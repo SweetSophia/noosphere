@@ -58,6 +58,12 @@ model Article {
   sourceUrl  String?
   sourceType String?   // "url", "text", "manual"
 
+  // Article lifecycle and quality metadata
+  confidence        String?   // "low", "medium", "high"
+  status           String    @default("published")  // "draft", "reviewed", "published"
+  lastReviewed     DateTime?
+  relatedArticleIds String?   @db.Text  // JSON array of article CUIDs
+
   deletedAt DateTime?
 
   @@unique([topicId, slug])
@@ -65,6 +71,8 @@ model Article {
   @@index([slug])
   @@index([authorId])
   @@index([sourceUrl])
+  @@index([status])
+  @@index([confidence])
 }
 
 // ─────────────────────────────────────────────

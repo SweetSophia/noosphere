@@ -36,6 +36,9 @@ interface IngestArticle {
   tags?: string[];
   sourceUrl?: string;
   authorName?: string;
+  confidence?: string;
+  status?: string;
+  relatedArticleIds?: string[];
 }
 
 export async function POST(request: NextRequest) {
@@ -175,6 +178,9 @@ export async function POST(request: NextRequest) {
           topicId: article.topicId,
           sourceUrl: article.sourceUrl || sourceUrl,
           sourceType: source.type,
+          confidence: article.confidence || null,
+          status: article.status || "published",
+          relatedArticleIds: article.relatedArticleIds ? JSON.stringify(article.relatedArticleIds) : null,
           tags: { create: tagConnections },
           revisions: {
             create: {

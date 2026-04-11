@@ -26,6 +26,14 @@ export async function GET(request: NextRequest) {
       where.tags = { some: { tag: { slug: tag } } };
     }
 
+    if (searchParams.get("status")) {
+      where.status = searchParams.get("status");
+    }
+
+    if (searchParams.get("confidence")) {
+      where.confidence = searchParams.get("confidence");
+    }
+
     const offset = (page - 1) * limit;
     const articleIds = q
       ? await searchArticleIds(q, {
@@ -80,6 +88,10 @@ export async function GET(request: NextRequest) {
       topic: { id: a.topic.id, name: a.topic.name, slug: a.topic.slug },
       tags: a.tags.map((t) => ({ id: t.tag.id, name: t.tag.name, slug: t.tag.slug })),
       author: a.author ? { id: a.author.id, name: a.author.name } : { name: a.authorName },
+      confidence: a.confidence,
+      status: a.status,
+      lastReviewed: a.lastReviewed,
+      relatedArticleIds: a.relatedArticleIds ? JSON.parse(a.relatedArticleIds) : null,
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
     }));
@@ -118,11 +130,25 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { title, slug, content, topicId, tags, excerpt, authorName } = body;
+    const { title, slug, content, topicId, tags, excerpt, authorName, confidence, status, relatedArticleIds } = body;
 
     if (!title || !slug || !content || !topicId) {
       return NextResponse.json(
         { error: "Missing required fields: title, slug, content, topicId" },
+        { status: 400 }
+      );
+    }
+
+    if (status && !["draft", "reviewed", "published"].includes(status)) {
+      return NextResponse.json(
+        { error: "status must be one of: draft, reviewed, published" },
+        { status: 400 }
+      );
+    }
+
+    if (confidence && !["low", "medium", "high"].includes(confidence)) {
+      return NextResponse.json(
+        { error: "confidence must be one of: low, medium, high" },
         { status: 400 }
       );
     }
@@ -177,6 +203,9 @@ export async function POST(request: NextRequest) {
         authorId: session?.user ? (session.user as { id: string }).id : null,
         authorName: authorName || (session?.user?.name ?? null),
         tags: { create: tagConnections },
+        confidence: confidence || null,
+        status: status || "published",
+        relatedArticleIds: relatedArticleIds ? JSON.stringify(relatedArticleIds) : null,
         revisions: {
           create: {
             authorId: session?.user ? (session.user as { id: string }).id : null,

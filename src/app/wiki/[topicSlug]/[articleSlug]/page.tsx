@@ -69,7 +69,53 @@ export default async function ArticlePage({ params }: Props) {
             ))}
           </div>
         )}
-        <div style={{ marginTop: "1rem" }} className="page-actions">
+
+        {/* Metadata bar */}
+        <div style={{ marginTop: "0.75rem", display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+          {article.status && article.status !== "published" && (
+            <span className={`status-badge status-${article.status}`}>{article.status}</span>
+          )}
+          {article.confidence && (
+            <span className={`confidence-badge confidence-${article.confidence}`}>
+              {article.confidence} confidence
+            </span>
+          )}
+          {article.lastReviewed && (
+            <span style={{ fontSize: "0.8em", color: "var(--muted)" }}>
+              Reviewed {new Date(article.lastReviewed).toLocaleDateString()}
+            </span>
+          )}
+          {article.sourceUrl && (
+            <a
+              href={article.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: "0.8em" }}
+            >
+              📄 Source
+            </a>
+          )}
+        </div>
+
+        {/* Related articles */}
+        {article.relatedArticleIds && (() => {
+          try {
+            const relatedIds: string[] = JSON.parse(article.relatedArticleIds);
+            if (!relatedIds.length) return null;
+            return (
+              <div style={{ marginTop: "0.5rem", display: "flex", gap: "0.4rem", flexWrap: "wrap", alignItems: "center" }}>
+                <span style={{ fontSize: "0.8em", color: "var(--muted)" }}>Related:</span>
+                {relatedIds.map((id) => (
+                  <span key={id} style={{ fontSize: "0.8em" }}>{id.slice(0, 8)}…</span>
+                ))}
+              </div>
+            );
+          } catch {
+            return null;
+          }
+        })()}
+
+        <div style={{ marginTop: "0.75rem" }} className="page-actions">
           <Link
             href={`/wiki/${topic.slug}/${article.slug}/edit`}
             className="btn btn-secondary btn-sm"
