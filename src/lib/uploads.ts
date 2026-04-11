@@ -50,7 +50,6 @@ export async function saveUploadedImage(filename: string, bytes: Uint8Array) {
   const dir = getImageDir();
   const absolutePath = path.join(dir, finalName);
 
-
   await mkdir(dir, { recursive: true });
   await writeFile(absolutePath, bytes);
 
@@ -62,17 +61,23 @@ export async function saveUploadedImage(filename: string, bytes: Uint8Array) {
 }
 
 export function resolvePublicImagePath(parts: string[]) {
-  // Strict validation: no slashes, dots, or special characters allowed
-  const safeParts = parts.filter((part) => {
-    if (!part) return false;
-    if (part === "." || part === "..") return false;
-    if (part.includes("/") || part.includes("\\")) return false;
-    // Only allow alphanumeric, dash, underscore, and dot (for extension)
-    if (!/^[a-zA-Z0-9_\-. ]+$/.test(part)) return false;
-    return true;
-  });
+  // Validate each part - throw on any invalid segment
+  for (const part of parts) {
+    if (!part) {
+      throw new Error("Invalid path: empty segment");
+    }
+    if (part === "." || part === "..") {
+      throw new Error("Invalid path: dot segments not allowed");
+    }
+    if (part.includes("/") || part.includes("\\")) {
+      throw new Error("Invalid path: slashes not allowed");
+    }
+    if (!/^[a-zA-Z0-9_\-. ]+$/.test(part)) {
+      throw new Error("Invalid path: unsupported characters");
+    }
+  }
 
-  const resolved = path.join(getImageDir(), ...safeParts);
+  const resolved = path.join(getImageDir(), ...parts);
 
   // Security: Ensure resolved path is within upload directory
   const imageDir = getImageDir();

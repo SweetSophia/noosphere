@@ -18,22 +18,22 @@ export interface AuthResult {
 export async function checkRouteAuth(
     request: NextRequest
 ): Promise<AuthResult> {
-    try {
-        const apiAuth = await requireApiKey(request);
-        const session = await getServerSession(authOptions);
+    // First check API key - return immediately if valid
+    const apiAuth = await requireApiKey(request);
+    if (apiAuth.authorized) {
+        return {
+            authorized: true,
+            permissions: apiAuth.permissions,
+            keyId: apiAuth.keyId,
+        };
+    }
 
-        if (!apiAuth.authorized && !session?.user) {
+    // Only check session if API key is not authorized
+    try {
+        const session = await getServerSession(authOptions);
+        if (!session?.user) {
             return { authorized: false };
         }
-
-        if (apiAuth.authorized) {
-            return {
-                authorized: true,
-                permissions: apiAuth.permissions,
-                keyId: apiAuth.keyId,
-            };
-        }
-
         const user = session?.user as { role?: string; id?: string };
         return {
             authorized: true,
@@ -41,7 +41,7 @@ export async function checkRouteAuth(
             userId: user?.id,
         };
     } catch (error) {
-        console.error("[Auth] Backend error:", error instanceof Error ? error.message : "Unknown error");
+        console.error("[Auth] Session error:", error instanceof Error ? error.message : "Unknown error");
         return { authorized: false };
     }
 }
@@ -64,7 +64,6 @@ const ROLE_LEVELS: Record<string, number> = {
     ADMIN: 3,
 };
 
-
 /**
  * Verify API key or session has required permission level.
  * Empty required array = "allow if authenticated"
@@ -79,7 +78,6 @@ export function hasPermission(
         return auth.authorized;
     }
 
-
     // Check API key permissions with hierarchy
     if (auth.permissions) {
         const userLevel = PERMISSION_LEVELS[auth.permissions];
@@ -92,9 +90,9 @@ export function hasPermission(
         const userLevel = ROLE_LEVELS[auth.role] ?? 0;
         // Map permissions to equivalent role levels
         const requiredLevels = required.map((p) => {
-            if (p === "ADMIN") return 3; // ADMIN permissions
-            if (p === "WRITE") return 2; // EDITOR role
-            return 1; // READ permissions
+            if (p === "ADMIN") return 3;
+            if (p === "WRITE") return 2;
+            return 1;
         });
         return requiredLevels.some((level) => level <= userLevel);
     }
@@ -117,7 +115,6 @@ export async function requirePermission(
             response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
         };
     }
-
 
     if (!hasPermission(auth, required)) {
         return {
