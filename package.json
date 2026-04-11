@@ -1,0 +1,40 @@
+{
+  "name": "noosphere",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "db:seed": "tsx scripts/seed-topics.ts",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.7.0",
+    "@prisma/client": "^7.7.0",
+    "@types/pg": "^8.20.0",
+    "bcryptjs": "^3.0.3",
+    "next": "16.2.3",
+    "next-auth": "^4.24.13",
+    "pg": "^8.20.0",
+    "prisma": "^7.7.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/uuid": "^10.0.0",
+    "dotenv": "^17.4.1",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,56 @@
+services:
+  # ────────────────────────────────────────────
+  # Noosphere — Next.js wiki app
+  # ────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: noosphere-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://noosphere:${POSTGRES_PASSWORD}@db:5432/noosphere
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - ./uploads:/app/uploads:rw
+      - ./uploads/images:/app/uploads/images:rw
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ────────────────────────────────────────────
+  # PostgreSQL — persistent database
+  # ────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: noosphere-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: noosphere
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: noosphere
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U noosphere -d noosphere"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  postgres_data:
+    driver: local
