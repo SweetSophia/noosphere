@@ -54,12 +54,17 @@ model Article {
   tags      ArticleTag[]
   revisions ArticleRevision[]
 
+  // Source tracking — where this article's content originated
+  sourceUrl  String?
+  sourceType String?   // "url", "text", "manual"
+
   deletedAt DateTime?
 
   @@unique([topicId, slug])
   @@index([topicId])
   @@index([slug])
   @@index([authorId])
+  @@index([sourceUrl])
 }
 
 // ─────────────────────────────────────────────
@@ -170,4 +175,21 @@ enum Permissions {
   READ
   WRITE
   ADMIN
+}
+
+// ─────────────────────────────────────────────
+// Activity Log — append-only timeline of wiki events
+// ─────────────────────────────────────────────
+model ActivityLog {
+  id          String   @id @default(cuid())
+  type        String   // "ingest", "create", "update", "delete", "lint"
+  title       String   // Human-readable summary
+  details     Json?    // Structured payload
+  sourceUrl   String?  // Origin URL if applicable
+  authorName  String?
+  createdAt   DateTime @default(now())
+
+  @@index([type])
+  @@index([createdAt])
+  @@index([authorName])
 }
