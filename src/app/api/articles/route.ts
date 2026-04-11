@@ -23,7 +23,6 @@ export async function GET(request: NextRequest) {
   try {
     const where: Record<string, unknown> = { deletedAt: null };
 
-
     if (topicSlug) {
       where.topic = { slug: topicSlug };
     }
@@ -92,7 +91,7 @@ export async function GET(request: NextRequest) {
       slug: a.slug,
       excerpt: a.excerpt,
       topic: { id: a.topic.id, name: a.topic.name, slug: a.topic.slug },
-      tags: a.tags.map((t) => ({ id: t.tag.id, name: t.tag.name, slug: t.tag.slug })),
+      tags: a.tags.map((t: { tag: { id: string; name: string; slug: string } }) => ({ id: t.tag.id, name: t.tag.name, slug: t.tag.slug })),
       author: a.author ? { id: a.author.id, name: a.author.name } : { name: a.authorName },
       confidence: a.confidence,
       status: a.status,
@@ -146,16 +145,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Security: Validate content size
-    if (content.length > MAX_CONTENT_SIZE) {
+    // Security: Validate content size using byte length for accurate 1MB limit
+    if (typeof content === "string" && new TextEncoder().encode(content).length > MAX_CONTENT_SIZE) {
       return NextResponse.json(
         { error: `Content exceeds maximum size of ${MAX_CONTENT_SIZE} bytes` },
         { status: 400 }
       );
     }
 
+
     // Security: Validate title length
-    if (title.length > MAX_TITLE_LENGTH) {
+    if (typeof title === "string" && new TextEncoder().encode(title).length > MAX_TITLE_LENGTH) {
       return NextResponse.json(
         { error: `Title exceeds maximum length of ${MAX_TITLE_LENGTH} characters` },
         { status: 400 }
@@ -163,7 +163,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Security: Validate excerpt length
-    if (excerpt && excerpt.length > MAX_EXCERPT_LENGTH) {
+    if (excerpt && typeof excerpt === "string" && new TextEncoder().encode(excerpt).length > MAX_EXCERPT_LENGTH) {
       return NextResponse.json(
         { error: `Excerpt exceeds maximum length of ${MAX_EXCERPT_LENGTH} characters` },
         { status: 400 }
@@ -176,6 +176,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
 
     if (confidence && !["low", "medium", "high"].includes(confidence)) {
       return NextResponse.json(
@@ -198,6 +199,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Topic not found" }, { status: 404 });
     }
 
+
     // Check slug uniqueness within topic
     const existing = await prisma.article.findUnique({
       where: { topicId_slug: { topicId, slug } },
@@ -209,11 +211,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Handle tags
-    const tagConnections = tags?.length
+    // Handle tags: normalize, dedupe, then upsert
+    const normalizedTags = tags
+      ? [...new Set(
+        tags
+          .map((t: string) => t.trim().toLowerCase())
+          .filter(Boolean)
+      )]
+      : [];
+
+    const tagConnections = normalizedTags.length
       ? await Promise.all(
-        tags.map(async (tagName: string) => {
-          const tagSlug = tagName.toLowerCase().replace(/\s+/g, "-");
+        normalizedTags.map(async (tagName: string) => {
+          const tagSlug = tagName.replace(/\s+/g, "-");
           const tag = await prisma.tag.upsert({
             where: { slug: tagSlug },
             create: { name: tagName, slug: tagSlug },
@@ -257,7 +267,7 @@ export async function POST(request: NextRequest) {
         title: article.title,
         slug: article.slug,
         topic: article.topic,
-        tags: article.tags.map((t) => t.tag),
+        tags: article.tags.map((t: { tag: { id: string; name: string; slug: string } }) => t.tag),
         createdAt: article.createdAt,
       },
       { status: 201 }
