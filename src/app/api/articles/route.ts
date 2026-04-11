@@ -144,10 +144,15 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { title, slug, content, topicId, tags, excerpt, authorName, confidence, status, relatedArticleIds } = body;
 
-    // Validate required fields are strings
-    if (typeof title !== "string" || typeof slug !== "string" || typeof content !== "string" || typeof topicId !== "string") {
+    // Validate required fields are non-empty strings
+    if (
+      typeof title !== "string" || !title.trim() ||
+      typeof slug !== "string" || !slug.trim() ||
+      typeof content !== "string" || !content.trim() ||
+      typeof topicId !== "string"
+    ) {
       return NextResponse.json(
-        { error: "Missing required fields: title, slug, content, topicId" },
+        { error: "Missing required fields: title, slug, content, topicId (must be non-empty strings)" },
         { status: 400 }
       );
     }
@@ -160,16 +165,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Security: Validate title length
-    if (new TextEncoder().encode(title).length > MAX_TITLE_LENGTH) {
+    // Security: Validate title length (character count, not bytes)
+    if (title.length > MAX_TITLE_LENGTH) {
       return NextResponse.json(
         { error: `Title exceeds maximum length of ${MAX_TITLE_LENGTH} characters` },
         { status: 400 }
       );
     }
 
-    // Security: Validate excerpt length
-    if (excerpt && typeof excerpt === "string" && new TextEncoder().encode(excerpt).length > MAX_EXCERPT_LENGTH) {
+    // Security: Validate excerpt length (character count, not bytes)
+    if (excerpt && excerpt.length > MAX_EXCERPT_LENGTH) {
       return NextResponse.json(
         { error: `Excerpt exceeds maximum length of ${MAX_EXCERPT_LENGTH} characters` },
         { status: 400 }
