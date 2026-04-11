@@ -4,8 +4,12 @@
  */
 
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 
-const prisma = new PrismaClient();
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter });
 
 const TOPICS = [
   {
@@ -13,31 +17,11 @@ const TOPICS = [
     slug: "engineering",
     description: "Technical documentation, architecture, and engineering practices",
     children: [
-      {
-        name: "Architecture",
-        slug: "architecture",
-        description: "System design and architectural decisions",
-      },
-      {
-        name: "Backend",
-        slug: "backend",
-        description: "Server-side services and APIs",
-      },
-      {
-        name: "Frontend",
-        slug: "frontend",
-        description: "UI/UX development and component libraries",
-      },
-      {
-        name: "DevOps",
-        slug: "devops",
-        description: "Infrastructure, CI/CD, and deployment",
-      },
-      {
-        name: "Security",
-        slug: "security",
-        description: "Security practices, audits, and hardening",
-      },
+      { name: "Architecture", slug: "architecture", description: "System design and architectural decisions" },
+      { name: "Backend", slug: "backend", description: "Server-side services and APIs" },
+      { name: "Frontend", slug: "frontend", description: "UI/UX development and component libraries" },
+      { name: "DevOps", slug: "devops", description: "Infrastructure, CI/CD, and deployment" },
+      { name: "Security", slug: "security", description: "Security practices, audits, and hardening" },
     ],
   },
   {
@@ -72,7 +56,7 @@ const TOPICS = [
 ];
 
 async function seedTopics() {
-  console.log("🌱 Seeding topics...\n");
+  console.log("Seeding topics...\n");
 
   for (const topic of TOPICS) {
     const parent = await prisma.topic.upsert({
@@ -84,11 +68,11 @@ async function seedTopics() {
         description: topic.description ?? null,
       },
     });
-    console.log(`  ✅ ${topic.name} (${parent.id})`);
+    console.log("  + " + topic.name);
 
     if (topic.children) {
       for (const child of topic.children) {
-        const sub = await prisma.topic.upsert({
+        await prisma.topic.upsert({
           where: { slug: child.slug },
           update: { name: child.name, description: child.description ?? null, parentId: parent.id },
           create: {
@@ -98,12 +82,12 @@ async function seedTopics() {
             parentId: parent.id,
           },
         });
-        console.log(`     ✅ ${child.name}`);
+        console.log("     + " + child.name);
       }
     }
   }
 
-  console.log("\n✨ Done!");
+  console.log("\nDone!");
 }
 
 seedTopics()

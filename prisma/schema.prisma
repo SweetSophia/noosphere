@@ -15,13 +15,12 @@ datasource db {
 model Topic {
   id        String   @id @default(cuid())
   name      String
-  slug      String   @unique // URL-safe identifier
+  slug      String   @unique
   parentId  String?
   parent    Topic?   @relation("TopicHierarchy", fields: [parentId], references: [id])
   children  Topic[]  @relation("TopicHierarchy")
   articles  Article[]
 
-  // Optional description for the topic
   description String?
 
   createdAt DateTime @default(now())
@@ -37,55 +36,29 @@ model Topic {
 model Article {
   id        String   @id @default(cuid())
   title     String
-  slug      String   // URL-safe, scoped within topic
-  content   String   @db.Text // GitHub-flavored Markdown
+  slug      String
+  content   String   @db.Text
 
-  // SEO / meta
   excerpt   String?
 
-  // Authorship
   authorId  String?
   author    User?    @relation(fields: [authorId], references: [id])
-  authorName String? // For API-key created articles (no user account)
+  authorName String?
 
-  // Hierarchy
   topicId   String
   topic     Topic    @relation(fields: [topicId], references: [id])
 
-  // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Tags (many-to-many)
   tags      ArticleTag[]
-
-  // Version history
   revisions ArticleRevision[]
 
-  // Soft delete
   deletedAt DateTime?
 
   @@unique([topicId, slug])
   @@index([topicId])
   @@index([slug])
-  @@index([authorId])
-}
-
-// ─────────────────────────────────────────────
-// Article Revisions — version history
-// ─────────────────────────────────────────────
-model ArticleRevision {
-  id        String   @id @default(cuid())
-  articleId String
-  article   Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
-  authorId  String?
-  author    User?    @relation(fields: [authorId], references: [id])
-  title     String
-  content   String   @db.Text
-
-  createdAt DateTime @default(now())
-
-  @@index([articleId])
   @@index([authorId])
 }
 
@@ -115,6 +88,24 @@ model ArticleTag {
   @@id([articleId, tagId])
   @@index([articleId])
   @@index([tagId])
+}
+
+// ─────────────────────────────────────────────
+// Article Revisions — version history
+// ─────────────────────────────────────────────
+model ArticleRevision {
+  id        String   @id @default(cuid())
+  articleId String
+  article   Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  authorId  String?
+  author    User?    @relation(fields: [authorId], references: [id])
+  title     String
+  content   String   @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([articleId])
+  @@index([authorId])
 }
 
 // ─────────────────────────────────────────────
@@ -162,9 +153,9 @@ model Session {
 // ─────────────────────────────────────────────
 model ApiKey {
   id          String   @id @default(cuid())
-  name        String   // Descriptive name, e.g. "Cylena Agent"
-  keyHash     String   @unique // SHA-256 hash of the key
-  keyPrefix   String   // First 8 chars for identification
+  name        String
+  keyHash     String   @unique
+  keyPrefix   String
 
   permissions Permissions @default(WRITE)
 
@@ -176,7 +167,7 @@ model ApiKey {
 }
 
 enum Permissions {
-  READ   // Read-only access
-  WRITE  // Read + create/update articles
-  ADMIN  // Full access including management
+  READ
+  WRITE
+  ADMIN
 }
