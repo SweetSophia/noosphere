@@ -3,7 +3,12 @@ import { prisma } from "@/lib/prisma";
 import { requireApiKey } from "@/lib/api/keys";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { countSearchArticles, searchArticleIds } from "@/lib/wiki";
+import { buildTagConnections, countSearchArticles, searchArticleIds } from "@/lib/wiki";
+
+// Constants for security limits
+const MAX_CONTENT_SIZE = 1024 * 1024; // 1MB max article content
+const MAX_TITLE_LENGTH = 200;
+const MAX_EXCERPT_LENGTH = 500;
 
 // GET /api/articles — List articles (with filters)
 // Auth: API key (READ/WRITE/ADMIN) or session (human)
@@ -14,6 +19,16 @@ export async function GET(request: NextRequest) {
   const q = searchParams.get("q"); // full-text search
   const page = parseInt(searchParams.get("page") ?? "1");
   const limit = Math.min(parseInt(searchParams.get("limit") ?? "20"), 100);
+  const status = searchParams.get("status");
+  const confidence = searchParams.get("confidence");
+
+  // Validate status/confidence against allow-lists
+  if (status && !["draft", "reviewed", "published"].includes(status)) {
+    return NextResponse.json({ error: "Invalid status filter" }, { status: 400 });
+  }
+  if (confidence && !["low", "medium", "high"].includes(confidence)) {
+    return NextResponse.json({ error: "Invalid confidence filter" }, { status: 400 });
+  }
 
   try {
     const where: Record<string, unknown> = { deletedAt: null };
@@ -26,57 +41,62 @@ export async function GET(request: NextRequest) {
       where.tags = { some: { tag: { slug: tag } } };
     }
 
-    if (searchParams.get("status")) {
-      where.status = searchParams.get("status");
+    if (status) {
+      where.status = status;
     }
 
-    if (searchParams.get("confidence")) {
-      where.confidence = searchParams.get("confidence");
+    if (confidence) {
+      where.confidence = confidence;
     }
 
     const offset = (page - 1) * limit;
+
     const articleIds = q
       ? await searchArticleIds(q, {
-          topicSlug: topicSlug ?? undefined,
-          tagSlug: tag ?? undefined,
-          limit,
-          offset,
-        })
+        topicSlug: topicSlug ?? undefined,
+        tagSlug: tag ?? undefined,
+        status: status ?? undefined,
+        confidence: confidence ?? undefined,
+        limit,
+        offset,
+      })
       : [];
 
     const [articles, total] = await Promise.all([
       q
         ? articleIds.length
           ? prisma.article.findMany({
-              where: { id: { in: articleIds } },
-              include: {
-                topic: true,
-                tags: { include: { tag: true } },
-                author: { select: { id: true, name: true, email: true } },
-              },
-            }).then((rows) => {
-              const rowsById = new Map(rows.map((row) => [row.id, row]));
-              return articleIds
-                .map((id) => rowsById.get(id))
-                .filter((row): row is (typeof rows)[number] => row !== undefined);
-            })
-          : Promise.resolve([])
-        : prisma.article.findMany({
-            where,
+            where: { id: { in: articleIds } },
             include: {
               topic: true,
               tags: { include: { tag: true } },
               author: { select: { id: true, name: true, email: true } },
             },
-            skip: offset,
-            take: limit,
-            orderBy: { updatedAt: "desc" },
-          }),
+          }).then((rows) => {
+            const rowsById = new Map(rows.map((row) => [row.id, row]));
+            return articleIds
+              .map((id) => rowsById.get(id))
+              .filter((row): row is (typeof rows)[number] => row !== undefined);
+          })
+          : Promise.resolve([])
+        : prisma.article.findMany({
+          where,
+          include: {
+            topic: true,
+            tags: { include: { tag: true } },
+            author: { select: { id: true, name: true, email: true } },
+          },
+          skip: offset,
+          take: limit,
+          orderBy: { updatedAt: "desc" },
+        }),
       q
         ? countSearchArticles(q, {
-            topicSlug: topicSlug ?? undefined,
-            tagSlug: tag ?? undefined,
-          })
+          topicSlug: topicSlug ?? undefined,
+          tagSlug: tag ?? undefined,
+          status: status ?? undefined,
+          confidence: confidence ?? undefined,
+        })
         : prisma.article.count({ where }),
     ]);
 
@@ -132,9 +152,47 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { title, slug, content, topicId, tags, excerpt, authorName, confidence, status, relatedArticleIds } = body;
 
-    if (!title || !slug || !content || !topicId) {
+    // Validate required fields are non-empty strings
+    if (
+      typeof title !== "string" || !title.trim() ||
+      typeof slug !== "string" || !slug.trim() ||
+      typeof content !== "string" || !content.trim() ||
+      typeof topicId !== "string"
+    ) {
       return NextResponse.json(
-        { error: "Missing required fields: title, slug, content, topicId" },
+        { error: "Missing required fields: title, slug, content, topicId (must be non-empty strings)" },
+        { status: 400 }
+      );
+    }
+
+    // Validate excerpt type (must be string if provided)
+    if (excerpt != null && typeof excerpt !== "string") {
+      return NextResponse.json(
+        { error: "Excerpt must be a string when provided" },
+        { status: 400 }
+      );
+    }
+
+    // Security: Validate content size using byte length for accurate 1MB limit
+    if (new TextEncoder().encode(content).length > MAX_CONTENT_SIZE) {
+      return NextResponse.json(
+        { error: `Content exceeds maximum size of ${MAX_CONTENT_SIZE} bytes` },
+        { status: 400 }
+      );
+    }
+
+    // Security: Validate title length (character count, not bytes)
+    if (title.length > MAX_TITLE_LENGTH) {
+      return NextResponse.json(
+        { error: `Title exceeds maximum length of ${MAX_TITLE_LENGTH} characters` },
+        { status: 400 }
+      );
+    }
+
+    // Security: Validate excerpt length (character count, not bytes)
+    if (excerpt && excerpt.length > MAX_EXCERPT_LENGTH) {
+      return NextResponse.json(
+        { error: `Excerpt exceeds maximum length of ${MAX_EXCERPT_LENGTH} characters` },
         { status: 400 }
       );
     }
@@ -178,20 +236,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Handle tags
-    const tagConnections = tags?.length
-      ? await Promise.all(
-          tags.map(async (tagName: string) => {
-            const tagSlug = tagName.toLowerCase().replace(/\s+/g, "-");
-            const tag = await prisma.tag.upsert({
-              where: { slug: tagSlug },
-              create: { name: tagName, slug: tagSlug },
-              update: {},
-            });
-            return { tagId: tag.id };
-          })
-        )
-      : [];
+    // Validate tags is an array of strings
+    if (tags !== undefined && (!Array.isArray(tags) || !(tags as unknown[]).every((t) => typeof t === "string"))) {
+      return NextResponse.json(
+        { error: "tags must be an array of strings" },
+        { status: 400 }
+      );
+    }
+
+    // Handle tags: normalize, dedupe, then upsert using shared helper
+    const tagConnections = await buildTagConnections(tags ?? []);
 
     const article = await prisma.article.create({
       data: {
@@ -226,7 +280,7 @@ export async function POST(request: NextRequest) {
         title: article.title,
         slug: article.slug,
         topic: article.topic,
-        tags: article.tags.map((t) => t.tag),
+        tags: article.tags.map((t: { tag: { id: string; name: string; slug: string } }) => t.tag),
         createdAt: article.createdAt,
       },
       { status: 201 }

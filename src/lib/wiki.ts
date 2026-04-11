@@ -43,6 +43,8 @@ export async function buildTagConnections(tagNames: string[]) {
 interface SearchArticlesOptions {
   topicSlug?: string;
   tagSlug?: string;
+  status?: string;
+  confidence?: string;
   limit?: number;
   offset?: number;
 }
@@ -64,6 +66,14 @@ function buildSearchFilters(options: SearchArticlesOptions) {
           AND tag_filter.slug = ${options.tagSlug}
       )`
     );
+  }
+
+  if (options.status) {
+    clauses.push(Prisma.sql`a.status = ${options.status}`);
+  }
+
+  if (options.confidence) {
+    clauses.push(Prisma.sql`a.confidence = ${options.confidence}`);
   }
 
   return clauses;

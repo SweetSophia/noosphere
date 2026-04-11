@@ -61,8 +61,34 @@ export async function saveUploadedImage(filename: string, bytes: Uint8Array) {
 }
 
 export function resolvePublicImagePath(parts: string[]) {
-  const safeParts = parts.filter((part) => part && part !== "." && part !== ".." && !part.includes("/"));
-  return path.join(getImageDir(), ...safeParts);
+  // Validate each part - throw on any invalid segment
+  for (const part of parts) {
+    if (!part) {
+      throw new Error("Invalid path: empty segment");
+    }
+    if (part === "." || part === "..") {
+      throw new Error("Invalid path: dot segments not allowed");
+    }
+    if (part.includes("/") || part.includes("\\")) {
+      throw new Error("Invalid path: slashes not allowed");
+    }
+    if (!/^[a-zA-Z0-9_\-.]+$/.test(part)) {
+      throw new Error("Invalid path: unsupported characters");
+    }
+  }
+
+  const resolved = path.join(getImageDir(), ...parts);
+
+  // Security: Ensure resolved path is within upload directory
+  // Use path.resolve to handle relative UPLOAD_DIR values correctly
+  const resolvedPath = path.resolve(resolved);
+  const imageDir = path.resolve(getImageDir());
+  const relative = path.relative(imageDir, resolvedPath);
+  if (relative.startsWith("..") || relative === "..") {
+    throw new Error("Invalid path: outside upload directory");
+  }
+
+  return resolvedPath;
 }
 
 export async function readUploadedImage(parts: string[]) {
