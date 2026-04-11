@@ -40,6 +40,7 @@ export async function GET(request: NextRequest) {
     }
 
     const offset = (page - 1) * limit;
+
     const articleIds = q
       ? await searchArticleIds(q, {
         topicSlug: topicSlug ?? undefined,
@@ -91,7 +92,7 @@ export async function GET(request: NextRequest) {
       slug: a.slug,
       excerpt: a.excerpt,
       topic: { id: a.topic.id, name: a.topic.name, slug: a.topic.slug },
-      tags: a.tags.map((t: { tag: { id: string; name: string; slug: string } }) => ({ id: t.tag.id, name: t.tag.name, slug: t.tag.slug })),
+      tags: a.tags.map((t) => ({ id: t.tag.id, name: t.tag.name, slug: t.tag.slug })),
       author: a.author ? { id: a.author.id, name: a.author.name } : { name: a.authorName },
       confidence: a.confidence,
       status: a.status,
@@ -137,8 +138,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { title, slug, content, topicId, tags, excerpt, authorName, confidence, status, relatedArticleIds } = body;
 
-
-    if (!title || !slug || !content || !topicId) {
+    // Validate required fields are strings
+    if (typeof title !== "string" || typeof slug !== "string" || typeof content !== "string" || typeof topicId !== "string") {
       return NextResponse.json(
         { error: "Missing required fields: title, slug, content, topicId" },
         { status: 400 }
@@ -146,16 +147,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Security: Validate content size using byte length for accurate 1MB limit
-    if (typeof content === "string" && new TextEncoder().encode(content).length > MAX_CONTENT_SIZE) {
+    if (new TextEncoder().encode(content).length > MAX_CONTENT_SIZE) {
       return NextResponse.json(
         { error: `Content exceeds maximum size of ${MAX_CONTENT_SIZE} bytes` },
         { status: 400 }
       );
     }
 
-
     // Security: Validate title length
-    if (typeof title === "string" && new TextEncoder().encode(title).length > MAX_TITLE_LENGTH) {
+    if (new TextEncoder().encode(title).length > MAX_TITLE_LENGTH) {
       return NextResponse.json(
         { error: `Title exceeds maximum length of ${MAX_TITLE_LENGTH} characters` },
         { status: 400 }
@@ -176,7 +176,6 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-
 
     if (confidence && !["low", "medium", "high"].includes(confidence)) {
       return NextResponse.json(
@@ -199,7 +198,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Topic not found" }, { status: 404 });
     }
 
-
     // Check slug uniqueness within topic
     const existing = await prisma.article.findUnique({
       where: { topicId_slug: { topicId, slug } },
@@ -208,6 +206,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "Article with this slug already exists in this topic" },
         { status: 409 }
+      );
+    }
+
+    // Validate tags is an array of strings
+    if (tags !== undefined && (!Array.isArray(tags) || !tags.every((t: unknown) => typeof t === "string"))) {
+      return NextResponse.json(
+        { error: "tags must be an array of strings" },
+        { status: 400 }
       );
     }
 
