@@ -7,16 +7,26 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildTagConnections, parseTagInput } from "@/lib/wiki";
 
-export async function saveArticle(
-  topicSlug: string,
-  articleSlug: string,
-  formData: FormData
-): Promise<void> {
+async function requireEditorSession() {
   const session = await getServerSession(authOptions);
 
   if (!session?.user) {
     throw new Error("You must be signed in to edit articles.");
   }
+
+  if (session.user.role !== "EDITOR" && session.user.role !== "ADMIN") {
+    throw new Error("You do not have permission to edit articles.");
+  }
+
+  return session;
+}
+
+export async function saveArticle(
+  topicSlug: string,
+  articleSlug: string,
+  formData: FormData
+): Promise<void> {
+  const session = await requireEditorSession();
 
   const content = String(formData.get("content") ?? "");
   const title = String(formData.get("title") ?? "");
@@ -77,4 +87,32 @@ export async function saveArticle(
   revalidatePath("/wiki");
   revalidatePath("/wiki/search");
   redirect(`/wiki/${topicSlug}/${articleSlug}`);
+}
+
+export async function deleteArticle(
+  topicSlug: string,
+  articleSlug: string,
+  _formData: FormData
+): Promise<void> {
+  await requireEditorSession();
+
+  const topic = await prisma.topic.findUnique({ where: { slug: topicSlug } });
+  if (!topic) throw new Error("Topic not found.");
+
+  const article = await prisma.article.findFirst({
+    where: { topicId: topic.id, slug: articleSlug, deletedAt: null },
+  });
+
+  if (!article) throw new Error("Article not found.");
+
+  await prisma.article.update({
+    where: { id: article.id },
+    data: { deletedAt: new Date(), updatedAt: new Date() },
+  });
+
+  revalidatePath(`/wiki/${topicSlug}`);
+  revalidatePath(`/wiki/${topicSlug}/${articleSlug}`);
+  revalidatePath("/wiki");
+  revalidatePath("/wiki/search");
+  redirect(`/wiki/${topicSlug}`);
 }

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { ImageUploadPanel } from "@/components/wiki/ImageUploadPanel";
+import { MarkdownToolbar } from "@/components/wiki/MarkdownToolbar";
 import { createArticle } from "./actions";
 
 interface Props {
@@ -72,6 +73,7 @@ export default async function NewArticlePage({ params }: Props) {
 
         <div className="form-group">
           <label className="form-label" htmlFor="content">Content (Markdown) *</label>
+          <MarkdownToolbar targetTextareaId="content" />
           <textarea
             id="content"
             name="content"

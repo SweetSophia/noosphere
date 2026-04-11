@@ -154,6 +154,13 @@ export async function POST(request: NextRequest) {
         authorId: session?.user ? (session.user as { id: string }).id : null,
         authorName: authorName || (session?.user?.name ?? null),
         tags: { create: tagConnections },
+        revisions: {
+          create: {
+            authorId: session?.user ? (session.user as { id: string }).id : null,
+            title,
+            content,
+          },
+        },
       },
       include: {
         topic: true,

@@ -2,8 +2,10 @@ export const dynamic = "force-dynamic";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { DeleteArticleForm } from "@/components/wiki/DeleteArticleForm";
 import { ImageUploadPanel } from "@/components/wiki/ImageUploadPanel";
-import { saveArticle } from "./actions";
+import { MarkdownToolbar } from "@/components/wiki/MarkdownToolbar";
+import { deleteArticle, saveArticle } from "./actions";
 
 interface Props {
   params: Promise<{ topicSlug: string; articleSlug: string }>;
@@ -36,14 +38,17 @@ export default async function EditArticlePage({ params }: Props) {
         <span>Edit</span>
       </nav>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem", gap: "1rem", flexWrap: "wrap" }}>
         <h1 style={{ margin: 0 }}>Edit Article</h1>
-        <Link
-          href={`/wiki/${topic.slug}/${article.slug}`}
-          className="btn btn-secondary btn-sm"
-        >
-          Cancel
-        </Link>
+        <div className="page-actions">
+          <DeleteArticleForm action={deleteArticle.bind(null, topicSlug, articleSlug)} articleId={article.id} />
+          <Link
+            href={`/wiki/${topic.slug}/${article.slug}`}
+            className="btn btn-secondary btn-sm"
+          >
+            Cancel
+          </Link>
+        </div>
       </div>
 
       <ImageUploadPanel targetTextareaId="content" />
@@ -88,6 +93,7 @@ export default async function EditArticlePage({ params }: Props) {
 
         <div className="form-group">
           <label className="form-label" htmlFor="content">Content (Markdown)</label>
+          <MarkdownToolbar targetTextareaId="content" />
           <textarea
             id="content"
             name="content"

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { CopyButton } from "@/components/wiki/CopyButton";
 import { createApiKeyAction, revokeApiKeyAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +44,10 @@ export default async function ApiKeysPage({ searchParams }: Props) {
       {params.created && (
         <div className="alert alert-success">
           <strong>New key created for {params.name || "agent"}.</strong>
-          <div className="secret-box">{params.created}</div>
+          <div className="secret-box-row">
+            <div className="secret-box">{params.created}</div>
+            <CopyButton text={params.created} label="Copy key" copiedLabel="Key copied" />
+          </div>
           <p className="secret-hint">Save it now. The raw key is only shown once.</p>
         </div>
       )}

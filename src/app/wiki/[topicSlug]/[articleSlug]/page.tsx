@@ -2,10 +2,12 @@ export const dynamic = "force-dynamic";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { DeleteArticleForm } from "@/components/wiki/DeleteArticleForm";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { deleteArticle } from "./edit/actions";
 
 interface Props {
   params: Promise<{ topicSlug: string; articleSlug: string }>;
@@ -67,13 +69,14 @@ export default async function ArticlePage({ params }: Props) {
             ))}
           </div>
         )}
-        <div style={{ marginTop: "1rem" }}>
+        <div style={{ marginTop: "1rem" }} className="page-actions">
           <Link
             href={`/wiki/${topic.slug}/${article.slug}/edit`}
             className="btn btn-secondary btn-sm"
           >
             Edit
           </Link>
+          <DeleteArticleForm action={deleteArticle.bind(null, topic.slug, article.slug)} articleId={article.id} />
         </div>
       </header>
 

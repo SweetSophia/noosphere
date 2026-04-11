@@ -7,15 +7,25 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildTagConnections, parseTagInput, slugify } from "@/lib/wiki";
 
-export async function createArticle(
-  topicSlug: string,
-  formData: FormData
-): Promise<void> {
+async function requireEditorSession() {
   const session = await getServerSession(authOptions);
 
   if (!session?.user) {
     throw new Error("You must be signed in to create articles.");
   }
+
+  if (session.user.role !== "EDITOR" && session.user.role !== "ADMIN") {
+    throw new Error("You do not have permission to create articles.");
+  }
+
+  return session;
+}
+
+export async function createArticle(
+  topicSlug: string,
+  formData: FormData
+): Promise<void> {
+  const session = await requireEditorSession();
 
   const title = String(formData.get("title") ?? "");
   const content = String(formData.get("content") ?? "");
