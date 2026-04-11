@@ -26,7 +26,7 @@ export default async function ArticlePage({ params }: Props) {
       author: { select: { id: true, name: true } },
       revisions: {
         orderBy: { createdAt: "desc" },
-        take: 1,
+        take: 5,
         select: { createdAt: true },
       },
     },
@@ -110,6 +110,26 @@ export default async function ArticlePage({ params }: Props) {
           {article.content}
         </ReactMarkdown>
       </article>
+
+      <section className="revision-summary-card">
+        <div className="page-toolbar">
+          <div>
+            <h2 style={{ margin: 0 }}>Revision History</h2>
+            <p className="page-subtitle">Latest saved changes for this article.</p>
+          </div>
+          <Link href={`/wiki/${topic.slug}/${article.slug}/history`} className="btn btn-secondary btn-sm">
+            View Full History
+          </Link>
+        </div>
+        <div className="revision-summary-list">
+          {article.revisions.map((revision, index) => (
+            <div key={revision.createdAt.toISOString()} className="revision-summary-item">
+              <strong>Revision {article.revisions.length - index}</strong>
+              <span className="text-muted">{new Date(revision.createdAt).toLocaleString()}</span>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

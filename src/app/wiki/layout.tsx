@@ -34,6 +34,7 @@ export default async function WikiLayout({
         <nav className="wiki-nav">
           <Link href="/wiki" className="nav-link">Browse</Link>
           {role === "ADMIN" && <Link href="/wiki/admin/keys" className="nav-link">API Keys</Link>}
+          {role === "ADMIN" && <Link href="/wiki/admin/trash" className="nav-link">Trash</Link>}
           {session?.user ? (
             <div className="wiki-user-nav">
               <span className="wiki-user-name">

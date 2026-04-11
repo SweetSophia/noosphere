@@ -21,6 +21,16 @@ async function requireEditorSession() {
   return session;
 }
 
+async function requireAdminSession() {
+  const session = await getServerSession(authOptions);
+
+  if (!session?.user || session.user.role !== "ADMIN") {
+    throw new Error("Admin access required.");
+  }
+
+  return session;
+}
+
 export async function saveArticle(
   topicSlug: string,
   articleSlug: string,
@@ -94,7 +104,7 @@ export async function deleteArticle(
   articleSlug: string,
   _formData: FormData
 ): Promise<void> {
-  await requireEditorSession();
+  await requireAdminSession();
 
   const topic = await prisma.topic.findUnique({ where: { slug: topicSlug } });
   if (!topic) throw new Error("Topic not found.");

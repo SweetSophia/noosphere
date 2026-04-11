@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { ImageUploadPanel } from "@/components/wiki/ImageUploadPanel";
+import { MarkdownPreviewTabs } from "@/components/wiki/MarkdownPreviewTabs";
 import { MarkdownToolbar } from "@/components/wiki/MarkdownToolbar";
 import { createArticle } from "./actions";
 
@@ -84,6 +85,7 @@ export default async function NewArticlePage({ params }: Props) {
           <p className="form-hint">
             Supports GitHub-flavored Markdown. Code blocks with syntax highlighting.
           </p>
+          <MarkdownPreviewTabs targetTextareaId="content" />
         </div>
 
         <div style={{ display: "flex", gap: "0.75rem" }}>
