@@ -19,6 +19,8 @@ export async function GET(request: NextRequest) {
   const q = searchParams.get("q"); // full-text search
   const page = parseInt(searchParams.get("page") ?? "1");
   const limit = Math.min(parseInt(searchParams.get("limit") ?? "20"), 100);
+  const status = searchParams.get("status");
+  const confidence = searchParams.get("confidence");
 
   try {
     const where: Record<string, unknown> = { deletedAt: null };
@@ -31,12 +33,12 @@ export async function GET(request: NextRequest) {
       where.tags = { some: { tag: { slug: tag } } };
     }
 
-    if (searchParams.get("status")) {
-      where.status = searchParams.get("status");
+    if (status) {
+      where.status = status;
     }
 
-    if (searchParams.get("confidence")) {
-      where.confidence = searchParams.get("confidence");
+    if (confidence) {
+      where.confidence = confidence;
     }
 
     const offset = (page - 1) * limit;
@@ -45,6 +47,8 @@ export async function GET(request: NextRequest) {
       ? await searchArticleIds(q, {
         topicSlug: topicSlug ?? undefined,
         tagSlug: tag ?? undefined,
+        status: status ?? undefined,
+        confidence: confidence ?? undefined,
         limit,
         offset,
       })
@@ -82,6 +86,8 @@ export async function GET(request: NextRequest) {
         ? countSearchArticles(q, {
           topicSlug: topicSlug ?? undefined,
           tagSlug: tag ?? undefined,
+          status: status ?? undefined,
+          confidence: confidence ?? undefined,
         })
         : prisma.article.count({ where }),
     ]);
@@ -210,7 +216,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate tags is an array of strings
-    if (tags !== undefined && (!Array.isArray(tags) || !tags.every((t: unknown) => typeof t === "string"))) {
+    if (tags !== undefined && (!Array.isArray(tags) || !(tags as unknown[]).every((t) => typeof t === "string"))) {
       return NextResponse.json(
         { error: "tags must be an array of strings" },
         { status: 400 }
@@ -220,7 +226,7 @@ export async function POST(request: NextRequest) {
     // Handle tags: normalize, dedupe, then upsert
     const normalizedTags = tags
       ? [...new Set(
-        tags
+        (tags as string[])
           .map((t: string) => t.trim().toLowerCase())
           .filter(Boolean)
       )]
