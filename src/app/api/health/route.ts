@@ -1,8 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { NextResponse } from "next/server";
 
 export async function GET() {
   try {
+    // Dynamic import to catch Prisma initialization errors
+    const { prisma } = await import("@/lib/prisma");
+
     // Verify database connectivity
     await prisma.$queryRaw`SELECT 1`;
     return NextResponse.json({ status: "ok", timestamp: new Date().toISOString() });
