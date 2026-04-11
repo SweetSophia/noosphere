@@ -50,6 +50,7 @@ export async function saveUploadedImage(filename: string, bytes: Uint8Array) {
   const dir = getImageDir();
   const absolutePath = path.join(dir, finalName);
 
+
   await mkdir(dir, { recursive: true });
   await writeFile(absolutePath, bytes);
 
@@ -61,8 +62,25 @@ export async function saveUploadedImage(filename: string, bytes: Uint8Array) {
 }
 
 export function resolvePublicImagePath(parts: string[]) {
-  const safeParts = parts.filter((part) => part && part !== "." && part !== ".." && !part.includes("/"));
-  return path.join(getImageDir(), ...safeParts);
+  // Strict validation: no slashes, dots, or special characters allowed
+  const safeParts = parts.filter((part) => {
+    if (!part) return false;
+    if (part === "." || part === "..") return false;
+    if (part.includes("/") || part.includes("\\")) return false;
+    // Only allow alphanumeric, dash, underscore, and dot (for extension)
+    if (!/^[a-zA-Z0-9_\-. ]+$/.test(part)) return false;
+    return true;
+  });
+
+  const resolved = path.join(getImageDir(), ...safeParts);
+
+  // Security: Ensure resolved path is within upload directory
+  const imageDir = getImageDir();
+  if (!resolved.startsWith(imageDir + path.sep) && resolved !== imageDir) {
+    throw new Error("Invalid path: outside upload directory");
+  }
+
+  return resolved;
 }
 
 export async function readUploadedImage(parts: string[]) {
