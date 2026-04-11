@@ -3,10 +3,8 @@
  * Usage: npx tsx scripts/create-admin.ts
  */
 
-import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
-
-const prisma = new PrismaClient();
+import { closePrisma, prisma } from "./_prisma";
 
 async function main() {
   const email = process.argv[2];
@@ -39,4 +37,4 @@ main()
     console.error("Error:", e);
     process.exit(1);
   })
-  .finally(() => prisma.$disconnect());
+  .finally(() => closePrisma());

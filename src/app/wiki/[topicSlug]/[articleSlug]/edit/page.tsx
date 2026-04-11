@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { ImageUploadPanel } from "@/components/wiki/ImageUploadPanel";
 import { saveArticle } from "./actions";
 
 interface Props {
@@ -44,6 +45,8 @@ export default async function EditArticlePage({ params }: Props) {
           Cancel
         </Link>
       </div>
+
+      <ImageUploadPanel targetTextareaId="content" />
 
       <form action={saveArticle.bind(null, topicSlug, articleSlug)}>
         <div className="form-group">

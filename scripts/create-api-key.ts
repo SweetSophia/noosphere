@@ -4,10 +4,8 @@
  * permissions: READ | WRITE | ADMIN (default: WRITE)
  */
 
-import { PrismaClient } from "@prisma/client";
 import { generateApiKey } from "../src/lib/api/keys";
-
-const prisma = new PrismaClient();
+import { closePrisma, prisma } from "./_prisma";
 
 async function main() {
   const name = process.argv[2];
@@ -42,4 +40,4 @@ main()
     console.error("Error:", e);
     process.exit(1);
   })
-  .finally(() => prisma.$disconnect());
+  .finally(() => closePrisma());
