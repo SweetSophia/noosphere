@@ -5,6 +5,11 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { countSearchArticles, searchArticleIds } from "@/lib/wiki";
 
+// Constants for security limits
+const MAX_CONTENT_SIZE = 1024 * 1024; // 1MB max article content
+const MAX_TITLE_LENGTH = 200;
+const MAX_EXCERPT_LENGTH = 500;
+
 // GET /api/articles — List articles (with filters)
 // Auth: API key (READ/WRITE/ADMIN) or session (human)
 export async function GET(request: NextRequest) {
@@ -17,6 +22,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const where: Record<string, unknown> = { deletedAt: null };
+
 
     if (topicSlug) {
       where.topic = { slug: topicSlug };
@@ -37,46 +43,46 @@ export async function GET(request: NextRequest) {
     const offset = (page - 1) * limit;
     const articleIds = q
       ? await searchArticleIds(q, {
-          topicSlug: topicSlug ?? undefined,
-          tagSlug: tag ?? undefined,
-          limit,
-          offset,
-        })
+        topicSlug: topicSlug ?? undefined,
+        tagSlug: tag ?? undefined,
+        limit,
+        offset,
+      })
       : [];
 
     const [articles, total] = await Promise.all([
       q
         ? articleIds.length
           ? prisma.article.findMany({
-              where: { id: { in: articleIds } },
-              include: {
-                topic: true,
-                tags: { include: { tag: true } },
-                author: { select: { id: true, name: true, email: true } },
-              },
-            }).then((rows) => {
-              const rowsById = new Map(rows.map((row) => [row.id, row]));
-              return articleIds
-                .map((id) => rowsById.get(id))
-                .filter((row): row is (typeof rows)[number] => row !== undefined);
-            })
-          : Promise.resolve([])
-        : prisma.article.findMany({
-            where,
+            where: { id: { in: articleIds } },
             include: {
               topic: true,
               tags: { include: { tag: true } },
               author: { select: { id: true, name: true, email: true } },
             },
-            skip: offset,
-            take: limit,
-            orderBy: { updatedAt: "desc" },
-          }),
+          }).then((rows) => {
+            const rowsById = new Map(rows.map((row) => [row.id, row]));
+            return articleIds
+              .map((id) => rowsById.get(id))
+              .filter((row): row is (typeof rows)[number] => row !== undefined);
+          })
+          : Promise.resolve([])
+        : prisma.article.findMany({
+          where,
+          include: {
+            topic: true,
+            tags: { include: { tag: true } },
+            author: { select: { id: true, name: true, email: true } },
+          },
+          skip: offset,
+          take: limit,
+          orderBy: { updatedAt: "desc" },
+        }),
       q
         ? countSearchArticles(q, {
-            topicSlug: topicSlug ?? undefined,
-            tagSlug: tag ?? undefined,
-          })
+          topicSlug: topicSlug ?? undefined,
+          tagSlug: tag ?? undefined,
+        })
         : prisma.article.count({ where }),
     ]);
 
@@ -132,9 +138,34 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { title, slug, content, topicId, tags, excerpt, authorName, confidence, status, relatedArticleIds } = body;
 
+
     if (!title || !slug || !content || !topicId) {
       return NextResponse.json(
         { error: "Missing required fields: title, slug, content, topicId" },
+        { status: 400 }
+      );
+    }
+
+    // Security: Validate content size
+    if (content.length > MAX_CONTENT_SIZE) {
+      return NextResponse.json(
+        { error: `Content exceeds maximum size of ${MAX_CONTENT_SIZE} bytes` },
+        { status: 400 }
+      );
+    }
+
+    // Security: Validate title length
+    if (title.length > MAX_TITLE_LENGTH) {
+      return NextResponse.json(
+        { error: `Title exceeds maximum length of ${MAX_TITLE_LENGTH} characters` },
+        { status: 400 }
+      );
+    }
+
+    // Security: Validate excerpt length
+    if (excerpt && excerpt.length > MAX_EXCERPT_LENGTH) {
+      return NextResponse.json(
+        { error: `Excerpt exceeds maximum length of ${MAX_EXCERPT_LENGTH} characters` },
         { status: 400 }
       );
     }
@@ -181,16 +212,16 @@ export async function POST(request: NextRequest) {
     // Handle tags
     const tagConnections = tags?.length
       ? await Promise.all(
-          tags.map(async (tagName: string) => {
-            const tagSlug = tagName.toLowerCase().replace(/\s+/g, "-");
-            const tag = await prisma.tag.upsert({
-              where: { slug: tagSlug },
-              create: { name: tagName, slug: tagSlug },
-              update: {},
-            });
-            return { tagId: tag.id };
-          })
-        )
+        tags.map(async (tagName: string) => {
+          const tagSlug = tagName.toLowerCase().replace(/\s+/g, "-");
+          const tag = await prisma.tag.upsert({
+            where: { slug: tagSlug },
+            create: { name: tagName, slug: tagSlug },
+            update: {},
+          });
+          return { tagId: tag.id };
+        })
+      )
       : [];
 
     const article = await prisma.article.create({
