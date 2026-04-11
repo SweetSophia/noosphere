@@ -56,7 +56,7 @@ docker compose exec app npx prisma migrate deploy
 docker compose exec app node scripts/create-admin.js
 
 # 7. Open in browser
-open http://localhost:3000/wiki
+open http://localhost:4400/wiki
 ```
 
 ### Local Development
@@ -95,7 +95,7 @@ Articles can also have **tags** for cross-cutting concerns (e.g., `#security`, `
 
 ```bash
 # Create an article
-curl -X POST http://localhost:3000/api/articles \
+curl -X POST http://localhost:4400/api/articles \
   -H "Authorization: Bearer noo_your_api_key_here" \
   -H "Content-Type: application/json" \
   -d '{
@@ -125,7 +125,7 @@ API keys are managed via the admin panel at `/wiki/admin/keys`.
 |----------|-------------|
 | `DATABASE_URL` | PostgreSQL connection string |
 | `NEXTAUTH_SECRET` | Secret for session encryption |
-| `NEXTAUTH_URL` | Base URL (default: http://localhost:3000) |
+| `NEXTAUTH_URL` | Base URL (default: http://localhost:4400) |
 | `APP_URL` | Public URL of the app |
 | `POSTGRES_PASSWORD` | PostgreSQL password |
 
