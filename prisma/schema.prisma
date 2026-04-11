@@ -59,12 +59,33 @@ model Article {
   // Tags (many-to-many)
   tags      ArticleTag[]
 
+  // Version history
+  revisions ArticleRevision[]
+
   // Soft delete
   deletedAt DateTime?
 
   @@unique([topicId, slug])
   @@index([topicId])
   @@index([slug])
+  @@index([authorId])
+}
+
+// ─────────────────────────────────────────────
+// Article Revisions — version history
+// ─────────────────────────────────────────────
+model ArticleRevision {
+  id        String   @id @default(cuid())
+  articleId String
+  article   Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  authorId  String?
+  author    User?    @relation(fields: [authorId], references: [id])
+  title     String
+  content   String   @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([articleId])
   @@index([authorId])
 }
 
@@ -107,6 +128,7 @@ model User {
   role          Role      @default(EDITOR)
 
   articles      Article[]
+  revisions     ArticleRevision[]
   sessions      Session[]
 
   createdAt     DateTime  @default(now())

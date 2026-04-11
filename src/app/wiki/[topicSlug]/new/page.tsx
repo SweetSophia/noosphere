@@ -1,0 +1,83 @@
+export const dynamic = "force-dynamic";
+import { notFound } from "next/navigation";
+import Link from "next/link";
+import { prisma } from "@/lib/prisma";
+import { createArticle } from "./actions";
+
+interface Props {
+  params: Promise<{ topicSlug: string }>;
+}
+
+export default async function NewArticlePage({ params }: Props) {
+  const { topicSlug } = await params;
+
+  const topic = await prisma.topic.findUnique({ where: { slug: topicSlug } });
+  if (!topic) notFound();
+
+  return (
+    <div className="wiki-content" style={{ maxWidth: 900 }}>
+      <nav className="breadcrumb">
+        <Link href="/wiki">Noosphere</Link>
+        <span className="breadcrumb-sep">/</span>
+        <Link href={`/wiki/${topic.slug}`}>{topic.name}</Link>
+        <span className="breadcrumb-sep">/</span>
+        <span>New Article</span>
+      </nav>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
+        <h1 style={{ margin: 0 }}>New Article</h1>
+        <Link href={`/wiki/${topic.slug}`} className="btn btn-secondary btn-sm">
+          Cancel
+        </Link>
+      </div>
+
+      <form action={createArticle.bind(null, topicSlug)}>
+        <div className="form-group">
+          <label className="form-label" htmlFor="title">Title *</label>
+          <input
+            id="title"
+            name="title"
+            type="text"
+            className="form-input"
+            placeholder="Article title"
+            required
+          />
+        </div>
+
+        <div className="form-group">
+          <label className="form-label" htmlFor="excerpt">Excerpt (optional)</label>
+          <input
+            id="excerpt"
+            name="excerpt"
+            type="text"
+            className="form-input"
+            placeholder="Brief description shown in article listings"
+          />
+        </div>
+
+        <div className="form-group">
+          <label className="form-label" htmlFor="content">Content (Markdown) *</label>
+          <textarea
+            id="content"
+            name="content"
+            className="form-textarea"
+            placeholder="Write your article in Markdown..."
+            required
+          />
+          <p className="form-hint">
+            Supports GitHub-flavored Markdown. Code blocks with syntax highlighting.
+          </p>
+        </div>
+
+        <div style={{ display: "flex", gap: "0.75rem" }}>
+          <button type="submit" className="btn btn-primary">
+            Create Article
+          </button>
+          <Link href={`/wiki/${topic.slug}`} className="btn btn-secondary">
+            Cancel
+          </Link>
+        </div>
+      </form>
+    </div>
+  );
+}

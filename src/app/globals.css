@@ -1,12 +1,28 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* Noosphere wiki theme */
+  --bg-color: #ffffff;
+  --bg-secondary: #f9fafb;
+  --text-color: #111827;
+  --text-muted: #6b7280;
+  --border-color: #e5e7eb;
+  --accent-color: #3b82f6;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+
+    /* Noosphere wiki theme — dark */
+    --bg-color: #0f172a;
+    --bg-secondary: #1e293b;
+    --text-color: #f1f5f9;
+    --text-muted: #94a3b8;
+    --border-color: #334155;
+    --accent-color: #60a5fa;
   }
 }
 

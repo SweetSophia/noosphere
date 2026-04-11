@@ -23,6 +23,10 @@
     "prisma": "^7.7.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "react-markdown": "^10.1.0",
+    "react-syntax-highlighter": "^16.1.1",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
     "uuid": "^13.0.0"
   },
   "devDependencies": {
@@ -30,6 +34,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/react-syntax-highlighter": "^15.5.13",
     "@types/uuid": "^10.0.0",
     "dotenv": "^17.4.1",
     "eslint": "^9",
