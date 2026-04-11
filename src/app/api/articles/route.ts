@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiKey } from "@/lib/api/keys";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { countSearchArticles, searchArticleIds } from "@/lib/wiki";
+import { buildTagConnections, countSearchArticles, searchArticleIds } from "@/lib/wiki";
 
 // Constants for security limits
 const MAX_CONTENT_SIZE = 1024 * 1024; // 1MB max article content
@@ -21,6 +21,14 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(parseInt(searchParams.get("limit") ?? "20"), 100);
   const status = searchParams.get("status");
   const confidence = searchParams.get("confidence");
+
+  // Validate status/confidence against allow-lists
+  if (status && !["draft", "reviewed", "published"].includes(status)) {
+    return NextResponse.json({ error: "Invalid status filter" }, { status: 400 });
+  }
+  if (confidence && !["low", "medium", "high"].includes(confidence)) {
+    return NextResponse.json({ error: "Invalid confidence filter" }, { status: 400 });
+  }
 
   try {
     const where: Record<string, unknown> = { deletedAt: null };
@@ -157,6 +165,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate excerpt type (must be string if provided)
+    if (excerpt != null && typeof excerpt !== "string") {
+      return NextResponse.json(
+        { error: "Excerpt must be a string when provided" },
+        { status: 400 }
+      );
+    }
+
     // Security: Validate content size using byte length for accurate 1MB limit
     if (new TextEncoder().encode(content).length > MAX_CONTENT_SIZE) {
       return NextResponse.json(
@@ -228,28 +244,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Handle tags: normalize, dedupe, then upsert
-    const normalizedTags = tags
-      ? [...new Set(
-        (tags as string[])
-          .map((t: string) => t.trim().toLowerCase())
-          .filter(Boolean)
-      )]
-      : [];
-
-    const tagConnections = normalizedTags.length
-      ? await Promise.all(
-        normalizedTags.map(async (tagName: string) => {
-          const tagSlug = tagName.replace(/\s+/g, "-");
-          const tag = await prisma.tag.upsert({
-            where: { slug: tagSlug },
-            create: { name: tagName, slug: tagSlug },
-            update: {},
-          });
-          return { tagId: tag.id };
-        })
-      )
-      : [];
+    // Handle tags: normalize, dedupe, then upsert using shared helper
+    const tagConnections = await buildTagConnections(tags ?? []);
 
     const article = await prisma.article.create({
       data: {

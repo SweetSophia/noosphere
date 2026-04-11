@@ -72,7 +72,7 @@ export function resolvePublicImagePath(parts: string[]) {
     if (part.includes("/") || part.includes("\\")) {
       throw new Error("Invalid path: slashes not allowed");
     }
-    if (!/^[a-zA-Z0-9_\-. ]+$/.test(part)) {
+    if (!/^[a-zA-Z0-9_\-.]+$/.test(part)) {
       throw new Error("Invalid path: unsupported characters");
     }
   }
@@ -80,12 +80,15 @@ export function resolvePublicImagePath(parts: string[]) {
   const resolved = path.join(getImageDir(), ...parts);
 
   // Security: Ensure resolved path is within upload directory
-  const imageDir = getImageDir();
-  if (!resolved.startsWith(imageDir + path.sep) && resolved !== imageDir) {
+  // Use path.resolve to handle relative UPLOAD_DIR values correctly
+  const resolvedPath = path.resolve(resolved);
+  const imageDir = path.resolve(getImageDir());
+  const relative = path.relative(imageDir, resolvedPath);
+  if (relative.startsWith("..") || relative === "..") {
     throw new Error("Invalid path: outside upload directory");
   }
 
-  return resolved;
+  return resolvedPath;
 }
 
 export async function readUploadedImage(parts: string[]) {
