@@ -5,15 +5,7 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9 -]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .trim();
-}
+import { buildTagConnections, parseTagInput, slugify } from "@/lib/wiki";
 
 export async function createArticle(
   topicSlug: string,
@@ -25,14 +17,15 @@ export async function createArticle(
     throw new Error("You must be signed in to create articles.");
   }
 
-  const title = formData.get("title") as string;
-  const content = formData.get("content") as string;
-  const excerpt = formData.get("excerpt") as string;
+  const title = String(formData.get("title") ?? "");
+  const content = String(formData.get("content") ?? "");
+  const excerpt = String(formData.get("excerpt") ?? "");
+  const tags = parseTagInput(String(formData.get("tags") ?? ""));
 
-  if (!title?.trim()) {
+  if (!title.trim()) {
     throw new Error("Title is required.");
   }
-  if (!content?.trim()) {
+  if (!content.trim()) {
     throw new Error("Content cannot be empty.");
   }
 
@@ -47,18 +40,30 @@ export async function createArticle(
     slug = `${slug}-${Date.now()}`;
   }
 
+  const tagConnections = await buildTagConnections(tags);
+
   const article = await prisma.article.create({
     data: {
       title: title.trim(),
       slug,
       content: content.trim(),
-      excerpt: excerpt?.trim() || null,
+      excerpt: excerpt.trim() || content.trim().slice(0, 160).replace(/[#*`_]/g, ""),
       topicId: topic.id,
       authorId: session.user.id,
+      tags: { create: tagConnections },
+      revisions: {
+        create: {
+          authorId: session.user.id,
+          title: title.trim(),
+          content: content.trim(),
+        },
+      },
     },
   });
 
   revalidatePath(`/wiki/${topicSlug}`);
   revalidatePath(`/wiki/${topicSlug}/${article.slug}`);
+  revalidatePath("/wiki");
+  revalidatePath("/wiki/search");
   redirect(`/wiki/${topicSlug}/${article.slug}`);
 }

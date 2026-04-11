@@ -12,6 +12,19 @@ export default function WikiLayout({
         <Link href="/wiki" className="wiki-logo">
           Noosphere
         </Link>
+
+        <form action="/wiki/search" method="get" className="wiki-search-form">
+          <input
+            type="search"
+            name="q"
+            placeholder="Search articles, excerpts, tags..."
+            className="wiki-search-input"
+          />
+          <button type="submit" className="btn btn-secondary btn-sm">
+            Search
+          </button>
+        </form>
+
         <nav className="wiki-nav">
           <Link href="/wiki" className="nav-link">Browse</Link>
           <Link href="/wiki/login" className="nav-link">Sign In</Link>

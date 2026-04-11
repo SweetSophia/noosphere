@@ -50,7 +50,7 @@ export default async function TopicPage({ params }: Props) {
         <span>{topic.name}</span>
       </nav>
 
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "1.5rem" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "1.5rem", gap: "1rem" }}>
         <div>
           <h1 style={{ margin: 0 }}>{topic.name}</h1>
           {topic.description && (
@@ -59,6 +59,9 @@ export default async function TopicPage({ params }: Props) {
             </p>
           )}
         </div>
+        <Link href={`/wiki/${topic.slug}/new`} className="btn btn-primary btn-sm">
+          New Article
+        </Link>
       </div>
 
       {/* Sub-topics */}

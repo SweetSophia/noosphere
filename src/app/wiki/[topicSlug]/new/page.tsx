@@ -45,14 +45,26 @@ export default async function NewArticlePage({ params }: Props) {
         </div>
 
         <div className="form-group">
-          <label className="form-label" htmlFor="excerpt">Excerpt (optional)</label>
+          <label className="form-label" htmlFor="excerpt">Excerpt</label>
           <input
             id="excerpt"
             name="excerpt"
             type="text"
             className="form-input"
-            placeholder="Brief description shown in article listings"
+            placeholder="Brief summary used in lists and search results"
           />
+        </div>
+
+        <div className="form-group">
+          <label className="form-label" htmlFor="tags">Tags</label>
+          <input
+            id="tags"
+            name="tags"
+            type="text"
+            className="form-input"
+            placeholder="architecture, api, deployment"
+          />
+          <p className="form-hint">Comma-separated tags. Existing tags are reused automatically.</p>
         </div>
 
         <div className="form-group">

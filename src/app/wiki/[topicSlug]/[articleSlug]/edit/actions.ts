@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { buildTagConnections, parseTagInput } from "@/lib/wiki";
 
 export async function saveArticle(
   topicSlug: string,
@@ -17,10 +18,12 @@ export async function saveArticle(
     throw new Error("You must be signed in to edit articles.");
   }
 
-  const content = formData.get("content") as string;
-  const title = formData.get("title") as string;
+  const content = String(formData.get("content") ?? "");
+  const title = String(formData.get("title") ?? "");
+  const excerpt = String(formData.get("excerpt") ?? "");
+  const tags = parseTagInput(String(formData.get("tags") ?? ""));
 
-  if (!content?.trim()) {
+  if (!content.trim()) {
     throw new Error("Content cannot be empty.");
   }
 
@@ -33,24 +36,45 @@ export async function saveArticle(
 
   if (!article) throw new Error("Article not found.");
 
-  await prisma.article.update({
-    where: { id: article.id },
-    data: {
-      content: content.trim(),
-      title: title.trim() || article.title,
-      updatedAt: new Date(),
-    },
-  });
+  const nextTitle = title.trim() || article.title;
+  const nextContent = content.trim();
+  const nextExcerpt = excerpt.trim() || nextContent.slice(0, 160).replace(/[#*`_]/g, "");
+  const tagConnections = await buildTagConnections(tags);
 
-  await prisma.articleRevision.create({
-    data: {
-      articleId: article.id,
-      authorId: session.user.id,
-      content: content.trim(),
-      title: title.trim() || article.title,
-    },
-  });
+  await prisma.$transaction([
+    prisma.article.update({
+      where: { id: article.id },
+      data: {
+        content: nextContent,
+        title: nextTitle,
+        excerpt: nextExcerpt,
+        updatedAt: new Date(),
+      },
+    }),
+    prisma.articleTag.deleteMany({ where: { articleId: article.id } }),
+    prisma.articleRevision.create({
+      data: {
+        articleId: article.id,
+        authorId: session.user.id,
+        content: nextContent,
+        title: nextTitle,
+      },
+    }),
+  ]);
 
+  if (tagConnections.length > 0) {
+    await prisma.articleTag.createMany({
+      data: tagConnections.map((connection) => ({
+        articleId: article.id,
+        tagId: connection.tagId,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  revalidatePath(`/wiki/${topicSlug}`);
   revalidatePath(`/wiki/${topicSlug}/${articleSlug}`);
+  revalidatePath("/wiki");
+  revalidatePath("/wiki/search");
   redirect(`/wiki/${topicSlug}/${articleSlug}`);
 }
