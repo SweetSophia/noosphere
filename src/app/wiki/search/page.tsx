@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { searchArticleIds } from "@/lib/wiki";
 
 export const dynamic = "force-dynamic";
 
@@ -27,28 +28,43 @@ export default async function SearchPage({ searchParams }: Props) {
     where.tags = { some: { tag: { slug: tag } } };
   }
 
-  if (q) {
-    where.OR = [
-      { title: { contains: q, mode: "insensitive" } },
-      { content: { contains: q, mode: "insensitive" } },
-      { excerpt: { contains: q, mode: "insensitive" } },
-      { tags: { some: { tag: { name: { contains: q, mode: "insensitive" } } } } },
-    ];
-  }
+  const articleIds = q
+    ? await searchArticleIds(q, {
+        topicSlug: topic || undefined,
+        tagSlug: tag || undefined,
+        limit: 50,
+      })
+    : [];
 
   const [results, topics, tags] = await Promise.all([
-    q || topic || tag
-      ? prisma.article.findMany({
-          where,
-          include: {
-            topic: true,
-            tags: { include: { tag: true } },
-            author: { select: { id: true, name: true } },
-          },
-          orderBy: { updatedAt: "desc" },
-          take: 50,
-        })
-      : Promise.resolve([]),
+    q
+      ? articleIds.length
+        ? prisma.article.findMany({
+            where: { id: { in: articleIds } },
+            include: {
+              topic: true,
+              tags: { include: { tag: true } },
+              author: { select: { id: true, name: true } },
+            },
+          }).then((articles) => {
+            const articlesById = new Map(articles.map((article) => [article.id, article]));
+            return articleIds
+              .map((id) => articlesById.get(id))
+              .filter((article): article is (typeof articles)[number] => article !== undefined);
+          })
+        : Promise.resolve([])
+      : topic || tag
+        ? prisma.article.findMany({
+            where,
+            include: {
+              topic: true,
+              tags: { include: { tag: true } },
+              author: { select: { id: true, name: true } },
+            },
+            orderBy: { updatedAt: "desc" },
+            take: 50,
+          })
+        : Promise.resolve([]),
     prisma.topic.findMany({ orderBy: { name: "asc" } }),
     prisma.tag.findMany({ orderBy: { name: "asc" }, take: 50 }),
   ]);

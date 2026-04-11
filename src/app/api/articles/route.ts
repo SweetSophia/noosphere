@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiKey } from "@/lib/api/keys";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import type { Permissions } from "@prisma/client";
+import { countSearchArticles, searchArticleIds } from "@/lib/wiki";
 
 // GET /api/articles — List articles (with filters)
 // Auth: API key (READ/WRITE/ADMIN) or session (human)
@@ -26,27 +26,50 @@ export async function GET(request: NextRequest) {
       where.tags = { some: { tag: { slug: tag } } };
     }
 
-    if (q) {
-      where.OR = [
-        { title: { contains: q, mode: "insensitive" } },
-        { content: { contains: q, mode: "insensitive" } },
-        { excerpt: { contains: q, mode: "insensitive" } },
-      ];
-    }
+    const offset = (page - 1) * limit;
+    const articleIds = q
+      ? await searchArticleIds(q, {
+          topicSlug: topicSlug ?? undefined,
+          tagSlug: tag ?? undefined,
+          limit,
+          offset,
+        })
+      : [];
 
     const [articles, total] = await Promise.all([
-      prisma.article.findMany({
-        where,
-        include: {
-          topic: true,
-          tags: { include: { tag: true } },
-          author: { select: { id: true, name: true, email: true } },
-        },
-        skip: (page - 1) * limit,
-        take: limit,
-        orderBy: { updatedAt: "desc" },
-      }),
-      prisma.article.count({ where }),
+      q
+        ? articleIds.length
+          ? prisma.article.findMany({
+              where: { id: { in: articleIds } },
+              include: {
+                topic: true,
+                tags: { include: { tag: true } },
+                author: { select: { id: true, name: true, email: true } },
+              },
+            }).then((rows) => {
+              const rowsById = new Map(rows.map((row) => [row.id, row]));
+              return articleIds
+                .map((id) => rowsById.get(id))
+                .filter((row): row is (typeof rows)[number] => row !== undefined);
+            })
+          : Promise.resolve([])
+        : prisma.article.findMany({
+            where,
+            include: {
+              topic: true,
+              tags: { include: { tag: true } },
+              author: { select: { id: true, name: true, email: true } },
+            },
+            skip: offset,
+            take: limit,
+            orderBy: { updatedAt: "desc" },
+          }),
+      q
+        ? countSearchArticles(q, {
+            topicSlug: topicSlug ?? undefined,
+            tagSlug: tag ?? undefined,
+          })
+        : prisma.article.count({ where }),
     ]);
 
     const formatted = articles.map((a) => ({
