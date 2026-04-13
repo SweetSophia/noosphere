@@ -29,6 +29,13 @@ export default async function ArticlePage({ params }: Props) {
         take: 5,
         select: { createdAt: true },
       },
+      relatedTo: {
+        include: {
+          target: {
+            select: { id: true, title: true, slug: true, topic: { select: { slug: true } } },
+          },
+        },
+      },
     },
   });
 
@@ -98,22 +105,20 @@ export default async function ArticlePage({ params }: Props) {
         </div>
 
         {/* Related articles */}
-        {article.relatedArticleIds && (() => {
-          try {
-            const relatedIds: string[] = JSON.parse(article.relatedArticleIds);
-            if (!relatedIds.length) return null;
-            return (
-              <div style={{ marginTop: "0.5rem", display: "flex", gap: "0.4rem", flexWrap: "wrap", alignItems: "center" }}>
-                <span style={{ fontSize: "0.8em", color: "var(--muted)" }}>Related:</span>
-                {relatedIds.map((id) => (
-                  <span key={id} style={{ fontSize: "0.8em" }}>{id.slice(0, 8)}…</span>
-                ))}
-              </div>
-            );
-          } catch {
-            return null;
-          }
-        })()}
+        {article.relatedTo.length > 0 && (
+          <div style={{ marginTop: "0.5rem", display: "flex", gap: "0.4rem", flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ fontSize: "0.8em", color: "var(--muted)" }}>Related:</span>
+            {article.relatedTo.map((rel) => (
+              <Link
+                key={rel.target.id}
+                href={`/wiki/${rel.target.topic.slug}/${rel.target.slug}`}
+                style={{ fontSize: "0.8em", textDecoration: "none" }}
+              >
+                {rel.target.title}
+              </Link>
+            ))}
+          </div>
+        )}
 
         <div style={{ marginTop: "0.75rem" }} className="page-actions">
           <Link

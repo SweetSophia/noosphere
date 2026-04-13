@@ -149,12 +149,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       updateData.confidence = confidence;
     }
 
-    // relatedArticleIds
+    // relatedArticleIds — handled separately (not a direct field, uses ArticleRelation table)
     if (relatedArticleIds !== undefined) {
-      if (!Array.isArray(relatedArticleIds)) {
-        return NextResponse.json({ error: "relatedArticleIds must be an array" }, { status: 400 });
+      if (!Array.isArray(relatedArticleIds) || !(relatedArticleIds as unknown[]).every((id) => typeof id === "string" && id.length > 0)) {
+        return NextResponse.json({ error: "relatedArticleIds must be an array of non-empty strings" }, { status: 400 });
       }
-      updateData.relatedArticleIds = JSON.stringify(relatedArticleIds);
     }
 
     // lastReviewed
@@ -192,32 +191,48 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       };
     }
 
-    // Execute update with tag reconnect if tags changed
-    const article = await prisma.article.update({
-      where: { id },
-      data: updateData,
-      include: { topic: true },
-    });
+    // Execute update in transaction: article update + tag reconnect + relation sync
+    const updatedArticle = await prisma.$transaction(async (tx) => {
+      // Update article fields
+      await tx.article.update({
+        where: { id },
+        data: updateData,
+      });
 
-    // Reconnect tags if they changed
-    if (tags !== undefined) {
-      // Remove all existing tag connections
-      await prisma.articleTag.deleteMany({ where: { articleId: id } });
-      // Create new connections
-      if (newTagConnections.length > 0) {
-        await prisma.articleTag.createMany({
-          data: newTagConnections.map((tc) => ({ articleId: id, tagId: tc.tagId })),
+      // Reconnect tags if changed
+      if (tags !== undefined) {
+        await tx.articleTag.deleteMany({ where: { articleId: id } });
+        if (newTagConnections.length > 0) {
+          await tx.articleTag.createMany({
+            data: newTagConnections.map((tc) => ({ articleId: id, tagId: tc.tagId })),
+          });
+        }
+      }
+
+      // Sync related articles via ArticleRelation table
+      await tx.articleRelation.deleteMany({ where: { sourceId: id } });
+      if (relatedArticleIds !== undefined && relatedArticleIds.length > 0) {
+        await tx.articleRelation.createMany({
+          data: relatedArticleIds
+            .filter((targetId: string) => targetId !== id) // prevent self-reference
+            .map((targetId: string) => ({ sourceId: id, targetId })),
+          skipDuplicates: true,
         });
       }
-    }
 
-    // Fetch updated tags
-    const updatedArticle = await prisma.article.findUnique({
-      where: { id },
-      include: {
-        topic: true,
-        tags: { include: { tag: true } },
-      },
+      // Return updated article with relations
+      return tx.article.findUnique({
+        where: { id },
+        include: {
+          topic: true,
+          tags: { include: { tag: true } },
+          relatedTo: {
+            include: {
+              target: { select: { id: true, title: true, slug: true, topic: true } },
+            },
+          },
+        },
+      });
     });
 
     return NextResponse.json({
@@ -230,9 +245,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       confidence: updatedArticle!.confidence,
       status: updatedArticle!.status,
       lastReviewed: updatedArticle!.lastReviewed,
-      relatedArticleIds: updatedArticle!.relatedArticleIds
-        ? JSON.parse(updatedArticle!.relatedArticleIds)
-        : null,
+      relatedArticles: updatedArticle!.relatedTo.map((r) => ({
+        id: r.target.id,
+        title: r.target.title,
+        slug: r.target.slug,
+        topicSlug: r.target.topic.slug,
+      })),
       createdAt: updatedArticle!.createdAt,
       updatedAt: updatedArticle!.updatedAt,
     });

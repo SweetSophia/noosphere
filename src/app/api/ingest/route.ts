@@ -180,7 +180,6 @@ export async function POST(request: NextRequest) {
           sourceType: source.type,
           confidence: article.confidence || null,
           status: article.status || "published",
-          relatedArticleIds: article.relatedArticleIds ? JSON.stringify(article.relatedArticleIds) : null,
           tags: { create: tagConnections },
           revisions: {
             create: {
@@ -199,6 +198,16 @@ export async function POST(request: NextRequest) {
         slug: article.slug,
         topic: topic.name,
       });
+
+      // Create ArticleRelation records for related articles
+      if (article.relatedArticleIds && article.relatedArticleIds.length > 0) {
+        await tx.articleRelation.createMany({
+          data: article.relatedArticleIds
+            .filter((targetId: string) => targetId !== created.id)
+            .map((targetId: string) => ({ sourceId: created.id, targetId })),
+          skipDuplicates: true,
+        });
+      }
     }
 
     // --- Log the ingest ---

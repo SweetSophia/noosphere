@@ -71,6 +71,11 @@ export async function GET(request: NextRequest) {
               topic: true,
               tags: { include: { tag: true } },
               author: { select: { id: true, name: true, email: true } },
+              relatedTo: {
+                include: {
+                  target: { select: { id: true, title: true, slug: true, topic: true } },
+                },
+              },
             },
           }).then((rows) => {
             const rowsById = new Map(rows.map((row) => [row.id, row]));
@@ -85,6 +90,11 @@ export async function GET(request: NextRequest) {
             topic: true,
             tags: { include: { tag: true } },
             author: { select: { id: true, name: true, email: true } },
+            relatedTo: {
+              include: {
+                target: { select: { id: true, title: true, slug: true, topic: true } },
+              },
+            },
           },
           skip: offset,
           take: limit,
@@ -111,7 +121,12 @@ export async function GET(request: NextRequest) {
       confidence: a.confidence,
       status: a.status,
       lastReviewed: a.lastReviewed,
-      relatedArticleIds: a.relatedArticleIds ? JSON.parse(a.relatedArticleIds) : null,
+      relatedArticles: a.relatedTo.map((r) => ({
+        id: r.target.id,
+        title: r.target.title,
+        slug: r.target.slug,
+        topicSlug: r.target.topic.slug,
+      })),
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
     }));
@@ -151,6 +166,16 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { title, slug, content, topicId, tags, excerpt, authorName, confidence, status, relatedArticleIds } = body;
+
+    // Validate relatedArticleIds is an array of valid CUIDs
+    if (relatedArticleIds !== undefined) {
+      if (!Array.isArray(relatedArticleIds) || !(relatedArticleIds as unknown[]).every((id) => typeof id === "string" && id.length > 0)) {
+        return NextResponse.json(
+          { error: "relatedArticleIds must be an array of non-empty strings" },
+          { status: 400 }
+        );
+      }
+    }
 
     // Validate required fields are non-empty strings
     if (
@@ -247,31 +272,44 @@ export async function POST(request: NextRequest) {
     // Handle tags: normalize, dedupe, then upsert using shared helper
     const tagConnections = await buildTagConnections(tags ?? []);
 
-    const article = await prisma.article.create({
-      data: {
-        title,
-        slug,
-        content,
-        excerpt: excerpt || content.slice(0, 160).replace(/[#*`_]/g, ""),
-        topicId,
-        authorId: session?.user ? (session.user as { id: string }).id : null,
-        authorName: authorName || (session?.user?.name ?? null),
-        tags: { create: tagConnections },
-        confidence: confidence || null,
-        status: status || "published",
-        relatedArticleIds: relatedArticleIds ? JSON.stringify(relatedArticleIds) : null,
-        revisions: {
-          create: {
-            authorId: session?.user ? (session.user as { id: string }).id : null,
-            title,
-            content,
+    const article = await prisma.$transaction(async (tx) => {
+      const created = await tx.article.create({
+        data: {
+          title,
+          slug,
+          content,
+          excerpt: excerpt || content.slice(0, 160).replace(/[#*`_]/g, ""),
+          topicId,
+          authorId: session?.user ? (session.user as { id: string }).id : null,
+          authorName: authorName || (session?.user?.name ?? null),
+          tags: { create: tagConnections },
+          confidence: confidence || null,
+          status: status || "published",
+          revisions: {
+            create: {
+              authorId: session?.user ? (session.user as { id: string }).id : null,
+              title,
+              content,
+            },
           },
         },
-      },
-      include: {
-        topic: true,
-        tags: { include: { tag: true } },
-      },
+        include: {
+          topic: true,
+          tags: { include: { tag: true } },
+        },
+      });
+
+      // Create ArticleRelation records for related articles
+      if (relatedArticleIds && relatedArticleIds.length > 0) {
+        await tx.articleRelation.createMany({
+          data: relatedArticleIds
+            .filter((id: string) => id !== created.id) // prevent self-reference
+            .map((targetId: string) => ({ sourceId: created.id, targetId })),
+          skipDuplicates: true,
+        });
+      }
+
+      return created;
     });
 
     return NextResponse.json(

@@ -62,7 +62,10 @@ model Article {
   confidence        String?   // "low", "medium", "high"
   status           String    @default("published")  // "draft", "reviewed", "published"
   lastReviewed     DateTime?
-  relatedArticleIds String?   @db.Text  // JSON array of article CUIDs
+
+  // Proper many-to-many relation for article cross-references
+  relatedTo   ArticleRelation[] @relation("ArticleRelatedTo")
+  relatedFrom ArticleRelation[] @relation("ArticleRelatedFrom")
 
   deletedAt DateTime?
 
@@ -200,4 +203,21 @@ model ActivityLog {
   @@index([type])
   @@index([createdAt])
   @@index([authorName])
+}
+
+// ─────────────────────────────────────────────
+// Article Relations — proper join table for article cross-references
+// ─────────────────────────────────────────────
+model ArticleRelation {
+  id        String   @id @default(cuid())
+  sourceId  String   // Article that declares the relation
+  targetId  String   // Article that is related
+  source    Article  @relation("ArticleRelatedTo", fields: [sourceId], references: [id], onDelete: Cascade)
+  target    Article  @relation("ArticleRelatedFrom", fields: [targetId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([sourceId, targetId])
+  @@index([sourceId])
+  @@index([targetId])
 }
