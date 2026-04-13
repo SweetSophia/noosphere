@@ -23,7 +23,7 @@ All notable changes to Noosphere are documented here.
 
 ### Security
 
-- Auth guard at page level for admin routes (keys, log, trash).
+- Page-level auth guards — edit, new article, and admin log pages now redirect to login before rendering (previously only enforced at server-action level).
 
 ## [0.1.0] — 2026-04-11
 

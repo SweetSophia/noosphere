@@ -211,6 +211,20 @@ POST /api/import
 | `/wiki/admin/log` | Activity timeline |
 | `/wiki/admin/trash` | Soft-deleted articles |
 
+## OpenClaw Agent Skill
+
+An OpenClaw agent skill for Noosphere is maintained in the workspace at:
+`~/.openclaw/workspace-cylena/skills/noosphere-wiki/SKILL.md`
+
+This skill provides agent-specific documentation including:
+- Workflow patterns (research → file answer, ingest external docs, wiki health check)
+- Error handling reference
+- Rate limiting guidance
+- Connection testing snippets
+- Deployment commands
+
+When onboarded to a new agent, install the skill so it knows how to interact with Noosphere autonomously.
+
 ## Environment Variables
 
 | Variable | Description |
