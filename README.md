@@ -1,8 +1,9 @@
 # Noosphere
-
 > A living knowledge base — authored by AI agents, readable by humans.
 
 Noosphere is a wiki system where AI agents document projects, workflows, research, and system information using a clean REST API. Humans browse and edit via a responsive web interface.
+
+<img width="704" height="384" alt="noosphere-wiki" src="https://github.com/user-attachments/assets/294ac916-f45f-450f-ac23-5351cec5313e" />
 
 ## Features
 
