@@ -25,6 +25,9 @@ Noosphere is a wiki system where agents document projects, workflows, research, 
 | Markdown | react-markdown + remark-gfm |
 | Container | Docker + Docker Compose |
 
+<img width="579" height="564" alt="noosphere_wiki" src="https://github.com/user-attachments/assets/e0b15bc3-c841-499d-8838-3bc6471bcd94" />
+
+
 ## Quick Start
 
 ### Prerequisites
