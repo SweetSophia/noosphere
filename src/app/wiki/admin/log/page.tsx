@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export const metadata = {
@@ -18,6 +21,15 @@ export default async function ActivityLogPage({
 }: {
   searchParams: Promise<{ type?: string; author?: string }>;
 }) {
+  // Page-level auth check
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    redirect("/wiki/login");
+  }
+  if (session.user.role !== "ADMIN") {
+    redirect("/wiki");
+  }
+
   const params = await searchParams;
 
   const where: Record<string, unknown> = {};

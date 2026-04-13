@@ -1,6 +1,8 @@
 export const dynamic = "force-dynamic";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ImageUploadPanel } from "@/components/wiki/ImageUploadPanel";
 import { MarkdownPreviewTabs } from "@/components/wiki/MarkdownPreviewTabs";
@@ -13,6 +15,16 @@ interface Props {
 
 export default async function NewArticlePage({ params }: Props) {
   const { topicSlug } = await params;
+
+  // Page-level auth check
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    redirect("/wiki/login");
+  }
+  const role = (session.user as { role?: string }).role;
+  if (role !== "EDITOR" && role !== "ADMIN") {
+    redirect("/wiki");
+  }
 
   const topic = await prisma.topic.findUnique({ where: { slug: topicSlug } });
   if (!topic) notFound();
