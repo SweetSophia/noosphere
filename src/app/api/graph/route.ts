@@ -53,11 +53,20 @@ export async function GET(request: NextRequest) {
     createdAt: a.createdAt,
   }));
 
-  // Build edges
+  // Build edges using O(1) Set lookups instead of O(n) edges.some()
+  // Key format: "sortedId1:sortedId2:type" — same pair + same type = duplicate
+  const seenEdges = new Set<string>();
   const edges: { source: string; target: string; type: string }[] = [];
 
+  function addEdge(source: string, target: string, type: string) {
+    if (source === target) return;
+    const key = [source, target].sort().join(":") + ":" + type;
+    if (seenEdges.has(key)) return;
+    seenEdges.add(key);
+    edges.push({ source, target, type });
+  }
+
   // Topic edges: articles in the same topic are connected
-  // Only add for article pairs (avoid doubling edges for small topics)
   const byTopic = new Map<string, string[]>();
   for (const article of articles) {
     const list = byTopic.get(article.topic.slug) ?? [];
@@ -68,7 +77,7 @@ export async function GET(request: NextRequest) {
   for (const [, ids] of byTopic) {
     for (let i = 0; i < ids.length; i++) {
       for (let j = i + 1; j < ids.length; j++) {
-        edges.push({ source: ids[i], target: ids[j], type: "topic" });
+        addEdge(ids[i], ids[j], "topic");
       }
     }
   }
@@ -86,25 +95,13 @@ export async function GET(request: NextRequest) {
   for (const [, ids] of byTag) {
     for (let i = 0; i < ids.length; i++) {
       for (let j = i + 1; j < ids.length; j++) {
-        // Avoid duplicate topic edges
-        if (
-          !edges.some(
-            (e) =>
-              (e.source === ids[i] && e.target === ids[j]) ||
-              (e.source === ids[j] && e.target === ids[i])
-          )
-        ) {
-          edges.push({ source: ids[i], target: ids[j], type: "tag" });
-        }
+        addEdge(ids[i], ids[j], "tag");
       }
     }
   }
 
   // Cross-reference edges: articles that explicitly link to other articles in the wiki
   // Detect wikilink-style references: [[slug]] or [text](/wiki/topic/slug)
-  const slugSet = new Set(articles.map((a) => a.slug));
-  const topicSlugSet = new Set(articles.map((a) => a.topic.slug));
-
   for (const article of articles) {
     // Match [[slug]] patterns (wikilinks to other wiki pages)
     const wikiLinkRegex = /\[\[([a-z0-9-]+)\]\]/gi;
@@ -112,15 +109,8 @@ export async function GET(request: NextRequest) {
     while ((match = wikiLinkRegex.exec(article.content)) !== null) {
       const targetSlug = match[1].toLowerCase();
       const target = articles.find((a) => a.slug === targetSlug);
-      if (target && target.id !== article.id) {
-        const exists = edges.some(
-          (e) =>
-            (e.source === article.id && e.target === target.id) ||
-            (e.source === target.id && e.target === article.id)
-        );
-        if (!exists) {
-          edges.push({ source: article.id, target: target.id, type: "cross_ref" });
-        }
+      if (target) {
+        addEdge(article.id, target.id, "cross_ref");
       }
     }
 
@@ -132,15 +122,8 @@ export async function GET(request: NextRequest) {
       const target = articles.find(
         (a) => a.topic.slug === refTopic && a.slug === refSlug
       );
-      if (target && target.id !== article.id) {
-        const exists = edges.some(
-          (e) =>
-            (e.source === article.id && e.target === target.id) ||
-            (e.source === target.id && e.target === article.id)
-        );
-        if (!exists) {
-          edges.push({ source: article.id, target: target.id, type: "cross_ref" });
-        }
+      if (target) {
+        addEdge(article.id, target.id, "cross_ref");
       }
     }
   }
