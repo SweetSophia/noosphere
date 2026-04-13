@@ -1,79 +1,63 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-// GET /api/topics — List all topics (hierarchical tree)
+// GET /api/topics — List all topics (full hierarchical tree, unlimited depth)
 export async function GET() {
   try {
-    const topics = await prisma.topic.findMany({
-      where: { parentId: null }, // Root topics only
+    // Fetch ALL topics in one query (no depth limit)
+    const allTopics = await prisma.topic.findMany({
       include: {
-        children: {
-          include: {
-            children: {
-              include: {
-                children: true,
-              },
-            },
-          },
-        },
+        _count: { select: { articles: true } },
       },
       orderBy: { name: "asc" },
     });
 
-    // Get article counts per topic
-    const topicIds = collectAllTopicIds(topics);
+    // Get article counts per topic (excluding soft-deleted)
     const counts = await prisma.article.groupBy({
       by: ["topicId"],
       _count: { id: true },
-      where: { topicId: { in: topicIds }, deletedAt: null },
+      where: { topicId: { in: allTopics.map((t) => t.id) }, deletedAt: null },
     });
-
     const countMap = new Map(counts.map((c) => [c.topicId, c._count.id]));
 
-    const formatted = topics.map((t) => ({
-      id: t.id,
-      name: t.name,
-      slug: t.slug,
-      description: t.description,
-      articleCount: countMap.get(t.id) ?? 0,
-      children: (t.children ?? []).map((c) => ({
-        id: c.id,
-        name: c.name,
-        slug: c.slug,
-        description: c.description,
-        articleCount: countMap.get(c.id) ?? 0,
-        children: ((c as Record<string, unknown>).children as typeof topics ?? []).map((gc) => ({
-          id: gc.id,
-          name: gc.name,
-          slug: gc.slug,
-          description: gc.description,
-          articleCount: countMap.get(gc.id) ?? 0,
-          children: (gc as Record<string, unknown>).children ?? [],
-        })),
-      })),
-    }));
+    // Build tree in JS — supports unlimited nesting depth
+    type TopicTree = {
+      id: string;
+      name: string;
+      slug: string;
+      description: string | null;
+      articleCount: number;
+      children: TopicTree[];
+    };
 
-    return NextResponse.json({ topics: formatted });
+    const topicMap = new Map<string, TopicTree>();
+    const roots: TopicTree[] = [];
+
+    // First pass: create tree nodes
+    for (const topic of allTopics) {
+      topicMap.set(topic.id, {
+        id: topic.id,
+        name: topic.name,
+        slug: topic.slug,
+        description: topic.description,
+        articleCount: countMap.get(topic.id) ?? topic._count.articles,
+        children: [],
+      });
+    }
+
+    // Second pass: link children to parents
+    for (const topic of allTopics) {
+      const node = topicMap.get(topic.id)!;
+      if (topic.parentId && topicMap.has(topic.parentId)) {
+        topicMap.get(topic.parentId)!.children.push(node);
+      } else {
+        roots.push(node);
+      }
+    }
+
+    return NextResponse.json({ topics: roots });
   } catch (error) {
     console.error("[GET /api/topics]", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
-}
-
-function collectAllTopicIds(topics: Array<{ id: string; children?: Array<{ id: string; children?: Array<{ id: string }> }> }>): string[] {
-  const ids: string[] = [];
-  for (const t of topics) {
-    ids.push(t.id);
-    if (t.children) {
-      for (const c of t.children) {
-        ids.push(c.id);
-        if (c.children) {
-          for (const gc of c.children) {
-            ids.push(gc.id);
-          }
-        }
-      }
-    }
-  }
-  return ids;
 }

@@ -3,27 +3,97 @@ import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
+// Types
+interface TopicNode {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  children: TopicNode[];
+}
+
+interface ArticleCountMap {
+  [topicId: string]: number;
+}
+
+// Recursive component: renders a topic card and all its nested children
+function TopicNode({ node, countMap, depth = 0 }: { node: TopicNode; countMap: ArticleCountMap; depth?: number }) {
+  const hasChildren = node.children.length > 0;
+  const count = countMap[node.id] ?? 0;
+
+  return (
+    <div
+      className="topic-card"
+      style={{
+        marginLeft: depth > 0 ? "1.25rem" : 0,
+        borderLeft: depth > 0 ? "2px solid var(--border-color, #e5e7eb)" : undefined,
+        paddingLeft: depth > 0 ? "1rem" : 0,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: depth === 0 ? "1.25rem" : "1rem" }}>
+            <Link href={`/wiki/${node.slug}`} style={{ color: "inherit", textDecoration: "none" }}>
+              {node.name}
+            </Link>
+          </h2>
+          {node.description && (
+            <p style={{ margin: "0.25rem 0 0", color: "var(--text-muted, #6b7280)", fontSize: "0.875rem" }}>
+              {node.description}
+            </p>
+          )}
+        </div>
+        <span style={{ fontSize: "0.75rem", color: "var(--text-muted, #6b7280)", flexShrink: 0 }}>
+          {count} article{count !== 1 ? "s" : ""}
+        </span>
+      </div>
+
+      {hasChildren && (
+        <div className="sub-topics" style={{ marginTop: "0.5rem" }}>
+          {node.children.map((child) => (
+            <TopicNode key={child.id} node={child} countMap={countMap} depth={depth + 1} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default async function WikiHomePage() {
-  const topics = await prisma.topic.findMany({
-    where: { parentId: null },
+  // Fetch ALL topics (no depth limit in query)
+  const allTopics = await prisma.topic.findMany({
     include: {
-      children: {
-        include: {
-          children: true,
-          _count: { select: { articles: true } },
-        },
-      },
+      _count: { select: { articles: true } },
     },
     orderBy: { name: "asc" },
   });
 
-  // Fetch article counts per topic
+  // Get article counts per topic (excluding soft-deleted)
   const topicCounts = await prisma.article.groupBy({
     by: ["topicId"],
     where: { deletedAt: null },
     _count: { topicId: true },
   });
-  const countMap = Object.fromEntries(topicCounts.map((t) => [t.topicId, t._count.topicId]));
+  const countMap: ArticleCountMap = Object.fromEntries(
+    topicCounts.map((t) => [t.topicId, t._count.topicId])
+  );
+
+  // Build tree in JS — unlimited nesting depth
+  const topicMap = new Map<string, TopicNode & { _count: { articles: number } }>();
+  const roots: TopicNode[] = [];
+
+  for (const topic of allTopics) {
+    topicMap.set(topic.id, { ...topic, children: [] });
+  }
+
+  for (const topic of allTopics) {
+    const node = topicMap.get(topic.id)!;
+    if (topic.parentId && topicMap.has(topic.parentId)) {
+      topicMap.get(topic.parentId)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
 
   const recentArticles = await prisma.article.findMany({
     where: { deletedAt: null },
@@ -70,41 +140,14 @@ export default async function WikiHomePage() {
 
       <section>
         <h2>Topics</h2>
-        {topics.length === 0 ? (
+        {roots.length === 0 ? (
           <div className="empty-state">
             <h3>No topics yet</h3>
             <p>Topics will appear here once created.</p>
           </div>
         ) : (
-          topics.map((topic) => (
-            <div key={topic.id} className="topic-card">
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div>
-                  <h2 style={{ margin: 0 }}>{topic.name}</h2>
-                  {topic.description && (
-                    <p style={{ margin: "0.25rem 0 0" }}>{topic.description}</p>
-                  )}
-                </div>
-                <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", flexShrink: 0 }}>
-                  {countMap[topic.id] || 0} article{(countMap[topic.id] || 0) !== 1 ? "s" : ""}
-                </span>
-              </div>
-
-              {topic.children.length > 0 && (
-                <div className="sub-topics">
-                  {topic.children.map((child) => (
-                    <Link
-                      key={child.id}
-                      href={`/wiki/${child.slug}`}
-                      className="sub-topic-tag"
-                    >
-                      {child.name}
-                      {(countMap[child.id] || 0) > 0 && ` (${countMap[child.id] || 0})`}
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </div>
+          roots.map((topic) => (
+            <TopicNode key={topic.id} node={topic} countMap={countMap} depth={0} />
           ))
         )}
       </section>
