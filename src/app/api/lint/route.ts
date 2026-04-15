@@ -209,9 +209,11 @@ export async function POST(request: NextRequest) {
     for (const b of articles) {
       if (b.id === a.id) continue;
 
-      // Does b's content mention a's title or slug without linking?
-      const titlePlain = new RegExp(`\\b${a.title}\\b`, "i");
-      const slugPlain = new RegExp(`\\b${a.slug}\\b`, "i");
+      // Escape regex special chars in user-controlled article metadata
+      // before building word-boundary patterns to prevent ReDoS.
+      const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const titlePlain = new RegExp(`\\b${escapeRe(a.title)}\\b`, "i");
+      const slugPlain = new RegExp(`\\b${escapeRe(a.slug)}\\b`, "i");
       const isLinked =
         new RegExp(`\\[\\[${a.slug}\\]\\]`, "i").test(b.content) ||
         new RegExp(`/wiki/[^/]*/${a.slug}(?![a-z0-9-])`, "i").test(b.content);
