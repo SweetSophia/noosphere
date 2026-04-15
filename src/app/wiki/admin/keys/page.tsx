@@ -25,10 +25,9 @@ export default async function ApiKeysPage({ searchParams }: Props) {
   const params = await searchParams;
   const cookieStore = await cookies();
   const flashKey = cookieStore.get("api_key_flash")?.value ?? null;
-  // Clear the flash cookie now that we've read it
-  if (flashKey) {
-    cookieStore.delete("api_key_flash");
-  }
+  // Note: cookie deletion in Server Components is not supported in Next.js 15+.
+  // The cookie expires naturally after maxAge=60 (set in createApiKeyAction).
+  // The "only shown once" guarantee relies on the short maxAge, not explicit deletion.
 
   const keys = await prisma.apiKey.findMany({
     orderBy: [{ revokedAt: "asc" }, { createdAt: "desc" }],

@@ -142,8 +142,26 @@ export async function POST(request: NextRequest) {
   const toImport: ImportArticle[] = [];
   const zipFiles = Object.values(zip.files);
 
+  // Track uncompressed size to prevent zip-bomb decompression.
+  // JSZip's central directory exposes uncompressedSize after loadAsync()
+  // without requiring decompression — check before each entry is processed.
+  const MAX_UNCOMPRESSED = 200 * 1024 * 1024; // 200 MB total
+  let totalUncompressed = 0;
+
   for (const entry of zipFiles) {
     if (entry.dir || !entry.name.endsWith(".md") || entry.name.includes("README")) continue;
+
+    // Abort early if cumulative uncompressed size would exceed limit.
+    // _data is internal JSZip metadata populated from the central directory after
+    // loadAsync() — accessed via type assertion since it's not in public types.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const entrySize = (entry as any)._data?.uncompressedSize ?? 0;
+    if (totalUncompressed + entrySize > MAX_UNCOMPRESSED) {
+      return NextResponse.json(
+        { error: "Zip contents exceed 200 MB uncompressed size limit" },
+        { status: 400 }
+      );
+    }
 
     let content: string;
     try {
@@ -152,6 +170,9 @@ export async function POST(request: NextRequest) {
       toImport.push({ filename: entry.name, title: "", slug: "", topicSlug: "", content: "", tags: [], error: "Failed to read file" });
       continue;
     }
+
+    // Update cumulative size after successful decompression
+    totalUncompressed += entrySize;
 
     // Parse frontmatter (handles both \n and \r\n)
     const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
