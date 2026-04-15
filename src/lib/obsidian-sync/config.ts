@@ -12,6 +12,7 @@ export interface ObsidianSyncConfig {
   autoClean: boolean;
   preserveLocalChanges: boolean;
   trashDeletions: boolean;
+  publish: boolean; // add publish: true to frontmatter (for Obsidian Publish)
   manifestPath: string; // relative inside vault
   lastRunPath: string; // relative inside vault
   timeoutMs: number;
@@ -52,6 +53,7 @@ export function getObsidianSyncConfig(): ObsidianSyncConfig | null {
     autoClean: parseBool(process.env["OBSIDIAN_SYNC_AUTO_CLEAN"], true),
     preserveLocalChanges: parseBool(process.env["OBSIDIAN_SYNC_PRESERVE_LOCAL_CHANGES"], true),
     trashDeletions: parseBool(process.env["OBSIDIAN_SYNC_TRASH_DELETIONS"], true),
+    publish: parseBool(process.env["OBSIDIAN_SYNC_PUBLISH"], true),
     manifestPath: process.env["OBSIDIAN_SYNC_MANIFEST_PATH"] ?? ".noosphere-sync/manifest.json",
     lastRunPath: process.env["OBSIDIAN_SYNC_LAST_RUN_PATH"] ?? ".noosphere-sync/last-run.json",
     timeoutMs: parseEnvInt(process.env["OBSIDIAN_SYNC_TIMEOUT_MS"], 60_000),

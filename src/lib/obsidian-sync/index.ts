@@ -237,14 +237,15 @@ const FM_KEYS = [
   "id", "slug", "title", "topic", "topicPath",
   "confidence", "status", "tags", "excerpt",
   "authorName", "sourceUrl", "sourceType", "lastReviewed",
-  "createdAt", "updatedAt", "noosphere",
+  "createdAt", "updatedAt", "noosphere", "publish",
 ] as const;
 
 function buildFrontmatter(
   article: ArticleForSync,
   topicPath: string[],
   contentHash: string,
-  syncedAt: string
+  syncedAt: string,
+  publish: boolean
 ): string {
   const fm: Record<string, unknown> = {
     id: article.id,
@@ -271,6 +272,7 @@ function buildFrontmatter(
   if (article.sourceUrl) fm.sourceUrl = article.sourceUrl;
   if (article.sourceType) fm.sourceType = article.sourceType;
   if (article.lastReviewed) fm.lastReviewed = article.lastReviewed.toISOString();
+  if (publish) fm.publish = true;
 
   // Build ordered object matching FM_KEYS for stable serialization
   const ordered: Record<string, unknown> = {};
@@ -291,8 +293,8 @@ function buildFrontmatter(
   return `---\n${yamlStr.trim()}\n---\n`;
 }
 
-function renderMarkdown(article: ArticleForSync, topicPath: string[], contentHash: string, syncedAt: string): string {
-  return buildFrontmatter(article, topicPath, contentHash, syncedAt) + "\n" + article.content;
+function renderMarkdown(article: ArticleForSync, topicPath: string[], contentHash: string, syncedAt: string, publish: boolean): string {
+  return buildFrontmatter(article, topicPath, contentHash, syncedAt, publish) + "\n" + article.content;
 }
 
 /**
@@ -301,11 +303,13 @@ function renderMarkdown(article: ArticleForSync, topicPath: string[], contentHas
  * regardless of when the sync runs.
  */
 function computeContentHash(article: ArticleForSync, topicPath: string[]): string {
+  // Use false for publish so the hash is stable regardless of the publish setting
   const stable = buildFrontmatter(
     article,
     topicPath,
     "STABLE_HASH",
-    "1970-01-01T00:00:00.000Z"
+    "1970-01-01T00:00:00.000Z",
+    false
   ) + "\n" + article.content;
   return createHash("sha256").update(stable).digest("hex");
 }
@@ -587,7 +591,7 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
           }
         }
 
-        const markdown = renderMarkdown(article, topicPath, canonicalHash, syncedAt);
+        const markdown = renderMarkdown(article, topicPath, canonicalHash, syncedAt, config.publish);
         writeFileAtomic(safe, markdown);
         managedPaths.push(relativePath);
 
