@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireApiKey } from "@/lib/api/keys";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 
 // GET /api/log — Query the activity log
 //
@@ -15,6 +18,13 @@ import { prisma } from "@/lib/prisma";
 //   { entries: [{id, type, title, details, sourceUrl, authorName, createdAt}], total, limit, offset }
 
 export async function GET(request: NextRequest) {
+  // Auth: API key (any permission) or session
+  const apiAuth = await requireApiKey(request);
+  const session = await getServerSession(authOptions);
+  if (!apiAuth.authorized && !session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { searchParams } = new URL(request.url);
 
   const type = searchParams.get("type");

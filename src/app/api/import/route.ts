@@ -9,6 +9,19 @@ import yaml from "js-yaml";
 // Disable Next.js body parsing for file uploads
 export const dynamic = "force-dynamic";
 
+// ── Validation helpers ───────────────────────────────────────────────────────
+
+const VALID_CONFIDENCE = new Set(["low", "medium", "high"]);
+const VALID_STATUS = new Set(["draft", "reviewed", "published"]);
+
+function validatedConfidence(v: string | undefined): string | null {
+  return v && VALID_CONFIDENCE.has(v) ? v : null;
+}
+
+function validatedStatus(v: string | undefined, fallback: string): string {
+  return v && VALID_STATUS.has(v) ? v : fallback;
+}
+
 interface ImportArticle {
   filename: string;
   title: string;
@@ -103,6 +116,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Failed to read uploaded zip file" }, { status: 400 });
   }
 
+  // Enforce compressed size limit to mitigate zip-bomb DoS
+  const MAX_ZIP_SIZE = 50 * 1024 * 1024; // 50 MB
+  if (zipBuffer.byteLength > MAX_ZIP_SIZE) {
+    return NextResponse.json({ error: "Zip file exceeds 50 MB compressed size limit" }, { status: 400 });
+  }
+
   // Parse zip
   let zip: JSZip;
   try {
@@ -123,8 +142,26 @@ export async function POST(request: NextRequest) {
   const toImport: ImportArticle[] = [];
   const zipFiles = Object.values(zip.files);
 
+  // Track uncompressed size to prevent zip-bomb decompression.
+  // JSZip's central directory exposes uncompressedSize after loadAsync()
+  // without requiring decompression — check before each entry is processed.
+  const MAX_UNCOMPRESSED = 200 * 1024 * 1024; // 200 MB total
+  let totalUncompressed = 0;
+
   for (const entry of zipFiles) {
     if (entry.dir || !entry.name.endsWith(".md") || entry.name.includes("README")) continue;
+
+    // Abort early if cumulative uncompressed size would exceed limit.
+    // _data is internal JSZip metadata populated from the central directory after
+    // loadAsync() — accessed via type assertion since it's not in public types.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const entrySize = (entry as any)._data?.uncompressedSize ?? 0;
+    if (totalUncompressed + entrySize > MAX_UNCOMPRESSED) {
+      return NextResponse.json(
+        { error: "Zip contents exceed 200 MB uncompressed size limit" },
+        { status: 400 }
+      );
+    }
 
     let content: string;
     try {
@@ -133,6 +170,9 @@ export async function POST(request: NextRequest) {
       toImport.push({ filename: entry.name, title: "", slug: "", topicSlug: "", content: "", tags: [], error: "Failed to read file" });
       continue;
     }
+
+    // Update cumulative size after successful decompression
+    totalUncompressed += entrySize;
 
     // Parse frontmatter (handles both \n and \r\n)
     const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
@@ -232,8 +272,8 @@ export async function POST(request: NextRequest) {
               title: article.title,
               content: article.content,
               excerpt: article.excerpt ?? article.content.slice(0, 160).replace(/[#*`_]/g, ""),
-              confidence: article.confidence ?? null,
-              status: article.status ?? existing.status,
+              confidence: validatedConfidence(article.confidence),
+              status: validatedStatus(article.status, existing.status),
               updatedAt: new Date(),
             },
           });
@@ -270,8 +310,8 @@ export async function POST(request: NextRequest) {
           topicId: topic.id,
           authorId: userId,
           authorName: userName,
-          confidence: article.confidence ?? null,
-          status: article.status ?? "published",
+          confidence: validatedConfidence(article.confidence),
+          status: validatedStatus(article.status, "published"),
           sourceUrl: article.sourceUrl ?? null,
           sourceType: article.sourceType ?? "import",
           tags: { create: tagConnections },

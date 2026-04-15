@@ -5,6 +5,10 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { buildTagConnections } from "@/lib/wiki";
 
+// Security limits
+const MAX_ARTICLE_CONTENT_SIZE = 1024 * 1024; // 1 MB per article
+const MAX_AUTHOR_NAME_LENGTH = 100;
+
 // POST /api/ingest — Process a source into multiple wiki articles
 // Auth: API key (WRITE/ADMIN) or session (EDITOR/ADMIN)
 //
@@ -76,7 +80,12 @@ export async function POST(request: NextRequest) {
   }
 
   const { source, articles, tags: globalTags } = body;
-  const authorName = body.authorName || session?.user?.name || "Unknown";
+  // authorName from body is accepted but sanitized to prevent HTML injection / spoofing
+  const rawAuthorName = body.authorName ?? "";
+  const sanitizedAuthorName = rawAuthorName
+    .replace(/<[^>]*>/g, "") // strip any HTML tags
+    .trim()
+    .slice(0, MAX_AUTHOR_NAME_LENGTH) || session?.user?.name || "Unknown";
   const userId = session?.user ? (session.user as { id?: string }).id ?? null : null;
 
   // --- Validate ---
@@ -123,6 +132,16 @@ export async function POST(request: NextRequest) {
   const sourceUrl = source.type === "url" ? source.url : null;
   const createdArticles: { id: string; title: string; slug: string; topic: string }[] = [];
   let totalTagsApplied = 0;
+
+  // Validate content sizes before entering transaction — throws are not caught inside $transaction
+  for (const article of articles) {
+    if (new TextEncoder().encode(article.content).length > MAX_ARTICLE_CONTENT_SIZE) {
+      return NextResponse.json(
+        { error: `Article [${articles.indexOf(article)}] content exceeds ${MAX_ARTICLE_CONTENT_SIZE} bytes` },
+        { status: 400 }
+      );
+    }
+  }
 
   // Use a transaction to keep everything consistent
   const result = await prisma.$transaction(async (tx) => {
@@ -174,7 +193,11 @@ export async function POST(request: NextRequest) {
           content: article.content,
           excerpt,
           authorId: userId,
-          authorName: article.authorName || authorName,
+          // article.authorName is accepted but sanitized — strip HTML, cap length
+          authorName: (article.authorName ?? "")
+            .replace(/<[^>]*>/g, "")
+            .trim()
+            .slice(0, MAX_AUTHOR_NAME_LENGTH) || sanitizedAuthorName,
           topicId: article.topicId,
           sourceUrl: article.sourceUrl || sourceUrl,
           sourceType: source.type,
@@ -216,7 +239,7 @@ export async function POST(request: NextRequest) {
         type: "ingest",
         title: `Ingested "${source.title}" — ${createdArticles.length} articles created`,
         sourceUrl,
-        authorName,
+        authorName: sanitizedAuthorName,
         details: {
           sourceTitle: source.title,
           sourceType: source.type,

@@ -6,6 +6,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateApiKey } from "@/lib/api/keys";
+import { cookies } from "next/headers";
 
 async function requireAdmin() {
   const session = await getServerSession(authOptions);
@@ -42,8 +43,18 @@ export async function createApiKeyAction(formData: FormData) {
     },
   });
 
+  // Flash the raw key via HttpOnly cookie instead of URL query param
+  // so it never appears in server logs, browser history, or Referer headers
+  (await cookies()).set("api_key_flash", raw, {
+    httpOnly: true,
+    secure: true,
+    maxAge: 60,
+    path: "/wiki/admin/keys",
+    sameSite: "lax",
+  });
+
   revalidatePath("/wiki/admin/keys");
-  redirect(`/wiki/admin/keys?created=${encodeURIComponent(raw)}&name=${encodeURIComponent(name)}`);
+  redirect(`/wiki/admin/keys?flash=1&name=${encodeURIComponent(name)}`);
 }
 
 export async function revokeApiKeyAction(formData: FormData) {

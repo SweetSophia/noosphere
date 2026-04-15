@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireApiKey } from "@/lib/api/keys";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 
 // GET /api/graph — Wiki knowledge graph
 //
@@ -18,6 +21,13 @@ import { prisma } from "@/lib/prisma";
 //   }
 
 export async function GET(request: NextRequest) {
+  // Auth: API key (any permission) or session
+  const apiAuth = await requireApiKey(request);
+  const session = await getServerSession(authOptions);
+  if (!apiAuth.authorized && !session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { searchParams } = new URL(request.url);
   const topicSlug = searchParams.get("topic");
   const limit = Math.min(parseInt(searchParams.get("limit") ?? "100", 10), 500);

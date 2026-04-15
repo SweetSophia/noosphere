@@ -70,7 +70,7 @@ export async function GET(request: NextRequest) {
             include: {
               topic: true,
               tags: { include: { tag: true } },
-              author: { select: { id: true, name: true, email: true } },
+              author: { select: { id: true, name: true } },
               relatedTo: {
                 include: {
                   target: { select: { id: true, title: true, slug: true, topic: true } },
@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
           include: {
             topic: true,
             tags: { include: { tag: true } },
-            author: { select: { id: true, name: true, email: true } },
+            author: { select: { id: true, name: true } },
             relatedTo: {
               include: {
                 target: { select: { id: true, title: true, slug: true, topic: true } },

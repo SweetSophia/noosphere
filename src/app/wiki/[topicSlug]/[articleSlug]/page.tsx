@@ -92,16 +92,24 @@ export default async function ArticlePage({ params }: Props) {
               Reviewed {new Date(article.lastReviewed).toLocaleDateString()}
             </span>
           )}
-          {article.sourceUrl && (
-            <a
-              href={article.sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ fontSize: "0.8em" }}
-            >
-              📄 Source
-            </a>
-          )}
+          {article.sourceUrl && (() => {
+            // Validate protocol before rendering to prevent javascript: XSS
+            let safe = false;
+            try {
+              const parsed = new URL(article.sourceUrl);
+              safe = parsed.protocol === "https:" || parsed.protocol === "http:";
+            } catch { /* invalid URL */ }
+            return safe ? (
+              <a
+                href={article.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ fontSize: "0.8em" }}
+              >
+                📄 Source
+              </a>
+            ) : null;
+          })()}
         </div>
 
         {/* Related articles */}

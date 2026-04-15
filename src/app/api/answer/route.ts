@@ -61,7 +61,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { title, content, topicId, excerpt, tags, sourceQuery, confidence, status, authorName } = body;
+  const { title, content, topicId, excerpt, tags, sourceQuery, confidence, status, authorName: rawAuthorName } = body;
+  // Sanitize authorName from body to prevent HTML injection / name spoofing
+  const authorName = (rawAuthorName ?? "")
+    .replace(/<[^>]*>/g, "")
+    .trim()
+    .slice(0, 100) || session?.user?.name || "Unknown";
   const sessionUser = session?.user as ({ id?: string } | null) | undefined;
   const userId = sessionUser?.id ?? null;
 
