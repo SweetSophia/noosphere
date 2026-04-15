@@ -133,6 +133,16 @@ export async function POST(request: NextRequest) {
   const createdArticles: { id: string; title: string; slug: string; topic: string }[] = [];
   let totalTagsApplied = 0;
 
+  // Validate content sizes before entering transaction — throws are not caught inside $transaction
+  for (const article of articles) {
+    if (new TextEncoder().encode(article.content).length > MAX_ARTICLE_CONTENT_SIZE) {
+      return NextResponse.json(
+        { error: `Article [${articles.indexOf(article)}] content exceeds ${MAX_ARTICLE_CONTENT_SIZE} bytes` },
+        { status: 400 }
+      );
+    }
+  }
+
   // Use a transaction to keep everything consistent
   const result = await prisma.$transaction(async (tx) => {
     for (const article of articles) {
@@ -145,14 +155,6 @@ export async function POST(request: NextRequest) {
         // Skip — don't overwrite in ingest. Agent should use PATCH for updates.
         // Log a warning but continue with other articles.
         continue;
-      }
-
-      // Content size guard
-      if (new TextEncoder().encode(article.content).length > MAX_ARTICLE_CONTENT_SIZE) {
-        throw Object.assign(
-          new Error(`Article [${articles.indexOf(article)}] content exceeds ${MAX_ARTICLE_CONTENT_SIZE} bytes`),
-          { status: 400 }
-        );
       }
 
       // Merge article tags + global tags, deduplicate
