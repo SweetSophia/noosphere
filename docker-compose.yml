@@ -18,6 +18,9 @@ services:
     volumes:
       - ./uploads:/app/uploads:rw
       - ./uploads/images:/app/uploads/images:rw
+      # Obsidian Publish vault (absolute path — set in .env or replace below)
+      # On VPS: mount /home/descartes/obsidian-vault as /app/obsidian-vault
+      - /home/descartes/obsidian-vault:/app/obsidian-vault:rw
     depends_on:
       db:
         condition: service_healthy
