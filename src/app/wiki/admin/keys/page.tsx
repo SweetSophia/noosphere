@@ -5,11 +5,12 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { CopyButton } from "@/components/wiki/CopyButton";
 import { createApiKeyAction, revokeApiKeyAction } from "./actions";
+import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
 
 interface Props {
-  searchParams: Promise<{ created?: string; name?: string }>;
+  searchParams: Promise<{ flash?: string; name?: string }>;
 }
 
 export default async function ApiKeysPage({ searchParams }: Props) {
@@ -22,6 +23,13 @@ export default async function ApiKeysPage({ searchParams }: Props) {
   }
 
   const params = await searchParams;
+  const cookieStore = await cookies();
+  const flashKey = cookieStore.get("api_key_flash")?.value ?? null;
+  // Clear the flash cookie now that we've read it
+  if (flashKey) {
+    cookieStore.delete("api_key_flash");
+  }
+
   const keys = await prisma.apiKey.findMany({
     orderBy: [{ revokedAt: "asc" }, { createdAt: "desc" }],
   });
@@ -41,12 +49,12 @@ export default async function ApiKeysPage({ searchParams }: Props) {
         </div>
       </div>
 
-      {params.created && (
+      {params.flash && flashKey && (
         <div className="alert alert-success">
           <strong>New key created for {params.name || "agent"}.</strong>
           <div className="secret-box-row">
-            <div className="secret-box">{params.created}</div>
-            <CopyButton text={params.created} label="Copy key" copiedLabel="Key copied" />
+            <div className="secret-box">{flashKey}</div>
+            <CopyButton text={flashKey} label="Copy key" copiedLabel="Key copied" />
           </div>
           <p className="secret-hint">Save it now. The raw key is only shown once.</p>
         </div>

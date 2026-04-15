@@ -213,8 +213,8 @@ export async function POST(request: NextRequest) {
       const titlePlain = new RegExp(`\\b${a.title}\\b`, "i");
       const slugPlain = new RegExp(`\\b${a.slug}\\b`, "i");
       const isLinked =
-        /\[\[a.slug\]\]/i.test(a.content) ||
-        new RegExp(`/wiki/[^/]*/a.slug`).test(a.content);
+        new RegExp(`\\[\\[${a.slug}\\]\\]`, "i").test(b.content) ||
+        new RegExp(`/wiki/[^/]*/${a.slug}(?![a-z0-9-])`, "i").test(b.content);
 
       if (!isLinked && (titlePlain.test(b.content) || slugPlain.test(b.content))) {
         unlinkedMentions.push(b.title);

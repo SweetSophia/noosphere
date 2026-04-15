@@ -9,6 +9,19 @@ import yaml from "js-yaml";
 // Disable Next.js body parsing for file uploads
 export const dynamic = "force-dynamic";
 
+// ── Validation helpers ───────────────────────────────────────────────────────
+
+const VALID_CONFIDENCE = new Set(["low", "medium", "high"]);
+const VALID_STATUS = new Set(["draft", "reviewed", "published"]);
+
+function validatedConfidence(v: string | undefined): string | null {
+  return v && VALID_CONFIDENCE.has(v) ? v : null;
+}
+
+function validatedStatus(v: string | undefined, fallback: string): string {
+  return v && VALID_STATUS.has(v) ? v : fallback;
+}
+
 interface ImportArticle {
   filename: string;
   title: string;
@@ -101,6 +114,12 @@ export async function POST(request: NextRequest) {
     zipBuffer = await fileEntry.arrayBuffer();
   } catch {
     return NextResponse.json({ error: "Failed to read uploaded zip file" }, { status: 400 });
+  }
+
+  // Enforce compressed size limit to mitigate zip-bomb DoS
+  const MAX_ZIP_SIZE = 50 * 1024 * 1024; // 50 MB
+  if (zipBuffer.byteLength > MAX_ZIP_SIZE) {
+    return NextResponse.json({ error: "Zip file exceeds 50 MB compressed size limit" }, { status: 400 });
   }
 
   // Parse zip
@@ -232,8 +251,8 @@ export async function POST(request: NextRequest) {
               title: article.title,
               content: article.content,
               excerpt: article.excerpt ?? article.content.slice(0, 160).replace(/[#*`_]/g, ""),
-              confidence: article.confidence ?? null,
-              status: article.status ?? existing.status,
+              confidence: validatedConfidence(article.confidence),
+              status: validatedStatus(article.status, existing.status),
               updatedAt: new Date(),
             },
           });
@@ -270,8 +289,8 @@ export async function POST(request: NextRequest) {
           topicId: topic.id,
           authorId: userId,
           authorName: userName,
-          confidence: article.confidence ?? null,
-          status: article.status ?? "published",
+          confidence: validatedConfidence(article.confidence),
+          status: validatedStatus(article.status, "published"),
           sourceUrl: article.sourceUrl ?? null,
           sourceType: article.sourceType ?? "import",
           tags: { create: tagConnections },
