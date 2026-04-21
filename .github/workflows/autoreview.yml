@@ -1,37 +1,40 @@
-name: Roo Code Auto-Review (Z.ai GLM)
+name: Minimax Auto-Review
 
 on:
   pull_request:
     types: [opened, synchronize]
   workflow_dispatch:
-  
+
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   review:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-
-      - name: Roo Code Review
-        uses: rooveterinaryinc/roo-code-action@v1
         with:
-          # Use OpenAI-compatible mode for direct Z.ai integration
-          provider: "openai-compatible"
+          fetch-depth: 0 
+
+      - name: AI PR Reviewer
+        uses: sourcefuse/ai-pr-reviewer@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          openai_api_key: ${{ secrets.MINIMAX_API_KEY }}
           
-          # Official international endpoint for Z.ai
-          base-url: "https://api.z.ai/api/paas/v4"
+          # Official international OpenAI-compatible endpoint for Minimax
+          openai_base_url: "https://api.minimax.io/v1"
           
-          # Ensure you configure this exact secret name in your repository
-          api-key: ${{ secrets.ZAI_API_KEY }}
+          # Verified model string for Minimax's high-speed M2.7
+          openai_light_model: "MiniMax-M2.7-highspeed"
+          openai_heavy_model: "MiniMax-M2.7-highspeed"
           
-          # Specify the model included in the GLM Coding Plan
-          model: "glm-5.1"
-          
-          instructions: |
+          system_message: |
             Act as a Senior Software Engineer.
             Analyze the Pull Request for:
             1. Logic errors and edge cases.
