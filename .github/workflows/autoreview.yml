@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 0
 
       - name: AI PR Reviewer
-        uses: sourcefuse/ai-pr-reviewer@latest
+        uses: sourcefuse/ai-pr-reviewer@main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
