@@ -1,33 +1,161 @@
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
 
-  /* Noosphere wiki theme */
-  --bg-color: #ffffff;
-  --bg-secondary: #f9fafb;
-  --text-color: #111827;
-  --text-muted: #6b7280;
-  --border-color: #e5e7eb;
-  --accent-color: #3b82f6;
+  --font-body: var(--font-noosphere-sans), "Segoe UI", sans-serif;
+  --font-display: var(--font-noosphere-display), "Iowan Old Style", Georgia, serif;
+  --font-mono: var(--font-noosphere-mono), "SFMono-Regular", monospace;
+
+  --background: #f6f2ea;
+  --foreground: #121723;
+  --bg-color: var(--background);
+  --bg-secondary: #ede6db;
+  --surface-color: rgba(255, 250, 241, 0.74);
+  --surface-strong: #fffaf1;
+  --surface-elevated: rgba(255, 252, 247, 0.88);
+  --surface-inset: rgba(235, 226, 214, 0.72);
+
+  --text-color: var(--foreground);
+  --text-muted: #5e6375;
+  --text-faint: #81879b;
+
+  --border-color: rgba(18, 23, 35, 0.12);
+  --border-strong: rgba(18, 23, 35, 0.18);
+
+  --accent-color: #5b63ff;
+  --accent-strong: #3640ff;
+  --accent-soft: rgba(91, 99, 255, 0.12);
+  --accent-glow: rgba(91, 99, 255, 0.26);
+  --accent-ink: #eef0ff;
+  --surface-highlight: rgba(255, 255, 255, 0.14);
+  --ambient-primary: rgba(91, 99, 255, 0.12);
+  --ambient-secondary: rgba(95, 178, 255, 0.08);
+  --ambient-linear: rgba(255, 255, 255, 0.2);
+
+  --success-color: #0f8f67;
+  --warning-color: #bf7a14;
+  --danger-color: #c94761;
+  --info-color: #2865d7;
+
+  --code-surface: #161c2e;
+  --code-border: rgba(255, 255, 255, 0.08);
+
+  --shadow-1: 0 18px 44px rgba(18, 23, 35, 0.08);
+  --shadow-2: 0 28px 80px rgba(18, 23, 35, 0.14);
+
+  --radius-sm: 0.625rem;
+  --radius-md: 0.875rem;
+  --radius-lg: 1.125rem;
+  --radius-xl: 1.5rem;
+  --radius-pill: 999px;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  --content-width: 1200px;
+  --reading-width: 900px;
+
+  --focus-ring: 0 0 0 3px rgba(91, 99, 255, 0.2);
+  --selection-color: rgba(91, 99, 255, 0.2);
+
+  --status-draft-bg: #fef1d2;
+  --status-draft-fg: #8b5a12;
+  --status-reviewed-bg: #e4ecff;
+  --status-reviewed-fg: #244fa6;
+  --status-published-bg: #daf5ec;
+  --status-published-fg: #0f6b4f;
+
+  --confidence-low-bg: #fde4e5;
+  --confidence-low-fg: #95263f;
+  --confidence-medium-bg: #fef1d2;
+  --confidence-medium-fg: #8b5a12;
+  --confidence-high-bg: #daf5ec;
+  --confidence-high-fg: #0f6b4f;
+
+  --alert-error-bg: #fff0f3;
+  --alert-error-border: #f3becb;
+  --alert-error-fg: #942847;
+  --alert-success-bg: #edfbf4;
+  --alert-success-border: #bcead2;
+  --alert-success-fg: #166548;
+
+  --primary: var(--accent-color);
+  --muted: var(--text-muted);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    color-scheme: dark;
 
-    /* Noosphere wiki theme — dark */
-    --bg-color: #0f172a;
-    --bg-secondary: #1e293b;
-    --text-color: #f1f5f9;
-    --text-muted: #94a3b8;
-    --border-color: #334155;
-    --accent-color: #60a5fa;
+    --background: #0b1020;
+    --foreground: #edf2ff;
+    --bg-color: var(--background);
+    --bg-secondary: #151c31;
+    --surface-color: rgba(14, 20, 38, 0.74);
+    --surface-strong: #11182c;
+    --surface-elevated: rgba(17, 24, 44, 0.88);
+    --surface-inset: rgba(21, 28, 49, 0.84);
+
+    --text-color: var(--foreground);
+    --text-muted: #9aa6c3;
+    --text-faint: #73809d;
+
+    --border-color: rgba(195, 206, 255, 0.12);
+    --border-strong: rgba(195, 206, 255, 0.2);
+
+    --accent-color: #8b92ff;
+    --accent-strong: #b4b8ff;
+    --accent-soft: rgba(139, 146, 255, 0.18);
+    --accent-glow: rgba(139, 146, 255, 0.24);
+    --accent-ink: rgba(139, 146, 255, 0.14);
+    --surface-highlight: rgba(255, 255, 255, 0.04);
+    --ambient-primary: rgba(139, 146, 255, 0.16);
+    --ambient-secondary: rgba(80, 127, 255, 0.09);
+    --ambient-linear: rgba(19, 25, 45, 0.2);
+
+    --success-color: #4dd1a4;
+    --warning-color: #f7bc63;
+    --danger-color: #ff7a96;
+    --info-color: #76a8ff;
+
+    --code-surface: #090d18;
+    --code-border: rgba(255, 255, 255, 0.06);
+
+    --shadow-1: 0 20px 48px rgba(0, 0, 0, 0.28);
+    --shadow-2: 0 34px 90px rgba(0, 0, 0, 0.42);
+    --focus-ring: 0 0 0 3px rgba(139, 146, 255, 0.24);
+    --selection-color: rgba(139, 146, 255, 0.24);
+
+    --status-draft-bg: rgba(247, 188, 99, 0.15);
+    --status-draft-fg: #f7bc63;
+    --status-reviewed-bg: rgba(118, 168, 255, 0.15);
+    --status-reviewed-fg: #9ec0ff;
+    --status-published-bg: rgba(77, 209, 164, 0.15);
+    --status-published-fg: #8ce7c5;
+
+    --confidence-low-bg: rgba(255, 122, 150, 0.15);
+    --confidence-low-fg: #ff9cb1;
+    --confidence-medium-bg: rgba(247, 188, 99, 0.15);
+    --confidence-medium-fg: #f7bc63;
+    --confidence-high-bg: rgba(77, 209, 164, 0.15);
+    --confidence-high-fg: #8ce7c5;
+
+    --alert-error-bg: rgba(201, 71, 97, 0.12);
+    --alert-error-border: rgba(255, 122, 150, 0.22);
+    --alert-error-fg: #ff9cb1;
+    --alert-success-bg: rgba(77, 209, 164, 0.12);
+    --alert-success-border: rgba(77, 209, 164, 0.22);
+    --alert-success-fg: #8ce7c5;
   }
 }
 
 html {
   height: 100%;
+  scroll-behavior: smooth;
 }
 
 html,
@@ -41,16 +169,47 @@ body {
   display: flex;
   flex-direction: column;
   color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  background:
+    radial-gradient(circle at top left, var(--ambient-primary), transparent 30%),
+    radial-gradient(circle at top right, var(--ambient-secondary), transparent 26%),
+    linear-gradient(180deg, var(--ambient-linear), transparent 28rem),
+    var(--background);
+  font-family: var(--font-body);
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
-  padding: 0;
   margin: 0;
+  padding: 0;
+}
+
+::selection {
+  background: var(--selection-color);
+}
+
+img,
+svg,
+video,
+canvas {
+  display: block;
+  max-width: 100%;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  color: inherit;
 }
 
 a {
@@ -58,8 +217,22 @@ a {
   text-decoration: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
-  }
+p {
+  color: inherit;
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--font-mono);
+}
+
+::placeholder {
+  color: var(--text-faint);
+}
+
+:where(a, button, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }

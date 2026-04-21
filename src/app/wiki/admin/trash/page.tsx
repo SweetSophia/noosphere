@@ -3,10 +3,18 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
+import { PageHeader } from "@/components/wiki/PageHeader";
+import { EmptyState } from "@/components/wiki/EmptyState";
 import { RestoreArticleForm } from "@/components/wiki/RestoreArticleForm";
 import { restoreArticleAction } from "./actions";
 
 export const dynamic = "force-dynamic";
+
+export const metadata = {
+  title: "Trash",
+  description: "Manage soft-deleted articles. Restore or permanently remove them.",
+};
 
 export default async function TrashPage() {
   const session = await getServerSession(authOptions);
@@ -23,27 +31,31 @@ export default async function TrashPage() {
   });
 
   return (
-    <div className="wiki-content" style={{ maxWidth: 1000 }}>
-      <nav className="breadcrumb">
-        <Link href="/wiki">Noosphere</Link>
-        <span className="breadcrumb-sep">/</span>
-        <span>Trash</span>
-      </nav>
+    <div className="wiki-content">
+      <Breadcrumbs
+        items={[
+          { label: "Noosphere", href: "/wiki" },
+          { label: "Trash" },
+        ]}
+      />
 
-      <div className="page-toolbar">
-        <div>
-          <h1 style={{ margin: 0 }}>Trash</h1>
-          <p className="page-subtitle">Soft-deleted articles can be restored from here.</p>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Admin Console"
+        title="Trash"
+        description="Soft-deleted articles can be restored from here. Articles remain in trash until explicitly restored."
+        meta={
+          <div className="page-meta-pills">
+            <span className="page-meta-pill">
+              <strong>{articles.length}</strong>
+              <span>deleted article{articles.length !== 1 ? "s" : ""}</span>
+            </span>
+          </div>
+        }
+      />
 
       <section className="admin-card">
-        <h2>Deleted Articles</h2>
         {articles.length === 0 ? (
-          <div className="empty-state">
-            <h3>Trash is empty</h3>
-            <p>No soft-deleted articles are waiting for restore.</p>
-          </div>
+          <EmptyState title="Trash is empty" description="No soft-deleted articles are waiting for restore." />
         ) : (
           <div className="table-wrap">
             <table className="admin-table">

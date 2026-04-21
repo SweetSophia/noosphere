@@ -1,9 +1,10 @@
 import Link from "next/link";
+import { EmptyState } from "@/components/wiki/EmptyState";
+import { PageHeader } from "@/components/wiki/PageHeader";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
-// Types
 interface TopicNode {
   id: string;
   name: string;
@@ -16,42 +17,59 @@ interface ArticleCountMap {
   [topicId: string]: number;
 }
 
-// Recursive component: renders a topic card and all its nested children
-function TopicNode({ node, countMap, depth = 0 }: { node: TopicNode; countMap: ArticleCountMap; depth?: number }) {
-  const hasChildren = node.children.length > 0;
-  const count = countMap[node.id] ?? 0;
+interface TopicRenderNode {
+  node: TopicNode;
+  articleCount: number;
+  descendantCount: number;
+  children: TopicRenderNode[];
+}
+
+function buildTopicRenderNode(node: TopicNode, countMap: ArticleCountMap): TopicRenderNode {
+  const children = node.children.map((child) => buildTopicRenderNode(child, countMap));
+
+  return {
+    node,
+    articleCount:
+      (countMap[node.id] ?? 0) + children.reduce((total, child) => total + child.articleCount, 0),
+    descendantCount:
+      node.children.length + children.reduce((total, child) => total + child.descendantCount, 0),
+    children,
+  };
+}
+
+function TopicTreeNode({ tree }: { tree: TopicRenderNode }) {
+  const { node, articleCount, descendantCount, children } = tree;
+  const hasChildren = children.length > 0;
 
   return (
-    <div
-      className="topic-card"
-      style={{
-        marginLeft: depth > 0 ? "1.25rem" : 0,
-        borderLeft: depth > 0 ? "2px solid var(--border-color, #e5e7eb)" : undefined,
-        paddingLeft: depth > 0 ? "1rem" : 0,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: depth === 0 ? "1.25rem" : "1rem" }}>
-            <Link href={`/wiki/${node.slug}`} style={{ color: "inherit", textDecoration: "none" }}>
-              {node.name}
-            </Link>
+    <div className="topic-tree-node">
+      <div className="topic-card topic-tree-card">
+        <div className="topic-tree-copy">
+          <p className="topic-tree-kind">{hasChildren ? "Topic cluster" : "Leaf topic"}</p>
+          <h2 className="topic-tree-title">
+            <Link href={`/wiki/${node.slug}`}>{node.name}</Link>
           </h2>
-          {node.description && (
-            <p style={{ margin: "0.25rem 0 0", color: "var(--text-muted, #6b7280)", fontSize: "0.875rem" }}>
-              {node.description}
-            </p>
-          )}
+          <p className="topic-tree-description">
+            {node.description ?? "A focused pocket of the wiki ready for articles, references, and linked subtopics."}
+          </p>
         </div>
-        <span style={{ fontSize: "0.75rem", color: "var(--text-muted, #6b7280)", flexShrink: 0 }}>
-          {count} article{count !== 1 ? "s" : ""}
-        </span>
+
+        <div className="topic-tree-metrics" aria-label={`${node.name} metrics`}>
+          <div className="topic-tree-stat">
+            <strong>{articleCount}</strong>
+            <span>article{articleCount !== 1 ? "s" : ""}</span>
+          </div>
+          <div className="topic-tree-stat">
+            <strong>{descendantCount}</strong>
+            <span>subtopic{descendantCount !== 1 ? "s" : ""}</span>
+          </div>
+        </div>
       </div>
 
       {hasChildren && (
-        <div className="sub-topics" style={{ marginTop: "0.5rem" }}>
-          {node.children.map((child) => (
-            <TopicNode key={child.id} node={child} countMap={countMap} depth={depth + 1} />
+        <div className="topic-tree-children">
+          {children.map((child) => (
+            <TopicTreeNode key={child.node.id} tree={child} />
           ))}
         </div>
       )}
@@ -60,26 +78,27 @@ function TopicNode({ node, countMap, depth = 0 }: { node: TopicNode; countMap: A
 }
 
 export default async function WikiHomePage() {
-  // Fetch ALL topics (no depth limit in query)
-  const allTopics = await prisma.topic.findMany({
-    include: {
-      _count: { select: { articles: true } },
-    },
-    orderBy: { name: "asc" },
-  });
+  const [allTopics, topicCounts, recentArticles] = await Promise.all([
+    prisma.topic.findMany({ orderBy: { name: "asc" } }),
+    prisma.article.groupBy({
+      by: ["topicId"],
+      where: { deletedAt: null },
+      _count: { topicId: true },
+    }),
+    prisma.article.findMany({
+      where: { deletedAt: null },
+      include: {
+        topic: true,
+        tags: { include: { tag: true } },
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 8,
+    }),
+  ]);
 
-  // Get article counts per topic (excluding soft-deleted)
-  const topicCounts = await prisma.article.groupBy({
-    by: ["topicId"],
-    where: { deletedAt: null },
-    _count: { topicId: true },
-  });
-  const countMap: ArticleCountMap = Object.fromEntries(
-    topicCounts.map((t) => [t.topicId, t._count.topicId])
-  );
+  const countMap: ArticleCountMap = Object.fromEntries(topicCounts.map((t) => [t.topicId, t._count.topicId]));
 
-  // Build tree in JS — unlimited nesting depth
-  const topicMap = new Map<string, TopicNode & { _count: { articles: number } }>();
+  const topicMap = new Map<string, TopicNode & { parentId: string | null }>();
   const roots: TopicNode[] = [];
 
   for (const topic of allTopics) {
@@ -95,60 +114,117 @@ export default async function WikiHomePage() {
     }
   }
 
-  const recentArticles = await prisma.article.findMany({
-    where: { deletedAt: null },
-    include: {
-      topic: true,
-      tags: { include: { tag: true } },
-    },
-    orderBy: { updatedAt: "desc" },
-    take: 8,
-  });
+  const totalArticles = Object.values(countMap).reduce((total, count) => total + count, 0);
+  const [featuredArticle, ...secondaryArticles] = recentArticles;
+  const topicTree = roots.map((topic) => buildTopicRenderNode(topic, countMap));
 
   return (
-    <div className="wiki-content" style={{ maxWidth: 800 }}>
-      <h1>Noosphere</h1>
-      <p style={{ color: "var(--text-muted, #6b7280)", marginBottom: "2rem" }}>
-        Agent-authored knowledge base — written by agents, readable by all.
-      </p>
+    <div className="wiki-content wiki-home">
+      <PageHeader
+        eyebrow="Knowledge atlas"
+        title="Noosphere"
+        description="Agent-authored documentation with a calmer information hierarchy: browse live updates, scan topic clusters, and dive straight into the wiki's deepest branches."
+        meta={
+          <div className="page-meta-pills">
+            <span className="page-meta-pill">
+              <strong>{totalArticles}</strong>
+              <span>published articles</span>
+            </span>
+            <span className="page-meta-pill">
+              <strong>{allTopics.length}</strong>
+              <span>topics mapped</span>
+            </span>
+            <span className="page-meta-pill">
+              <strong>{recentArticles.length}</strong>
+              <span>recent updates surfaced</span>
+            </span>
+          </div>
+        }
+      />
 
       {recentArticles.length > 0 && (
-        <section style={{ marginBottom: "2.5rem" }}>
-          <h2>Recently Updated</h2>
-          <div>
-            {recentArticles.map((article) => (
+        <section className="browse-section">
+          <div className="section-header">
+            <div className="section-header-copy">
+              <p className="page-eyebrow">Fresh signal</p>
+              <h2 className="section-title">Recently updated</h2>
+              <p className="section-subtitle">The newest edits, additions, and refinements across the wiki.</p>
+            </div>
+            <div className="section-actions">
+              <Link href="/wiki/search" className="btn btn-secondary btn-sm">
+                Search everything
+              </Link>
+            </div>
+          </div>
+
+          <div className="recent-updates-shell">
+            {featuredArticle ? (
               <Link
-                key={article.id}
-                href={`/wiki/${article.topic.slug}/${article.slug}`}
-                className="article-card"
+                href={`/wiki/${featuredArticle.topic.slug}/${featuredArticle.slug}`}
+                className="article-card article-card-featured"
               >
-                <h3>{article.title}</h3>
-                {article.excerpt && <p>{article.excerpt}</p>}
-                <div className="article-meta">
-                  {article.topic.name}
-                  {article.tags.length > 0 && (
-                    <> · {article.tags.map((t) => t.tag.name).join(", ")}</>
-                  )}
-                  {" · "}
-                  {new Date(article.updatedAt).toLocaleDateString()}
+                <div className="article-card-header-row">
+                  <span className="article-kicker">Featured update</span>
+                  <span className="article-date">{new Date(featuredArticle.updatedAt).toLocaleDateString()}</span>
+                </div>
+                <h3>{featuredArticle.title}</h3>
+                <p>
+                  {featuredArticle.excerpt ??
+                    "Fresh edits landed here recently. Open the article for the latest revision and linked context."}
+                </p>
+                <div className="article-meta article-meta-rich">
+                  <span>{featuredArticle.topic.name}</span>
+                  {featuredArticle.tags.length > 0 ? (
+                    <span>{featuredArticle.tags.slice(0, 3).map((tag) => tag.tag.name).join(" · ")}</span>
+                  ) : null}
                 </div>
               </Link>
-            ))}
+            ) : null}
+
+            <div className="recent-updates-list">
+              {secondaryArticles.map((article) => (
+                <Link
+                  key={article.id}
+                  href={`/wiki/${article.topic.slug}/${article.slug}`}
+                  className="article-card article-card-compact"
+                >
+                  <div className="article-card-header-row">
+                    <span className="article-kicker">{article.topic.name}</span>
+                    <span className="article-date">{new Date(article.updatedAt).toLocaleDateString()}</span>
+                  </div>
+                  <h3>{article.title}</h3>
+                  <p>
+                    {article.excerpt ?? "Open the latest revision to read the current summary and linked references."}
+                  </p>
+                  {article.tags.length > 0 ? (
+                    <div className="article-tag-row article-tag-row-muted">
+                      {article.tags.slice(0, 3).map((tag) => (
+                        <span key={tag.tag.id} className="tag-badge">
+                          {tag.tag.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </Link>
+              ))}
+            </div>
           </div>
         </section>
       )}
 
-      <section>
-        <h2>Topics</h2>
-        {roots.length === 0 ? (
-          <div className="empty-state">
-            <h3>No topics yet</h3>
-            <p>Topics will appear here once created.</p>
+      <section className="browse-section">
+        <div className="section-header">
+          <div className="section-header-copy">
+            <p className="page-eyebrow">Topic map</p>
+            <h2 className="section-title">Browse the knowledge tree</h2>
+            <p className="section-subtitle">Follow parent-to-child branches to see how subjects cluster and where the richest pockets of documentation live.</p>
           </div>
+        </div>
+
+        {roots.length === 0 ? (
+          <EmptyState title="No topics yet" description="Topics will appear here once they are created." />
         ) : (
-          roots.map((topic) => (
-            <TopicNode key={topic.id} node={topic} countMap={countMap} depth={0} />
-          ))
+          <div className="topic-tree">{topicTree.map((topic) => <TopicTreeNode key={topic.node.id} tree={topic} />)}</div>
         )}
       </section>
     </div>

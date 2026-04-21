@@ -4,6 +4,9 @@ import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
+import { PageHeader } from "@/components/wiki/PageHeader";
+import { EmptyState } from "@/components/wiki/EmptyState";
 import { DeleteArticleForm } from "@/components/wiki/DeleteArticleForm";
 import { ImageUploadPanel } from "@/components/wiki/ImageUploadPanel";
 import { MarkdownPreviewTabs } from "@/components/wiki/MarkdownPreviewTabs";
@@ -17,7 +20,6 @@ interface Props {
 export default async function EditArticlePage({ params }: Props) {
   const { topicSlug, articleSlug } = await params;
 
-  // Page-level auth check
   const session = await getServerSession(authOptions);
   if (!session?.user) {
     redirect("/wiki/login");
@@ -40,29 +42,45 @@ export default async function EditArticlePage({ params }: Props) {
   if (!article) notFound();
 
   return (
-    <div className="wiki-content" style={{ maxWidth: 900 }}>
-      <nav className="breadcrumb">
-        <Link href="/wiki">Noosphere</Link>
-        <span className="breadcrumb-sep">/</span>
-        <Link href={`/wiki/${topic.slug}`}>{topic.name}</Link>
-        <span className="breadcrumb-sep">/</span>
-        <Link href={`/wiki/${topic.slug}/${article.slug}`}>{article.title}</Link>
-        <span className="breadcrumb-sep">/</span>
-        <span>Edit</span>
-      </nav>
+    <div className="wiki-content">
+      <Breadcrumbs
+        items={[
+          { label: "Noosphere", href: "/wiki" },
+          { label: topic.name, href: `/wiki/${topic.slug}` },
+          { label: article.title, href: `/wiki/${topic.slug}/${article.slug}` },
+          { label: "Edit" },
+        ]}
+      />
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem", gap: "1rem", flexWrap: "wrap" }}>
-        <h1 style={{ margin: 0 }}>Edit Article</h1>
-        <div className="page-actions">
-          <DeleteArticleForm action={deleteArticle.bind(null, topicSlug, articleSlug)} articleId={article.id} />
-          <Link
-            href={`/wiki/${topic.slug}/${article.slug}`}
-            className="btn btn-secondary btn-sm"
-          >
-            Cancel
-          </Link>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Authoring"
+        title="Edit Article"
+        description="Update the title, excerpt, tags, and markdown body. Content changes will be tracked as a new revision."
+        actions={
+          <div className="page-actions">
+            <DeleteArticleForm action={deleteArticle.bind(null, topicSlug, articleSlug)} articleId={article.id} />
+            <Link href={`/wiki/${topic.slug}/${article.slug}`} className="btn btn-secondary btn-sm">
+              Cancel
+            </Link>
+          </div>
+        }
+        meta={
+          <div className="page-meta-pills">
+            <span className="page-meta-pill">
+              <strong>{article.title}</strong>
+              <span>current title</span>
+            </span>
+            <span className="page-meta-pill">
+              <strong>{article.tags.length}</strong>
+              <span>tag{article.tags.length !== 1 ? "s" : ""}</span>
+            </span>
+            <span className="page-meta-pill">
+              <strong>{new Date(article.updatedAt).toLocaleDateString()}</strong>
+              <span>last updated</span>
+            </span>
+          </div>
+        }
+      />
 
       <ImageUploadPanel targetTextareaId="content" />
 
@@ -121,14 +139,11 @@ export default async function EditArticlePage({ params }: Props) {
           <MarkdownPreviewTabs targetTextareaId="content" />
         </div>
 
-        <div style={{ display: "flex", gap: "0.75rem" }}>
+        <div className="form-actions-row">
           <button type="submit" className="btn btn-primary">
             Save Changes
           </button>
-          <Link
-            href={`/wiki/${topic.slug}/${article.slug}`}
-            className="btn btn-secondary"
-          >
+          <Link href={`/wiki/${topic.slug}/${article.slug}`} className="btn btn-secondary">
             Cancel
           </Link>
         </div>

@@ -3,11 +3,19 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
+import { PageHeader } from "@/components/wiki/PageHeader";
+import { EmptyState } from "@/components/wiki/EmptyState";
 import { CopyButton } from "@/components/wiki/CopyButton";
 import { createApiKeyAction, revokeApiKeyAction } from "./actions";
 import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
+
+export const metadata = {
+  title: "API Keys",
+  description: "Create and revoke agent keys for Noosphere automation.",
+};
 
 interface Props {
   searchParams: Promise<{ flash?: string; name?: string }>;
@@ -25,28 +33,40 @@ export default async function ApiKeysPage({ searchParams }: Props) {
   const params = await searchParams;
   const cookieStore = await cookies();
   const flashKey = cookieStore.get("api_key_flash")?.value ?? null;
-  // Note: cookie deletion in Server Components is not supported in Next.js 15+.
-  // The cookie expires naturally after maxAge=60 (set in createApiKeyAction).
-  // The "only shown once" guarantee relies on the short maxAge, not explicit deletion.
 
   const keys = await prisma.apiKey.findMany({
     orderBy: [{ revokedAt: "asc" }, { createdAt: "desc" }],
   });
 
-  return (
-    <div className="wiki-content" style={{ maxWidth: 1000 }}>
-      <nav className="breadcrumb">
-        <Link href="/wiki">Noosphere</Link>
-        <span className="breadcrumb-sep">/</span>
-        <span>API Keys</span>
-      </nav>
+  const activeKeys = keys.filter((k) => !k.revokedAt);
+  const revokedKeys = keys.filter((k) => k.revokedAt);
 
-      <div className="page-toolbar">
-        <div>
-          <h1 style={{ margin: 0 }}>API Keys</h1>
-          <p className="page-subtitle">Create and revoke agent keys for Noosphere automation.</p>
-        </div>
-      </div>
+  return (
+    <div className="wiki-content">
+      <Breadcrumbs
+        items={[
+          { label: "Noosphere", href: "/wiki" },
+          { label: "API Keys" },
+        ]}
+      />
+
+      <PageHeader
+        eyebrow="Admin Console"
+        title="API Keys"
+        description="Create and revoke agent keys for Noosphere automation. Keys are stored as SHA-256 hashes and can only be shown once at creation time."
+        meta={
+          <div className="page-meta-pills">
+            <span className="page-meta-pill">
+              <strong>{activeKeys.length}</strong>
+              <span>active key{activeKeys.length !== 1 ? "s" : ""}</span>
+            </span>
+            <span className="page-meta-pill">
+              <strong>{revokedKeys.length}</strong>
+              <span>revoked</span>
+            </span>
+          </div>
+        }
+      />
 
       {params.flash && flashKey && (
         <div className="alert alert-success">
@@ -60,7 +80,12 @@ export default async function ApiKeysPage({ searchParams }: Props) {
       )}
 
       <section className="admin-card">
-        <h2>Create API Key</h2>
+        <div className="section-header">
+          <div className="section-header-copy">
+            <p className="page-eyebrow">Provisioning</p>
+            <h2 className="section-title">Create API Key</h2>
+          </div>
+        </div>
         <form action={createApiKeyAction} className="admin-form-grid">
           <div className="form-group">
             <label className="form-label" htmlFor="name">Name</label>
@@ -81,12 +106,14 @@ export default async function ApiKeysPage({ searchParams }: Props) {
       </section>
 
       <section className="admin-card">
-        <h2>Existing Keys</h2>
-        {keys.length === 0 ? (
-          <div className="empty-state">
-            <h3>No API keys yet</h3>
-            <p>Create one above for agents or external automation.</p>
+        <div className="section-header">
+          <div className="section-header-copy">
+            <p className="page-eyebrow">Registry</p>
+            <h2 className="section-title">Existing Keys</h2>
           </div>
+        </div>
+        {keys.length === 0 ? (
+          <EmptyState title="No API keys yet" description="Create one above for agents or external automation." />
         ) : (
           <div className="table-wrap">
             <table className="admin-table">

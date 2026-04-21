@@ -4,6 +4,8 @@ import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
+import { PageHeader } from "@/components/wiki/PageHeader";
 import { ImageUploadPanel } from "@/components/wiki/ImageUploadPanel";
 import { MarkdownPreviewTabs } from "@/components/wiki/MarkdownPreviewTabs";
 import { MarkdownToolbar } from "@/components/wiki/MarkdownToolbar";
@@ -16,7 +18,6 @@ interface Props {
 export default async function NewArticlePage({ params }: Props) {
   const { topicSlug } = await params;
 
-  // Page-level auth check
   const session = await getServerSession(authOptions);
   if (!session?.user) {
     redirect("/wiki/login");
@@ -30,21 +31,25 @@ export default async function NewArticlePage({ params }: Props) {
   if (!topic) notFound();
 
   return (
-    <div className="wiki-content" style={{ maxWidth: 900 }}>
-      <nav className="breadcrumb">
-        <Link href="/wiki">Noosphere</Link>
-        <span className="breadcrumb-sep">/</span>
-        <Link href={`/wiki/${topic.slug}`}>{topic.name}</Link>
-        <span className="breadcrumb-sep">/</span>
-        <span>New Article</span>
-      </nav>
+    <div className="wiki-content">
+      <Breadcrumbs
+        items={[
+          { label: "Noosphere", href: "/wiki" },
+          { label: topic.name, href: `/wiki/${topic.slug}` },
+          { label: "New Article" },
+        ]}
+      />
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
-        <h1 style={{ margin: 0 }}>New Article</h1>
-        <Link href={`/wiki/${topic.slug}`} className="btn btn-secondary btn-sm">
-          Cancel
-        </Link>
-      </div>
+      <PageHeader
+        eyebrow="Authoring"
+        title="New Article"
+        description="Write a new article for this topic using GitHub-flavored Markdown with code highlighting, image embeds, and live preview."
+        actions={
+          <Link href={`/wiki/${topic.slug}`} className="btn btn-secondary btn-sm">
+            Cancel
+          </Link>
+        }
+      />
 
       <ImageUploadPanel targetTextareaId="content" />
 
@@ -100,7 +105,7 @@ export default async function NewArticlePage({ params }: Props) {
           <MarkdownPreviewTabs targetTextareaId="content" />
         </div>
 
-        <div style={{ display: "flex", gap: "0.75rem" }}>
+        <div className="form-actions-row">
           <button type="submit" className="btn btn-primary">
             Create Article
           </button>

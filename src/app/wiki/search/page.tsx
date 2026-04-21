@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { searchArticleIds } from "@/lib/wiki";
+import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
+import { PageHeader } from "@/components/wiki/PageHeader";
+import { EmptyState } from "@/components/wiki/EmptyState";
 
 export const dynamic = "force-dynamic";
 
@@ -69,20 +72,22 @@ export default async function SearchPage({ searchParams }: Props) {
     prisma.tag.findMany({ orderBy: { name: "asc" }, take: 50 }),
   ]);
 
-  return (
-    <div className="wiki-content" style={{ maxWidth: 900 }}>
-      <nav className="breadcrumb">
-        <Link href="/wiki">Noosphere</Link>
-        <span className="breadcrumb-sep">/</span>
-        <span>Search</span>
-      </nav>
+  const hasQuery = q || topic || tag;
 
-      <div className="page-toolbar">
-        <div>
-          <h1 style={{ margin: 0 }}>Search</h1>
-          <p className="page-subtitle">Find articles by text, topic, or tag.</p>
-        </div>
-      </div>
+  return (
+    <div className="wiki-content">
+      <Breadcrumbs
+        items={[
+          { label: "Noosphere", href: "/wiki" },
+          { label: "Search" },
+        ]}
+      />
+
+      <PageHeader
+        eyebrow="Discovery"
+        title="Search"
+        description="Find articles by text, topic, or tag across the entire wiki."
+      />
 
       <form action="/wiki/search" method="get" className="search-panel">
         <div className="search-grid">
@@ -131,48 +136,59 @@ export default async function SearchPage({ searchParams }: Props) {
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: "0.75rem" }}>
+        <div className="form-actions-row">
           <button type="submit" className="btn btn-primary">Search</button>
           <Link href="/wiki/search" className="btn btn-secondary">Reset</Link>
         </div>
       </form>
 
-      {!q && !topic && !tag ? (
-        <div className="empty-state">
-          <h3>Start a search</h3>
-          <p>Enter a query, pick a topic, or filter by tag.</p>
-        </div>
+      {!hasQuery ? (
+        <EmptyState
+          title="Start a search"
+          description="Enter a query, pick a topic, or filter by tag to find articles across the wiki."
+        />
       ) : results.length === 0 ? (
-        <div className="empty-state">
-          <h3>No matching articles</h3>
-          <p>Try a broader query or remove one of the filters.</p>
-        </div>
+        <EmptyState
+          title="No matching articles"
+          description="Try a broader query or remove one of the filters."
+        />
       ) : (
-        <section>
-          <h2>
-            Results
-            <span className="result-count">({results.length})</span>
-          </h2>
-          {results.map((article) => (
-            <Link
-              key={article.id}
-              href={`/wiki/${article.topic.slug}/${article.slug}`}
-              className="article-card"
-            >
-              <h3>{article.title}</h3>
-              {article.excerpt && <p>{article.excerpt}</p>}
-              <div className="article-meta">
-                {article.topic.name}
-                {article.tags.length > 0 && (
-                  <> · {article.tags.map((entry) => entry.tag.name).join(", ")}</>
-                )}
-                {" · "}
-                {article.author?.name ?? article.authorName ?? "Unknown author"}
-                {" · Updated "}
-                {new Date(article.updatedAt).toLocaleDateString()}
-              </div>
-            </Link>
-          ))}
+        <section className="browse-section browse-section-tight">
+          <div className="section-header">
+            <div className="section-header-copy">
+              <h2 className="section-title">Results</h2>
+              <p className="section-subtitle">
+                {results.length} article{results.length !== 1 ? "s" : ""} found
+                {q && ` for "${q}"`}
+              </p>
+            </div>
+          </div>
+
+          <div className="article-list">
+            {results.map((article) => (
+              <Link
+                key={article.id}
+                href={`/wiki/${article.topic.slug}/${article.slug}`}
+                className="article-card article-card-rich"
+              >
+                <div className="article-card-header-row">
+                  <span className="article-kicker">{article.topic.name}</span>
+                  <span className="article-date">{new Date(article.updatedAt).toLocaleDateString()}</span>
+                </div>
+                <h3>{article.title}</h3>
+                <p>{article.excerpt ?? "Open the article to read the latest revision and linked references."}</p>
+                {article.tags.length > 0 ? (
+                  <div className="article-tag-row article-tag-row-muted">
+                    {article.tags.slice(0, 4).map((entry) => (
+                      <span key={entry.tag.id} className="tag-badge">
+                        {entry.tag.name}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </Link>
+            ))}
+          </div>
         </section>
       )}
     </div>
