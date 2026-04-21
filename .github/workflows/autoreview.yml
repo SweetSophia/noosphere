@@ -1,13 +1,19 @@
-name: Minimax Auto-Review
-
-on:
-  pull_request:
-    types: [opened, synchronize]
-  workflow_dispatch:
+name: AI PR Reviewer
 
 permissions:
   contents: read
   pull-requests: write
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  pull_request_review_comment:
+    types: [created]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.repository }}-${{ github.event.number || github.head_ref || github.sha }}-${{ github.workflow }}-${{ github.event_name == 'pull_request_review_comment' && 'pr_comment' || 'pr' }}
+  cancel-in-progress: ${{ github.event_name != 'pull_request_review_comment' }}
 
 jobs:
   review:
@@ -16,24 +22,18 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 
+          fetch-depth: 0
 
       - name: AI PR Reviewer
         uses: sourcefuse/ai-pr-reviewer@latest
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          OPENAI_API_BASE_URL: "https://api.minimax.io/v1"
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          openai_api_key: ${{ secrets.MINIMAX_API_KEY }}
-          
-          # Official international OpenAI-compatible endpoint for Minimax
-          openai_base_url: "https://api.minimax.io/v1"
-          
-          # Verified model string for Minimax's high-speed M2.7
-          openai_light_model: "MiniMax-M2.7-highspeed"
-          openai_heavy_model: "MiniMax-M2.7-highspeed"
-          
+          openai_light_model: "MiniMax-M2.7"
+          openai_heavy_model: "MiniMax-M2.7"
           system_message: |
             Act as a Senior Software Engineer.
             Analyze the Pull Request for:
