@@ -31,8 +31,8 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
           OPENAI_API_BASE_URL: "https://api.minimax.io/v1"
         with:
-          openai_light_model: "MiniMax-M2.7"
-          openai_heavy_model: "MiniMax-M2.7"
+          openai_light_model: "MiniMax-M2.7-highspeed"
+          openai_heavy_model: "MiniMax-M2.7-highspeed"
           system_message: |
             Act as a Senior Software Engineer.
             Analyze the Pull Request for:
