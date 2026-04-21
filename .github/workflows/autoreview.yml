@@ -3,7 +3,8 @@ name: Roo Code Auto-Review (Z.ai GLM)
 on:
   pull_request:
     types: [opened, synchronize]
-
+  workflow_dispatch:
+  
 jobs:
   review:
     runs-on: ubuntu-latest
