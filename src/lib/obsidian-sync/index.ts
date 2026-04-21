@@ -629,12 +629,18 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
       for (const [articleId, entry] of Object.entries(manifest.articles)) {
         if (!deletedIds.has(articleId)) continue;
 
-        const absPath = join(vaultPath, entry.path);
-        if (existsSync(absPath)) {
+        const safeAbsPath = safePath(vaultPath, entry.path);
+        if (!safeAbsPath) {
+          warnings.push(`Path traversal rejected during deletion: ${entry.path}`);
+          stats.skipped++;
+          delete manifest.articles[articleId];
+          continue;
+        }
+        if (existsSync(safeAbsPath)) {
           if (config.trashDeletions) {
-            trashFile(vaultPath, absPath);
+            trashFile(vaultPath, safeAbsPath);
           } else {
-            unlinkSync(absPath);
+            unlinkSync(safeAbsPath);
           }
           stats.deleted++;
           warnings.push(`Removed soft-deleted mirror: ${entry.path}`);
