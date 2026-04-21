@@ -31,7 +31,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
           OPENAI_API_BASE_URL: "https://api.minimax.io/v1"
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
           openai_light_model: "MiniMax-M2.7"
           openai_heavy_model: "MiniMax-M2.7"
           system_message: |
