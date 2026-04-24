@@ -1,4 +1,14 @@
 export type {
+  HindsightMemoryType,
+  HindsightProviderSettings,
+  HindsightRecallBudget,
+  HindsightRecallOptionsMetadata,
+  HindsightRecallResponse,
+  HindsightRecallResult,
+  HindsightTagsMatch,
+} from "./hindsight";
+
+export type {
   MemoryProvider,
   MemoryProviderCapabilities,
   MemoryProviderConfig,
@@ -17,6 +27,8 @@ export type {
   MemoryScore,
   MemorySourceType,
 } from "./types";
+
+export { createHindsightProvider, HindsightProvider } from "./hindsight";
 
 export {
   DEFAULT_MEMORY_PROVIDER_CAPABILITIES,
