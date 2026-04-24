@@ -13,8 +13,9 @@
  */
 
 import { createHash } from "crypto";
-import { writeFileSync, unlinkSync, mkdirSync, rmdirSync, readFileSync, existsSync, renameSync } from "fs";
-import { join } from "path";
+import { writeFileSync, unlinkSync, mkdirSync, rmdirSync, readFileSync, existsSync, renameSync, readdirSync } from "fs";
+import { join, resolve } from "path";
+import * as yaml from "js-yaml";
 import { spawn } from "child_process";
 
 // ─── Test helpers ────────────────────────────────────────────────────────────
@@ -166,7 +167,6 @@ function buildFrontmatter(
   ];
 
   // Use yaml.dump for proper multi-line nested object serialization
-  const yaml = require("js-yaml");
   const yamlStr = yaml.dump(fm, {
     indent: 2,
     lineWidth: -1,
@@ -195,7 +195,6 @@ function renderMarkdown(article: ArticleForSync, topicPath: string[], contentHas
 }
 
 function safePath(vaultPath: string, relativePath: string): string | null {
-  const { resolve } = require("path") as typeof import("path");
   const resolved = resolve(vaultPath, relativePath);
   if (!resolved.startsWith(vaultPath)) return null;
   return resolved;
@@ -381,7 +380,6 @@ test("valid YAML output (parseable)", () => {
   const fm = buildFrontmatter(article, topicPath, "abc123", "2026-04-15T14:35:00.000Z");
 
   // Parse YAML by extracting content between first and second ---
-  const yaml = require("js-yaml");
   const firstDash = fm.indexOf("---");
   const secondDash = fm.indexOf("---", firstDash + 3);
   const fmBody = fm.slice(firstDash + 3, secondDash).trim();
