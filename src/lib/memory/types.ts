@@ -61,10 +61,7 @@ export interface MemoryResult {
   metadata?: MemoryProviderMetadata;
 }
 
-export interface MemoryResultInput
-  extends Omit<MemoryResult, "tokenEstimate"> {
-  tokenEstimate?: number;
-}
+export type MemoryResultInput = MemoryResult;
 
 export const DEFAULT_MEMORY_CHARS_PER_TOKEN = 4;
 
@@ -84,7 +81,22 @@ export function estimateMemoryTokens(
     return 0;
   }
 
-  return Math.ceil(text.length / charsPerToken);
+  const safeCharsPerToken =
+    Number.isFinite(charsPerToken) && charsPerToken > 0
+      ? charsPerToken
+      : DEFAULT_MEMORY_CHARS_PER_TOKEN;
+
+  return Math.ceil(text.length / safeCharsPerToken);
+}
+
+export function normalizeMemoryTokenEstimate(
+  tokenEstimate: number | undefined,
+): number | undefined {
+  if (tokenEstimate === undefined || !Number.isFinite(tokenEstimate)) {
+    return undefined;
+  }
+
+  return Math.max(0, Math.ceil(tokenEstimate));
 }
 
 export function defineMemoryResult(input: MemoryResultInput): MemoryResult {
@@ -103,6 +115,7 @@ export function defineMemoryResult(input: MemoryResultInput): MemoryResult {
         ? undefined
         : normalizeMemoryScore(input.recencyScore),
     tokenEstimate:
-      input.tokenEstimate ?? estimateMemoryTokens(input.summary ?? input.content),
+      normalizeMemoryTokenEstimate(input.tokenEstimate) ??
+      estimateMemoryTokens(input.summary || input.content),
   };
 }

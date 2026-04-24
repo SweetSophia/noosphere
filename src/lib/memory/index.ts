@@ -11,5 +11,6 @@ export {
   DEFAULT_MEMORY_CHARS_PER_TOKEN,
   defineMemoryResult,
   estimateMemoryTokens,
+  normalizeMemoryTokenEstimate,
   normalizeMemoryScore,
 } from "./types";
