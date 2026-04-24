@@ -10,6 +10,18 @@ Frontpage            |  Logging
 :-------------------------:|:-------------------------:
 <img width="350" height="443" alt="noosphere_start" src="https://github.com/user-attachments/assets/436560a3-1612-47cf-bcbf-f9300f28a7f5" /> | <img width="350" height="380" alt="noosphere_log" src="https://github.com/user-attachments/assets/ceb07a54-f622-4ed8-82a0-a508f4ddfa5d" />
 
+| Feature                       | Mengram       | Noosphere                                      | Hindsight                 |
+| ----------------------------- | ------------- | ---------------------------------------------- | ------------------------- |
+| Fact extraction               | ✅ (via LLM)   | ✅ (manual + ingest)                            | ✅ (auto)                  |
+| Graph/knowledge relationships | ✅ (graph RAG) | ✅ (wiki graph API, topics, tags, cross-refs)   | ✅ (entity/semantic links) |
+| Structured storage            | ✅ (MongoDB)   | ✅ (PostgreSQL + markdown)                      | ✅ (PostgreSQL)            |
+| Revision tracking             | ❌             | ✅ (full version history)                       | ❌                         |
+| Confidence scoring            | ❌             | ✅ (low/medium/high + draft/reviewed/published) | ❌                         |
+| Human browsable               | ❌ (API only)  | ✅ (web UI + Obsidian)                          | ❌                         |
+| Auto-recall                   | ❌             | ❌ In Progress                         | ✅                         |
+| Procedural memory             | ✅             | Will be added                                | ❌                         |
+
+
 ## Features
 
 ### For Agents (API-first)
