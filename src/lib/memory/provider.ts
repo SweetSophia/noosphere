@@ -1,4 +1,9 @@
-import type { MemoryResult, MemoryScore, MemorySourceType } from "./types";
+import type {
+  MemoryProviderMetadata,
+  MemoryResult,
+  MemoryScore,
+  MemorySourceType,
+} from "./types";
 
 export interface MemoryProviderConfig {
   /** Whether the provider is available for explicit recall queries. */
@@ -10,11 +15,17 @@ export interface MemoryProviderConfig {
   /** Optional provider-specific result cap before global budgeting. */
   maxResults?: number;
 
-  /** Whether this provider may participate in automatic recall injection. */
+  /**
+   * Optional policy flag controlling whether this provider may participate in
+   * automatic recall injection.
+   *
+   * This can further restrict auto-recall participation but can never enable it
+   * when the provider capability declares `autoRecall: false`.
+   */
   allowAutoRecall?: boolean;
 
   /** Provider-specific config values must remain isolated here. */
-  metadata?: Record<string, unknown>;
+  metadata?: MemoryProviderMetadata;
 }
 
 export interface MemoryProviderCapabilities {
@@ -27,7 +38,12 @@ export interface MemoryProviderCapabilities {
   /** Provider emits or can compute score metadata for results. */
   score: boolean;
 
-  /** Provider can safely participate in low-budget automatic recall. */
+  /**
+   * Provider can safely participate in low-budget automatic recall.
+   *
+   * This is a hard capability limit: if false, the provider must never be used
+   * for auto-recall regardless of config flags.
+   */
   autoRecall: boolean;
 }
 
@@ -48,7 +64,7 @@ export interface MemoryProviderDescriptor {
   capabilities: MemoryProviderCapabilities;
 
   /** Provider-specific descriptor fields must remain isolated here. */
-  metadata?: Record<string, unknown>;
+  metadata?: MemoryProviderMetadata;
 }
 
 export interface MemoryProviderSearchOptions {
@@ -68,7 +84,7 @@ export interface MemoryProviderSearchOptions {
   signal?: AbortSignal;
 
   /** Provider-specific query options must remain isolated here. */
-  metadata?: Record<string, unknown>;
+  metadata?: MemoryProviderMetadata;
 }
 
 export interface MemoryProviderGetOptions {
@@ -79,7 +95,7 @@ export interface MemoryProviderGetOptions {
   signal?: AbortSignal;
 
   /** Provider-specific lookup options must remain isolated here. */
-  metadata?: Record<string, unknown>;
+  metadata?: MemoryProviderMetadata;
 }
 
 export interface MemoryProviderScoreContext {
@@ -110,7 +126,7 @@ export interface MemoryProviderScore {
   reasons?: string[];
 
   /** Provider-specific score fields must remain isolated here. */
-  metadata?: Record<string, unknown>;
+  metadata?: MemoryProviderMetadata;
 }
 
 export interface MemoryProvider {
@@ -154,6 +170,13 @@ export const DEFAULT_MEMORY_PROVIDER_CAPABILITIES: MemoryProviderCapabilities = 
   autoRecall: true,
 };
 
+export function getEffectiveAutoRecall(
+  capabilities: MemoryProviderCapabilities,
+  config: Pick<MemoryProviderConfig, "allowAutoRecall">,
+): boolean {
+  return capabilities.autoRecall && config.allowAutoRecall !== false;
+}
+
 export function normalizeMemoryProviderConfig(
   config: Partial<MemoryProviderConfig> = {},
 ): MemoryProviderConfig {
@@ -169,7 +192,7 @@ export function normalizeMemoryProviderConfig(
     !Number.isFinite(config.maxResults) ||
     config.maxResults <= 0
       ? undefined
-      : Math.floor(config.maxResults);
+      : Math.max(1, Math.floor(config.maxResults));
 
   const enabled =
     typeof config.enabled === "boolean"

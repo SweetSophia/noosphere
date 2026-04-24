@@ -21,6 +21,7 @@ export type {
 export {
   DEFAULT_MEMORY_PROVIDER_CAPABILITIES,
   DEFAULT_MEMORY_PROVIDER_CONFIG,
+  getEffectiveAutoRecall,
   normalizeMemoryProviderConfig,
 } from "./provider";
 
