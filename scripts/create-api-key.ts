@@ -9,7 +9,7 @@ import { closePrisma, prisma } from "./_prisma";
 
 async function main() {
   const name = process.argv[2];
-  let permissions = (process.argv[3] || "WRITE") as "READ" | "WRITE" | "ADMIN";
+  const permissions = (process.argv[3] || "WRITE") as "READ" | "WRITE" | "ADMIN";
 
   if (!name) {
     console.error("Usage: npx tsx scripts/create-api-key.ts <name> [READ|WRITE|ADMIN]");

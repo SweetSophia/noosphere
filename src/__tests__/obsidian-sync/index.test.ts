@@ -13,8 +13,9 @@
  */
 
 import { createHash } from "crypto";
-import { writeFileSync, unlinkSync, mkdirSync, rmdirSync, readFileSync, existsSync, renameSync } from "fs";
-import { join } from "path";
+import { writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, renameSync } from "fs";
+import { join, resolve } from "path";
+import yaml from "js-yaml";
 import { spawn } from "child_process";
 
 // ─── Test helpers ────────────────────────────────────────────────────────────
@@ -61,11 +62,7 @@ async function withTempDir(fn: (dir: string) => void | Promise<void>): Promise<v
   } finally {
     // Clean up
     try {
-      const files = existsSync(dir) ? readdirSync(dir) : [];
-      for (const f of files) {
-        try { unlinkSync(join(dir, f)); } catch { /* ignore */ }
-      }
-      rmdirSync(dir);
+      rmSync(dir, { recursive: true, force: true });
     } catch { /* ignore */ }
   }
 }
@@ -114,6 +111,13 @@ interface ArticleForSync {
   topic: { id: string; slug: string; name: string };
 }
 
+const FM_KEYS = [
+  "id", "slug", "title", "topic", "topicPath",
+  "confidence", "status", "tags", "excerpt",
+  "authorName", "sourceUrl", "sourceType", "lastReviewed",
+  "createdAt", "updatedAt", "noosphere",
+] as const;
+
 function buildFrontmatter(
   article: ArticleForSync,
   topicPath: string[],
@@ -146,28 +150,13 @@ function buildFrontmatter(
   if (article.sourceType) fm.sourceType = article.sourceType;
   if (article.lastReviewed) fm.lastReviewed = article.lastReviewed.toISOString();
 
-  const ordered: Array<[string, unknown]> = [
-    ["id", fm.id],
-    ["slug", fm.slug],
-    ["title", fm.title],
-    ["topic", fm.topic],
-    ["topicPath", fm.topicPath],
-    ["confidence", fm.confidence],
-    ["status", fm.status],
-    ["tags", fm.tags],
-    ["excerpt", fm.excerpt],
-    ["authorName", fm.authorName],
-    ["sourceUrl", fm.sourceUrl],
-    ["sourceType", fm.sourceType],
-    ["lastReviewed", fm.lastReviewed],
-    ["createdAt", fm.createdAt],
-    ["updatedAt", fm.updatedAt],
-    ["noosphere", fm.noosphere],
-  ];
+  const ordered: Record<string, unknown> = {};
+  for (const key of FM_KEYS) {
+    if (fm[key] !== undefined) ordered[key] = fm[key];
+  }
 
   // Use yaml.dump for proper multi-line nested object serialization
-  const yaml = require("js-yaml");
-  const yamlStr = yaml.dump(fm, {
+  const yamlStr = yaml.dump(ordered, {
     indent: 2,
     lineWidth: -1,
     quotingType: '"',
@@ -195,9 +184,9 @@ function renderMarkdown(article: ArticleForSync, topicPath: string[], contentHas
 }
 
 function safePath(vaultPath: string, relativePath: string): string | null {
-  const { resolve } = require("path") as typeof import("path");
-  const resolved = resolve(vaultPath, relativePath);
-  if (!resolved.startsWith(vaultPath)) return null;
+  const normalizedVault = vaultPath.replace(/[/\\]+$/, "");
+  const resolved = resolve(normalizedVault, relativePath);
+  if (!resolved.startsWith(normalizedVault + "/")) return null;
   return resolved;
 }
 
@@ -381,7 +370,6 @@ test("valid YAML output (parseable)", () => {
   const fm = buildFrontmatter(article, topicPath, "abc123", "2026-04-15T14:35:00.000Z");
 
   // Parse YAML by extracting content between first and second ---
-  const yaml = require("js-yaml");
   const firstDash = fm.indexOf("---");
   const secondDash = fm.indexOf("---", firstDash + 3);
   const fmBody = fm.slice(firstDash + 3, secondDash).trim();
