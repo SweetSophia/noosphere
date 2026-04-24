@@ -2,6 +2,7 @@ import type {
   MemoryProvider,
   MemoryProviderConfig,
   MemoryProviderDescriptor,
+  MemoryProviderGetOptions,
   MemoryProviderSearchOptions,
 } from "./provider";
 import { defineMemoryResult } from "./types";
@@ -32,6 +33,9 @@ export interface HindsightProviderSettings {
 
   /** Optional fetch implementation for tests or non-standard runtimes. */
   fetch?: typeof fetch;
+
+  /** Allow non-HTTPS base URLs for local development or test doubles. */
+  allowInsecureBaseUrl?: boolean;
 
   /** Base provider config consumed by orchestrators. */
   providerConfig?: Partial<MemoryProviderConfig>;
@@ -72,6 +76,8 @@ export interface HindsightRecallResponse {
 }
 
 const HINDSIGHT_PROVIDER_ID = "hindsight";
+const MAX_ERROR_BODY_LENGTH = 1_000;
+const MAX_METADATA_SOURCE_FACTS = 5;
 
 export class HindsightProvider implements MemoryProvider {
   readonly descriptor: MemoryProviderDescriptor;
@@ -97,13 +103,23 @@ export class HindsightProvider implements MemoryProvider {
       throw new Error("HindsightProvider requires a bankId");
     }
 
-    this.baseUrl = settings.baseUrl.replace(/\/+$/, "");
+    this.baseUrl = normalizeHindsightBaseUrl(
+      settings.baseUrl,
+      settings.allowInsecureBaseUrl,
+    );
     this.apiKey = settings.apiKey;
     this.bankId = settings.bankId;
     this.defaultBudget = settings.defaultBudget ?? "mid";
     this.defaultTypes = settings.defaultTypes;
     this.defaultMaxTokens = settings.defaultMaxTokens;
-    this.fetchImpl = settings.fetch ?? fetch;
+
+    const fetchImpl = settings.fetch ?? globalThis.fetch;
+    if (typeof fetchImpl !== "function") {
+      throw new Error(
+        "HindsightProvider requires a fetch implementation. Provide settings.fetch or ensure global fetch is available.",
+      );
+    }
+    this.fetchImpl = fetchImpl;
 
     this.descriptor = {
       id: HINDSIGHT_PROVIDER_ID,
@@ -140,8 +156,12 @@ export class HindsightProvider implements MemoryProvider {
     return cappedResults.map((result) => this.toMemoryResult(result, response));
   }
 
-  async getById(id: string): Promise<MemoryResult | null> {
+  async getById(
+    id: string,
+    options: MemoryProviderGetOptions = {},
+  ): Promise<MemoryResult | null> {
     void id;
+    void options;
     // Hindsight's public Recall API is query-oriented. Direct lookup is not
     // advertised as a capability, so keep this method policy-free and inert.
     return null;
@@ -180,7 +200,7 @@ export class HindsightProvider implements MemoryProvider {
       throw new Error(await buildHindsightErrorMessage(response));
     }
 
-    return (await response.json()) as HindsightRecallResponse;
+    return parseHindsightRecallResponse(response);
   }
 
   private toMemoryResult(
@@ -220,7 +240,7 @@ function buildHindsightMetadata(
   return {
     hindsightType: result.type,
     context: result.context ?? undefined,
-    metadata: result.metadata ?? undefined,
+    hindsightMetadata: result.metadata ?? undefined,
     entities: result.entities ?? undefined,
     occurredStart: result.occurred_start ?? undefined,
     occurredEnd: result.occurred_end ?? undefined,
@@ -229,25 +249,64 @@ function buildHindsightMetadata(
     chunkId: result.chunk_id ?? undefined,
     sourceFactIds: result.source_fact_ids ?? undefined,
     proofCount: result.proof_count ?? undefined,
-    sourceFacts: selectSourceFacts(result.source_fact_ids, response.source_facts),
+    ...buildSourceFactsMetadata(result.source_fact_ids, response.source_facts),
   };
 }
 
-function selectSourceFacts(
+function buildSourceFactsMetadata(
   sourceFactIds: string[] | null | undefined,
   sourceFacts: Record<string, HindsightRecallResult> | undefined,
-): HindsightRecallResult[] | undefined {
+): MemoryProviderMetadata {
   if (!sourceFactIds || !sourceFacts) {
-    return undefined;
+    return {};
   }
 
-  return sourceFactIds.flatMap((id) => (sourceFacts[id] ? [sourceFacts[id]] : []));
+  const availableFacts = sourceFactIds.flatMap((id) =>
+    sourceFacts[id] ? [sourceFacts[id]] : [],
+  );
+
+  return {
+    sourceFacts: availableFacts.slice(0, MAX_METADATA_SOURCE_FACTS),
+    sourceFactsTruncated: availableFacts.length > MAX_METADATA_SOURCE_FACTS,
+    missingSourceFactIds: sourceFactIds.filter((id) => !sourceFacts[id]),
+  };
+}
+
+function normalizeHindsightBaseUrl(
+  baseUrl: string,
+  allowInsecureBaseUrl = false,
+): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    throw new Error("HindsightProvider requires baseUrl to be a valid URL");
+  }
+
+  if (parsed.protocol !== "https:" && !allowInsecureBaseUrl) {
+    throw new Error(
+      "HindsightProvider requires an HTTPS baseUrl. Set allowInsecureBaseUrl for local development or tests.",
+    );
+  }
+
+  return baseUrl.replace(/\/+$/, "");
+}
+
+async function parseHindsightRecallResponse(
+  response: Response,
+): Promise<HindsightRecallResponse> {
+  try {
+    return (await response.json()) as HindsightRecallResponse;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to parse Hindsight response: ${message}`);
+  }
 }
 
 async function buildHindsightErrorMessage(response: Response): Promise<string> {
   let body = "";
   try {
-    body = await response.text();
+    body = formatHindsightErrorBody(await response.text());
   } catch {
     // Ignore body read failures; status details are still useful.
   }
@@ -256,6 +315,43 @@ async function buildHindsightErrorMessage(response: Response): Promise<string> {
   return details
     ? `Hindsight recall failed with status ${response.status}: ${details}`
     : `Hindsight recall failed with status ${response.status}`;
+}
+
+function formatHindsightErrorBody(body: string): string {
+  const parsedMessage = parseHindsightErrorBody(body);
+  const message = parsedMessage ?? body;
+  return message.length > MAX_ERROR_BODY_LENGTH
+    ? `${message.slice(0, MAX_ERROR_BODY_LENGTH)}...`
+    : message;
+}
+
+function parseHindsightErrorBody(body: string): string | undefined {
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (!parsed || typeof parsed !== "object") {
+      return undefined;
+    }
+
+    const record = parsed as Record<string, unknown>;
+    if (typeof record.message === "string") {
+      return record.message;
+    }
+
+    if (typeof record.error === "string") {
+      return record.error;
+    }
+
+    if (record.error && typeof record.error === "object") {
+      const error = record.error as Record<string, unknown>;
+      if (typeof error.message === "string") {
+        return error.message;
+      }
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
 }
 
 function removeUndefined<T extends Record<string, unknown>>(value: T): Partial<T> {
