@@ -4,30 +4,37 @@
  * Run with: npx tsx src/__tests__/memory/noosphere-provider.test.ts
  *
  * Tests cover:
- * 1. Pure function unit tests (mapConfidenceScore, mapCurationLevel, mapRecencyScore, normalizeRank, normalizeOffset)
- * 2. Constructor validation
- * 3. search() with mock Prisma (empty query, disabled config, successful search)
- * 4. getById() with mock Prisma (found, not found, disabled, canonical ref stripping)
- * 5. score() edge cases (non-noosphere results, missing fields, aggregate calculation)
- * 6. resolveSearchLimit priority chain
+ * 1. Constructor validation (descriptor, config overrides, factory)
+ * 2. search() edge cases (empty query, disabled config, no results)
+ * 3. getById() (found, not found, disabled, canonical ref stripping)
+ * 4. score() (non-noosphere guard, aggregate, recency decay)
+ * 5. Confidence and curation level mapping via getById
+ * 6. Descriptor metadata
  */
 
-// ─── Inline access to private-scoped helpers via re-export ──────────────────
-// The helper functions are module-scoped, so we test them through the provider's
-// public interface and verify the outputs on MemoryResult / MemoryProviderScore.
+// Provide a dummy DATABASE_URL so the default Prisma client import doesn't crash.
+// Tests inject their own mock Prisma, so this connection string is never used.
+if (!process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
+}
 
 import type { PrismaClient } from "@prisma/client";
+import {
+  NoosphereProvider,
+  createNoosphereProvider,
+} from "@/lib/memory/noosphere";
 
 // ─── Test helpers ────────────────────────────────────────────────────────────
 
 let testCounter = 0;
 let passCount = 0;
 let failCount = 0;
+const pending: Promise<void>[] = [];
 
 function test(name: string, fn: () => void | Promise<void>): void {
   testCounter++;
   const label = `[${testCounter}] ${name}`;
-  Promise.resolve()
+  const p = Promise.resolve()
     .then(() => fn())
     .then(() => {
       passCount++;
@@ -38,6 +45,7 @@ function test(name: string, fn: () => void | Promise<void>): void {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`  ✗ ${label}\n    ${message}`);
     });
+  pending.push(p);
 }
 
 function assert(condition: boolean, message: string): void {
@@ -46,68 +54,121 @@ function assert(condition: boolean, message: string): void {
 
 function assertEqual<T>(actual: T, expected: T, label: string): void {
   if (actual !== expected) {
-    throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+    throw new Error(
+      `${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+    );
   }
 }
 
-function assertApprox(actual: number, expected: number, tolerance: number, label: string): void {
+function assertApprox(
+  actual: number,
+  expected: number,
+  tolerance: number,
+  label: string,
+): void {
   if (Math.abs(actual - expected) > tolerance) {
-    throw new Error(`${label}: expected ~${expected} (±${tolerance}), got ${actual}`);
+    throw new Error(
+      `${label}: expected ~${expected} (±${tolerance}), got ${actual}`,
+    );
   }
 }
 
 // ─── Mock Prisma ─────────────────────────────────────────────────────────────
 
-function createMockPrisma(overrides: Record<string, unknown> = {}): PrismaClient {
+function createMockPrisma(
+  overrides: Record<string, unknown> = {},
+): PrismaClient {
   return {
     article: {
-      findFirst: (() => Promise.resolve(null)) as unknown as PrismaClient["article"]["findFirst"],
-      findMany: (() => Promise.resolve([])) as unknown as PrismaClient["article"]["findMany"],
+      findFirst: (() =>
+        Promise.resolve(null)) as unknown as PrismaClient["article"]["findFirst"],
+      findMany: (() =>
+        Promise.resolve(
+          [],
+        )) as unknown as PrismaClient["article"]["findMany"],
     },
-    $queryRaw: (() => Promise.resolve([])) as unknown as PrismaClient["$queryRaw"],
+    $queryRaw: (() =>
+      Promise.resolve([])) as unknown as PrismaClient["$queryRaw"],
     ...overrides,
   } as unknown as PrismaClient;
 }
 
-// ─── Import the provider (dynamic to allow tsx execution) ───────────────────
+// ─── Shared mock article factory ────────────────────────────────────────────
+
+function mockArticle(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "test-id",
+    title: "Test Article",
+    slug: "test-article",
+    content: "Test content body",
+    excerpt: "Test excerpt",
+    status: "published",
+    confidence: "high",
+    sourceUrl: null,
+    sourceType: null,
+    createdAt: new Date("2026-01-01"),
+    updatedAt: new Date("2026-04-01"),
+    lastReviewed: null,
+    authorId: null,
+    authorName: null,
+    topicId: "topic-1",
+    topic: { id: "topic-1", slug: "engineering", name: "Engineering" },
+    tags: [],
+    ...overrides,
+  };
+}
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
 
 async function main() {
-  // Dynamic import so tsx can resolve TypeScript + path aliases.
-  // We import the module and destructure what we need.
-  const { NoosphereProvider, createNoosphereProvider } = await import(
-    "@/lib/memory/noosphere"
-  );
-
   console.log("\n🔍 NoosphereProvider Tests\n");
 
-  // ─── Constructor ───────────────────────────────────────────────────────────
+  // ─── Constructor ─────────────────────────────────────────────────────────
 
   test("constructor uses default Prisma when none provided", () => {
-    // Just verify it doesn't throw and has the right descriptor.
-    // (Can't call search without a real DB.)
     const provider = new NoosphereProvider();
     assertEqual(provider.descriptor.id, "noosphere", "provider id");
     assertEqual(provider.descriptor.sourceType, "noosphere", "source type");
-    assertEqual(provider.descriptor.capabilities.search, true, "search cap");
-    assertEqual(provider.descriptor.capabilities.getById, true, "getById cap");
+    assertEqual(
+      provider.descriptor.capabilities.search,
+      true,
+      "search cap",
+    );
+    assertEqual(
+      provider.descriptor.capabilities.getById,
+      true,
+      "getById cap",
+    );
     assertEqual(provider.descriptor.capabilities.score, true, "score cap");
-    assertEqual(provider.descriptor.capabilities.autoRecall, true, "autoRecall cap");
+    assertEqual(
+      provider.descriptor.capabilities.autoRecall,
+      true,
+      "autoRecall cap",
+    );
   });
 
   test("constructor applies providerConfig overrides", () => {
     const provider = new NoosphereProvider({
       providerConfig: { priorityWeight: 2.5, maxResults: 5 },
     });
-    assertEqual(provider.descriptor.defaultConfig.priorityWeight, 2.5, "priorityWeight override");
-    assertEqual(provider.descriptor.defaultConfig.maxResults, 5, "maxResults override");
+    assertEqual(
+      provider.descriptor.defaultConfig.priorityWeight,
+      2.5,
+      "priorityWeight override",
+    );
+    assertEqual(
+      provider.descriptor.defaultConfig.maxResults,
+      5,
+      "maxResults override",
+    );
   });
 
-  test("createNoosphereProvider factory returns NoosphereProvider instance", () => {
+  test("createNoosphereProvider factory returns instance", () => {
     const provider = createNoosphereProvider();
     assert(provider instanceof NoosphereProvider, "instance check");
   });
 
-  // ─── search() ──────────────────────────────────────────────────────────────
+  // ─── search() ───────────────────────────────────────────────────────────
 
   test("search returns empty array for empty query", async () => {
     const provider = new NoosphereProvider({
@@ -138,14 +199,12 @@ async function main() {
     assertEqual(results.length, 0, "no results");
   });
 
-  // ─── getById() ─────────────────────────────────────────────────────────────
+  // ─── getById() ──────────────────────────────────────────────────────────
 
   test("getById returns null when article not found", async () => {
     const provider = new NoosphereProvider({
       prisma: createMockPrisma({
-        article: {
-          findFirst: () => Promise.resolve(null),
-        },
+        article: { findFirst: () => Promise.resolve(null) },
       }),
     });
     const result = await provider.getById("nonexistent-id");
@@ -164,33 +223,14 @@ async function main() {
   });
 
   test("getById strips noosphere:article: prefix from id", async () => {
-    const mockArticle = {
-      id: "abc123",
-      title: "Test Article",
-      slug: "test-article",
-      content: "Test content",
-      excerpt: "Test excerpt",
-      status: "published",
-      confidence: "high",
-      sourceUrl: null,
-      sourceType: null,
-      createdAt: new Date("2026-01-01"),
-      updatedAt: new Date("2026-04-01"),
-      lastReviewed: null,
-      authorId: null,
-      authorName: null,
-      topicId: "topic1",
-      topic: { id: "topic1", slug: "engineering", name: "Engineering" },
-      tags: [],
-    };
-
     let capturedId: string | undefined;
     const provider = new NoosphereProvider({
       prisma: createMockPrisma({
         article: {
-          findFirst: (args: { where: { id: string } }) => {
-            capturedId = args.where.id;
-            return Promise.resolve(mockArticle);
+          findFirst: (args: Record<string, unknown>) => {
+            const where = args.where as { id: string };
+            capturedId = where.id;
+            return Promise.resolve(mockArticle({ id: "abc123" }));
           },
         },
       }),
@@ -202,13 +242,45 @@ async function main() {
     assertEqual(result!.provider, "noosphere", "provider field");
     assertEqual(result!.sourceType, "noosphere", "sourceType field");
     assertEqual(result!.title, "Test Article", "title");
-    assertEqual(result!.content, "Test content", "content");
+    assertEqual(result!.content, "Test content body", "content");
     assertEqual(result!.summary, "Test excerpt", "summary");
-    assertEqual(result!.curationLevel, "curated", "curation level for published");
-    assertEqual(result!.canonicalRef, "noosphere:article:abc123", "canonical ref");
+    assertEqual(
+      result!.curationLevel,
+      "curated",
+      "curation level for published",
+    );
+    assertEqual(
+      result!.canonicalRef,
+      "noosphere:article:abc123",
+      "canonical ref",
+    );
   });
 
-  // ─── score() ───────────────────────────────────────────────────────────────
+  test("getById maps confidence and recency from article fields", async () => {
+    const provider = new NoosphereProvider({
+      prisma: createMockPrisma({
+        article: {
+          findFirst: () =>
+            Promise.resolve(
+              mockArticle({
+                confidence: "high",
+                updatedAt: new Date("2026-04-25"),
+              }),
+            ),
+        },
+      }),
+    });
+    const result = await provider.getById("test");
+    assert(result !== null, "result exists");
+    assertEqual(result!.confidenceScore, 1, "high confidence → 1");
+    // recencyScore depends on current time vs updatedAt, so just verify it's high.
+    assert(
+      result!.recencyScore !== undefined && result!.recencyScore! > 0.9,
+      "recent article → recency > 0.9",
+    );
+  });
+
+  // ─── score() ────────────────────────────────────────────────────────────
 
   test("score returns empty object for non-noosphere results", () => {
     const provider = new NoosphereProvider({ prisma: createMockPrisma() });
@@ -233,7 +305,6 @@ async function main() {
       updatedAt: new Date("2026-04-01").toISOString(),
     });
     assert(score.aggregateScore !== undefined, "aggregate should exist");
-    // Average of 0.8 (relevance) + 1.0 (confidence) + recency (should be < 1.0)
     assert(score.aggregateScore! > 0, "aggregate > 0");
     assert(score.aggregateScore! <= 1, "aggregate <= 1");
     assert(score.reasons !== undefined, "reasons should exist");
@@ -248,14 +319,18 @@ async function main() {
       sourceType: "noosphere",
       content: "test",
     });
-    assertEqual(score.aggregateScore, undefined, "no aggregate without signals");
+    assertEqual(
+      score.aggregateScore,
+      undefined,
+      "no aggregate without signals",
+    );
   });
 
-  test("score recency decays over time", () => {
+  test("score recency decays with 90-day half-life", () => {
     const provider = new NoosphereProvider({ prisma: createMockPrisma() });
     const now = new Date("2026-04-25");
 
-    // Fresh article (0 days old)
+    // Fresh article (0 days old) → recency 1
     const fresh = provider.score(
       {
         id: "1",
@@ -268,8 +343,10 @@ async function main() {
     );
     assertEqual(fresh.recencyScore, 1, "fresh article score");
 
-    // 90 days old = half-life should give ~0.5
-    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    // 90 days old → half-life ≈ 0.5
+    const ninetyDaysAgo = new Date(
+      now.getTime() - 90 * 24 * 60 * 60 * 1000,
+    );
     const old = provider.score(
       {
         id: "2",
@@ -283,8 +360,10 @@ async function main() {
     assert(old.recencyScore !== undefined, "old recency should exist");
     assertApprox(old.recencyScore!, 0.5, 0.01, "90-day half-life");
 
-    // Very old article (365 days)
-    const yearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+    // 365 days old → very decayed
+    const yearAgo = new Date(
+      now.getTime() - 365 * 24 * 60 * 60 * 1000,
+    );
     const ancient = provider.score(
       {
         id: "3",
@@ -295,126 +374,101 @@ async function main() {
       },
       { now },
     );
-    assert(ancient.recencyScore !== undefined, "ancient recency should exist");
-    assert(ancient.recencyScore! < 0.1, "365-day should be < 0.1");
+    assert(ancient.recencyScore !== undefined, "ancient recency exists");
+    assert(ancient.recencyScore! < 0.1, "365-day < 0.1");
   });
 
-  // ─── mapConfidenceScore (tested via score/getById) ─────────────────────────
+  // ─── Confidence mapping via getById ─────────────────────────────────────
 
-  test("confidence mapping: high=1, medium=0.66, low=0.33, null=undefined", () => {
-    const provider = new NoosphereProvider({ prisma: createMockPrisma() });
-
-    // Test via score — the confidenceScore on the result comes from mapConfidenceScore.
-    // We test the output of getById which calls toMemoryResult → mapConfidenceScore.
-    const mockArticleFactory = (confidence: string | null) => ({
-      id: "test",
-      title: "Test",
-      slug: "test",
-      content: "content",
-      excerpt: null,
-      status: "published",
-      confidence,
-      sourceUrl: null,
-      sourceType: null,
-      createdAt: new Date("2026-01-01"),
-      updatedAt: new Date("2026-01-01"),
-      lastReviewed: null,
-      authorId: null,
-      authorName: null,
-      topicId: "t1",
-      topic: { id: "t1", slug: "test", name: "Test" },
-      tags: [],
-    });
-
-    // We can test mapConfidenceScore indirectly by checking score output on results
-    // that have confidenceScore set. But since score() just reads the result's
-    // confidenceScore, let's test the mapping directly via getById mock.
-    const expectations: [string | null, number | undefined][] = [
+  test("confidence: high=1, medium=0.66, low=0.33, null=undefined", async () => {
+    const cases: [string | null, number | undefined][] = [
       ["high", 1],
       ["medium", 0.66],
       ["low", 0.33],
       [null, undefined],
     ];
 
-    for (const [confidence, expected] of expectations) {
+    for (const [confidence, expected] of cases) {
       const provider = new NoosphereProvider({
         prisma: createMockPrisma({
           article: {
-            findFirst: () => Promise.resolve(mockArticleFactory(confidence)),
+            findFirst: () =>
+              Promise.resolve(mockArticle({ confidence })),
           },
         }),
       });
-      provider.getById("test").then((result) => {
-        if (!result) throw new Error("result is null");
-        if (expected === undefined) {
-          assertEqual(result.confidenceScore, undefined, `confidence=${confidence}`);
-        } else {
-          assertApprox(result.confidenceScore!, expected, 0.01, `confidence=${confidence}`);
-        }
-      });
+      const result = await provider.getById("test");
+      assert(result !== null, `result exists for confidence=${confidence}`);
+      if (expected === undefined) {
+        assertEqual(
+          result!.confidenceScore,
+          undefined,
+          `confidence=${confidence}`,
+        );
+      } else {
+        assertApprox(
+          result!.confidenceScore!,
+          expected,
+          0.01,
+          `confidence=${confidence}`,
+        );
+      }
     }
   });
 
-  // ─── mapCurationLevel (tested via getById) ─────────────────────────────────
+  // ─── Curation level mapping via getById ─────────────────────────────────
 
-  test("curation level mapping: published=curated, reviewed=reviewed, draft=ephemeral", async () => {
-    const mockArticleFactory = (status: string) => ({
-      id: "test",
-      title: "Test",
-      slug: "test",
-      content: "content",
-      excerpt: null,
-      status,
-      confidence: null,
-      sourceUrl: null,
-      sourceType: null,
-      createdAt: new Date("2026-01-01"),
-      updatedAt: new Date("2026-01-01"),
-      lastReviewed: null,
-      authorId: null,
-      authorName: null,
-      topicId: "t1",
-      topic: { id: "t1", slug: "test", name: "Test" },
-      tags: [],
-    });
-
-    const expectations: [string, string][] = [
+  test("curation: published=curated, reviewed=reviewed, draft=ephemeral", async () => {
+    const cases: [string, string][] = [
       ["published", "curated"],
       ["reviewed", "reviewed"],
       ["draft", "ephemeral"],
     ];
 
-    for (const [status, expected] of expectations) {
+    for (const [status, expected] of cases) {
       const provider = new NoosphereProvider({
         prisma: createMockPrisma({
           article: {
-            findFirst: () => Promise.resolve(mockArticleFactory(status)),
+            findFirst: () => Promise.resolve(mockArticle({ status })),
           },
         }),
       });
       const result = await provider.getById("test");
-      assertEqual(result?.curationLevel, expected as "curated" | "reviewed" | "ephemeral", `status=${status}`);
+      assertEqual(
+        result?.curationLevel,
+        expected as "curated" | "reviewed" | "ephemeral",
+        `status=${status}`,
+      );
     }
   });
 
-  // ─── descriptor metadata ───────────────────────────────────────────────────
+  // ─── Descriptor metadata ───────────────────────────────────────────────
 
   test("descriptor has correct default priority weight", () => {
     const provider = new NoosphereProvider();
-    assertEqual(provider.descriptor.defaultConfig.priorityWeight, 1.25, "default priority");
+    assertEqual(
+      provider.descriptor.defaultConfig.priorityWeight,
+      1.25,
+      "default priority",
+    );
   });
 
   test("descriptor metadata includes contentType article", () => {
     const provider = new NoosphereProvider();
-    assertEqual(provider.descriptor.metadata?.contentType, "article", "contentType");
+    assertEqual(
+      provider.descriptor.metadata?.contentType,
+      "article",
+      "contentType",
+    );
   });
 
-  // ─── Wait for async tests to complete ──────────────────────────────────────
+  // ─── Wait for all async tests ───────────────────────────────────────────
 
-  // Small delay to let all async test assertions settle.
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await Promise.all(pending);
 
-  console.log(`\n  ${passCount} passed, ${failCount} failed, ${testCounter} total\n`);
+  console.log(
+    `\n  ${passCount} passed, ${failCount} failed, ${testCounter} total\n`,
+  );
 
   if (failCount > 0) {
     process.exit(1);
