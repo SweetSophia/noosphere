@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { prisma as defaultPrisma } from "@/lib/prisma";
+import { buildSearchFilters } from "@/lib/wiki";
 
 import type {
   MemoryProvider,
@@ -227,7 +228,7 @@ export class NoosphereProvider implements MemoryProvider {
       offset: number;
     },
   ): Promise<{ id: string; rank: number; relevanceScore: number }[]> {
-    const filters = buildNoosphereSearchFilters(options);
+    const filters = buildSearchFilters(options);
     const limitClause =
       options.limit === undefined ? Prisma.empty : Prisma.sql`LIMIT ${options.limit}`;
 
@@ -321,41 +322,6 @@ export function createNoosphereProvider(
   settings: NoosphereProviderSettings = {},
 ): NoosphereProvider {
   return new NoosphereProvider(settings);
-}
-
-function buildNoosphereSearchFilters(options: {
-  topicSlug?: string;
-  tagSlug?: string;
-  status?: string;
-  confidence?: string;
-}): Prisma.Sql[] {
-  const clauses: Prisma.Sql[] = [Prisma.sql`a."deletedAt" IS NULL`];
-
-  if (options.topicSlug) {
-    clauses.push(Prisma.sql`tpc.slug = ${options.topicSlug}`);
-  }
-
-  if (options.tagSlug) {
-    clauses.push(
-      Prisma.sql`EXISTS (
-        SELECT 1
-        FROM "ArticleTag" at_filter
-        INNER JOIN "Tag" tag_filter ON tag_filter.id = at_filter."tagId"
-        WHERE at_filter."articleId" = a.id
-          AND tag_filter.slug = ${options.tagSlug}
-      )`,
-    );
-  }
-
-  if (options.status) {
-    clauses.push(Prisma.sql`a.status = ${options.status}`);
-  }
-
-  if (options.confidence) {
-    clauses.push(Prisma.sql`a.confidence = ${options.confidence}`);
-  }
-
-  return clauses;
 }
 
 function mapConfidenceScore(confidence: string | null): number | undefined {

@@ -40,7 +40,7 @@ export async function buildTagConnections(tagNames: string[]) {
   );
 }
 
-interface SearchArticlesOptions {
+export interface SearchArticlesOptions {
   topicSlug?: string;
   tagSlug?: string;
   status?: string;
@@ -49,7 +49,7 @@ interface SearchArticlesOptions {
   offset?: number;
 }
 
-function buildSearchFilters(options: SearchArticlesOptions) {
+export function buildSearchFilters(options: SearchArticlesOptions) {
   const clauses: Prisma.Sql[] = [Prisma.sql`a."deletedAt" IS NULL`];
 
   if (options.topicSlug) {
