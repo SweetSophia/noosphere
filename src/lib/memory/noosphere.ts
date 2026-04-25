@@ -198,6 +198,19 @@ export class NoosphereProvider implements MemoryProvider {
     const scoredValues = [relevanceScore, confidenceScore, recencyScore].filter(
       (score): score is number => score !== undefined,
     );
+    const reasons = [
+      "Noosphere articles are curated durable knowledge.",
+      confidenceScore === undefined
+        ? "Article has no explicit confidence label."
+        : "Confidence score mapped from article confidence label.",
+      "Recency score decays from the article updated timestamp.",
+    ];
+
+    if (scoredValues.length > 0) {
+      reasons.push(
+        "Aggregate score averages available relevance, confidence, and recency signals.",
+      );
+    }
 
     return {
       relevanceScore,
@@ -210,14 +223,7 @@ export class NoosphereProvider implements MemoryProvider {
               scoredValues.reduce((sum, score) => sum + score, 0) /
                 scoredValues.length,
             ),
-      reasons: [
-        "Noosphere articles are curated durable knowledge.",
-        confidenceScore === undefined
-          ? "Article has no explicit confidence label."
-          : "Confidence score mapped from article confidence label.",
-        "Recency score decays from the article updated timestamp.",
-        "Aggregate score averages available relevance, confidence, and recency signals.",
-      ],
+      reasons,
     };
   }
 
@@ -266,8 +272,8 @@ export class NoosphereProvider implements MemoryProvider {
       OFFSET ${options.offset}
     `);
 
-    const maxRank = Math.max(
-      ...rows.map((row) => normalizeRank(row.rank)),
+    const maxRank = rows.reduce(
+      (max, row) => Math.max(max, normalizeRank(row.rank)),
       0,
     );
 
@@ -311,7 +317,7 @@ export class NoosphereProvider implements MemoryProvider {
         topicName: article.topic.name,
         wikiPath: `/wiki/${article.topic.slug}/${article.slug}`,
         sourceUrl: article.sourceUrl ?? undefined,
-        sourceType: article.sourceType ?? undefined,
+        articleSourceType: article.sourceType ?? undefined,
         status: article.status,
         confidence: article.confidence ?? undefined,
         lastReviewed: article.lastReviewed?.toISOString(),
@@ -389,25 +395,28 @@ function resolveSearchLimit(
   config: MemoryProviderConfig,
 ): number | undefined {
   if (optionLimit !== undefined) {
-    return normalizeOptionalLimit(optionLimit);
+    return normalizeExplicitLimit(optionLimit) ?? DEFAULT_NOOSPHERE_MAX_RESULTS;
   }
 
   if (
     configOverride &&
     Object.prototype.hasOwnProperty.call(configOverride, "maxResults")
   ) {
-    return normalizeOptionalLimit(configOverride.maxResults);
+    return configOverride.maxResults === undefined
+      ? undefined
+      : normalizeExplicitLimit(configOverride.maxResults) ??
+          DEFAULT_NOOSPHERE_MAX_RESULTS;
   }
 
   return config.maxResults ?? DEFAULT_NOOSPHERE_MAX_RESULTS;
 }
 
-function normalizeOptionalLimit(limit: number | undefined): number | undefined {
-  if (limit === undefined || !Number.isFinite(limit) || limit <= 0) {
+function normalizeExplicitLimit(limit: number): number | undefined {
+  if (!Number.isFinite(limit) || limit < 0) {
     return undefined;
   }
 
-  return Math.max(1, Math.floor(limit));
+  return Math.floor(limit);
 }
 
 function normalizeOffset(offset: number | undefined): number {
