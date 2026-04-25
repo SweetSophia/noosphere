@@ -12,7 +12,11 @@ import type {
   MemoryProviderSearchOptions,
 } from "./provider";
 import { normalizeMemoryProviderConfig } from "./provider";
-import { defineMemoryResult, normalizeMemoryScore } from "./types";
+import {
+  defineMemoryResult,
+  normalizeMemoryScore,
+  removeUndefined,
+} from "./types";
 import type { MemoryProviderMetadata, MemoryResult } from "./types";
 
 export interface NoosphereProviderSettings {
@@ -412,10 +416,4 @@ function normalizeOffset(offset: number | undefined): number {
   }
 
   return Math.floor(offset);
-}
-
-function removeUndefined<T extends Record<string, unknown>>(value: T): Partial<T> {
-  return Object.fromEntries(
-    Object.entries(value).filter(([, entry]) => entry !== undefined),
-  ) as Partial<T>;
 }
