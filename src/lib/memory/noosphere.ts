@@ -109,7 +109,7 @@ export class NoosphereProvider implements MemoryProvider {
 
     const limit = resolveSearchLimit(options.limit, options.config, config);
     const metadata = (options.metadata ?? {}) as NoosphereSearchOptionsMetadata;
-    const rows = await this.searchArticleRows(normalizedQuery, {
+    const articles = await this.searchArticles(normalizedQuery, {
       limit,
       offset: normalizeOffset(metadata.offset),
       topicSlug: metadata.topicSlug ?? options.scope,
@@ -118,37 +118,7 @@ export class NoosphereProvider implements MemoryProvider {
       confidence: metadata.confidence,
     });
 
-    if (rows.length === 0) {
-      return [];
-    }
-
-    const articles = await this.prisma.article.findMany({
-      where: {
-        id: {
-          in: rows.map((row) => row.id),
-        },
-        deletedAt: null,
-      },
-      include: {
-        topic: true,
-        tags: {
-          include: {
-            tag: true,
-          },
-        },
-      },
-    });
-
-    const articleById = new Map(articles.map((article) => [article.id, article]));
-
-    return rows.flatMap((row) => {
-      const article = articleById.get(row.id);
-      if (!article) {
-        return [];
-      }
-
-      return [this.toMemoryResult(article, row.relevanceScore)];
-    });
+    return articles;
   }
 
   async getById(
@@ -227,7 +197,14 @@ export class NoosphereProvider implements MemoryProvider {
     };
   }
 
-  private async searchArticleRows(
+  /**
+   * Single-query search: returns fully-hydrated MemoryResult[] directly from the
+   * database, eliminating the previous two-query pattern (rank IDs → findMany).
+   *
+   * The CTE computes full-text rank, then joins back to Article+Topic+Tag rows
+   * so we get both the relevance score and article data in one round-trip.
+   */
+  private async searchArticles(
     query: string,
     options: {
       topicSlug?: string;
@@ -237,54 +214,200 @@ export class NoosphereProvider implements MemoryProvider {
       limit?: number;
       offset: number;
     },
-  ): Promise<{ id: string; rank: number; relevanceScore: number }[]> {
+  ): Promise<MemoryResult[]> {
     const filters = buildSearchFilters(options);
     const limitClause =
       options.limit === undefined ? Prisma.empty : Prisma.sql`LIMIT ${options.limit}`;
 
+    // Raw query returns flat rows — we'll aggregate tags in JS.
     const rows = await this.prisma.$queryRaw<
-      { id: string; rank: number | string }[]
+      {
+        id: string;
+        rank: number | string;
+        title: string;
+        slug: string;
+        content: string;
+        excerpt: string | null;
+        status: string;
+        confidence: string | null;
+        sourceUrl: string | null;
+        sourceType: string | null;
+        createdAt: Date;
+        updatedAt: Date;
+        lastReviewed: Date | null;
+        authorId: string | null;
+        authorName: string | null;
+        topicId: string;
+        topicSlug: string;
+        topicName: string;
+        tagName: string | null;
+      }[]
     >(Prisma.sql`
-      WITH searchable AS (
+      WITH ranked AS (
         SELECT
           a.id,
           a."updatedAt",
-          (
+          ts_rank(
             setweight(to_tsvector('simple', coalesce(a.title, '')), 'A') ||
             setweight(to_tsvector('simple', coalesce(a.excerpt, '')), 'B') ||
             setweight(to_tsvector('simple', coalesce(a.content, '')), 'C') ||
-            setweight(to_tsvector('simple', coalesce(string_agg(tg.name, ' '), '')), 'B')
-          ) AS document
+            setweight(to_tsvector('simple', coalesce(string_agg(tg.name, ' '), '')), 'B'),
+            websearch_to_tsquery('simple', ${query})
+          ) AS rank
         FROM "Article" a
         INNER JOIN "Topic" tpc ON tpc.id = a."topicId"
         LEFT JOIN "ArticleTag" at ON at."articleId" = a.id
         LEFT JOIN "Tag" tg ON tg.id = at."tagId"
         WHERE ${Prisma.join(filters, " AND ")}
         GROUP BY a.id, a.title, a.excerpt, a.content, a."updatedAt"
+        HAVING ts_rank(
+          setweight(to_tsvector('simple', coalesce(a.title, '')), 'A') ||
+          setweight(to_tsvector('simple', coalesce(a.excerpt, '')), 'B') ||
+          setweight(to_tsvector('simple', coalesce(a.content, '')), 'C') ||
+          setweight(to_tsvector('simple', coalesce(string_agg(tg.name, ' '), '')), 'B'),
+          websearch_to_tsquery('simple', ${query})
+        ) > 0
+        ORDER BY rank DESC, a."updatedAt" DESC
+        ${limitClause}
+        OFFSET ${options.offset}
       )
       SELECT
-        id,
-        ts_rank(document, websearch_to_tsquery('simple', ${query})) AS rank
-      FROM searchable
-      WHERE document @@ websearch_to_tsquery('simple', ${query})
-      ORDER BY rank DESC, "updatedAt" DESC
-      ${limitClause}
-      OFFSET ${options.offset}
+        r.id, r.rank,
+        a.title, a.slug, a.content, a.excerpt, a.status, a.confidence,
+        a."sourceUrl", a."sourceType",
+        a."createdAt", a."updatedAt", a."lastReviewed",
+        a."authorId", a."authorName",
+        tpc.id AS "topicId", tpc.slug AS "topicSlug", tpc.name AS "topicName",
+        tg.name AS "tagName"
+      FROM ranked r
+      INNER JOIN "Article" a ON a.id = r.id
+      INNER JOIN "Topic" tpc ON tpc.id = a."topicId"
+      LEFT JOIN "ArticleTag" at2 ON at2."articleId" = a.id
+      LEFT JOIN "Tag" tg ON tg.id = at2."tagId"
+      ORDER BY r.rank DESC, a."updatedAt" DESC
     `);
 
+    if (rows.length === 0) {
+      return [];
+    }
+
+    // Compute max rank for relative relevance scoring.
     const maxRank = rows.reduce(
       (max, row) => Math.max(max, normalizeRank(row.rank)),
       0,
     );
 
-    return rows.map((row) => {
-      const rank = normalizeRank(row.rank);
-      return {
-        id: row.id,
-        rank,
-        relevanceScore:
-          maxRank === 0 ? 0 : rank / maxRank,
-      };
+    // Aggregate flat rows (one per tag) into article groups.
+    const articleMap = new Map<
+      string,
+      {
+        row: (typeof rows)[number];
+        tags: string[];
+      }
+    >();
+
+    for (const row of rows) {
+      const existing = articleMap.get(row.id);
+      if (existing) {
+        if (row.tagName) {
+          existing.tags.push(row.tagName);
+        }
+      } else {
+        articleMap.set(row.id, {
+          row,
+          tags: row.tagName ? [row.tagName] : [],
+        });
+      }
+    }
+
+    // Preserve rank-descending order from the query.
+    const seenIds = new Set<string>();
+    const results: MemoryResult[] = [];
+
+    for (const row of rows) {
+      if (seenIds.has(row.id)) continue;
+      seenIds.add(row.id);
+
+      const entry = articleMap.get(row.id)!;
+      const rank = normalizeRank(entry.row.rank);
+      const relevanceScore = maxRank === 0 ? 0 : rank / maxRank;
+
+      results.push(
+        this.toMemoryResultFromRow(entry.row, entry.tags, relevanceScore),
+      );
+    }
+
+    return results;
+  }
+
+  /**
+   * Build a MemoryResult from a raw SQL row (single-query path).
+   * Avoids the Prisma include/hydration overhead of toMemoryResult().
+   */
+  private toMemoryResultFromRow(
+    row: {
+      id: string;
+      title: string;
+      slug: string;
+      content: string;
+      excerpt: string | null;
+      status: string;
+      confidence: string | null;
+      sourceUrl: string | null;
+      sourceType: string | null;
+      createdAt: Date | string;
+      updatedAt: Date | string;
+      lastReviewed: Date | string | null;
+      authorId: string | null;
+      authorName: string | null;
+      topicId: string;
+      topicSlug: string;
+      topicName: string;
+    },
+    tags: string[],
+    relevanceScore?: number,
+  ): MemoryResult {
+    const updatedAt =
+      row.updatedAt instanceof Date ? row.updatedAt : new Date(row.updatedAt);
+    const createdAt =
+      row.createdAt instanceof Date ? row.createdAt : new Date(row.createdAt);
+    const lastReviewed =
+      row.lastReviewed == null
+        ? undefined
+        : row.lastReviewed instanceof Date
+          ? row.lastReviewed
+          : new Date(row.lastReviewed);
+
+    return defineMemoryResult({
+      id: row.id,
+      provider: NOOSPHERE_PROVIDER_ID,
+      sourceType: "noosphere",
+      title: row.title,
+      content: row.content,
+      summary: row.excerpt ?? undefined,
+      relevanceScore,
+      confidenceScore: mapConfidenceScore(row.confidence),
+      recencyScore: mapRecencyScore(updatedAt),
+      curationLevel: mapCurationLevel(row.status),
+      createdAt: createdAt.toISOString(),
+      updatedAt: updatedAt.toISOString(),
+      canonicalRef: `noosphere:article:${row.id}`,
+      tags,
+      metadata: removeUndefined({
+        articleId: row.id,
+        articleSlug: row.slug,
+        topicId: row.topicId,
+        topicSlug: row.topicSlug,
+        topicName: row.topicName,
+        wikiPath: `/wiki/${row.topicSlug}/${row.slug}`,
+        sourceUrl: row.sourceUrl ?? undefined,
+        articleSourceType: row.sourceType ?? undefined,
+        status: row.status,
+        confidence: row.confidence ?? undefined,
+        lastReviewed: lastReviewed?.toISOString(),
+        authorId: row.authorId ?? undefined,
+        authorName: row.authorName ?? undefined,
+      }),
     });
   }
 
@@ -394,18 +517,22 @@ function resolveSearchLimit(
   configOverride: Partial<MemoryProviderConfig> | undefined,
   config: MemoryProviderConfig,
 ): number | undefined {
+  // Priority: explicit option > config override > default config > hardcoded default.
   if (optionLimit !== undefined) {
     return normalizeExplicitLimit(optionLimit) ?? DEFAULT_NOOSPHERE_MAX_RESULTS;
   }
 
+  const overrideMax = configOverride?.maxResults;
+  if (overrideMax !== undefined) {
+    return normalizeExplicitLimit(overrideMax) ?? DEFAULT_NOOSPHERE_MAX_RESULTS;
+  }
+
+  // If the override explicitly set maxResults to undefined (unset), use no cap.
   if (
     configOverride &&
     Object.prototype.hasOwnProperty.call(configOverride, "maxResults")
   ) {
-    return configOverride.maxResults === undefined
-      ? undefined
-      : normalizeExplicitLimit(configOverride.maxResults) ??
-          DEFAULT_NOOSPHERE_MAX_RESULTS;
+    return undefined;
   }
 
   return config.maxResults ?? DEFAULT_NOOSPHERE_MAX_RESULTS;
