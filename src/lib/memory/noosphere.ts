@@ -52,7 +52,6 @@ type NoosphereArticle = Prisma.ArticleGetPayload<{
 
 const NOOSPHERE_PROVIDER_ID = "noosphere";
 const DEFAULT_NOOSPHERE_MAX_RESULTS = 10;
-const DEFAULT_RELEVANCE_SCORE = 1;
 const RECENCY_HALF_LIFE_DAYS = 90;
 
 export class NoosphereProvider implements MemoryProvider {
@@ -103,7 +102,7 @@ export class NoosphereProvider implements MemoryProvider {
       return [];
     }
 
-    const limit = normalizeLimit(options.limit ?? config.maxResults);
+    const limit = resolveSearchLimit(options.limit, options.config, config);
     const metadata = (options.metadata ?? {}) as NoosphereSearchOptionsMetadata;
     const rows = await this.searchArticleRows(normalizedQuery, {
       limit,
@@ -135,7 +134,6 @@ export class NoosphereProvider implements MemoryProvider {
       },
     });
 
-    const rowById = new Map(rows.map((row) => [row.id, row]));
     const articleById = new Map(articles.map((article) => [article.id, article]));
 
     return rows.flatMap((row) => {
@@ -145,10 +143,6 @@ export class NoosphereProvider implements MemoryProvider {
       }
 
       return [this.toMemoryResult(article, row.relevanceScore)];
-    }).sort((left, right) => {
-      const leftRank = rowById.get(left.id)?.rank ?? 0;
-      const rightRank = rowById.get(right.id)?.rank ?? 0;
-      return rightRank - leftRank;
     });
   }
 
@@ -156,7 +150,13 @@ export class NoosphereProvider implements MemoryProvider {
     id: string,
     options: MemoryProviderGetOptions = {},
   ): Promise<MemoryResult | null> {
-    void options;
+    const config = normalizeMemoryProviderConfig({
+      ...this.descriptor.defaultConfig,
+      ...options.config,
+    });
+    if (!config.enabled) {
+      return null;
+    }
 
     const articleId = parseNoosphereArticleId(id);
     const article = await this.prisma.article.findFirst({
@@ -185,7 +185,7 @@ export class NoosphereProvider implements MemoryProvider {
       return {};
     }
 
-    const relevanceScore = result.relevanceScore ?? DEFAULT_RELEVANCE_SCORE;
+    const relevanceScore = result.relevanceScore;
     const confidenceScore = result.confidenceScore;
     const recencyScore = result.updatedAt
       ? mapRecencyScore(new Date(result.updatedAt), context.now)
@@ -223,11 +223,13 @@ export class NoosphereProvider implements MemoryProvider {
       tagSlug?: string;
       status?: string;
       confidence?: string;
-      limit: number;
+      limit?: number;
       offset: number;
     },
   ): Promise<{ id: string; rank: number; relevanceScore: number }[]> {
     const filters = buildNoosphereSearchFilters(options);
+    const limitClause =
+      options.limit === undefined ? Prisma.empty : Prisma.sql`LIMIT ${options.limit}`;
 
     const rows = await this.prisma.$queryRaw<
       { id: string; rank: number | string }[]
@@ -255,7 +257,7 @@ export class NoosphereProvider implements MemoryProvider {
       FROM searchable
       WHERE document @@ websearch_to_tsquery('simple', ${query})
       ORDER BY rank DESC, "updatedAt" DESC
-      LIMIT ${options.limit}
+      ${limitClause}
       OFFSET ${options.offset}
     `);
 
@@ -270,7 +272,7 @@ export class NoosphereProvider implements MemoryProvider {
         id: row.id,
         rank,
         relevanceScore:
-          maxRank === 0 ? DEFAULT_RELEVANCE_SCORE : rank / maxRank,
+          maxRank === 0 ? 0 : rank / maxRank,
       };
     });
   }
@@ -396,7 +398,9 @@ function mapRecencyScore(
   }
 
   const ageDays = ageMs / (1000 * 60 * 60 * 24);
-  return normalizeMemoryScore(Math.exp(-ageDays / RECENCY_HALF_LIFE_DAYS));
+  return normalizeMemoryScore(
+    Math.exp((-ageDays * Math.LN2) / RECENCY_HALF_LIFE_DAYS),
+  );
 }
 
 function parseNoosphereArticleId(id: string): string {
@@ -405,12 +409,32 @@ function parseNoosphereArticleId(id: string): string {
 }
 
 function normalizeRank(rank: number | string): number {
-  return typeof rank === "number" ? rank : Number(rank);
+  const normalizedRank = typeof rank === "number" ? rank : Number(rank);
+  return Number.isFinite(normalizedRank) ? Math.max(0, normalizedRank) : 0;
 }
 
-function normalizeLimit(limit: number | undefined): number {
+function resolveSearchLimit(
+  optionLimit: number | undefined,
+  configOverride: Partial<MemoryProviderConfig> | undefined,
+  config: MemoryProviderConfig,
+): number | undefined {
+  if (optionLimit !== undefined) {
+    return normalizeOptionalLimit(optionLimit);
+  }
+
+  if (
+    configOverride &&
+    Object.prototype.hasOwnProperty.call(configOverride, "maxResults")
+  ) {
+    return normalizeOptionalLimit(configOverride.maxResults);
+  }
+
+  return config.maxResults ?? DEFAULT_NOOSPHERE_MAX_RESULTS;
+}
+
+function normalizeOptionalLimit(limit: number | undefined): number | undefined {
   if (limit === undefined || !Number.isFinite(limit) || limit <= 0) {
-    return DEFAULT_NOOSPHERE_MAX_RESULTS;
+    return undefined;
   }
 
   return Math.max(1, Math.floor(limit));
