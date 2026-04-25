@@ -119,3 +119,11 @@ export function defineMemoryResult(input: MemoryResultInput): MemoryResult {
       estimateMemoryTokens(input.summary || input.content),
   };
 }
+
+export function removeUndefined<T extends Record<string, unknown>>(
+  value: T,
+): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  ) as Partial<T>;
+}

@@ -5,7 +5,7 @@ import type {
   MemoryProviderGetOptions,
   MemoryProviderSearchOptions,
 } from "./provider";
-import { defineMemoryResult } from "./types";
+import { defineMemoryResult, removeUndefined } from "./types";
 import type { MemoryProviderMetadata, MemoryResult } from "./types";
 
 export type HindsightMemoryType = "world" | "experience" | "observation";
@@ -352,10 +352,4 @@ function parseHindsightErrorBody(body: string): string | undefined {
   }
 
   return undefined;
-}
-
-function removeUndefined<T extends Record<string, unknown>>(value: T): Partial<T> {
-  return Object.fromEntries(
-    Object.entries(value).filter(([, entry]) => entry !== undefined),
-  ) as Partial<T>;
 }

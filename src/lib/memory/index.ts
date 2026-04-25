@@ -9,6 +9,11 @@ export type {
 } from "./hindsight";
 
 export type {
+  NoosphereProviderSettings,
+  NoosphereSearchOptionsMetadata,
+} from "./noosphere";
+
+export type {
   MemoryProvider,
   MemoryProviderCapabilities,
   MemoryProviderConfig,
@@ -29,6 +34,7 @@ export type {
 } from "./types";
 
 export { createHindsightProvider, HindsightProvider } from "./hindsight";
+export { createNoosphereProvider, NoosphereProvider } from "./noosphere";
 
 export {
   DEFAULT_MEMORY_PROVIDER_CAPABILITIES,
@@ -43,4 +49,5 @@ export {
   estimateMemoryTokens,
   normalizeMemoryTokenEstimate,
   normalizeMemoryScore,
+  removeUndefined,
 } from "./types";
