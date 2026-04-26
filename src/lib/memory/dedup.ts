@@ -99,8 +99,10 @@ export class CrossProviderDeduplicator {
   /**
    * Deduplicate results that share the same `canonicalRef`.
    *
-   * When no `canonicalRef` is set, the result is treated as unique and passes
-   * through without deduplication.
+   * When no `canonicalRef` is set, a deterministic fallback key
+   * `${providerId}:${result.id}` is used instead. This means entries from the
+   * same provider with the same local ID will still be collapsed, while
+   * entries from different providers (or with different IDs) remain separate.
    *
    * For each group of duplicates, the "winning" result is selected according
    * to the configured strategy. Provenance from all providers is preserved.

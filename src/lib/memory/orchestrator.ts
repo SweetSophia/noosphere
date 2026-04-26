@@ -74,6 +74,9 @@ export interface RecallResultRanked extends MemoryResult {
 
   /** Which provider this result came from. */
   providerId: string;
+
+  /** Cross-provider provenance (all providers that returned this same memory). */
+  provenance?: import("./dedup").ProviderProvenance[];
 }
 
 export interface RecallResponse {
@@ -316,6 +319,7 @@ export class RecallOrchestrator {
           recency: item.result.recencyScore,
         },
         providerId: item.providerId,
+        provenance: item.provenance.length > 1 ? item.provenance : undefined,
         rank: 0, // placeholder, assigned after sort
       }))
       // Re-sort by the winning entry's composite score to ensure correct

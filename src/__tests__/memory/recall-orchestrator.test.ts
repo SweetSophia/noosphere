@@ -686,6 +686,87 @@ async function main() {
     );
   });
 
+  // ─── Dedup strategy integration ──────────────────────────────────────────
+
+  test("dedup with provider-priority strategy picks correct winner", async () => {
+    const sharedRef = "shared-memory-1";
+    const noosphereResults = [
+      mockResult({
+        id: "n-1",
+        provider: "noosphere",
+        content: "Noosphere version",
+        relevanceScore: 0.9,
+        canonicalRef: sharedRef,
+      }),
+    ];
+    const hindsightResults = [
+      mockResult({
+        id: "h-1",
+        provider: "hindsight",
+        content: "Hindsight version",
+        relevanceScore: 0.5,
+        canonicalRef: sharedRef,
+      }),
+    ];
+
+    const orchestrator = new RecallOrchestrator({
+      providers: [
+        { provider: mockProvider("noosphere", noosphereResults) },
+        { provider: mockProvider("hindsight", hindsightResults) },
+      ],
+      deduplication: {
+        strategy: "provider-priority",
+        providerPriority: ["noosphere"],
+      },
+    });
+
+    const response = await orchestrator.recall({ query: "test", mode: "inspection" });
+    assertEqual(response.results.length, 1, "deduped to one");
+    assertEqual(response.results[0].providerId, "noosphere", "noosphere wins via priority");
+    assertEqual(response.results[0].content, "Noosphere version", "correct content");
+    assert(response.results[0].provenance != null, "provenance populated");
+    assertEqual(response.results[0].provenance!.length, 2, "both providers in provenance");
+    assert(response.dedupStats != null, "dedupStats present");
+    assertEqual(response.dedupStats!.collapsedTotal, 1, "1 collapsed");
+  });
+
+  test("dedup with most-recent strategy picks newer result", async () => {
+    const sharedRef = "shared-memory-2";
+    const oldResults = [
+      mockResult({
+        id: "old",
+        provider: "archiver",
+        content: "Old version",
+        relevanceScore: 0.9,
+        canonicalRef: sharedRef,
+        updatedAt: "2026-01-01T00:00:00Z",
+      }),
+    ];
+    const newResults = [
+      mockResult({
+        id: "new",
+        provider: "live",
+        content: "New version",
+        relevanceScore: 0.3,
+        canonicalRef: sharedRef,
+        updatedAt: "2026-06-01T00:00:00Z",
+      }),
+    ];
+
+    const orchestrator = new RecallOrchestrator({
+      providers: [
+        { provider: mockProvider("archiver", oldResults) },
+        { provider: mockProvider("live", newResults) },
+      ],
+      deduplication: { strategy: "most-recent" },
+    });
+
+    const response = await orchestrator.recall({ query: "test", mode: "inspection" });
+    assertEqual(response.results.length, 1, "deduped to one");
+    assertEqual(response.results[0].providerId, "live", "live wins via recency");
+    assertEqual(response.results[0].content, "New version", "correct content");
+  });
+
   // ─── Wait for all async tests ───────────────────────────────────────────
 
   await Promise.all(pending);

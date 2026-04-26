@@ -5,6 +5,16 @@
  * budget limits, verbosity, and per-provider configuration without touching
  * code. Designed to be serializable (JSON) for storage or API transport.
  *
+ * ## Design note: Settings vs Orchestrator config
+ *
+ * `RecallSettings` is a user-facing config model (stored, serialized, exposed
+ * via API). `RecallOrchestratorOptions` is the programmatic config passed to the
+ * orchestrator constructor. Settings like `deduplicationStrategy` and
+ * `providerPriorityWeights` map to `RecallOrchestratorOptions.deduplication` and
+ * per-provider weights at the wiring layer — they are separate entry points by
+ * design so that the orchestrator remains decoupled from any particular storage
+ * or API format.
+ *
  * @module recall-settings
  */
 
