@@ -66,6 +66,9 @@ export interface RecallResultRanked extends MemoryResult {
 
   /** Which provider this result came from. */
   providerId: string;
+
+  /** Estimated prompt tokens after budget enforcement (auto mode). */
+  tokenEstimate?: number;
 }
 
 export interface RecallResponse {
