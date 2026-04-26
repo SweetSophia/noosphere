@@ -486,6 +486,8 @@ function applyRecallBudget(
   const budgeted = budget.apply(results);
 
   return {
+    // Overwrites the inherited MemoryResult.tokenEstimate with the
+    // budget-adjusted estimate from ContextBudgetManager.
     results: budgeted.results.map((entry) => ({
       ...entry.result,
       tokenEstimate: entry.tokenEstimate,
