@@ -14,6 +14,13 @@ export type {
 } from "./noosphere";
 
 export type {
+  BudgetEntry,
+  BudgetVerbosity,
+  ContextBudgetConfig,
+  BudgetResult,
+} from "./budget";
+
+export type {
   MemoryProvider,
   MemoryProviderCapabilities,
   MemoryProviderConfig,
@@ -48,6 +55,11 @@ export type {
   RecallResponse,
   RecallResultRanked,
 } from "./orchestrator";
+
+export {
+  ContextBudgetManager,
+  createContextBudgetManager,
+} from "./budget";
 
 export {
   DEFAULT_MEMORY_PROVIDER_CAPABILITIES,

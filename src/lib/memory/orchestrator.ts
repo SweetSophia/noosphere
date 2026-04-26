@@ -3,14 +3,12 @@ import type {
   MemoryProviderConfig,
   MemoryProviderSearchOptions,
 } from "./provider";
+import { ContextBudgetManager } from "./budget";
 import {
   getEffectiveAutoRecall,
   normalizeMemoryProviderConfig,
 } from "./provider";
-import {
-  estimateMemoryTokens,
-  normalizeMemoryScore,
-} from "./types";
+import { normalizeMemoryScore } from "./types";
 import type { MemoryResult, MemoryScore } from "./types";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -160,14 +158,10 @@ export class RecallOrchestrator {
 
     const totalBeforeCap = ranked.length;
 
-    // Apply global cap.
-    const capped = ranked.slice(0, effectiveCap);
-
-    // Estimate tokens for auto-recall budget.
     const budgeted =
       query.mode === "auto" && effectiveBudget !== undefined
-        ? this.applyTokenBudget(capped, effectiveBudget)
-        : { results: capped, tokenBudgetUsed: undefined };
+        ? applyRecallBudget(ranked, effectiveCap, effectiveBudget)
+        : { results: ranked.slice(0, effectiveCap), tokenBudgetUsed: undefined };
 
     // Build prompt injection text for auto mode.
     const promptInjectionText =
@@ -340,52 +334,6 @@ export class RecallOrchestrator {
     return normalizeMemoryScore(raw * weight);
   }
 
-  // ─── Token budget ─────────────────────────────────────────────────────
-
-  private applyTokenBudget(
-    results: RecallResultRanked[],
-    budget: number,
-  ): { results: RecallResultRanked[]; tokenBudgetUsed: number } {
-    const budgeted: RecallResultRanked[] = [];
-    let remaining = budget;
-    let tokenBudgetUsed = 0;
-
-    for (const result of results) {
-      const tokens = estimateMemoryTokens(result.content);
-
-      if (tokens > remaining) {
-        // Try summary instead if it fits.
-        const summaryTokens = result.summary
-          ? estimateMemoryTokens(result.summary)
-          : tokens;
-
-        if (summaryTokens <= remaining) {
-          // Use summary-only version.
-          budgeted.push({
-            ...result,
-            content: result.summary!,
-            tokenEstimate: summaryTokens,
-          });
-          remaining -= summaryTokens;
-          tokenBudgetUsed += summaryTokens;
-          continue;
-        }
-
-        // Neither fits — stop.
-        break;
-      }
-
-      budgeted.push({
-        ...result,
-        tokenEstimate: tokens,
-      });
-      remaining -= tokens;
-      tokenBudgetUsed += tokens;
-    }
-
-    return { results: budgeted, tokenBudgetUsed };
-  }
-
   // ─── Prompt injection formatting ──────────────────────────────────────
 
   private formatPromptInjection(
@@ -527,6 +475,23 @@ function normalizePositiveInteger(
 
 function elapsedMs(start: number): number {
   return Math.round(performance.now() - start);
+}
+
+function applyRecallBudget(
+  results: RecallResultRanked[],
+  maxResults: number,
+  maxTokens: number,
+): { results: RecallResultRanked[]; tokenBudgetUsed: number } {
+  const budget = new ContextBudgetManager({ maxResults, maxTokens });
+  const budgeted = budget.apply(results);
+
+  return {
+    results: budgeted.results.map((entry) => ({
+      ...entry.result,
+      tokenEstimate: entry.tokenEstimate,
+    })),
+    tokenBudgetUsed: budgeted.tokensUsed,
+  };
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────────────
