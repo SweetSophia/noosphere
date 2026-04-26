@@ -5,6 +5,11 @@ import type {
 } from "./provider";
 import { ContextBudgetManager } from "./budget";
 import {
+  CrossProviderDeduplicator,
+  createDeduplicator,
+  type DeduplicationConfig,
+} from "./dedup";
+import {
   getEffectiveAutoRecall,
   normalizeMemoryProviderConfig,
 } from "./provider";
@@ -32,6 +37,9 @@ export interface RecallOrchestratorOptions {
 
   /** Maximum concurrent provider queries. Default: all at once. */
   concurrency?: number;
+
+  /** Cross-provider deduplication configuration. */
+  deduplication?: DeduplicationConfig;
 }
 
 export interface RecallQuery {
@@ -86,6 +94,9 @@ export interface RecallResponse {
 
   /** Per-provider query metadata. */
   providerMeta: RecallProviderMeta[];
+
+  /** Deduplication statistics. */
+  dedupStats?: import("./dedup").DeduplicationStats;
 }
 
 export interface RecallProviderMeta {
@@ -122,6 +133,7 @@ export class RecallOrchestrator {
   private readonly globalResultCap: number;
   private readonly autoRecallTokenBudget: number;
   private readonly concurrency: number;
+  private readonly deduplicator: CrossProviderDeduplicator;
 
   constructor(options: RecallOrchestratorOptions) {
     if (!options.providers || options.providers.length === 0) {
@@ -140,6 +152,7 @@ export class RecallOrchestrator {
       options.concurrency,
       options.providers.length,
     );
+    this.deduplicator = createDeduplicator(options.deduplication);
   }
 
   async recall(query: RecallQuery): Promise<RecallResponse> {
@@ -153,8 +166,8 @@ export class RecallOrchestrator {
     // Fan out to all enabled providers concurrently.
     const providerResults = await this.fanOut(query);
 
-    // Merge, score, and rank all results.
-    const ranked = this.rankResults(providerResults);
+    // Merge, score, deduplicate, and rank all results.
+    const { ranked, dedupStats } = this.rankResults(providerResults);
 
     const totalBeforeCap = ranked.length;
 
@@ -175,6 +188,7 @@ export class RecallOrchestrator {
       mode: query.mode,
       tokenBudgetUsed: budgeted.tokenBudgetUsed,
       promptInjectionText,
+      dedupStats,
       providerMeta: providerResults.map((pr) => ({
         providerId: pr.providerId,
         resultCount: pr.results.length,
@@ -266,7 +280,7 @@ export class RecallOrchestrator {
 
   private rankResults(
     providerResults: ProviderFanOutResult[],
-  ): RecallResultRanked[] {
+  ): { ranked: RecallResultRanked[]; dedupStats: import("./dedup").DeduplicationStats } {
     const allResults: ScorableResult[] = [];
 
     for (const pr of providerResults) {
@@ -287,29 +301,26 @@ export class RecallOrchestrator {
       return (b.result.relevanceScore ?? 0) - (a.result.relevanceScore ?? 0);
     });
 
-    // Deduplicate by canonicalRef.
-    const seen = new Set<string>();
-    const deduped: ScorableResult[] = [];
-    for (const item of allResults) {
-      const key = item.result.canonicalRef ?? `${item.providerId}:${item.result.id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      deduped.push(item);
-    }
+    // Deduplicate using cross-provider deduplicator.
+    const dedupResult = this.deduplicator.dedup(allResults);
 
-    return deduped.map((item, index) =>
+    const ranked = dedupResult.results.map((item, index) =>
       ({
         ...item.result,
         rank: index + 1,
-        compositeScore: item.compositeScore,
+        compositeScore: allResults.find(
+          (r) => r.result === item.result,
+        )?.compositeScore ?? 0,
         providerScores: {
           relevance: item.result.relevanceScore,
           confidence: item.result.confidenceScore,
           recency: item.result.recencyScore,
         },
-        providerId: item.providerId,
+        providerId: item.provenance[0]?.providerId ?? "unknown",
       }) as RecallResultRanked,
     );
+
+    return { ranked, dedupStats: dedupResult.stats };
   }
 
   private computeCompositeScore(
