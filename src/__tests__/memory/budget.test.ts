@@ -98,6 +98,21 @@ async function main() {
     });
     assertEqual(mgr.maxTokens, 2000, "negative falls back to default");
     assertEqual(mgr.maxResults, 20, "NaN falls back to default");
+
+    const zero = new ContextBudgetManager({ maxTokens: 0, maxResults: 0 });
+    assertEqual(zero.maxTokens, 2000, "zero maxTokens falls back to default");
+    assertEqual(zero.maxResults, 20, "zero maxResults falls back to default");
+
+    const infinite = new ContextBudgetManager({
+      maxTokens: Infinity,
+      maxResults: Infinity,
+    });
+    assertEqual(infinite.maxTokens, 2000, "Infinity maxTokens falls back");
+    assertEqual(infinite.maxResults, 20, "Infinity maxResults falls back");
+
+    const float = new ContextBudgetManager({ maxTokens: 3.7, maxResults: 2.9 });
+    assertEqual(float.maxTokens, 3, "float maxTokens floors");
+    assertEqual(float.maxResults, 2, "float maxResults floors");
   });
 
   test("factory returns instance", () => {
@@ -122,6 +137,8 @@ async function main() {
     assertEqual(budgetResult.results.length, 3, "capped to maxResults");
     assertEqual(budgetResult.totalBeforeBudget, 10, "total before budget");
     assertEqual(budgetResult.droppedCount, 7, "7 dropped");
+    assertEqual(budgetResult.droppedByResultCap, 7, "7 dropped by count cap");
+    assertEqual(budgetResult.droppedByTokenBudget, 0, "none dropped by tokens");
   });
 
   // ─── Token budget enforcement ──────────────────────────────────────────
@@ -177,8 +194,33 @@ async function main() {
     const budgetResult = mgr.apply(results);
     assertEqual(budgetResult.results.length, 1, "result included");
     assertEqual(budgetResult.results[0].usedSummary, true, "used summary");
+    assertEqual(budgetResult.results[0].result.content, "Short", "result content is summary");
     assertEqual(budgetResult.results[0].tokenEstimate, 2, "summary tokens ~2");
     assertEqual(budgetResult.trimmedCount, 1, "1 trimmed");
+  });
+
+  test("tracks usedSummary for long standard summaries", () => {
+    const mgr = new ContextBudgetManager({
+      maxTokens: 1000,
+      summaryFirst: true,
+    });
+
+    const longSummary = "S".repeat(300);
+    const budgetResult = mgr.apply([
+      mockResult({
+        id: "1",
+        provider: "test",
+        content: "Full content",
+        summary: longSummary,
+      }),
+    ]);
+
+    assertEqual(budgetResult.results[0].usedSummary, true, "used long summary");
+    assertEqual(
+      budgetResult.results[0].result.content,
+      longSummary,
+      "standard emits untruncated summary",
+    );
   });
 
   test("uses full content when summaryFirst is false", () => {
@@ -221,6 +263,11 @@ async function main() {
     const budgetResult = mgr.apply(results);
     assertEqual(budgetResult.results.length, 1, "result included via fallback");
     assertEqual(budgetResult.results[0].usedSummary, true, "fell back to summary");
+    assertEqual(
+      budgetResult.results[0].result.content,
+      "Short summary",
+      "fallback substitutes summary content",
+    );
     assertEqual(budgetResult.trimmedCount, 1, "1 trimmed");
   });
 
@@ -242,6 +289,7 @@ async function main() {
     const budgetResult = mgr.apply(results);
     assertEqual(budgetResult.results.length, 0, "nothing fits");
     assertEqual(budgetResult.droppedCount, 1, "1 dropped");
+    assertEqual(budgetResult.droppedByTokenBudget, 1, "1 dropped by token budget");
   });
 
   // ─── Verbosity control ─────────────────────────────────────────────────
@@ -264,6 +312,60 @@ async function main() {
     assertEqual(budgetResult.results.length, 1, "result included");
     // Minimal caps at 60 tokens per result
     assertEqual(budgetResult.results[0].tokenEstimate, 60, "capped at 60");
+    assertEqual(
+      budgetResult.results[0].usedSummary,
+      false,
+      "truncating content is not summary use",
+    );
+    assertEqual(
+      budgetResult.results[0].result.content.length,
+      240,
+      "minimal content is truncated to 60-token char cap",
+    );
+  });
+
+  test("minimal verbosity uses summary even when summaryFirst is false", () => {
+    const mgr = new ContextBudgetManager({
+      maxTokens: 1000,
+      summaryFirst: false,
+      verbosity: "minimal",
+    });
+
+    const budgetResult = mgr.apply([
+      mockResult({
+        id: "1",
+        provider: "test",
+        content: "Full content",
+        summary: "Summary",
+      }),
+    ]);
+
+    assertEqual(budgetResult.results[0].usedSummary, true, "minimal used summary");
+    assertEqual(
+      budgetResult.results[0].result.content,
+      "Summary",
+      "minimal emits summary content",
+    );
+  });
+
+  test("minimal verbosity can fall back from oversized summary to content", () => {
+    const mgr = new ContextBudgetManager({
+      maxTokens: 5,
+      verbosity: "minimal",
+    });
+
+    const budgetResult = mgr.apply([
+      mockResult({
+        id: "1",
+        provider: "test",
+        content: "Fit",
+        summary: "S".repeat(300), // truncated to ~60 tokens, still won't fit
+      }),
+    ]);
+
+    assertEqual(budgetResult.results.length, 1, "content fallback fits");
+    assertEqual(budgetResult.results[0].usedSummary, false, "used content fallback");
+    assertEqual(budgetResult.results[0].result.content, "Fit", "emits content");
   });
 
   test("standard verbosity does not cap per-result tokens", () => {
@@ -284,6 +386,26 @@ async function main() {
     assertEqual(budgetResult.results[0].tokenEstimate, 100, "full estimate");
   });
 
+  test("summary-first can fall back to shorter full content", () => {
+    const mgr = new ContextBudgetManager({
+      maxTokens: 5,
+      summaryFirst: true,
+    });
+
+    const budgetResult = mgr.apply([
+      mockResult({
+        id: "1",
+        provider: "test",
+        content: "Fit",
+        summary: "A".repeat(40), // ~10 tokens, won't fit
+      }),
+    ]);
+
+    assertEqual(budgetResult.results.length, 1, "content fallback fits");
+    assertEqual(budgetResult.results[0].usedSummary, false, "used full content");
+    assertEqual(budgetResult.results[0].result.content, "Fit", "emits content");
+  });
+
   test("detailed verbosity uses full content", () => {
     const mgr = new ContextBudgetManager({
       maxTokens: 10000,
@@ -301,13 +423,13 @@ async function main() {
     ];
 
     const budgetResult = mgr.apply(results);
-    // summaryFirst is true so selectContent returns summary for standard,
-    // but detailed mode should use full content regardless.
-    // NOTE: current implementation uses summaryFirst in selectContent for
-    // all modes. This test documents expected behavior. If "detailed"
-    // should force full content, selectContent needs a verbosity check.
-    // For now, summaryFirst governs content selection.
     assertEqual(budgetResult.results.length, 1, "result included");
+    assertEqual(budgetResult.results[0].usedSummary, false, "detailed uses content");
+    assertEqual(
+      budgetResult.results[0].result.content,
+      "Full content here",
+      "detailed emits full content",
+    );
   });
 
   // ─── getContent helper ─────────────────────────────────────────────────
@@ -331,6 +453,20 @@ async function main() {
       content: "Full content",
     });
     assertEqual(mgr.getContent(result), "Full content", "returns content");
+  });
+
+  test("getContent returns full content in detailed mode", () => {
+    const mgr = new ContextBudgetManager({
+      summaryFirst: true,
+      verbosity: "detailed",
+    });
+    const result = mockResult({
+      id: "1",
+      provider: "test",
+      content: "Full content",
+      summary: "Summary",
+    });
+    assertEqual(mgr.getContent(result), "Full content", "detailed returns content");
   });
 
   test("getContent returns full content when summaryFirst is false", () => {

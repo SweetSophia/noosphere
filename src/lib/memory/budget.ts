@@ -45,21 +45,32 @@ export interface BudgetResult<T extends MemoryResult> {
   /** Estimated tokens consumed by the emitted results. */
   tokensUsed: number;
 
-  /** Results that were trimmed (downgraded from content to summary). */
+  /** Results whose emitted content was shortened or replaced by a summary. */
   trimmedCount: number;
 
-  /** Results that were dropped entirely because they didn't fit. */
+  /** Results excluded by either max-result or token-budget enforcement. */
   droppedCount: number;
+
+  /** Results excluded by the maxResults cap before token budgeting. */
+  droppedByResultCap: number;
+
+  /** Results excluded because they did not fit the token budget. */
+  droppedByTokenBudget: number;
 }
 
 export interface BudgetEntry<T extends MemoryResult> {
-  /** The (possibly summary-substituted) result. */
+  /** The result with content adjusted to the budgeted emitted content. */
   result: T;
 
   /** Token estimate for the emitted content. */
   tokenEstimate: number;
 
-  /** Whether the entry was downgraded from full content to summary. */
+  /** Whether the emitted content is the result summary. */
+  usedSummary: boolean;
+}
+
+interface ContentSelection {
+  content: string;
   usedSummary: boolean;
 }
 
@@ -72,6 +83,7 @@ const DEFAULT_VERBOSITY: BudgetVerbosity = "standard";
 
 /** In minimal mode, cap each individual result's tokens to this. */
 const MINIMAL_PER_RESULT_TOKEN_CAP = 60;
+const MINIMAL_PER_RESULT_CHAR_CAP = MINIMAL_PER_RESULT_TOKEN_CAP * 4;
 
 // ─── Budget Manager ──────────────────────────────────────────────────────────
 
@@ -85,7 +97,7 @@ export class ContextBudgetManager {
     this.maxTokens = normalizePositiveFinite(config.maxTokens, DEFAULT_MAX_TOKENS);
     this.maxResults = normalizePositiveFinite(config.maxResults, DEFAULT_MAX_RESULTS);
     this.summaryFirst = config.summaryFirst ?? DEFAULT_SUMMARY_FIRST;
-    this.verbosity = config.verbosity ?? DEFAULT_VERBOSITY;
+    this.verbosity = normalizeVerbosity(config.verbosity);
   }
 
   /**
@@ -99,51 +111,47 @@ export class ContextBudgetManager {
 
     // Phase 1: hard cap on count.
     const capped = results.slice(0, this.maxResults);
+    const droppedByResultCap = Math.max(0, totalBeforeBudget - capped.length);
 
     // Phase 2: token budget with summary-first preference.
     const budgeted: BudgetEntry<T>[] = [];
     let tokensUsed = 0;
     let trimmedCount = 0;
+    let droppedByTokenBudget = 0;
 
     for (const result of capped) {
-      const content = this.selectContent(result);
+      const selection = this.selectContent(result);
+      const { content } = selection;
       const tokens = estimateMemoryTokens(content);
 
-      // Check if this single result exceeds the per-result cap in minimal mode.
-      const effectiveTokens = this.effectiveTokenCap(tokens, content, result);
+      if (tokensUsed + tokens > this.maxTokens) {
+        const fallback = this.selectFallbackContent(result, selection);
 
-      if (tokensUsed + effectiveTokens > this.maxTokens) {
-        // Try summary fallback if we haven't already used it.
-        if (content === result.content && result.summary) {
-          const summaryTokens = estimateMemoryTokens(result.summary);
-          const effectiveSummary = this.effectiveTokenCap(
-            summaryTokens,
-            result.summary,
-            result,
-          );
-
-          if (tokensUsed + effectiveSummary <= this.maxTokens) {
+        if (fallback) {
+          const fallbackTokens = estimateMemoryTokens(fallback.content);
+          if (tokensUsed + fallbackTokens <= this.maxTokens) {
             budgeted.push({
-              result,
-              tokenEstimate: effectiveSummary,
-              usedSummary: true,
+              result: withBudgetedContent(result, fallback.content),
+              tokenEstimate: fallbackTokens,
+              usedSummary: fallback.usedSummary,
             });
-            tokensUsed += effectiveSummary;
+            tokensUsed += fallbackTokens;
             trimmedCount++;
             continue;
           }
         }
-        // Doesn't fit — skip. Remaining results won't fit either (ordered
-        // by rank, so they're equal or larger).
+        droppedByTokenBudget = capped.length - budgeted.length;
+        // Policy: stop here to preserve ranked order. Lower-ranked results are
+        // not considered even if they might be smaller and fit the remaining budget.
         break;
       }
 
       budgeted.push({
-        result,
-        tokenEstimate: effectiveTokens,
-        usedSummary: content !== result.content,
+        result: withBudgetedContent(result, content),
+        tokenEstimate: tokens,
+        usedSummary: selection.usedSummary,
       });
-      tokensUsed += effectiveTokens;
+      tokensUsed += tokens;
       if (content !== result.content) {
         trimmedCount++;
       }
@@ -158,6 +166,8 @@ export class ContextBudgetManager {
       tokensUsed,
       trimmedCount,
       droppedCount,
+      droppedByResultCap,
+      droppedByTokenBudget,
     };
   }
 
@@ -166,32 +176,58 @@ export class ContextBudgetManager {
    * and summary-first settings.
    */
   getContent<T extends MemoryResult>(result: T): string {
-    return this.selectContent(result);
+    return this.selectContent(result).content;
   }
 
   // ─── Private ───────────────────────────────────────────────────────────
 
-  private selectContent<T extends MemoryResult>(result: T): string {
-    if (this.summaryFirst && result.summary) {
-      return result.summary;
+  private selectContent<T extends MemoryResult>(result: T): ContentSelection {
+    if (this.verbosity === "detailed") {
+      return { content: result.content, usedSummary: false };
     }
-    return result.content;
+
+    if (this.verbosity === "minimal") {
+      return result.summary
+        ? { content: truncateForMinimal(result.summary), usedSummary: true }
+        : { content: truncateForMinimal(result.content), usedSummary: false };
+    }
+
+    if (this.summaryFirst && result.summary) {
+      return { content: result.summary, usedSummary: true };
+    }
+
+    return { content: result.content, usedSummary: false };
   }
 
-  /**
-   * In minimal verbosity, truncate each result to a token cap.
-   * Returns the effective token count (may be less than raw estimate
-   * if the content was truncated).
-   */
-  private effectiveTokenCap(
-    tokens: number,
-    _content: string,
-    _result: MemoryResult,
-  ): number {
-    if (this.verbosity === "minimal" && tokens > MINIMAL_PER_RESULT_TOKEN_CAP) {
-      return MINIMAL_PER_RESULT_TOKEN_CAP;
+  private selectFallbackContent<T extends MemoryResult>(
+    result: T,
+    selected: ContentSelection,
+  ): ContentSelection | undefined {
+    if (this.verbosity === "detailed") {
+      return undefined;
     }
-    return tokens;
+
+    if (result.summary && !selected.usedSummary) {
+      return {
+        content:
+          this.verbosity === "minimal"
+            ? truncateForMinimal(result.summary)
+            : result.summary,
+        usedSummary: true,
+      };
+    }
+
+    if (selected.content !== result.content) {
+      const content =
+        this.verbosity === "minimal"
+          ? truncateForMinimal(result.content)
+          : result.content;
+      if (content !== selected.content) {
+        return { content, usedSummary: false };
+      }
+    }
+
+    return undefined;
   }
 }
 
@@ -205,6 +241,25 @@ function normalizePositiveFinite(
     return Math.max(1, Math.floor(fallback));
   }
   return Math.max(1, Math.floor(value));
+}
+
+function normalizeVerbosity(value: BudgetVerbosity | undefined): BudgetVerbosity {
+  return value === "minimal" || value === "standard" || value === "detailed"
+    ? value
+    : DEFAULT_VERBOSITY;
+}
+
+function truncateForMinimal(content: string): string {
+  return content.length > MINIMAL_PER_RESULT_CHAR_CAP
+    ? content.slice(0, MINIMAL_PER_RESULT_CHAR_CAP)
+    : content;
+}
+
+function withBudgetedContent<T extends MemoryResult>(
+  result: T,
+  content: string,
+): T {
+  return content === result.content ? result : ({ ...result, content } as T);
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────────────
