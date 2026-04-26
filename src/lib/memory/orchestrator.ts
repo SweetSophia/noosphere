@@ -304,21 +304,27 @@ export class RecallOrchestrator {
     // Deduplicate using cross-provider deduplicator.
     const dedupResult = this.deduplicator.dedup(allResults);
 
-    const ranked = dedupResult.results.map((item, index) =>
-      ({
+    // Map deduplicated results to ranked format, carrying winner's score
+    // and provider ID directly from the deduplicator output.
+    const ranked = dedupResult.results
+      .map((item): RecallResultRanked => ({
         ...item.result,
-        rank: index + 1,
-        compositeScore: allResults.find(
-          (r) => r.result === item.result,
-        )?.compositeScore ?? 0,
+        compositeScore: item.compositeScore,
         providerScores: {
           relevance: item.result.relevanceScore,
           confidence: item.result.confidenceScore,
           recency: item.result.recencyScore,
         },
-        providerId: item.provenance[0]?.providerId ?? "unknown",
-      }) as RecallResultRanked,
-    );
+        providerId: item.providerId,
+        rank: 0, // placeholder, assigned after sort
+      }))
+      // Re-sort by the winning entry's composite score to ensure correct
+      // cross-group ranking regardless of dedup strategy.
+      .sort((a, b) => b.compositeScore - a.compositeScore)
+      .map((item, index) => ({
+        ...item,
+        rank: index + 1,
+      }));
 
     return { ranked, dedupStats: dedupResult.stats };
   }

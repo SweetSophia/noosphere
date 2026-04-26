@@ -58,6 +58,12 @@ export interface DeduplicatedResult {
 
   /** Number of duplicates that were collapsed. */
   collapsedCount: number;
+
+  /** The provider ID of the winning result. */
+  providerId: string;
+
+  /** The composite score of the winning result. */
+  compositeScore: number;
 }
 
 export interface DeduplicationStats {
@@ -102,13 +108,13 @@ export class CrossProviderDeduplicator {
   dedup(
     entries: ScoredCandidate[],
   ): DeduplicationResult {
+    // Group by canonicalRef. Entries without canonicalRef use a deterministic
+    // fallback key (providerId:localId) so same-provider duplicates are still
+    // collapsed when they share the same local ID.
     const groups = new Map<string, ScoredCandidate[]>();
 
-    // Group by canonicalRef. Entries without canonicalRef get a unique key
-    // so they never collapse with anything.
-    let uniqueCounter = 0;
     for (const entry of entries) {
-      const key = entry.result.canonicalRef ?? `__unique_${uniqueCounter++}`;
+      const key = entry.result.canonicalRef ?? `${entry.providerId}:${entry.result.id}`;
       let group = groups.get(key);
       if (!group) {
         group = [];
@@ -136,6 +142,8 @@ export class CrossProviderDeduplicator {
         result: winner.result,
         provenance,
         collapsedCount,
+        providerId: winner.providerId,
+        compositeScore: winner.compositeScore,
       });
     }
 

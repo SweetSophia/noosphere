@@ -94,14 +94,14 @@ export function normalizeRecallSettings(
 
   const enabledProviders = Array.isArray(input.enabledProviders)
     ? input.enabledProviders.filter((p): p is string => typeof p === "string")
-    : DEFAULT_RECALL_SETTINGS.enabledProviders;
+    : [...DEFAULT_RECALL_SETTINGS.enabledProviders];
 
   const providerPriorityWeights =
     input.providerPriorityWeights &&
     typeof input.providerPriorityWeights === "object" &&
     !Array.isArray(input.providerPriorityWeights)
       ? normalizePriorityWeights(input.providerPriorityWeights)
-      : DEFAULT_RECALL_SETTINGS.providerPriorityWeights;
+      : { ...DEFAULT_RECALL_SETTINGS.providerPriorityWeights };
 
   const summaryFirst =
     typeof input.summaryFirst === "boolean"

@@ -117,7 +117,20 @@ async function main() {
     assertEqual(result.stats.collapsedTotal, 0, "nothing collapsed");
   });
 
-  test("entries without canonicalRef are treated as unique", () => {
+  test("entries without canonicalRef dedup by providerId:id fallback", () => {
+    const dedup = new CrossProviderDeduplicator();
+    // Same provider + same id → should collapse (same fallback key)
+    const entries = [
+      candidate({ id: "1", provider: "a", providerId: "a", compositeScore: 0.9 }),
+      candidate({ id: "1", provider: "a", providerId: "a", compositeScore: 0.8 }),
+    ];
+
+    const result = dedup.dedup(entries);
+    assertEqual(result.results.length, 1, "collapsed by fallback key");
+    assertEqual(result.stats.collapsedTotal, 1, "1 collapsed");
+  });
+
+  test("entries without canonicalRef with different ids stay separate", () => {
     const dedup = new CrossProviderDeduplicator();
     const entries = [
       candidate({ id: "1", provider: "a", providerId: "a", compositeScore: 0.9 }),
@@ -125,7 +138,7 @@ async function main() {
     ];
 
     const result = dedup.dedup(entries);
-    assertEqual(result.results.length, 2, "both unique");
+    assertEqual(result.results.length, 2, "different ids → different fallback keys");
     assertEqual(result.stats.collapsedTotal, 0, "nothing collapsed");
   });
 
@@ -253,7 +266,19 @@ async function main() {
 
   // ─── Multiple groups ──────────────────────────────────────────────────
 
-  test("handles multiple dedup groups independently", () => {
+  test("DeduplicatedResult includes winner providerId and compositeScore", () => {
+    const dedup = new CrossProviderDeduplicator({ strategy: "most-recent" });
+    const entries = [
+      candidate({ id: "1", provider: "a", providerId: "a", compositeScore: 0.9, canonicalRef: "shared-ref", updatedAt: "2026-01-01T00:00:00Z" }),
+      candidate({ id: "2", provider: "b", providerId: "b", compositeScore: 0.3, canonicalRef: "shared-ref", updatedAt: "2026-06-01T00:00:00Z" }),
+    ];
+
+    const result = dedup.dedup(entries);
+    assertEqual(result.results[0].providerId, "b", "winner providerId");
+    assertEqual(result.results[0].compositeScore, 0.3, "winner compositeScore");
+  });
+
+  test("multiple dedup groups independently report collapsed counts", () => {
     const dedup = new CrossProviderDeduplicator();
     const entries = [
       candidate({ id: "1", provider: "a", providerId: "a", compositeScore: 0.9, canonicalRef: "ref-a" }),
