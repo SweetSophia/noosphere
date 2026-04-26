@@ -66,9 +66,6 @@ export interface RecallResultRanked extends MemoryResult {
 
   /** Which provider this result came from. */
   providerId: string;
-
-  /** Estimated prompt tokens after budget enforcement (auto mode). */
-  tokenEstimate?: number;
 }
 
 export interface RecallResponse {
@@ -489,6 +486,8 @@ function applyRecallBudget(
   const budgeted = budget.apply(results);
 
   return {
+    // Overwrites the inherited MemoryResult.tokenEstimate with the
+    // budget-adjusted estimate from ContextBudgetManager.
     results: budgeted.results.map((entry) => ({
       ...entry.result,
       tokenEstimate: entry.tokenEstimate,
