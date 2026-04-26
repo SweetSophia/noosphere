@@ -22,7 +22,6 @@ import {
   RecallOrchestrator,
   createRecallOrchestrator,
 } from "@/lib/memory/orchestrator";
-import type { RecallQuery } from "@/lib/memory/orchestrator";
 
 // ─── Test helpers ────────────────────────────────────────────────────────────
 
@@ -123,6 +122,21 @@ async function main() {
       providers: [{ provider: mockProvider("test") }],
     });
     assert(orchestrator instanceof RecallOrchestrator, "instance check");
+  });
+
+  test("constructor rejects duplicate provider IDs", () => {
+    let threw = false;
+    try {
+      new RecallOrchestrator({
+        providers: [
+          { provider: mockProvider("duplicate") },
+          { provider: mockProvider("duplicate") },
+        ],
+      });
+    } catch {
+      threw = true;
+    }
+    assert(threw, "should throw on duplicate provider IDs");
   });
 
   test("createRecallOrchestrator factory returns instance", () => {
@@ -237,6 +251,11 @@ async function main() {
           provider: mockProvider("disabled", []),
           config: { enabled: false },
         },
+        {
+          provider: mockProvider("second-enabled", [
+            mockResult({ id: "2", provider: "second-enabled", content: "hello" }),
+          ]),
+        },
       ],
     });
 
@@ -245,8 +264,20 @@ async function main() {
       mode: "inspection",
     });
 
-    assertEqual(response.providerMeta.length, 1, "only enabled provider");
+    assertEqual(response.providerMeta.length, 3, "all providers reported");
     assertEqual(response.providerMeta[0].providerId, "enabled", "enabled id");
+    assertEqual(response.providerMeta[1].providerId, "disabled", "disabled id");
+    assertEqual(response.providerMeta[1].enabled, false, "disabled provider marked disabled");
+    assertEqual(
+      response.providerMeta[1].skippedReason,
+      "disabled",
+      "disabled skip reason",
+    );
+    assertEqual(
+      response.providerMeta[2].providerId,
+      "second-enabled",
+      "provider metadata preserves registration order",
+    );
   });
 
   // ─── Auto-recall gating ─────────────────────────────────────────────────
@@ -274,8 +305,40 @@ async function main() {
     });
 
     assertEqual(response.results.length, 0, "no results from auto-blocked");
-    // Provider was skipped entirely — no meta entry.
-    assertEqual(response.providerMeta.length, 0, "provider was skipped");
+    assertEqual(response.providerMeta.length, 1, "provider skip reported");
+    assertEqual(response.providerMeta[0].enabled, false, "provider marked skipped");
+    assertEqual(
+      response.providerMeta[0].skippedReason,
+      "auto-recall-disabled",
+      "auto capability skip reason",
+    );
+  });
+
+  test("auto mode respects allowAutoRecall=false provider config", async () => {
+    const provider = mockProvider("config-no-auto", [
+      mockResult({ id: "1", provider: "config-no-auto", content: "hidden" }),
+    ]);
+
+    const orchestrator = new RecallOrchestrator({
+      providers: [
+        {
+          provider,
+          config: { allowAutoRecall: false },
+        },
+      ],
+    });
+
+    const response = await orchestrator.recall({
+      query: "test",
+      mode: "auto",
+    });
+
+    assertEqual(response.results.length, 0, "config blocks auto recall");
+    assertEqual(
+      response.providerMeta[0].skippedReason,
+      "auto-recall-disabled",
+      "config skip reason",
+    );
   });
 
   // ─── Error handling ─────────────────────────────────────────────────────
@@ -295,7 +358,41 @@ async function main() {
     });
 
     assertEqual(response.results.length, 0, "no results on error");
+    assertEqual(response.providerMeta[0].providerId, "failing", "failed provider id");
+    assertEqual(response.providerMeta[0].enabled, true, "failed provider still enabled");
     assertEqual(response.providerMeta[0].error, "DB connection lost", "error message");
+  });
+
+  test("respects provider query concurrency limit", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const makeDelayedProvider = (id: string) =>
+      mockProvider(id, [], {
+        search: async () => {
+          active++;
+          maxActive = Math.max(maxActive, active);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          active--;
+          return [mockResult({ id, provider: id, content: id })];
+        },
+      });
+
+    const orchestrator = new RecallOrchestrator({
+      providers: [
+        { provider: makeDelayedProvider("p1") },
+        { provider: makeDelayedProvider("p2") },
+        { provider: makeDelayedProvider("p3") },
+      ],
+      concurrency: 1,
+    });
+
+    const response = await orchestrator.recall({
+      query: "test",
+      mode: "inspection",
+    });
+
+    assertEqual(response.results.length, 3, "all providers queried");
+    assertEqual(maxActive, 1, "only one provider active at a time");
   });
 
   // ─── Deduplication ──────────────────────────────────────────────────────
@@ -405,8 +502,40 @@ async function main() {
     });
 
     assert(response.results.length < 5, "truncated by budget");
-    assert(response.tokenBudgetUsed === 20, "budget reported");
+    const tokenBudgetUsed = response.tokenBudgetUsed;
+    if (tokenBudgetUsed === undefined) {
+      throw new Error("token usage reported");
+    }
+    assert(tokenBudgetUsed <= 20, "actual usage within budget");
     assert(response.promptInjectionText !== undefined, "has prompt text");
+  });
+
+  test("auto mode budgets full content before falling back to summary", async () => {
+    const results = [
+      mockResult({
+        id: "long",
+        provider: "noosphere",
+        content: "A".repeat(400),
+        summary: "short",
+        tokenEstimate: 2,
+        relevanceScore: 1,
+      }),
+    ];
+
+    const orchestrator = new RecallOrchestrator({
+      providers: [{ provider: mockProvider("noosphere", results) }],
+      autoRecallTokenBudget: 10,
+    });
+
+    const response = await orchestrator.recall({
+      query: "test",
+      mode: "auto",
+    });
+
+    assertEqual(response.results.length, 1, "summary fallback kept result");
+    assertEqual(response.results[0].content, "short", "summary used for output");
+    assertEqual(response.tokenBudgetUsed, 2, "actual summary token usage reported");
+    assert(!response.promptInjectionText?.includes("AAAA"), "long content omitted");
   });
 
   // ─── Prompt injection formatting ────────────────────────────────────────
