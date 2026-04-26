@@ -62,6 +62,28 @@ export {
 } from "./budget";
 
 export {
+  CrossProviderDeduplicator,
+  createDeduplicator,
+} from "./dedup";
+
+export type {
+  DeduplicationConfig,
+  DeduplicationResult,
+  DeduplicationStats,
+  DeduplicationStrategy,
+  ProviderProvenance,
+  DeduplicatedResult,
+} from "./dedup";
+
+export {
+  DEFAULT_RECALL_SETTINGS,
+  mergeRecallSettings,
+  normalizeRecallSettings,
+} from "./settings";
+
+export type { RecallSettings } from "./settings";
+
+export {
   DEFAULT_MEMORY_PROVIDER_CAPABILITIES,
   DEFAULT_MEMORY_PROVIDER_CONFIG,
   getEffectiveAutoRecall,
