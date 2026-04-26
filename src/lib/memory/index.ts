@@ -35,6 +35,19 @@ export type {
 
 export { createHindsightProvider, HindsightProvider } from "./hindsight";
 export { createNoosphereProvider, NoosphereProvider } from "./noosphere";
+export {
+  RecallOrchestrator,
+  createRecallOrchestrator,
+} from "./orchestrator";
+export type {
+  RecallMode,
+  RecallOrchestratorOptions,
+  RecallOrchestratorProviderEntry,
+  RecallQuery,
+  RecallProviderMeta,
+  RecallResponse,
+  RecallResultRanked,
+} from "./orchestrator";
 
 export {
   DEFAULT_MEMORY_PROVIDER_CAPABILITIES,
