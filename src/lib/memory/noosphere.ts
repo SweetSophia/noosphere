@@ -475,11 +475,11 @@ function mapCurationLevel(status: string): MemoryResult["curationLevel"] {
     case "published":
       return "curated";
     case "reviewed":
-      return "reviewed";
+      return "managed";
     case "draft":
       return "ephemeral";
     default:
-      return "reviewed";
+      return "managed";
   }
 }
 

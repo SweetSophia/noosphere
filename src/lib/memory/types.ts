@@ -5,7 +5,7 @@ export type MemorySourceType =
   | "procedural"
   | (string & {});
 
-export type MemoryCurationLevel = "ephemeral" | "reviewed" | "curated";
+export type MemoryCurationLevel = "ephemeral" | "managed" | "curated";
 
 export type MemoryScore = number;
 

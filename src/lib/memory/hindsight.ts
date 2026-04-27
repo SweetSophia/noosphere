@@ -325,14 +325,15 @@ function formatHindsightErrorBody(body: string): string {
     : message;
 }
 
+type CurationLevel = "curated" | "managed" | "ephemeral";
+
 /**
  * Derives a curation level from the number of proof sources.
- * Maps to MemoryCurationLevel: "ephemeral" | "reviewed" | "curated"
  * - curated: 10+ sources (well-sourced, high confidence)
- * - reviewed: 3-9 sources (moderately sourced, reviewed)
+ * - managed: 3-9 sources (moderately sourced)
  * - ephemeral: <3 sources or null (low sourcing)
  */
-function deriveCurationLevel(proofCount: number | null | undefined): "curated" | "reviewed" | "ephemeral" {
+function deriveCurationLevel(proofCount: number | null | undefined): CurationLevel {
   if (proofCount === null || proofCount === undefined) {
     return "ephemeral";
   }
@@ -340,7 +341,7 @@ function deriveCurationLevel(proofCount: number | null | undefined): "curated" |
     return "curated";
   }
   if (proofCount >= 3) {
-    return "reviewed";
+    return "managed";
   }
   return "ephemeral";
 }
