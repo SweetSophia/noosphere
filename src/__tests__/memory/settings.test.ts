@@ -318,6 +318,8 @@ async function main() {
     const config = toConflictConfig(settings);
     assertEqual(config.conflictThreshold, 0.1, "default threshold");
     assertEqual(config.strategy, "surface", "default strategy");
+    assertEqual(config.includeConflictMetadata, true, "default metadata");
+    assertEqual(Object.keys(config.providerPriorityWeights || {}).length, 0, "default weights empty");
   });
 
   // ─── Wait for all async tests ──────────────────────────────────────────

@@ -220,6 +220,6 @@ export function toConflictConfig(settings: RecallSettings): import("./conflict")
     conflictThreshold: settings.conflictThreshold,
     strategy: settings.conflictStrategy,
     includeConflictMetadata: true,
-    providerPriorityWeights: settings.providerPriorityWeights,
+    providerPriorityWeights: { ...settings.providerPriorityWeights },
   };
 }
