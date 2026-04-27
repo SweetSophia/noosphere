@@ -300,4 +300,20 @@ describe("promotion config", () => {
     const stats = recordRecall(map, result2);
     assert.equal(stats.curationLevel, "managed");
   });
+
+  // [26] createPromotionCandidate uses config.promotionTargets
+  test("[26] createPromotionCandidate respects custom promotionTargets", () => {
+    const config: PromotionConfig = {
+      ...DEFAULT_PROMOTION_CONFIG,
+      promotionTargets: {
+        ephemeral: "curated", // skip managed, go straight to curated
+        managed: "curated",
+        curated: null,
+      },
+    };
+    const stats = makeStats({ curationLevel: "ephemeral" });
+    const candidate = createPromotionCandidate(stats, "2026-04-27T00:00:00Z", config);
+    assert.ok(candidate);
+    assert.equal(candidate!.targetLevel, "curated");
+  });
 });

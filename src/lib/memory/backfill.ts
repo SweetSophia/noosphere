@@ -157,7 +157,7 @@ export function slugify(text: string): string {
     .replace(/[\s_]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
-    .slice(0, 100);
+    .slice(0, 100) || "untitled";
 }
 
 /**
@@ -248,18 +248,19 @@ export function synthesize(
   strategy: ContentStrategy = DEFAULT_SYNTHESIS_CONFIG.defaultStrategy,
 ): SynthesisResult {
   try {
-    // If updating an existing article, merge content
-    if (input.existingArticleId && input.existingContent) {
-      const mergedContent = mergeContent(
-        input.existingContent,
-        input.content,
-        strategy,
-      );
+    // If updating an existing article, merge or replace content.
+    if (input.existingArticleId) {
+      // When existingContent is available, apply the merge strategy.
+      // When missing (e.g. replace strategy or unavailable content),
+      // just use the incoming content directly.
+      const resolvedContent = input.existingContent
+        ? mergeContent(input.existingContent, input.content, strategy)
+        : input.content;
 
       return {
         success: true,
         articleId: input.existingArticleId,
-        content: mergedContent,
+        content: resolvedContent,
         created: false,
       };
     }
@@ -327,6 +328,7 @@ export function retryJob(
     status: "pending",
     retryCount: job.retryCount + 1,
     updatedAt: now,
+    completedAt: undefined,
     error: undefined,
   };
 }

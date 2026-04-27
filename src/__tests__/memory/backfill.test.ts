@@ -79,8 +79,8 @@ describe("backfill", () => {
   });
 
   // [5] slugify: empty string
-  test("[5] slugify handles empty string", () => {
-    assert.equal(slugify(""), "");
+  test("[5] slugify handles empty string with fallback", () => {
+    assert.equal(slugify(""), "untitled");
   });
 
   // [6] generateJobId: deterministic
@@ -275,5 +275,38 @@ describe("backfill", () => {
     const result = synthesize(input, "replace");
     assert.equal(result.content, "Brand new content");
     assert.ok(!result.content!.includes("Old"));
+  });
+
+  // [26] synthesize: update existing article without existingContent
+  test("[26] synthesize updates existing article when existingContent is missing", () => {
+    const input = {
+      content: "New content for existing article",
+      topicSlug: "test",
+      existingArticleId: "art-1",
+      // existingContent intentionally omitted
+    };
+    const result = synthesize(input, "append");
+    assert.equal(result.success, true);
+    assert.equal(result.created, false);
+    assert.equal(result.articleId, "art-1");
+    assert.equal(result.content, "New content for existing article");
+  });
+
+  // [27] retryJob clears completedAt
+  test("[27] retryJob clears completedAt from previous attempt", () => {
+    const job = makeJob({
+      status: "failed",
+      retryCount: 1,
+      completedAt: "2026-04-27T12:00:00Z",
+      error: "DB error",
+    });
+    const retried = retryJob(job, "2026-04-27T13:00:00Z");
+    assert.equal(retried.completedAt, undefined);
+    assert.equal(retried.status, "pending");
+  });
+
+  // [28] slugify: special-char-only input gets fallback
+  test("[28] slugify returns untitled for special-char-only input", () => {
+    assert.equal(slugify("@@@!!!###"), "untitled");
   });
 });

@@ -209,7 +209,7 @@ export function createPromotionCandidate(
     return null;
   }
 
-  const targetLevel = getNextCurationLevel(stats.curationLevel);
+  const targetLevel = config.promotionTargets[stats.curationLevel] ?? null;
   if (!targetLevel) {
     return null;
   }
