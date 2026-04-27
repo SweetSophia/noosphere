@@ -115,4 +115,7 @@ export {
   normalizeMemoryTokenEstimate,
   normalizeMemoryScore,
   removeUndefined,
+  CURATION_SCORE_MAP,
+  COMPOSITE_WEIGHTS,
+  computeBaseCompositeScore,
 } from "./types";

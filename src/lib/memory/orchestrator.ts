@@ -19,7 +19,12 @@ import {
   getEffectiveAutoRecall,
   normalizeMemoryProviderConfig,
 } from "./provider";
-import { normalizeMemoryScore } from "./types";
+import {
+  computeBaseCompositeScore,
+  COMPOSITE_WEIGHTS,
+  CURATION_SCORE_MAP,
+  normalizeMemoryScore,
+} from "./types";
 import type { MemoryResult, MemoryScore } from "./types";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -130,18 +135,6 @@ export interface RecallProviderMeta {
 
 const DEFAULT_GLOBAL_RESULT_CAP = 20;
 const DEFAULT_AUTO_RECALL_TOKEN_BUDGET = 2000;
-const COMPOSITE_WEIGHTS = {
-  relevance: 0.4,
-  confidence: 0.25,
-  recency: 0.2,
-  curation: 0.15,
-} as const;
-
-const CURATION_SCORE_MAP: Record<string, number> = {
-  curated: 1.0,
-  reviewed: 0.7,
-  ephemeral: 0.3,
-};
 
 // ─── Orchestrator ────────────────────────────────────────────────────────────
 
@@ -431,22 +424,9 @@ export class RecallOrchestrator {
     result: MemoryResult,
     providerId: string,
   ): number {
-    const relevance = result.relevanceScore ?? 0;
-    const confidence = result.confidenceScore ?? 0;
-    const recency = result.recencyScore ?? 0;
-    const curation =
-      CURATION_SCORE_MAP[result.curationLevel ?? ""] ?? 0.5;
-
+    const base = computeBaseCompositeScore(result);
     const weight = this.providerWeights.get(providerId) ?? 1;
-
-    const raw =
-      COMPOSITE_WEIGHTS.relevance * relevance +
-      COMPOSITE_WEIGHTS.confidence * confidence +
-      COMPOSITE_WEIGHTS.recency * recency +
-      COMPOSITE_WEIGHTS.curation * curation;
-
-    // Apply provider weight as a multiplier.
-    return normalizeMemoryScore(raw * weight);
+    return normalizeMemoryScore(base * weight);
   }
 
   // ─── Prompt injection formatting ──────────────────────────────────────

@@ -127,3 +127,42 @@ export function removeUndefined<T extends Record<string, unknown>>(
     Object.entries(value).filter(([, entry]) => entry !== undefined),
   ) as Partial<T>;
 }
+
+// ─── Shared scoring constants ──────────────────────────────────────────────
+
+/** Curation level → numeric score, used by orchestrator and conflict engine. */
+export const CURATION_SCORE_MAP: Record<string, number> = {
+  curated: 1.0,
+  reviewed: 0.7,
+  ephemeral: 0.3,
+};
+
+/** Weights for the composite memory score formula. */
+export const COMPOSITE_WEIGHTS = {
+  relevance: 0.4,
+  confidence: 0.25,
+  recency: 0.2,
+  curation: 0.15,
+} as const;
+
+/**
+ * Compute the base composite score for a memory result.
+ * Shared by orchestrator (ranking) and conflict engine (adjusted scoring)
+ * to ensure consistent weight calculations.
+ */
+export function computeBaseCompositeScore(
+  result: MemoryResult,
+): number {
+  const relevance = result.relevanceScore ?? 0;
+  const confidence = result.confidenceScore ?? 0;
+  const recency = result.recencyScore ?? 0;
+  const curation =
+    CURATION_SCORE_MAP[result.curationLevel ?? ""] ?? 0.5;
+
+  return normalizeMemoryScore(
+    COMPOSITE_WEIGHTS.relevance * relevance +
+    COMPOSITE_WEIGHTS.confidence * confidence +
+    COMPOSITE_WEIGHTS.recency * recency +
+    COMPOSITE_WEIGHTS.curation * curation,
+  );
+}

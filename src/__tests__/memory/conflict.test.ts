@@ -263,11 +263,13 @@ test("resolveConflicts accept-highest keeps higher scoring result", () => {
   const conflictResult = resolveConflicts([resultA, resultB], {
     strategy: "accept-highest",
     conflictThreshold: 0.1,
-    providerPriorityWeights: {}, // No provider weights
+    providerPriorityWeights: {},
   });
 
-  // Both results should still be in output (accept-highest keeps them but marks action)
-  assertEqual(conflictResult.results.length >= 1, true, "at least one result kept");
+  // accept-highest suppresses the loser
+  assertEqual(conflictResult.results.length, 1, "only winner kept");
+  assertEqual(conflictResult.results[0].id, "mem-1", "mem-1 wins with higher scores");
+  assertEqual(conflictResult.stats.suppressed, 1, "one result suppressed");
 });
 
 test("resolveConflicts accept-highest with provider weights prefers higher weight", () => {
@@ -294,7 +296,9 @@ test("resolveConflicts accept-highest with provider weights prefers higher weigh
     providerPriorityWeights: { noosphere: 2.0, hindsight: 1.0 },
   });
 
-  assertEqual(conflictResult.results.length, 2, "both results kept in surface-like mode");
+  // noosphere has 2x weight, so mem-2 wins despite equal base scores
+  assertEqual(conflictResult.results.length, 1, "only winner kept");
+  assertEqual(conflictResult.results[0].id, "mem-2", "mem-2 wins with provider weight");
 });
 
 // ─── resolveConflicts with suppress-low strategy ─────────────────────────────
@@ -347,8 +351,9 @@ test("resolveConflicts accept-recent prefers more recent result", () => {
     conflictThreshold: 0.1,
   });
 
-  // Both results kept in surface-like mode
-  assertEqual(conflictResult.results.length, 2, "both results kept");
+  // accept-recent suppresses the older result
+  assertEqual(conflictResult.results.length, 1, "only winner kept");
+  assertEqual(conflictResult.results[0].id, "mem-2", "mem-2 wins as more recent");
 });
 
 // ─── resolveConflicts with accept-curated strategy ────────────────────────────
@@ -372,8 +377,9 @@ test("resolveConflicts accept-curated prefers curated result", () => {
     conflictThreshold: 0.1,
   });
 
-  // Both results kept in surface-like mode
-  assertEqual(conflictResult.results.length, 2, "both results kept");
+  // accept-curated suppresses the less curated result
+  assertEqual(conflictResult.results.length, 1, "only winner kept");
+  assertEqual(conflictResult.results[0].id, "mem-2", "mem-2 wins as more curated");
 });
 
 // ─── Stats tests ─────────────────────────────────────────────────────────────
@@ -461,7 +467,9 @@ test("resolveConflicts uses confidenceScore in scoring", () => {
     providerPriorityWeights: {},
   });
 
-  assertEqual(conflictResult.results.length, 2, "both kept (accept-highest doesn't suppress)");
+  // accept-highest suppresses the loser — mem-1 has higher confidence
+  assertEqual(conflictResult.results.length, 1, "only winner kept");
+  assertEqual(conflictResult.results[0].id, "mem-1", "mem-1 wins with higher confidence");
 });
 
 test("resolveConflicts uses curationLevel in conflict scoring", () => {

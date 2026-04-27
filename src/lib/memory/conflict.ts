@@ -21,7 +21,12 @@
  * @module conflict
  */
 
-import { normalizeMemoryScore, type MemoryResult } from "./types";
+import {
+  computeBaseCompositeScore,
+  CURATION_SCORE_MAP,
+  normalizeMemoryScore,
+  type MemoryResult,
+} from "./types";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -122,14 +127,6 @@ export interface ConflictResolutionResult {
   stats: ConflictStats;
 }
 
-// ─── Curation score map ─────────────────────────────────────────────────────
-
-const DEFAULT_CURATION_WEIGHTS: Record<string, number> = {
-  curated: 1.0,
-  reviewed: 0.6,
-  ephemeral: 0.2,
-};
-
 // ─── Conflict Detection ─────────────────────────────────────────────────────
 
 /**
@@ -148,8 +145,8 @@ export function computeConflictScore(
   }
 
   // Curation level divergence.
-  const curationA = DEFAULT_CURATION_WEIGHTS[resultA.curationLevel ?? "ephemeral"] ?? 0.2;
-  const curationB = DEFAULT_CURATION_WEIGHTS[resultB.curationLevel ?? "ephemeral"] ?? 0.2;
+  const curationA = CURATION_SCORE_MAP[resultA.curationLevel ?? "ephemeral"] ?? 0.3;
+  const curationB = CURATION_SCORE_MAP[resultB.curationLevel ?? "ephemeral"] ?? 0.3;
   const curationDiff = Math.abs(curationA - curationB);
   if (curationDiff > 0.3) {
     divergence += 0.2;
@@ -243,30 +240,16 @@ export function detectConflict(
 // ─── Scoring helpers ─────────────────────────────────────────────────────────
 
 /**
- * Compute an adjusted score for a result considering provider weights and
- * curation level.
+ * Compute an adjusted score for a result considering provider weights.
+ * Uses the shared base composite score for consistency with the orchestrator.
  */
 export function computeAdjustedScore(
   result: MemoryResult,
   providerWeights: Record<string, number>,
 ): number {
-  // Base composite: 40% relevance + 25% confidence + 20% recency + 15% curation.
-  const relevance = result.relevanceScore ?? 0;
-  const confidence = result.confidenceScore ?? 0;
-  const recency = result.recencyScore ?? 0;
-  const curation =
-    DEFAULT_CURATION_WEIGHTS[result.curationLevel ?? "ephemeral"] ?? 0.2;
-
-  const rawScore =
-    0.4 * relevance +
-    0.25 * confidence +
-    0.2 * recency +
-    0.15 * curation;
-
-  // Apply provider weight.
+  const base = computeBaseCompositeScore(result);
   const providerWeight = providerWeights[result.provider] ?? 1.0;
-
-  return normalizeMemoryScore(rawScore * providerWeight);
+  return normalizeMemoryScore(base * providerWeight);
 }
 
 // ─── Conflict Resolution ─────────────────────────────────────────────────────
@@ -305,7 +288,7 @@ export function resolveConflicts(
         );
 
         if (resolved.action === "suppressed" && resolved.loser) {
-          suppressed.add(resolved.loser.id);
+          suppressed.add(`${resolved.loser.provider}:${resolved.loser.id}`);
         }
       }
     }
@@ -316,7 +299,7 @@ export function resolveConflicts(
   let surfaced = 0;
 
   for (const result of results) {
-    if (suppressed.has(result.id)) {
+    if (suppressed.has(`${result.provider}:${result.id}`)) {
       // Skip suppressed results.
       continue;
     }
@@ -324,7 +307,8 @@ export function resolveConflicts(
     // Check if this result was involved in a surfaced conflict.
     const hasSurfacedConflict = conflicts.some(
       (c) =>
-        (c.resultA.id === result.id || c.resultB.id === result.id) &&
+        ((c.resultA.provider === result.provider && c.resultA.id === result.id) ||
+         (c.resultB.provider === result.provider && c.resultB.id === result.id)) &&
         (strategy === "surface" ||
           (strategy === "accept-highest" && includeMetadata)),
     );
@@ -366,7 +350,7 @@ function resolveConflictPair(
     case "accept-highest": {
       const winner = scoreA >= scoreB ? resultA : resultB;
       const loser = winner === resultA ? resultB : resultA;
-      return { winner, loser, conflict, action: "kept" };
+      return { winner, loser, conflict, action: "suppressed" };
     }
 
     case "accept-recent": {
@@ -374,8 +358,7 @@ function resolveConflictPair(
       const dateB = resultB.updatedAt ?? resultB.createdAt ?? "";
       const winner = dateA >= dateB ? resultA : resultB;
       const loser = winner === resultA ? resultB : resultA;
-      // accept-recent keeps the result (doesn't suppress), just picks a winner
-      return { winner, loser, conflict, action: "kept" };
+      return { winner, loser, conflict, action: "suppressed" };
     }
 
     case "accept-curated": {
@@ -384,8 +367,7 @@ function resolveConflictPair(
       const rankB = curationRank[resultB.curationLevel ?? "ephemeral"] ?? 1;
       const winner = rankA >= rankB ? resultA : resultB;
       const loser = winner === resultA ? resultB : resultA;
-      // accept-curated keeps the result (doesn't suppress), just picks a winner
-      return { winner, loser, conflict, action: "kept" };
+      return { winner, loser, conflict, action: "suppressed" };
     }
 
     case "surface": {
