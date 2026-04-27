@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { prisma as defaultPrisma } from "@/lib/prisma";
-import { buildSearchFilters } from "@/lib/wiki";
+import { buildArticleSearchFilters, buildSearchableCTE, buildSearchTsQuery } from "@/lib/memory/article-search";
 
 import type {
   MemoryProvider,
@@ -215,7 +215,9 @@ export class NoosphereProvider implements MemoryProvider {
       offset: number;
     },
   ): Promise<MemoryResult[]> {
-    const filters = buildSearchFilters(options);
+    const filters = buildArticleSearchFilters(options);
+    const cte = buildSearchableCTE(filters);
+    const tsQuery = buildSearchTsQuery(query);
     const limitClause =
       options.limit === undefined ? Prisma.empty : Prisma.sql`LIMIT ${options.limit}`;
 
@@ -243,31 +245,17 @@ export class NoosphereProvider implements MemoryProvider {
         tagName: string | null;
       }[]
     >(Prisma.sql`
-      WITH ranked AS (
+      WITH searchable AS (
+        ${cte}
+      ),
+      ranked AS (
         SELECT
-          a.id,
-          a."updatedAt",
-          ts_rank(
-            setweight(to_tsvector('simple', coalesce(a.title, '')), 'A') ||
-            setweight(to_tsvector('simple', coalesce(a.excerpt, '')), 'B') ||
-            setweight(to_tsvector('simple', coalesce(a.content, '')), 'C') ||
-            setweight(to_tsvector('simple', coalesce(string_agg(tg.name, ' '), '')), 'B'),
-            websearch_to_tsquery('simple', ${query})
-          ) AS rank
-        FROM "Article" a
-        INNER JOIN "Topic" tpc ON tpc.id = a."topicId"
-        LEFT JOIN "ArticleTag" at ON at."articleId" = a.id
-        LEFT JOIN "Tag" tg ON tg.id = at."tagId"
-        WHERE ${Prisma.join(filters, " AND ")}
-        GROUP BY a.id, a.title, a.excerpt, a.content, a."updatedAt"
-        HAVING ts_rank(
-          setweight(to_tsvector('simple', coalesce(a.title, '')), 'A') ||
-          setweight(to_tsvector('simple', coalesce(a.excerpt, '')), 'B') ||
-          setweight(to_tsvector('simple', coalesce(a.content, '')), 'C') ||
-          setweight(to_tsvector('simple', coalesce(string_agg(tg.name, ' '), '')), 'B'),
-          websearch_to_tsquery('simple', ${query})
-        ) > 0
-        ORDER BY rank DESC, a."updatedAt" DESC
+          s.id,
+          s."updatedAt",
+          ts_rank(s.document, ${tsQuery}) AS rank
+        FROM searchable s
+        WHERE s.document @@ ${tsQuery}
+        ORDER BY rank DESC, s."updatedAt" DESC
         ${limitClause}
         OFFSET ${options.offset}
       )
