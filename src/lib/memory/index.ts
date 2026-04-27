@@ -119,3 +119,48 @@ export {
   COMPOSITE_WEIGHTS,
   computeBaseCompositeScore,
 } from "./types";
+
+export {
+  DEFAULT_PROMOTION_CONFIG,
+  computeCandidateKey,
+  getNextCurationLevel,
+  isEligibleForPromotion,
+  createPromotionCandidate,
+  applyReview,
+  scanForCandidates,
+  recordRecall,
+  prunePendingCandidates,
+} from "./promotion";
+
+export type {
+  MemoryRecallStats,
+  PromotionCandidate,
+  PromotionConfig,
+  PromotionReview,
+  PromotionStatus,
+  PromotionTargetLevel,
+} from "./promotion";
+
+export {
+  DEFAULT_SYNTHESIS_CONFIG,
+  slugify,
+  generateJobId,
+  createSynthesisJob,
+  mergeContent,
+  prepareSynthesisInput,
+  synthesize,
+  updateJobStatus,
+  canRetry,
+  retryJob,
+  getPendingJobs,
+  filterJobsByStatus,
+} from "./backfill";
+
+export type {
+  SynthesisConfig,
+  SynthesisInput,
+  SynthesisJob,
+  SynthesisResult,
+  SynthesisStatus,
+  ContentStrategy,
+} from "./backfill";
