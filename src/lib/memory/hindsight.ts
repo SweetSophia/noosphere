@@ -213,7 +213,7 @@ export class HindsightProvider implements MemoryProvider {
       sourceType: "hindsight",
       title: buildHindsightTitle(result),
       content: result.text,
-      curationLevel: "ephemeral",
+      curationLevel: deriveCurationLevel(result.proof_count),
       createdAt: result.mentioned_at ?? result.occurred_start ?? undefined,
       updatedAt: result.mentioned_at ?? result.occurred_end ?? undefined,
       canonicalRef: `hindsight:${this.bankId}:${result.id}`,
@@ -323,6 +323,27 @@ function formatHindsightErrorBody(body: string): string {
   return message.length > MAX_ERROR_BODY_LENGTH
     ? `${message.slice(0, MAX_ERROR_BODY_LENGTH)}...`
     : message;
+}
+
+type CurationLevel = "curated" | "managed" | "ephemeral";
+
+/**
+ * Derives a curation level from the number of proof sources.
+ * - curated: 10+ sources (well-sourced, high confidence)
+ * - managed: 3-9 sources (moderately sourced)
+ * - ephemeral: <3 sources or null (low sourcing)
+ */
+function deriveCurationLevel(proofCount: number | null | undefined): CurationLevel {
+  if (proofCount === null || proofCount === undefined) {
+    return "ephemeral";
+  }
+  if (proofCount >= 10) {
+    return "curated";
+  }
+  if (proofCount >= 3) {
+    return "managed";
+  }
+  return "ephemeral";
 }
 
 function parseHindsightErrorBody(body: string): string | undefined {

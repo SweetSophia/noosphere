@@ -4,16 +4,18 @@
  * Run with: npx tsx src/__tests__/memory/hindsight-provider.test.ts
  *
  * Tests cover:
- * 1. Constructor validation (baseUrl, apiKey, bankId, fetch impl)
+ * 1. Constructor validation (baseUrl, apiKey, bankId, fetch impl, HTTPS enforcement)
  * 2. Descriptor correctness (id, sourceType, capabilities, config)
- * 3. URL normalization (trailing slash strip, HTTPS enforcement)
+ * 3. URL normalization (trailing slash strip)
  * 4. search() — happy path, limit, empty results
- * 5. search() — options passthrough (budget, types, maxTokens, queryTimestamp, tags)
- * 6. search() — HTTP error handling with parsed error messages
- * 7. search() — JSON parse failure handling
- * 8. getById() — always returns null (not supported)
- * 9. Factory createHindsightProvider()
- * 10. Default config options (defaultBudget, defaultTypes, defaultMaxTokens)
+ * 5. search() — options passthrough (budget, types, maxTokens, queryTimestamp, tags, tagsMatch)
+ * 6. search() — curationLevel derivation from proof_count
+ * 7. search() — sourceFacts metadata, truncation (>5 facts), missing fact IDs
+ * 8. search() — HTTP error handling with parsed error messages
+ * 9. search() — JSON parse failure handling
+ * 10. getById() — always returns null (not supported)
+ * 11. Factory createHindsightProvider()
+ * 12. Default config options (defaultBudget, defaultTypes, defaultMaxTokens)
  */
 
 import {
@@ -590,7 +592,7 @@ test("search respects metadata options (budget, types, maxTokens, tags)", async 
       types: ["observation"],
       maxTokens: 512,
       queryTimestamp: "2026-04-27T10:00:00Z",
-      tags: ["urgent", " Sophie"],
+      tags: ["urgent", "sophie"],
       tagsMatch: "all",
     } as Record<string, unknown>,
   });
@@ -601,7 +603,7 @@ test("search respects metadata options (budget, types, maxTokens, tags)", async 
   assertEqual(body.types, ["observation"], "types override");
   assertEqual(body.max_tokens, 512, "max_tokens override");
   assertEqual(body.query_timestamp, "2026-04-27T10:00:00Z", "query_timestamp");
-  assertEqual(body.tags, ["urgent", " Sophie"], "tags");
+  assertEqual(body.tags, ["urgent", "sophie"], "tags");
   assertEqual(body.tags_match, "all", "tags_match");
 });
 
@@ -790,6 +792,144 @@ test("search populates missingSourceFactIds for dangling references", async () =
     meta?.missingSourceFactIds,
     ["fact-missing"],
     "dangling fact IDs collected",
+  );
+});
+
+// ─── Curation Level ────────────────────────────────────────────────────────
+
+test("search sets curationLevel to ephemeral when proof_count is null", async () => {
+  const mockFetch = createMockFetch([
+    {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => mockRecallResponse([{ id: "mem-1", text: "Fact", proof_count: null }]),
+      text: async () => "{}",
+    },
+  ]);
+
+  const provider = new HindsightProvider({
+    baseUrl: "https://api.example.com",
+    apiKey: "test-key",
+    bankId: "test-bank",
+    fetch: mockFetch.fetch,
+  });
+
+  const results = await provider.search("test");
+  assertEqual(results[0].curationLevel, "ephemeral", "null proof_count → ephemeral");
+});
+
+test("search sets curationLevel to ephemeral when proof_count < 3", async () => {
+  const mockFetch = createMockFetch([
+    {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => mockRecallResponse([{ id: "mem-1", text: "Fact", proof_count: 2 }]),
+      text: async () => "{}",
+    },
+  ]);
+
+  const provider = new HindsightProvider({
+    baseUrl: "https://api.example.com",
+    apiKey: "test-key",
+    bankId: "test-bank",
+    fetch: mockFetch.fetch,
+  });
+
+  const results = await provider.search("test");
+  assertEqual(results[0].curationLevel, "ephemeral", "proof_count 2 → ephemeral");
+});
+
+test("search sets curationLevel to managed when proof_count is 3-9", async () => {
+  const mockFetch = createMockFetch([
+    {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => mockRecallResponse([{ id: "mem-1", text: "Fact", proof_count: 5 }]),
+      text: async () => "{}",
+    },
+  ]);
+
+  const provider = new HindsightProvider({
+    baseUrl: "https://api.example.com",
+    apiKey: "test-key",
+    bankId: "test-bank",
+    fetch: mockFetch.fetch,
+  });
+
+  const results = await provider.search("test");
+  assertEqual(results[0].curationLevel, "managed", "proof_count 5 → managed");
+});
+
+test("search sets curationLevel to curated when proof_count >= 10", async () => {
+  const mockFetch = createMockFetch([
+    {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => mockRecallResponse([{ id: "mem-1", text: "Fact", proof_count: 15 }]),
+      text: async () => "{}",
+    },
+  ]);
+
+  const provider = new HindsightProvider({
+    baseUrl: "https://api.example.com",
+    apiKey: "test-key",
+    bankId: "test-bank",
+    fetch: mockFetch.fetch,
+  });
+
+  const results = await provider.search("test");
+  assertEqual(results[0].curationLevel, "curated", "proof_count 15 → curated");
+});
+
+test("search truncates sourceFacts when more than 5", async () => {
+  // MAX_METADATA_SOURCE_FACTS = 5, so 6+ facts should be truncated
+  const fact1 = { id: "f1", text: "f1", type: "world" };
+  const fact2 = { id: "f2", text: "f2", type: "world" };
+  const fact3 = { id: "f3", text: "f3", type: "world" };
+  const fact4 = { id: "f4", text: "f4", type: "world" };
+  const fact5 = { id: "f5", text: "f5", type: "world" };
+  const fact6 = { id: "f6", text: "f6", type: "world" };
+  const fact7 = { id: "f7", text: "f7", type: "world" };
+
+  const mockFetch = createMockFetch([
+    {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({
+        results: [{
+          id: "mem-1",
+          text: "Summary with many sources",
+          type: "experience",
+          source_fact_ids: ["f1", "f2", "f3", "f4", "f5", "f6", "f7"],
+        }],
+        // f7 is intentionally missing to test missingSourceFactIds tracking
+        source_facts: { f1: fact1, f2: fact2, f3: fact3, f4: fact4, f5: fact5, f6: fact6 },
+      }),
+      text: async () => "{}",
+    },
+  ]);
+
+  const provider = new HindsightProvider({
+    baseUrl: "https://api.example.com",
+    apiKey: "test-key",
+    bankId: "test-bank",
+    fetch: mockFetch.fetch,
+  });
+
+  const results = await provider.search("test");
+  const meta = results[0].metadata as Record<string, unknown>;
+  const facts = meta?.sourceFacts as unknown[];
+  assertEqual(facts.length, 5, "capped at 5 facts");
+  assertEqual(meta?.sourceFactsTruncated, true, "truncated flag set");
+  assertEqual(
+    (meta?.missingSourceFactIds as string[]),
+    ["f7"],
+    "missing fact IDs tracked",
   );
 });
 
