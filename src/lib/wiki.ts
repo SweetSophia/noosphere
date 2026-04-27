@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
+  type ArticleSearchFilters,
   buildArticleSearchFilters,
   buildSearchableCTE,
   buildSearchTsQuery,
@@ -45,11 +46,7 @@ export async function buildTagConnections(tagNames: string[]) {
   );
 }
 
-export interface SearchArticlesOptions {
-  topicSlug?: string;
-  tagSlug?: string;
-  status?: string;
-  confidence?: string;
+export interface SearchArticlesOptions extends ArticleSearchFilters {
   limit?: number;
   offset?: number;
 }

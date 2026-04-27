@@ -91,7 +91,7 @@ export function buildSearchableCTE(
     LEFT JOIN "ArticleTag" at ON at."articleId" = a.id
     LEFT JOIN "Tag" tg ON tg.id = at."tagId"
     WHERE ${whereClause}
-    GROUP BY a.id, a.title, a.excerpt, a.content, a."updatedAt"
+    GROUP BY a.id
   `;
 }
 
