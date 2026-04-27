@@ -16,15 +16,12 @@
  * 10. Default config options (defaultBudget, defaultTypes, defaultMaxTokens)
  */
 
-if (!process.env.DATABASE_URL) {
-  process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
-}
-
 import {
   HindsightProvider,
   createHindsightProvider,
   type HindsightProviderSettings,
 } from "@/lib/memory/hindsight";
+import type { MemoryProviderConfig } from "@/lib/memory/provider";
 
 // ─── Test runner ───────────────────────────────────────────────────────────
 
@@ -64,6 +61,7 @@ function assertEqual<T>(actual: T, expected: T, label: string): void {
 
 function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
+  if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
   if (a === null || b === null) return a === b;
   if (typeof a !== typeof b) return false;
   if (typeof a !== "object") return false;
@@ -79,6 +77,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
   const aKeys = Object.keys(aObj);
   const bKeys = Object.keys(bObj);
   if (aKeys.length !== bKeys.length) return false;
+  if (!aKeys.every((k) => Object.prototype.hasOwnProperty.call(bObj, k))) return false;
   return aKeys.every((k) => deepEqual(aObj[k], bObj[k]));
 }
 
@@ -197,89 +196,74 @@ function mockRecallResponse(
 // ─── Constructor validation ─────────────────────────────────────────────────
 
 test("throws when baseUrl is missing", () => {
-  assert.throws = (() => {
-    try {
-      // eslint-disable-next-line no-new
-      new HindsightProvider({
-        baseUrl: "",
-        apiKey: "test-key",
-        bankId: "test-bank",
-      } as HindsightProviderSettings);
-      return false;
-    } catch (err: unknown) {
-      return err instanceof Error && err.message.includes("baseUrl");
-    }
-  })();
-  if (!assert.throws) throw new Error("Should have thrown for missing baseUrl");
+  let threw = false;
+  try {
+    new HindsightProvider({
+      baseUrl: "",
+      apiKey: "test-key",
+      bankId: "test-bank",
+    } as HindsightProviderSettings);
+  } catch (err: unknown) {
+    threw = err instanceof Error && err.message.includes("baseUrl");
+  }
+  if (!threw) throw new Error("Should have thrown for missing baseUrl");
 });
 
 test("throws when apiKey is missing", () => {
-  assert.throws = (() => {
-    try {
-      // eslint-disable-next-line no-new
-      new HindsightProvider({
-        baseUrl: "https://api.example.com",
-        apiKey: "",
-        bankId: "test-bank",
-      } as HindsightProviderSettings);
-      return false;
-    } catch (err: unknown) {
-      return err instanceof Error && err.message.includes("apiKey");
-    }
-  })();
-  if (!assert.throws) throw new Error("Should have thrown for missing apiKey");
+  let threw = false;
+  try {
+    new HindsightProvider({
+      baseUrl: "https://api.example.com",
+      apiKey: "",
+      bankId: "test-bank",
+    } as HindsightProviderSettings);
+  } catch (err: unknown) {
+    threw = err instanceof Error && err.message.includes("apiKey");
+  }
+  if (!threw) throw new Error("Should have thrown for missing apiKey");
 });
 
 test("throws when bankId is missing", () => {
-  assert.throws = (() => {
-    try {
-      // eslint-disable-next-line no-new
-      new HindsightProvider({
-        baseUrl: "https://api.example.com",
-        apiKey: "test-key",
-        bankId: "",
-      } as HindsightProviderSettings);
-      return false;
-    } catch (err: unknown) {
-      return err instanceof Error && err.message.includes("bankId");
-    }
-  })();
-  if (!assert.throws) throw new Error("Should have thrown for missing bankId");
+  let threw = false;
+  try {
+    new HindsightProvider({
+      baseUrl: "https://api.example.com",
+      apiKey: "test-key",
+      bankId: "",
+    } as HindsightProviderSettings);
+  } catch (err: unknown) {
+    threw = err instanceof Error && err.message.includes("bankId");
+  }
+  if (!threw) throw new Error("Should have thrown for missing bankId");
 });
 
 test("throws when fetch is not a function", () => {
-  assert.throws = (() => {
-    try {
-      // eslint-disable-next-line no-new
-      new HindsightProvider({
-        baseUrl: "https://api.example.com",
-        apiKey: "test-key",
-        bankId: "test-bank",
-        fetch: "not a function" as unknown as typeof fetch,
-      } as HindsightProviderSettings);
-      return false;
-    } catch (err: unknown) {
-      return err instanceof Error && err.message.includes("fetch");
-    }
-  })();
-  if (!assert.throws) throw new Error("Should have thrown for non-function fetch");
+  let threw = false;
+  try {
+    new HindsightProvider({
+      baseUrl: "https://api.example.com",
+      apiKey: "test-key",
+      bankId: "test-bank",
+      fetch: "not a function" as unknown as typeof fetch,
+    } as HindsightProviderSettings);
+  } catch (err: unknown) {
+    threw = err instanceof Error && err.message.includes("fetch");
+  }
+  if (!threw) throw new Error("Should have thrown for non-function fetch");
 });
 
 test("throws when baseUrl is not HTTPS (without allowInsecureBaseUrl)", () => {
-  assert.throws = (() => {
-    try {
-      // eslint-disable-next-line no-new
-      new HindsightProvider({
-        baseUrl: "http://api.example.com",
-        apiKey: "test-key",
-        bankId: "test-bank",
-      } as HindsightProviderSettings);
-      return false;
-    } catch (err: unknown) {
-      return err instanceof Error && err.message.includes("HTTPS");
-    }
-  })();
-  if (!assert.throws) throw new Error("Should have thrown for non-HTTPS baseUrl");
+  let threw = false;
+  try {
+    new HindsightProvider({
+      baseUrl: "http://api.example.com",
+      apiKey: "test-key",
+      bankId: "test-bank",
+    } as HindsightProviderSettings);
+  } catch (err: unknown) {
+    threw = err instanceof Error && err.message.includes("HTTPS");
+  }
+  if (!threw) throw new Error("Should have thrown for non-HTTPS baseUrl");
 });
 
 test("allows HTTP baseUrl when allowInsecureBaseUrl is true", () => {
@@ -531,6 +515,35 @@ test("search respects limit option", async () => {
   assertEqual(results[1].id, "mem-2", "second id");
 });
 
+test("search falls back to config.maxResults when limit is not set", async () => {
+  const mockFetch = createMockFetch([
+    {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => mockRecallResponse([
+        { id: "mem-1", text: "First" },
+        { id: "mem-2", text: "Second" },
+        { id: "mem-3", text: "Third" },
+      ]),
+      text: async () => "{}",
+    },
+  ]);
+
+  const provider = new HindsightProvider({
+    baseUrl: "https://api.example.com",
+    apiKey: "test-key",
+    bankId: "test-bank",
+    fetch: mockFetch.fetch,
+  });
+
+  // No explicit limit — should cap at config.maxResults (2)
+  const results = await provider.search("test", {
+    config: { maxResults: 2 } as Partial<MemoryProviderConfig>,
+  });
+  assertEqual(results.length, 2, "capped to config.maxResults");
+});
+
 test("search returns empty array when no results", async () => {
   const mockFetch = createMockFetch([
     {
@@ -643,6 +656,37 @@ test("search derives title from type when no context", async () => {
   assertEqual(results[0].title, "world", "title from type alone");
 });
 
+test("search derives createdAt/updatedAt from occurred_start/occurred_end", async () => {
+  const mockFetch = createMockFetch([
+    {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({
+        results: [{
+          id: "mem-1",
+          text: "Summary",
+          type: "experience",
+          occurred_start: "2026-01-01T00:00:00Z",
+          occurred_end: "2026-03-15T12:30:00Z",
+        }],
+      }),
+      text: async () => "{}",
+    },
+  ]);
+
+  const provider = new HindsightProvider({
+    baseUrl: "https://api.example.com",
+    apiKey: "test-key",
+    bankId: "test-bank",
+    fetch: mockFetch.fetch,
+  });
+
+  const results = await provider.search("test");
+  assertEqual(results[0].createdAt, "2026-01-01T00:00:00Z", "createdAt from occurred_start");
+  assertEqual(results[0].updatedAt, "2026-03-15T12:30:00Z", "updatedAt from occurred_end");
+});
+
 test("search includes sourceFacts metadata when present", async () => {
   const fact1 = { id: "fact-1", text: "Source fact text", type: "world" };
   const mockFetch = createMockFetch([
@@ -678,6 +722,75 @@ test("search includes sourceFacts metadata when present", async () => {
     "sourceFacts populated",
   );
   assertEqual(meta?.sourceFactsTruncated, false, "not truncated");
+});
+
+test("search truncates sourceFacts at MAX_METADATA_SOURCE_FACTS (5)", async () => {
+  const facts = Array.from({ length: 8 }, (_, i) => ({
+    id: `fact-${i}`,
+    text: `Fact ${i}`,
+    type: "world",
+  }));
+  const factIds = facts.map((f) => f.id);
+  const sourceFacts = Object.fromEntries(facts.map((f) => [f.id, f]));
+
+  const mockFetch = createMockFetch([
+    {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({ results: [{ id: "mem-1", text: "Summary", source_fact_ids: factIds }], source_facts: sourceFacts }),
+      text: async () => "{}",
+    },
+  ]);
+
+  const provider = new HindsightProvider({
+    baseUrl: "https://api.example.com",
+    apiKey: "test-key",
+    bankId: "test-bank",
+    fetch: mockFetch.fetch,
+  });
+
+  const results = await provider.search("test");
+  const meta = results[0].metadata as Record<string, unknown>;
+  assertEqual((meta?.sourceFacts as unknown[]).length, 5, "capped to 5 facts");
+  assertEqual(meta?.sourceFactsTruncated, true, "truncated flag set");
+});
+
+test("search populates missingSourceFactIds for dangling references", async () => {
+  const mockFetch = createMockFetch([
+    {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({
+        results: [{
+          id: "mem-1",
+          text: "Summary",
+          source_fact_ids: ["fact-1", "fact-missing", "fact-2"],
+        }],
+        source_facts: {
+          "fact-1": { id: "fact-1", text: "Fact 1", type: "world" },
+          "fact-2": { id: "fact-2", text: "Fact 2", type: "world" },
+        },
+      }),
+      text: async () => "{}",
+    },
+  ]);
+
+  const provider = new HindsightProvider({
+    baseUrl: "https://api.example.com",
+    apiKey: "test-key",
+    bankId: "test-bank",
+    fetch: mockFetch.fetch,
+  });
+
+  const results = await provider.search("test");
+  const meta = results[0].metadata as Record<string, unknown>;
+  assertEqual(
+    meta?.missingSourceFactIds,
+    ["fact-missing"],
+    "dangling fact IDs collected",
+  );
 });
 
 // ─── Error handling ────────────────────────────────────────────────────────
@@ -809,7 +922,7 @@ test("search error body is truncated at 1000 chars", async () => {
     threw = true;
     const msg = (err as Error).message;
     assert(msg.length < longBody.length, "truncated vs original");
-    assertIncludes(msg, "x".repeat(1000 - 3) + "...", "truncation marker");
+    assertIncludes(msg, "x".repeat(1000) + "...", "truncation marker");
   }
   assert(threw, "should have thrown");
 });
