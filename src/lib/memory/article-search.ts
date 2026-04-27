@@ -74,7 +74,11 @@ export function buildArticleSearchFilters(
 export function buildSearchableCTE(
   filters: Prisma.Sql[],
 ): Prisma.Sql {
-  const whereClause = Prisma.join(filters, " AND ");
+  // Fallback to a tautology if no filters are provided, so the generated
+  // SQL is always valid (WHERE TRUE instead of bare WHERE).
+  const whereClause = filters.length > 0
+    ? Prisma.join(filters, " AND ")
+    : Prisma.sql`TRUE`;
 
   return Prisma.sql`
     SELECT
