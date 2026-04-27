@@ -76,6 +76,24 @@ export type {
 } from "./dedup";
 
 export {
+  resolveConflicts,
+  computeConflictScore,
+  detectConflict,
+  createConflictResolver,
+} from "./conflict";
+
+export type {
+  ConflictAction,
+  ConflictConfig,
+  ConflictEntry,
+  ConflictReason,
+  ConflictResolutionResult,
+  ConflictSignal,
+  ConflictStats,
+  ConflictStrategy,
+} from "./conflict";
+
+export {
   DEFAULT_RECALL_SETTINGS,
   mergeRecallSettings,
   normalizeRecallSettings,
@@ -97,4 +115,7 @@ export {
   normalizeMemoryTokenEstimate,
   normalizeMemoryScore,
   removeUndefined,
+  CURATION_SCORE_MAP,
+  COMPOSITE_WEIGHTS,
+  computeBaseCompositeScore,
 } from "./types";
