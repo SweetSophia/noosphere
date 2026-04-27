@@ -767,6 +767,232 @@ async function main() {
     assertEqual(response.results[0].content, "New version", "correct content");
   });
 
+  // ─── Conflict Resolution ────────────────────────────────────────────────
+
+  test("surface strategy surfaces conflicts in response", async () => {
+    const resultsA = [
+      mockResult({
+        id: "mem-a",
+        provider: "hindsight",
+        content: "Meeting at 3pm",
+        relevanceScore: 0.8,
+        confidenceScore: 0.8,
+        recencyScore: 0.8,
+        updatedAt: "2026-01-01T00:00:00Z",
+      }),
+    ];
+    const resultsB = [
+      mockResult({
+        id: "mem-b",
+        provider: "noosphere",
+        content: "Meeting at 5pm", // Different content = conflict
+        relevanceScore: 0.5,
+        confidenceScore: 0.5,
+        recencyScore: 0.5,
+        updatedAt: "2026-06-01T00:00:00Z",
+      }),
+    ];
+
+    const orchestrator = new RecallOrchestrator({
+      providers: [
+        { provider: mockProvider("hindsight", resultsA) },
+        { provider: mockProvider("noosphere", resultsB) },
+      ],
+      conflict: {
+        strategy: "surface",
+        conflictThreshold: 0.1,
+        includeConflictMetadata: true,
+      },
+    });
+
+    const response = await orchestrator.recall({ query: "meeting", mode: "inspection" });
+
+    // Both results should be present
+    assert(response.results.length === 2, "both results kept");
+    // Conflicts should be surfaced
+    assert(
+      response.conflicts !== undefined && response.conflicts.length > 0,
+      "conflicts are surfaced",
+    );
+    assert(
+      response.conflictStats !== undefined && response.conflictStats.conflictingPairs === 1,
+      "one conflicting pair",
+    );
+  });
+
+  test("suppress-low strategy suppresses lower scoring result", async () => {
+    const resultsA = [
+      mockResult({
+        id: "mem-high",
+        provider: "hindsight",
+        content: "Meeting at 3pm",
+        relevanceScore: 0.9,
+        confidenceScore: 0.9,
+        recencyScore: 0.9,
+      }),
+    ];
+    const resultsB = [
+      mockResult({
+        id: "mem-low",
+        provider: "noosphere",
+        content: "Meeting at 5pm",
+        relevanceScore: 0.3,
+        confidenceScore: 0.3,
+        recencyScore: 0.3,
+      }),
+    ];
+
+    const orchestrator = new RecallOrchestrator({
+      providers: [
+        { provider: mockProvider("hindsight", resultsA) },
+        { provider: mockProvider("noosphere", resultsB) },
+      ],
+      conflict: {
+        strategy: "suppress-low",
+        conflictThreshold: 0.1,
+      },
+    });
+
+    const response = await orchestrator.recall({ query: "meeting", mode: "inspection" });
+
+    // Only the higher-scoring result should remain
+    assert(response.results.length === 1, "only winner kept");
+    assert(
+      response.conflictStats !== undefined && response.conflictStats.suppressed === 1,
+      "one result suppressed",
+    );
+  });
+
+  test("accept-highest keeps both results (doesn't suppress)", async () => {
+    const resultsA = [
+      mockResult({
+        id: "mem-a",
+        provider: "hindsight",
+        content: "Meeting at 3pm",
+        relevanceScore: 0.8,
+        confidenceScore: 0.8,
+        recencyScore: 0.8,
+      }),
+    ];
+    const resultsB = [
+      mockResult({
+        id: "mem-b",
+        provider: "noosphere",
+        content: "Meeting at 5pm",
+        relevanceScore: 0.5,
+        confidenceScore: 0.5,
+        recencyScore: 0.5,
+      }),
+    ];
+
+    const orchestrator = new RecallOrchestrator({
+      providers: [
+        { provider: mockProvider("hindsight", resultsA) },
+        { provider: mockProvider("noosphere", resultsB) },
+      ],
+      conflict: {
+        strategy: "accept-highest",
+        conflictThreshold: 0.1,
+      },
+    });
+
+    const response = await orchestrator.recall({ query: "meeting", mode: "inspection" });
+
+    // Both results should be kept (accept-highest doesn't suppress)
+    assert(response.results.length === 2, "both results kept");
+    assert(
+      response.conflictStats !== undefined && response.conflictStats.suppressed === 0,
+      "no results suppressed",
+    );
+  });
+
+  test("accept-recent picks winner by timestamp", async () => {
+    const resultsA = [
+      mockResult({
+        id: "mem-old",
+        provider: "hindsight",
+        content: "Meeting at 3pm",
+        relevanceScore: 0.8,
+        confidenceScore: 0.8,
+        recencyScore: 0.8,
+        updatedAt: "2026-01-01T00:00:00Z",
+      }),
+    ];
+    const resultsB = [
+      mockResult({
+        id: "mem-new",
+        provider: "noosphere",
+        content: "Meeting at 5pm",
+        relevanceScore: 0.8,
+        confidenceScore: 0.8,
+        recencyScore: 0.8,
+        updatedAt: "2026-06-01T00:00:00Z", // More recent
+      }),
+    ];
+
+    const orchestrator = new RecallOrchestrator({
+      providers: [
+        { provider: mockProvider("hindsight", resultsA) },
+        { provider: mockProvider("noosphere", resultsB) },
+      ],
+      conflict: {
+        strategy: "accept-recent",
+        conflictThreshold: 0.1,
+      },
+    });
+
+    const response = await orchestrator.recall({ query: "meeting", mode: "inspection" });
+
+    // Both results should be kept but mem-new is the winner
+    assert(response.results.length === 2, "both results kept");
+    assert(
+      response.conflictStats !== undefined && response.conflictStats.suppressed === 0,
+      "no results suppressed (accept-recent keeps both)",
+    );
+  });
+
+  test("conflictStats are populated correctly", async () => {
+    const resultsA = [
+      mockResult({
+        id: "mem-a",
+        provider: "hindsight",
+        content: "Meeting at 3pm",
+        relevanceScore: 0.8,
+        confidenceScore: 0.8,
+        recencyScore: 0.8,
+      }),
+    ];
+    const resultsB = [
+      mockResult({
+        id: "mem-b",
+        provider: "noosphere",
+        content: "Meeting at 5pm",
+        relevanceScore: 0.5,
+        confidenceScore: 0.5,
+        recencyScore: 0.5,
+      }),
+    ];
+
+    const orchestrator = new RecallOrchestrator({
+      providers: [
+        { provider: mockProvider("hindsight", resultsA) },
+        { provider: mockProvider("noosphere", resultsB) },
+      ],
+      conflict: {
+        strategy: "surface",
+        conflictThreshold: 0.1,
+        includeConflictMetadata: true,
+      },
+    });
+
+    const response = await orchestrator.recall({ query: "meeting", mode: "inspection" });
+
+    assert(response.conflictStats !== undefined, "conflictStats present");
+    assertEqual(response.conflictStats!.totalInput, 2, "totalInput is 2");
+    assertEqual(response.conflictStats!.conflictingPairs, 1, "one conflicting pair");
+    assertEqual(response.conflictStats!.resolved, 1, "one resolved");
+  });
+
   // ─── Wait for all async tests ───────────────────────────────────────────
 
   await Promise.all(pending);

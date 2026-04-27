@@ -293,7 +293,7 @@ export function resolveConflicts(
 
   // Apply suppression and build final result list.
   const finalResults: MemoryResult[] = [];
-  let surfaced = 0;
+  const surfacedResults = new Set<string>();
 
   for (const result of results) {
     if (suppressed.has(`${result.provider}:${result.id}`)) {
@@ -311,7 +311,7 @@ export function resolveConflicts(
     );
 
     if (hasSurfacedConflict && includeMetadata) {
-      surfaced++;
+      surfacedResults.add(`${result.provider}:${result.id}`);
     }
 
     finalResults.push(result);
@@ -325,7 +325,7 @@ export function resolveConflicts(
       conflictingPairs: conflicts.length,
       resolved: conflicts.length,
       suppressed: suppressed.size,
-      surfaced,
+      surfaced: surfacedResults.size,
     },
   };
 }
@@ -347,15 +347,20 @@ function resolveConflictPair(
     case "accept-highest": {
       const winner = scoreA >= scoreB ? resultA : resultB;
       const loser = winner === resultA ? resultB : resultA;
-      return { winner, loser, conflict, action: "suppressed" };
+      // accept-highest picks the winner but keeps the loser (doesn't filter it out)
+      return { winner, loser, conflict, action: "kept" };
     }
 
     case "accept-recent": {
       const dateA = resultA.updatedAt ?? resultA.createdAt ?? "";
       const dateB = resultB.updatedAt ?? resultB.createdAt ?? "";
-      const winner = dateA >= dateB ? resultA : resultB;
+      // Parse as Date for correct numeric comparison (handles timezone offsets correctly).
+      // Fall back to 0 for missing/invalid dates so the other result wins.
+      const timeA = dateA ? new Date(dateA).getTime() : 0;
+      const timeB = dateB ? new Date(dateB).getTime() : 0;
+      const winner = timeA >= timeB ? resultA : resultB;
       const loser = winner === resultA ? resultB : resultA;
-      return { winner, loser, conflict, action: "suppressed" };
+      return { winner, loser, conflict, action: "kept" };
     }
 
     case "accept-curated": {
@@ -364,7 +369,7 @@ function resolveConflictPair(
       const rankB = curationRank[resultB.curationLevel ?? "ephemeral"] ?? 1;
       const winner = rankA >= rankB ? resultA : resultB;
       const loser = winner === resultA ? resultB : resultA;
-      return { winner, loser, conflict, action: "suppressed" };
+      return { winner, loser, conflict, action: "kept" };
     }
 
     case "surface": {

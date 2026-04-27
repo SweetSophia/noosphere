@@ -71,25 +71,6 @@ export interface RecallSettings {
    * Default: 0.1
    */
   conflictThreshold: number;
-
-  /**
-   * When true, prefer recency as a tiebreaker in conflict resolution.
-   * Default: false
-   */
-  preferRecency: boolean;
-
-  /**
-   * When true, prefer curation level as a tiebreaker in conflict resolution.
-   * Default: false
-   */
-  preferCuration: boolean;
-
-  /**
-   * Include conflict metadata in the recall response.
-   * When false, conflicts are still resolved but not surfaced.
-   * Default: true
-   */
-  showConflictsInline: boolean;
 }
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
@@ -105,9 +86,6 @@ export const DEFAULT_RECALL_SETTINGS: RecallSettings = {
   summaryFirst: true,
   conflictStrategy: "surface",
   conflictThreshold: 0.1,
-  preferRecency: false,
-  preferCuration: false,
-  showConflictsInline: true,
 };
 
 // ─── Normalization ───────────────────────────────────────────────────────────
@@ -175,21 +153,6 @@ export function normalizeRecallSettings(
       ? normalizeConflictThreshold(input.conflictThreshold)
       : DEFAULT_RECALL_SETTINGS.conflictThreshold;
 
-  const preferRecency =
-    typeof input.preferRecency === "boolean"
-      ? input.preferRecency
-      : DEFAULT_RECALL_SETTINGS.preferRecency;
-
-  const preferCuration =
-    typeof input.preferCuration === "boolean"
-      ? input.preferCuration
-      : DEFAULT_RECALL_SETTINGS.preferCuration;
-
-  const showConflictsInline =
-    typeof input.showConflictsInline === "boolean"
-      ? input.showConflictsInline
-      : DEFAULT_RECALL_SETTINGS.showConflictsInline;
-
   return {
     autoRecallEnabled,
     maxInjectedMemories,
@@ -201,9 +164,6 @@ export function normalizeRecallSettings(
     summaryFirst,
     conflictStrategy,
     conflictThreshold,
-    preferRecency,
-    preferCuration,
-    showConflictsInline,
   };
 }
 
