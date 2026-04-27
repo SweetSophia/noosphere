@@ -19,6 +19,7 @@
  */
 
 import type { BudgetVerbosity } from "./budget";
+import type { ConflictStrategy } from "./conflict";
 import type { DeduplicationStrategy } from "./dedup";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -50,6 +51,45 @@ export interface RecallSettings {
    * Overridden by verbosity in detailed/minimal modes.
    */
   summaryFirst: boolean;
+
+  // ─── Conflict resolution settings ────────────────────────────────────────
+
+  /**
+   * Conflict resolution strategy for cross-provider conflicts.
+   * - accept-highest: Keep higher-scoring result
+   * - accept-recent: Keep the most recent result
+   * - accept-curated: Keep the most curated result
+   * - surface: Keep all and surface conflicts for inspection
+   * - suppress-low: Silently suppress lower-scoring result
+   *
+   * Default: "surface"
+   */
+  conflictStrategy: ConflictStrategy;
+
+  /**
+   * Minimum score divergence (0.0–1.0) to trigger conflict detection.
+   * Default: 0.1
+   */
+  conflictThreshold: number;
+
+  /**
+   * When true, prefer recency as a tiebreaker in conflict resolution.
+   * Default: false
+   */
+  preferRecency: boolean;
+
+  /**
+   * When true, prefer curation level as a tiebreaker in conflict resolution.
+   * Default: false
+   */
+  preferCuration: boolean;
+
+  /**
+   * Include conflict metadata in the recall response.
+   * When false, conflicts are still resolved but not surfaced.
+   * Default: true
+   */
+  showConflictsInline: boolean;
 }
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
@@ -63,12 +103,18 @@ export const DEFAULT_RECALL_SETTINGS: RecallSettings = {
   enabledProviders: [],
   providerPriorityWeights: {},
   summaryFirst: true,
+  conflictStrategy: "surface",
+  conflictThreshold: 0.1,
+  preferRecency: false,
+  preferCuration: false,
+  showConflictsInline: true,
 };
 
 // ─── Normalization ───────────────────────────────────────────────────────────
 
 const VALID_VERBOSITIES: BudgetVerbosity[] = ["minimal", "standard", "detailed"];
 const VALID_STRATEGIES: DeduplicationStrategy[] = ["best-score", "provider-priority", "most-recent"];
+const VALID_CONFLICT_STRATEGIES: ConflictStrategy[] = ["accept-highest", "accept-recent", "accept-curated", "surface", "suppress-low"];
 
 /**
  * Normalize and validate recall settings, filling in defaults for missing
@@ -118,6 +164,32 @@ export function normalizeRecallSettings(
       ? input.summaryFirst
       : DEFAULT_RECALL_SETTINGS.summaryFirst;
 
+  const conflictStrategy: ConflictStrategy =
+    VALID_CONFLICT_STRATEGIES.includes(input.conflictStrategy as ConflictStrategy)
+      ? (input.conflictStrategy as ConflictStrategy)
+      : DEFAULT_RECALL_SETTINGS.conflictStrategy;
+
+  const conflictThreshold =
+    typeof input.conflictThreshold === "number" &&
+    Number.isFinite(input.conflictThreshold)
+      ? normalizeConflictThreshold(input.conflictThreshold)
+      : DEFAULT_RECALL_SETTINGS.conflictThreshold;
+
+  const preferRecency =
+    typeof input.preferRecency === "boolean"
+      ? input.preferRecency
+      : DEFAULT_RECALL_SETTINGS.preferRecency;
+
+  const preferCuration =
+    typeof input.preferCuration === "boolean"
+      ? input.preferCuration
+      : DEFAULT_RECALL_SETTINGS.preferCuration;
+
+  const showConflictsInline =
+    typeof input.showConflictsInline === "boolean"
+      ? input.showConflictsInline
+      : DEFAULT_RECALL_SETTINGS.showConflictsInline;
+
   return {
     autoRecallEnabled,
     maxInjectedMemories,
@@ -127,6 +199,11 @@ export function normalizeRecallSettings(
     enabledProviders,
     providerPriorityWeights,
     summaryFirst,
+    conflictStrategy,
+    conflictThreshold,
+    preferRecency,
+    preferCuration,
+    showConflictsInline,
   };
 }
 
@@ -166,4 +243,8 @@ function normalizePriorityWeights(
     }
   }
   return result;
+}
+
+function normalizeConflictThreshold(value: number): number {
+  return Math.max(0, Math.min(1, value));
 }

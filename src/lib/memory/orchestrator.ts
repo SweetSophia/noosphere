@@ -10,6 +10,12 @@ import {
   type DeduplicationConfig,
 } from "./dedup";
 import {
+  resolveConflicts,
+  type ConflictConfig,
+  type ConflictSignal,
+  type ConflictStats,
+} from "./conflict";
+import {
   getEffectiveAutoRecall,
   normalizeMemoryProviderConfig,
 } from "./provider";
@@ -40,6 +46,9 @@ export interface RecallOrchestratorOptions {
 
   /** Cross-provider deduplication configuration. */
   deduplication?: DeduplicationConfig;
+
+  /** Cross-provider conflict resolution configuration. */
+  conflict?: ConflictConfig;
 }
 
 export interface RecallQuery {
@@ -100,6 +109,12 @@ export interface RecallResponse {
 
   /** Deduplication statistics. */
   dedupStats?: import("./dedup").DeduplicationStats;
+
+  /** Detected conflicts between results (when strategy is "surface"). */
+  conflicts?: ConflictSignal[];
+
+  /** Conflict resolution statistics. */
+  conflictStats?: ConflictStats;
 }
 
 export interface RecallProviderMeta {
@@ -137,6 +152,7 @@ export class RecallOrchestrator {
   private readonly autoRecallTokenBudget: number;
   private readonly concurrency: number;
   private readonly deduplicator: CrossProviderDeduplicator;
+  private readonly conflictConfig: ConflictConfig;
 
   constructor(options: RecallOrchestratorOptions) {
     if (!options.providers || options.providers.length === 0) {
@@ -156,6 +172,7 @@ export class RecallOrchestrator {
       options.providers.length,
     );
     this.deduplicator = createDeduplicator(options.deduplication);
+    this.conflictConfig = options.conflict ?? {};
   }
 
   async recall(query: RecallQuery): Promise<RecallResponse> {
@@ -172,12 +189,16 @@ export class RecallOrchestrator {
     // Merge, score, deduplicate, and rank all results.
     const { ranked, dedupStats } = this.rankResults(providerResults);
 
+    // Apply conflict resolution if enabled.
+    const { results: conflictResolved, conflicts, stats } =
+      this.applyConflictResolution(ranked);
+
     const totalBeforeCap = ranked.length;
 
     const budgeted =
       query.mode === "auto" && effectiveBudget !== undefined
-        ? applyRecallBudget(ranked, effectiveCap, effectiveBudget)
-        : { results: ranked.slice(0, effectiveCap), tokenBudgetUsed: undefined };
+        ? applyRecallBudget(conflictResolved, effectiveCap, effectiveBudget)
+        : { results: conflictResolved.slice(0, effectiveCap), tokenBudgetUsed: undefined };
 
     // Build prompt injection text for auto mode.
     const promptInjectionText =
@@ -192,6 +213,8 @@ export class RecallOrchestrator {
       tokenBudgetUsed: budgeted.tokenBudgetUsed,
       promptInjectionText,
       dedupStats,
+      conflicts: conflicts.length > 0 ? conflicts : undefined,
+      conflictStats: stats,
       providerMeta: providerResults.map((pr) => ({
         providerId: pr.providerId,
         resultCount: pr.results.length,
@@ -200,6 +223,77 @@ export class RecallOrchestrator {
         durationMs: pr.durationMs,
         skippedReason: pr.skippedReason,
       })),
+    };
+  }
+
+  // ─── Conflict Resolution ───────────────────────────────────────────────
+
+  private applyConflictResolution(
+    ranked: RecallResultRanked[],
+  ): {
+    results: RecallResultRanked[];
+    conflicts: ConflictSignal[];
+    stats: ConflictStats;
+  } {
+    if (ranked.length === 0) {
+      return {
+        results: ranked,
+        conflicts: [],
+        stats: {
+          totalInput: 0,
+          conflictingPairs: 0,
+          resolved: 0,
+          suppressed: 0,
+          surfaced: 0,
+        },
+      };
+    }
+
+    // Extract MemoryResults for conflict resolution.
+    const memoryResults = ranked as MemoryResult[];
+
+    // Apply conflict resolution.
+    const conflictResult = resolveConflicts(memoryResults, {
+      ...this.conflictConfig,
+      includeConflictMetadata: true,
+    });
+
+    // Build a set of surviving MemoryResult identifiers for fast lookup.
+    const survivingKeys = new Set<string>();
+    for (const result of conflictResult.results) {
+      survivingKeys.add(`${result.provider}:${result.id}`);
+    }
+
+    // Map surviving MemoryResults back to their RecallResultRanked wrappers.
+    const resultMap = new Map<string, RecallResultRanked>();
+    for (const r of ranked) {
+      resultMap.set(`${r.provider}:${r.id}`, r);
+    }
+
+    const resolvedRanked: RecallResultRanked[] = [];
+    for (const result of conflictResult.results) {
+      const key = `${result.provider}:${result.id}`;
+      const original = resultMap.get(key);
+      if (original) {
+        resolvedRanked.push(original);
+      }
+    }
+
+    // Re-rank by compositeScore descending (same as dedup).
+    resolvedRanked.sort((a, b) => b.compositeScore - a.compositeScore);
+
+    // Assign new ranks.
+    for (let i = 0; i < resolvedRanked.length; i++) {
+      resolvedRanked[i] = {
+        ...resolvedRanked[i],
+        rank: i + 1,
+      };
+    }
+
+    return {
+      results: resolvedRanked,
+      conflicts: conflictResult.conflicts,
+      stats: conflictResult.stats,
     };
   }
 

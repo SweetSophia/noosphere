@@ -841,7 +841,7 @@ test("search sets curationLevel to ephemeral when proof_count < 3", async () => 
   assertEqual(results[0].curationLevel, "ephemeral", "proof_count 2 → ephemeral");
 });
 
-test("search sets curationLevel to managed when proof_count is 3-9", async () => {
+test("search sets curationLevel to reviewed when proof_count is 3-9", async () => {
   const mockFetch = createMockFetch([
     {
       ok: true,
@@ -860,7 +860,7 @@ test("search sets curationLevel to managed when proof_count is 3-9", async () =>
   });
 
   const results = await provider.search("test");
-  assertEqual(results[0].curationLevel, "managed", "proof_count 5 → managed");
+  assertEqual(results[0].curationLevel, "reviewed", "proof_count 5 → reviewed");
 });
 
 test("search sets curationLevel to curated when proof_count >= 10", async () => {
