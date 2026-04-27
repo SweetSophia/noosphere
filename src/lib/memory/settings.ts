@@ -208,3 +208,18 @@ function normalizePriorityWeights(
 function normalizeConflictThreshold(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
+
+/**
+ * Map user-facing RecallSettings to the programmatic ConflictConfig
+ * consumed by the conflict resolution engine and the orchestrator.
+ *
+ * This is the wiring layer between stored/API settings and the runtime.
+ */
+export function toConflictConfig(settings: RecallSettings): import("./conflict").ConflictConfig {
+  return {
+    conflictThreshold: settings.conflictThreshold,
+    strategy: settings.conflictStrategy,
+    includeConflictMetadata: true,
+    providerPriorityWeights: { ...settings.providerPriorityWeights },
+  };
+}

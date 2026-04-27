@@ -1,6 +1,10 @@
 /**
  * RecallSettings — Unit Tests
  *
+ * Covers: defaults, overrides, validation, normalization, merge,
+ * conflict settings (conflictStrategy, conflictThreshold),
+ * and toConflictConfig mapping.
+ *
  * Run with: DATABASE_URL="postgresql://test:test@localhost:5432/test" npx tsx src/__tests__/memory/settings.test.ts
  */
 
@@ -12,6 +16,7 @@ import {
   DEFAULT_RECALL_SETTINGS,
   mergeRecallSettings,
   normalizeRecallSettings,
+  toConflictConfig,
 } from "@/lib/memory/settings";
 import type { RecallSettings } from "@/lib/memory/settings";
 
@@ -226,6 +231,96 @@ async function main() {
       assertEqual(settings.deduplicationStrategy, s, `strategy set to ${s}`);
     });
   }
+
+  // ─── Conflict settings ──────────────────────────────────────────────
+
+  test("defaults include conflictStrategy=\"surface\" and conflictThreshold=0.1", () => {
+    assertEqual(DEFAULT_RECALL_SETTINGS.conflictStrategy, "surface", "conflictStrategy default");
+    assertEqual(DEFAULT_RECALL_SETTINGS.conflictThreshold, 0.1, "conflictThreshold default");
+  });
+
+  test("conflictStrategy accepts all valid values", () => {
+    const strategies = ["accept-highest", "accept-recent", "accept-curated", "surface", "suppress-low"] as const;
+    for (const s of strategies) {
+      const settings = normalizeRecallSettings({ conflictStrategy: s });
+      assertEqual(settings.conflictStrategy, s, `conflictStrategy ${s}`);
+    }
+  });
+
+  test("invalid conflictStrategy falls back to surface", () => {
+    const settings = normalizeRecallSettings({ conflictStrategy: "merge" as RecallSettings["conflictStrategy"] });
+    assertEqual(settings.conflictStrategy, "surface", "invalid fallback");
+  });
+
+  test("conflictThreshold clamps to [0, 1]", () => {
+    assertEqual(normalizeRecallSettings({ conflictThreshold: -0.5 }).conflictThreshold, 0, "negative clamps to 0");
+    assertEqual(normalizeRecallSettings({ conflictThreshold: 1.5 }).conflictThreshold, 1, ">1 clamps to 1");
+    assertEqual(normalizeRecallSettings({ conflictThreshold: 0 }).conflictThreshold, 0, "0 accepted");
+    assertEqual(normalizeRecallSettings({ conflictThreshold: 1 }).conflictThreshold, 1, "1 accepted");
+    assertEqual(normalizeRecallSettings({ conflictThreshold: 0.75 }).conflictThreshold, 0.75, "0.75 accepted");
+  });
+
+  test("non-number conflictThreshold falls back to 0.1", () => {
+    assertEqual(
+      normalizeRecallSettings({ conflictThreshold: NaN }).conflictThreshold,
+      0.1,
+      "NaN fallback",
+    );
+    assertEqual(
+      normalizeRecallSettings({ conflictThreshold: "high" as unknown as number }).conflictThreshold,
+      0.1,
+      "string fallback",
+    );
+  });
+
+  test("conflictThreshold Infinity falls back to 0.1", () => {
+    assertEqual(
+      normalizeRecallSettings({ conflictThreshold: Infinity }).conflictThreshold,
+      0.1,
+      "Infinity fallback",
+    );
+    assertEqual(
+      normalizeRecallSettings({ conflictThreshold: -Infinity }).conflictThreshold,
+      0.1,
+      "-Infinity fallback",
+    );
+  });
+
+  test("mergeRecallSettings applies conflictStrategy override", () => {
+    const base = normalizeRecallSettings({ conflictStrategy: "accept-highest" });
+    const merged = mergeRecallSettings(base, { conflictStrategy: "suppress-low" });
+    assertEqual(merged.conflictStrategy, "suppress-low", "override applied");
+  });
+
+  test("mergeRecallSettings re-normalizes invalid conflictThreshold", () => {
+    const base = normalizeRecallSettings({ conflictThreshold: 0.5 });
+    const merged = mergeRecallSettings(base, { conflictThreshold: -1 });
+    assertEqual(merged.conflictThreshold, 0, "clamped to 0");
+  });
+
+  // ─── toConflictConfig mapping ─────────────────────────────────────────
+
+  test("toConflictConfig maps RecallSettings to ConflictConfig", () => {
+    const settings = normalizeRecallSettings({
+      conflictStrategy: "accept-recent",
+      conflictThreshold: 0.3,
+      providerPriorityWeights: { hindsight: 2.0 },
+    });
+    const config = toConflictConfig(settings);
+    assertEqual(config.conflictThreshold, 0.3, "threshold mapped");
+    assertEqual(config.strategy, "accept-recent", "strategy mapped");
+    assertEqual(config.includeConflictMetadata, true, "metadata always true");
+    assertEqual(config.providerPriorityWeights?.hindsight, 2.0, "weights mapped");
+  });
+
+  test("toConflictConfig uses defaults when settings are default", () => {
+    const settings = normalizeRecallSettings();
+    const config = toConflictConfig(settings);
+    assertEqual(config.conflictThreshold, 0.1, "default threshold");
+    assertEqual(config.strategy, "surface", "default strategy");
+    assertEqual(config.includeConflictMetadata, true, "default metadata");
+    assertEqual(Object.keys(config.providerPriorityWeights || {}).length, 0, "default weights empty");
+  });
 
   // ─── Wait for all async tests ──────────────────────────────────────────
 
