@@ -54,9 +54,6 @@ export interface ConflictConfig {
 
   /** Provider priority weights for conflict resolution (providerId → weight). */
   providerPriorityWeights?: Record<string, number>;
-
-  /** Curation level weights for conflict resolution. */
-  curationWeights?: Record<string, number>;
 }
 
 export interface ConflictSignal {
@@ -168,8 +165,8 @@ export function computeConflictScore(
   if (resultA.updatedAt && resultB.updatedAt) {
     const dateA = new Date(resultA.updatedAt).getTime();
     const dateB = new Date(resultB.updatedAt).getTime();
-    const recencyDiff = Math.abs(dateA - dateB) / (365 * 24 * 60 * 60 * 1000); // normalized to years
-    if (recencyDiff > 1) {
+    const recencyDiffDays = Math.abs(dateA - dateB) / (24 * 60 * 60 * 1000);
+    if (recencyDiffDays > 30) {
       divergence += 0.1;
     }
   }

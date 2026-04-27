@@ -251,12 +251,6 @@ export class RecallOrchestrator {
       includeConflictMetadata: true,
     });
 
-    // Build a set of surviving MemoryResult identifiers for fast lookup.
-    const survivingKeys = new Set<string>();
-    for (const result of conflictResult.results) {
-      survivingKeys.add(`${result.provider}:${result.id}`);
-    }
-
     // Map surviving MemoryResults back to their RecallResultRanked wrappers.
     const resultMap = new Map<string, RecallResultRanked>();
     for (const r of ranked) {
