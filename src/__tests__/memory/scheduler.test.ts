@@ -139,6 +139,7 @@ describe("local memory scheduler", () => {
       [makeJob({ intervalMs: 5_000 })],
       {
         setTimeout: ((..._args: Parameters<typeof globalThis.setTimeout>) => {
+          void _args;
           const id = timerIds.length + 1;
           timerIds.push(id);
           return id as unknown as ReturnType<typeof globalThis.setTimeout>;
@@ -192,6 +193,7 @@ describe("local memory scheduler", () => {
           cb: Parameters<typeof globalThis.setTimeout>[0],
           ..._args: unknown[]
         ) => {
+          void _args;
           callbacks.push(cb as () => void);
           return callbacks.length as unknown as ReturnType<
             typeof globalThis.setTimeout
