@@ -364,7 +364,7 @@ function resolveConflictPair(
     }
 
     case "accept-curated": {
-      const curationRank: Record<string, number> = { curated: 3, reviewed: 2, ephemeral: 1 };
+      const curationRank: Record<string, number> = { curated: 3, managed: 2, ephemeral: 1 };
       const rankA = curationRank[resultA.curationLevel ?? "ephemeral"] ?? 1;
       const rankB = curationRank[resultB.curationLevel ?? "ephemeral"] ?? 1;
       const winner = rankA >= rankB ? resultA : resultB;

@@ -23,6 +23,7 @@ import {
   NoosphereProvider,
   createNoosphereProvider,
 } from "@/lib/memory/noosphere";
+import type { MemoryCurationLevel } from "@/lib/memory/types";
 
 // ─── Test helpers ────────────────────────────────────────────────────────────
 
@@ -418,10 +419,10 @@ async function main() {
 
   // ─── Curation level mapping via getById ─────────────────────────────────
 
-  test("curation: published=curated, reviewed=reviewed, draft=ephemeral", async () => {
+  test("curation: published=curated, reviewed=managed, draft=ephemeral", async () => {
     const cases: [string, string][] = [
       ["published", "curated"],
-      ["reviewed", "reviewed"],
+      ["reviewed", "managed"],
       ["draft", "ephemeral"],
     ];
 
@@ -436,7 +437,7 @@ async function main() {
       const result = await provider.getById("test");
       assertEqual(
         result?.curationLevel,
-        expected as "curated" | "reviewed" | "ephemeral",
+        expected as MemoryCurationLevel,
         `status=${status}`,
       );
     }

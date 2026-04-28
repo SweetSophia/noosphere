@@ -131,9 +131,9 @@ export function removeUndefined<T extends Record<string, unknown>>(
 // ─── Shared scoring constants ──────────────────────────────────────────────
 
 /** Curation level → numeric score, used by orchestrator and conflict engine. */
-export const CURATION_SCORE_MAP: Record<string, number> = {
+export const CURATION_SCORE_MAP: Record<MemoryCurationLevel, number> = {
   curated: 1.0,
-  reviewed: 0.7,
+  managed: 0.7,
   ephemeral: 0.3,
 };
 
@@ -156,8 +156,8 @@ export function computeBaseCompositeScore(
   const relevance = result.relevanceScore ?? 0;
   const confidence = result.confidenceScore ?? 0;
   const recency = result.recencyScore ?? 0;
-  const curation =
-    CURATION_SCORE_MAP[result.curationLevel ?? ""] ?? 0.5;
+  const curationLevel = result.curationLevel as MemoryCurationLevel | undefined;
+  const curation = curationLevel ? CURATION_SCORE_MAP[curationLevel] : 0.5;
 
   return normalizeMemoryScore(
     COMPOSITE_WEIGHTS.relevance * relevance +
