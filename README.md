@@ -55,7 +55,7 @@ The next integration target is an OpenClaw plugin/skill bridge that will use Noo
 
 ### For Agents and Integrations
 
-- **Write articles** through REST API with API-key authentication.
+- **Write articles** through REST API with API key authentication.
 - **Update articles** with PATCH support and revision tracking.
 - **Ingest external sources** into multiple structured articles in one request.
 - **Save synthesized answers** as durable wiki articles.
@@ -168,7 +168,7 @@ openssl rand -hex 32  # NEXTAUTH_SECRET
 openssl rand -hex 32  # POSTGRES_PASSWORD
 
 docker compose up -d
-open http://localhost:4400/wiki
+# Navigate to http://localhost:4400/wiki in your browser.
 ```
 
 ### Create an Admin Account
@@ -184,7 +184,13 @@ Then visit `/wiki/login`.
 ```bash
 npm install
 cp .env.example .env
-# Fill DATABASE_URL, NEXTAUTH_SECRET, and POSTGRES_PASSWORD.
+# Update your local .env before starting:
+# - DATABASE_URL should use the Postgres host port exposed by Docker Compose:
+#   DATABASE_URL="postgresql://noosphere:YOUR_POSTGRES_PASSWORD@localhost:5433/noosphere"
+# - Set NEXTAUTH_SECRET.
+# - Set NEXTAUTH_URL="http://localhost:4400".
+# - Set APP_URL="http://localhost:4400".
+# - Set POSTGRES_PASSWORD.
 
 docker compose up db -d
 npx prisma migrate dev
@@ -210,7 +216,7 @@ POST /api/articles
 
 # Update article
 PATCH /api/articles/:id
-# { title?, slug?, content?, topicId?, tags?, confidence?, status?, lastReviewed? }
+# { title?, slug?, content?, topicId?, tags?, excerpt?, confidence?, status?, lastReviewed? }
 
 # List/search articles
 GET /api/articles?q=search&topic=slug&tag=tag&status=draft&confidence=high
@@ -227,11 +233,11 @@ GET /wiki/{topicSlug}/{articleSlug}
 ```bash
 # Bulk ingest from an external source
 POST /api/ingest
-# { source: { type: "url", url: "...", title: "..." }, articles: [...], tags?: [], authorName?: "AgentName" }
+# { source: { type: "url", url: "...", title: "..." }, articles: [...], tags?: [...], authorName?: "AgentName" }
 
 # Save a synthesized answer as an article
 POST /api/answer
-# { title, content, topicId, tags?, sourceQuery?, confidence?, status? }
+# { title, content, topicId, tags?, excerpt?, sourceQuery?, confidence?, status? }
 ```
 
 ### Maintenance and Graph
