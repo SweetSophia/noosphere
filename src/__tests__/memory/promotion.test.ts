@@ -23,7 +23,9 @@ import {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function makeStats(overrides: Partial<MemoryRecallStats> = {}): MemoryRecallStats {
+function makeStats(
+  overrides: Partial<MemoryRecallStats> = {},
+): MemoryRecallStats {
   return {
     memoryId: "mem-1",
     provider: "test",
@@ -54,7 +56,10 @@ describe("promotion", () => {
 
   // [4] computeCandidateKey
   test("[4] candidate key combines provider and memoryId", () => {
-    assert.equal(computeCandidateKey("hindsight", "mem-42"), "hindsight:mem-42");
+    assert.equal(
+      computeCandidateKey("hindsight", "mem-42"),
+      "hindsight:mem-42",
+    );
   });
 
   // [5] isEligibleForPromotion: eligible ephemeral
@@ -164,16 +169,28 @@ describe("promotion", () => {
     assert.equal(candidates.length, 0);
   });
 
+  // [16b] scanForCandidates: deduplicates duplicate stats within same scan
+  test("[16b] scan skips duplicate stats entries in same run", () => {
+    const stats = makeStats();
+    const duplicate = makeStats();
+    const candidates = scanForCandidates([stats, duplicate]);
+    assert.equal(candidates.length, 1);
+  });
+
   // [17] recordRecall: new memory
   test("[17] recordRecall creates new stats", () => {
     const map = new Map<string, MemoryRecallStats>();
-    const stats = recordRecall(map, {
-      id: "mem-new",
-      provider: "hindsight",
-      content: "test",
-      relevanceScore: 0.8,
-      curationLevel: "ephemeral",
-    } as any, "2026-04-27T00:00:00Z");
+    const stats = recordRecall(
+      map,
+      {
+        id: "mem-new",
+        provider: "hindsight",
+        content: "test",
+        relevanceScore: 0.8,
+        curationLevel: "ephemeral",
+      } as any,
+      "2026-04-27T00:00:00Z",
+    );
 
     assert.equal(stats.recallCount, 1);
     assert.equal(stats.relevanceSum, 0.8);
@@ -202,11 +219,13 @@ describe("promotion", () => {
 
   // [19] prunePendingCandidates: under limit
   test("[19] prune keeps all when under limit", () => {
-    const candidates = Array.from({ length: 5 }, (_, i) =>
-      createPromotionCandidate(
-        makeStats({ memoryId: `mem-${i}` }),
-        new Date(Date.now() + i * 1000).toISOString(),
-      )!
+    const candidates = Array.from(
+      { length: 5 },
+      (_, i) =>
+        createPromotionCandidate(
+          makeStats({ memoryId: `mem-${i}` }),
+          new Date(Date.now() + i * 1000).toISOString(),
+        )!,
     );
     const pruned = prunePendingCandidates(candidates, 10);
     assert.equal(pruned.length, 5);
@@ -214,11 +233,13 @@ describe("promotion", () => {
 
   // [20] prunePendingCandidates: over limit
   test("[20] prune removes oldest when over limit", () => {
-    const candidates = Array.from({ length: 10 }, (_, i) =>
-      createPromotionCandidate(
-        makeStats({ memoryId: `mem-${i}` }),
-        new Date(Date.now() + i * 1000).toISOString(),
-      )!
+    const candidates = Array.from(
+      { length: 10 },
+      (_, i) =>
+        createPromotionCandidate(
+          makeStats({ memoryId: `mem-${i}` }),
+          new Date(Date.now() + i * 1000).toISOString(),
+        )!,
     );
     const pruned = prunePendingCandidates(candidates, 5);
     const pending = pruned.filter((c) => c.status === "pending");
@@ -229,11 +250,13 @@ describe("promotion", () => {
 
   // [21] prunePendingCandidates: preserves non-pending
   test("[21] prune preserves approved/rejected candidates", () => {
-    const candidates = Array.from({ length: 8 }, (_, i) =>
-      createPromotionCandidate(
-        makeStats({ memoryId: `mem-${i}` }),
-        new Date(Date.now() + i * 1000).toISOString(),
-      )!
+    const candidates = Array.from(
+      { length: 8 },
+      (_, i) =>
+        createPromotionCandidate(
+          makeStats({ memoryId: `mem-${i}` }),
+          new Date(Date.now() + i * 1000).toISOString(),
+        )!,
     );
     // Approve the first one
     candidates[0] = applyReview(candidates[0], {
@@ -278,6 +301,20 @@ describe("promotion config", () => {
     assert.equal(isEligibleForPromotion(stats, config), true);
   });
 
+  // [24b] createPromotionCandidate uses config promotionTargets mapping
+  test("[24b] createPromotionCandidate respects custom promotionTargets", () => {
+    const config: PromotionConfig = {
+      ...DEFAULT_PROMOTION_CONFIG,
+      promotionTargets: {
+        ephemeral: "curated",
+        managed: "curated",
+        curated: null,
+      },
+    };
+    const candidate = createPromotionCandidate(makeStats(), undefined, config)!;
+    assert.equal(candidate.targetLevel, "curated");
+  });
+
   // [25] recordRecall preserves curationLevel from latest recall
   test("[25] recordRecall updates curationLevel from result", () => {
     const map = new Map<string, MemoryRecallStats>();
@@ -312,7 +349,11 @@ describe("promotion config", () => {
       },
     };
     const stats = makeStats({ curationLevel: "ephemeral" });
-    const candidate = createPromotionCandidate(stats, "2026-04-27T00:00:00Z", config);
+    const candidate = createPromotionCandidate(
+      stats,
+      "2026-04-27T00:00:00Z",
+      config,
+    );
     assert.ok(candidate);
     assert.equal(candidate!.targetLevel, "curated");
   });

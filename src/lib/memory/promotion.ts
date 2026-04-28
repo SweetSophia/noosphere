@@ -29,7 +29,7 @@ import type { MemoryCurationLevel, MemoryResult } from "./types";
 
 export type PromotionStatus = "pending" | "approved" | "rejected";
 
-export type PromotionTargetLevel = Exclude<MemoryCurationLevel, "curated">;
+export type PromotionTargetLevel = Exclude<MemoryCurationLevel, "ephemeral">;
 
 /** Tracks recall statistics for a memory over time. */
 export interface MemoryRecallStats {
@@ -139,17 +139,18 @@ export const DEFAULT_PROMOTION_CONFIG: PromotionConfig = {
 };
 
 /** Next curation level in the promotion ladder. */
-const CURATION_LADDER: Record<MemoryCurationLevel, MemoryCurationLevel | null> = {
-  ephemeral: "managed",
-  managed: "curated",
-  curated: null,
-};
+const CURATION_LADDER: Record<MemoryCurationLevel, MemoryCurationLevel | null> =
+  {
+    ephemeral: "managed",
+    managed: "curated",
+    curated: null,
+  };
 
 // ─── Functions ──────────────────────────────────────────────────────────────
 
 /**
- * Compute a simple content hash for deduplication of promotion candidates.
- * Uses a basic hash of provider + memoryId to avoid duplicate candidates.
+ * Compute a stable candidate key for deduplication of promotion candidates.
+ * Uses provider + memoryId to uniquely identify a candidate.
  */
 export function computeCandidateKey(
   provider: string,
@@ -257,18 +258,20 @@ export function scanForCandidates(
   now: string = new Date().toISOString(),
 ): PromotionCandidate[] {
   const candidates: PromotionCandidate[] = [];
+  const seenCandidateKeys = new Set(existingCandidateKeys);
 
   for (const stats of statsList) {
     const key = computeCandidateKey(stats.provider, stats.memoryId);
 
-    // Skip if already a candidate
-    if (existingCandidateKeys.has(key)) {
+    // Skip if already a candidate or already seen in this scan
+    if (seenCandidateKeys.has(key)) {
       continue;
     }
 
     const candidate = createPromotionCandidate(stats, now, config);
     if (candidate) {
       candidates.push(candidate);
+      seenCandidateKeys.add(key);
     }
   }
 
@@ -325,9 +328,7 @@ export function prunePendingCandidates(
   }
 
   // Sort pending by createdAt ascending (oldest first)
-  const sorted = pending.sort(
-    (a, b) => a.createdAt.localeCompare(b.createdAt),
-  );
+  const sorted = pending.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
   // Keep only the newest maxPending candidates
   const kept = sorted.slice(sorted.length - maxPending);

@@ -12,7 +12,11 @@
  * 2. For each candidate, fetch the source memory content
  * 3. If a matching article exists → update it with new information
  * 4. If no match → create a new draft article
- * 5. Mark the candidate as "synthesized"
+ * 5. Record the synthesis job outcome as completed or failed, including
+ *    any created/updated article metadata
+ *
+ * Note: this module tracks synthesis job lifecycle, not a separate
+ * post-synthesis candidate status.
  *
  * ## Content Resolution
  *
@@ -26,7 +30,6 @@
  */
 
 import type { PromotionCandidate } from "./promotion";
-import type { MemoryCurationLevel } from "./types";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -150,14 +153,16 @@ export const DEFAULT_SYNTHESIS_CONFIG: SynthesisConfig = {
  * Lowercases, replaces non-alphanumeric with hyphens, collapses duplicates.
  */
 export function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .trim()
-    .replace(/[^\w\s-]/g, "")
-    .replace(/[\s_]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 100) || "untitled";
+  return (
+    text
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, "")
+      .replace(/[\s_]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 100) || "untitled"
+  );
 }
 
 /**
@@ -220,7 +225,7 @@ export function mergeContent(
  * Prepare synthesis input from a promotion candidate and source memory.
  */
 export function prepareSynthesisInput(
-  candidate: PromotionCandidate,
+  _candidate: PromotionCandidate,
   memoryContent: string,
   memoryTitle?: string,
   memorySummary?: string,
@@ -248,20 +253,28 @@ export function synthesize(
   strategy: ContentStrategy = DEFAULT_SYNTHESIS_CONFIG.defaultStrategy,
 ): SynthesisResult {
   try {
-    // If updating an existing article, merge or replace content.
+    // If updating an existing article, merge or replace content
     if (input.existingArticleId) {
-      // When existingContent is available, apply the merge strategy.
-      // When missing (e.g. replace strategy or unavailable content),
-      // just use the incoming content directly.
-      const resolvedContent = input.existingContent
-        ? mergeContent(input.existingContent, input.content, strategy)
-        : input.content;
+      if (strategy === "replace" || input.existingContent !== undefined) {
+        const mergedContent = mergeContent(
+          input.existingContent ?? "",
+          input.content,
+          strategy,
+        );
+
+        return {
+          success: true,
+          articleId: input.existingArticleId,
+          content: mergedContent,
+          created: false,
+        };
+      }
 
       return {
-        success: true,
-        articleId: input.existingArticleId,
-        content: resolvedContent,
+        success: false,
         created: false,
+        error:
+          "Existing article ID provided but content missing for merge strategy",
       };
     }
 
@@ -297,10 +310,11 @@ export function updateJobStatus(
     ...job,
     status,
     updatedAt: now,
-    completedAt: status === "completed" || status === "failed" ? now : undefined,
+    completedAt:
+      status === "completed" || status === "failed" ? now : undefined,
     articleId: result?.articleId ?? job.articleId,
     articleSlug: result?.articleSlug ?? job.articleSlug,
-    error: status === "failed" ? result?.error ?? job.error : undefined,
+    error: status === "failed" ? (result?.error ?? job.error) : undefined,
   };
 }
 
@@ -311,9 +325,7 @@ export function canRetry(
   job: SynthesisJob,
   maxRetries: number = DEFAULT_SYNTHESIS_CONFIG.maxRetries,
 ): boolean {
-  return (
-    job.status === "failed" && job.retryCount < maxRetries
-  );
+  return job.status === "failed" && job.retryCount < maxRetries;
 }
 
 /**
@@ -336,9 +348,7 @@ export function retryJob(
 /**
  * Filter approved candidates that are ready for synthesis.
  */
-export function getPendingJobs(
-  jobs: SynthesisJob[],
-): SynthesisJob[] {
+export function getPendingJobs(jobs: SynthesisJob[]): SynthesisJob[] {
   return jobs.filter(
     (j) => j.status === "pending" && j.candidate.status === "approved",
   );
