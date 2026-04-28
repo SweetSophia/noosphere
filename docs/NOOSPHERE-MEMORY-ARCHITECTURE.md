@@ -205,8 +205,8 @@ Important options in `RecallOrchestratorOptions`:
 Source: `src/lib/memory/budget.ts`
 
 `ContextBudgetManager` enforces hard caps before recall results become prompt
-context. It returns `BudgetResult`, which includes selected entries, dropped
-entries, token usage, and counts.
+context. It returns `BudgetResult`, which includes selected entries, token
+usage, and aggregate drop/trim counts.
 
 Configuration is `ContextBudgetConfig`:
 
@@ -337,8 +337,10 @@ Job lifecycle:
 
 ```text
 pending → in_progress → completed
-                    ↘ failed ──retry──▶ pending
+                    ↘ failed ──retry action──▶ pending
 ```
+
+`retry` is an action performed by `retryJob()`, not a `SynthesisStatus` value.
 
 Content strategies:
 
