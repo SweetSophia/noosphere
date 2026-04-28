@@ -163,3 +163,18 @@ export type {
   SynthesisStatus,
   ContentStrategy,
 } from "./backfill";
+
+export {
+  LocalMemoryScheduler,
+  createLocalMemoryScheduler,
+  createSchedulerHealthJob,
+} from "./scheduler";
+
+export type {
+  LocalMemorySchedulerOptions,
+  SchedulerJobDefinition,
+  SchedulerJobSnapshot,
+  SchedulerJobStatus,
+  SchedulerRunContext,
+  SchedulerStatusSnapshot,
+} from "./scheduler";
