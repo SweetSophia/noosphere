@@ -262,26 +262,31 @@ user-facing recall settings.
 
 Source: `src/lib/memory/settings.ts`
 
-`RecallSettings` is the user-facing configuration model:
+`RecallSettings` is the stored/user-facing settings shape. It is normalized and
+merged in `settings.ts`, but not every field is automatically wired into the
+runtime by a single helper yet. Today, `toConflictConfig(settings)` maps the
+conflict-related fields into the orchestrator's `ConflictConfig`; the remaining
+settings must be translated by the API/UI/wiring layer when constructing
+providers or `RecallOrchestratorOptions`.
 
-| Setting | Purpose |
-| --- | --- |
-| `autoRecallEnabled` | Enables automatic recall injection. |
-| `maxInjectedMemories` | Result count cap for injected context. |
-| `maxInjectedTokens` | Token cap for injected context. |
-| `recallVerbosity` | `minimal`, `standard`, or `detailed`. |
-| `deduplicationStrategy` | Dedup strategy. |
-| `enabledProviders` | Provider allow-list. |
-| `providerPriorityWeights` | Provider ranking and conflict weights. |
-| `summaryFirst` | Prefer summaries before full content. |
-| `conflictStrategy` | Conflict resolution behavior. |
-| `conflictThreshold` | Conflict sensitivity from 0 to 1. |
+| Setting | Purpose | Current wiring note |
+| --- | --- | --- |
+| `autoRecallEnabled` | Enables automatic recall injection. | Wiring layer should decide whether to run auto recall. |
+| `maxInjectedMemories` | Result count cap for injected context. | Pass as `RecallQuery.resultCap` or orchestrator cap. |
+| `maxInjectedTokens` | Token cap for injected context. | Pass as `RecallQuery.tokenBudget` or `autoRecallTokenBudget`. |
+| `recallVerbosity` | `minimal`, `standard`, or `detailed`. | Normalized setting; budget verbosity translation is not automatic yet. |
+| `deduplicationStrategy` | Dedup strategy. | Pass into orchestrator `deduplication` config. |
+| `enabledProviders` | Provider allow-list. | Wiring layer chooses registered providers. |
+| `providerPriorityWeights` | Provider ranking and conflict weights. | Used by `toConflictConfig()` for conflicts; provider ranking weights need explicit wiring. |
+| `summaryFirst` | Prefer summaries before full content. | Normalized setting; budget `summaryFirst` translation is not automatic yet. |
+| `conflictStrategy` | Conflict resolution behavior. | Mapped by `toConflictConfig()`. |
+| `conflictThreshold` | Conflict sensitivity from 0 to 1. | Mapped by `toConflictConfig()`. |
 
 Use:
 
 - `normalizeRecallSettings(input)` to validate/clamp user input.
 - `mergeRecallSettings(base, overrides)` to apply overrides safely.
-- `toConflictConfig(settings)` to wire recall settings into conflict resolution.
+- `toConflictConfig(settings)` to wire conflict settings into conflict resolution.
 
 ---
 
