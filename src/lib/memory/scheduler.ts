@@ -74,10 +74,10 @@ export interface LocalMemorySchedulerOptions {
   now?: () => Date;
 
   /** Timer hook for deterministic tests. */
-  setInterval?: typeof globalThis.setInterval;
+  setTimeout?: typeof globalThis.setTimeout;
 
   /** Timer hook for deterministic tests. */
-  clearInterval?: typeof globalThis.clearInterval;
+  clearTimeout?: typeof globalThis.clearTimeout;
 
   /** Optional error logger. */
   onError?: (jobId: string, error: Error) => void;
@@ -96,13 +96,16 @@ interface SchedulerJobState extends SchedulerJobDefinition {
 
 export class LocalMemoryScheduler {
   private readonly jobs = new Map<string, SchedulerJobState>();
-  private readonly timers = new Map<string, ReturnType<typeof globalThis.setInterval>>();
+  private readonly timers = new Map<
+    string,
+    ReturnType<typeof globalThis.setTimeout>
+  >();
   private readonly inFlight = new Map<string, Promise<SchedulerJobSnapshot>>();
   private running = false;
 
   private readonly now: () => Date;
-  private readonly setTimer: typeof globalThis.setInterval;
-  private readonly clearTimer: typeof globalThis.clearInterval;
+  private readonly setTimer: typeof globalThis.setTimeout;
+  private readonly clearTimer: typeof globalThis.clearTimeout;
   private readonly onError?: (jobId: string, error: Error) => void;
 
   constructor(
@@ -110,8 +113,8 @@ export class LocalMemoryScheduler {
     options: LocalMemorySchedulerOptions = {},
   ) {
     this.now = options.now ?? (() => new Date());
-    this.setTimer = options.setInterval ?? globalThis.setInterval;
-    this.clearTimer = options.clearInterval ?? globalThis.clearInterval;
+    this.setTimer = options.setTimeout ?? globalThis.setTimeout;
+    this.clearTimer = options.clearTimeout ?? globalThis.clearTimeout;
     this.onError = options.onError;
 
     for (const job of jobs) {
@@ -189,9 +192,10 @@ export class LocalMemoryScheduler {
     }
 
     if (job.status === "running") {
-      return snapshotJob(job);
+      return this.inFlight.get(job.id) ?? snapshotJob(job);
     }
 
+    this.clearJobTimer(job.id);
     const run = this.executeJob(job);
     this.inFlight.set(job.id, run);
 
@@ -202,12 +206,14 @@ export class LocalMemoryScheduler {
     }
   }
 
-  private async executeJob(job: SchedulerJobState): Promise<SchedulerJobSnapshot> {
-
+  private async executeJob(
+    job: SchedulerJobState,
+  ): Promise<SchedulerJobSnapshot> {
     const startedAt = this.now().toISOString();
     job.status = "running";
     job.lastStartedAt = startedAt;
     job.lastError = undefined;
+    job.nextRunAt = undefined;
 
     try {
       await job.run({
@@ -215,22 +221,21 @@ export class LocalMemoryScheduler {
         startedAt,
         runCount: job.runCount,
       });
-
-      const completedAt = this.now().toISOString();
       job.status = "succeeded";
-      job.runCount += 1;
-      job.lastCompletedAt = completedAt;
-      job.nextRunAt = addMs(completedAt, job.intervalMs);
     } catch (err) {
-      const completedAt = this.now().toISOString();
       const error = err instanceof Error ? err : new Error(String(err));
       job.status = "failed";
-      job.runCount += 1;
       job.failCount += 1;
-      job.lastCompletedAt = completedAt;
       job.lastError = error.message;
-      job.nextRunAt = addMs(completedAt, job.intervalMs);
       this.onError?.(job.id, error);
+    } finally {
+      const completedAt = this.now().toISOString();
+      job.runCount += 1;
+      job.lastCompletedAt = completedAt;
+      job.nextRunAt = addMs(completedAt, job.intervalMs);
+      if (this.running && job.enabled) {
+        this.startJobTimer(job.id);
+      }
     }
 
     return snapshotJob(job);
@@ -275,10 +280,32 @@ export class LocalMemoryScheduler {
     }
 
     const job = this.getJob(jobId);
+    if (!job.enabled || !job.nextRunAt) {
+      return;
+    }
+
+    const dueAt = Date.parse(job.nextRunAt);
+    const delayMs = Math.max(0, dueAt - this.now().getTime());
     const timer = this.setTimer(() => {
+      this.timers.delete(jobId);
+      const currentJob = this.getJob(jobId);
+      if (!currentJob.enabled || currentJob.status === "running") {
+        return;
+      }
+
       void this.runJob(jobId);
-    }, job.intervalMs);
+    }, delayMs);
     this.timers.set(jobId, timer);
+  }
+
+  private clearJobTimer(jobId: string): void {
+    const timer = this.timers.get(jobId);
+    if (!timer) {
+      return;
+    }
+
+    this.clearTimer(timer);
+    this.timers.delete(jobId);
   }
 }
 
@@ -297,17 +324,19 @@ export function createSchedulerHealthJob(
     name: "Memory scheduler health check",
     intervalMs,
     runOnStart: true,
+    // Baseline health signal: prove the scheduler event loop can execute a job.
+    // Real provider/database checks are intentionally deferred to durable jobs.
     run: () => undefined,
   };
 }
 
 function validateJobDefinition(job: SchedulerJobDefinition): void {
-  if (!job.id.trim()) {
+  if (typeof job.id !== "string" || !job.id.trim()) {
     throw new Error("Scheduler job id is required");
   }
 
-  if (!job.name.trim()) {
-    throw new Error(`Scheduler job ${job.id} name is required`);
+  if (typeof job.name !== "string" || !job.name.trim()) {
+    throw new Error(`Scheduler job ${String(job.id)} name is required`);
   }
 
   if (!Number.isFinite(job.intervalMs) || job.intervalMs <= 0) {
