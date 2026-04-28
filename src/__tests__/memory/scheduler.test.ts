@@ -16,11 +16,12 @@ import {
 
 describe("local memory scheduler", () => {
   test("[1] starts with observable idle job status", () => {
-    const scheduler = createLocalMemoryScheduler([
-      makeJob({ id: "job.health", intervalMs: 1_000 }),
-    ], {
-      now: fixedClock("2026-04-28T00:00:00.000Z"),
-    });
+    const scheduler = createLocalMemoryScheduler(
+      [makeJob({ id: "job.health", intervalMs: 1_000 })],
+      {
+        now: fixedClock("2026-04-28T00:00:00.000Z"),
+      },
+    );
 
     const status = scheduler.getStatus();
     assert.equal(status.running, false);
@@ -32,17 +33,20 @@ describe("local memory scheduler", () => {
 
   test("[2] runJob records success metrics", async () => {
     let calls = 0;
-    const scheduler = createLocalMemoryScheduler([
-      makeJob({
-        run: ({ jobId, runCount }) => {
-          calls += 1;
-          assert.equal(jobId, "job.test");
-          assert.equal(runCount, 0);
-        },
-      }),
-    ], {
-      now: fixedClock("2026-04-28T00:00:00.000Z"),
-    });
+    const scheduler = createLocalMemoryScheduler(
+      [
+        makeJob({
+          run: ({ jobId, runCount }) => {
+            calls += 1;
+            assert.equal(jobId, "job.test");
+            assert.equal(runCount, 0);
+          },
+        }),
+      ],
+      {
+        now: fixedClock("2026-04-28T00:00:00.000Z"),
+      },
+    );
 
     const snapshot = await scheduler.runJob("job.test");
     assert.equal(calls, 1);
@@ -55,15 +59,18 @@ describe("local memory scheduler", () => {
 
   test("[3] runJob records failures without throwing", async () => {
     const errors: string[] = [];
-    const scheduler = createLocalMemoryScheduler([
-      makeJob({
-        run: () => {
-          throw new Error("boom");
-        },
-      }),
-    ], {
-      onError: (jobId, error) => errors.push(`${jobId}:${error.message}`),
-    });
+    const scheduler = createLocalMemoryScheduler(
+      [
+        makeJob({
+          run: () => {
+            throw new Error("boom");
+          },
+        }),
+      ],
+      {
+        onError: (jobId, error) => errors.push(`${jobId}:${error.message}`),
+      },
+    );
 
     const snapshot = await scheduler.runJob("job.test");
     assert.equal(snapshot.status, "failed");
@@ -93,24 +100,27 @@ describe("local memory scheduler", () => {
   test("[5] runDueJobs only runs due jobs", async () => {
     let dueCalls = 0;
     let futureCalls = 0;
-    const scheduler = createLocalMemoryScheduler([
-      makeJob({
-        id: "job.due",
-        intervalMs: 1_000,
-        run: () => {
-          dueCalls += 1;
-        },
-      }),
-      makeJob({
-        id: "job.future",
-        intervalMs: 60_000,
-        run: () => {
-          futureCalls += 1;
-        },
-      }),
-    ], {
-      now: fixedClock("2026-04-28T00:00:00.000Z"),
-    });
+    const scheduler = createLocalMemoryScheduler(
+      [
+        makeJob({
+          id: "job.due",
+          intervalMs: 1_000,
+          run: () => {
+            dueCalls += 1;
+          },
+        }),
+        makeJob({
+          id: "job.future",
+          intervalMs: 60_000,
+          run: () => {
+            futureCalls += 1;
+          },
+        }),
+      ],
+      {
+        now: fixedClock("2026-04-28T00:00:00.000Z"),
+      },
+    );
 
     const snapshots = await scheduler.runDueJobs(
       new Date("2026-04-28T00:00:02.000Z"),
@@ -125,18 +135,19 @@ describe("local memory scheduler", () => {
   test("[6] start and stop use local timers", async () => {
     const timerIds: number[] = [];
     const cleared: number[] = [];
-    const scheduler = new LocalMemoryScheduler([
-      makeJob({ intervalMs: 5_000 }),
-    ], {
-      setInterval: ((_callback: () => void, _ms?: number) => {
-        const id = timerIds.length + 1;
-        timerIds.push(id);
-        return id as unknown as ReturnType<typeof globalThis.setInterval>;
-      }) as typeof globalThis.setInterval,
-      clearInterval: ((timer) => {
-        cleared.push(timer as unknown as number);
-      }) as typeof globalThis.clearInterval,
-    });
+    const scheduler = new LocalMemoryScheduler(
+      [makeJob({ intervalMs: 5_000 })],
+      {
+        setTimeout: ((..._args: Parameters<typeof globalThis.setTimeout>) => {
+          const id = timerIds.length + 1;
+          timerIds.push(id);
+          return id as unknown as ReturnType<typeof globalThis.setTimeout>;
+        }) as typeof globalThis.setTimeout,
+        clearTimeout: ((timer) => {
+          cleared.push(timer as unknown as number);
+        }) as typeof globalThis.clearTimeout,
+      },
+    );
 
     scheduler.start();
     assert.equal(scheduler.getStatus().running, true);
@@ -163,28 +174,39 @@ describe("local memory scheduler", () => {
   });
 
   test("[9] runOnStart triggers immediate execution on start", async () => {
-    let callback: (() => void) | undefined;
+    const callbacks: (() => void)[] = [];
     let calls = 0;
-    const scheduler = new LocalMemoryScheduler([
-      makeJob({
-        runOnStart: true,
-        run: () => {
-          calls += 1;
-        },
-      }),
-    ], {
-      setInterval: ((cb: () => void, _ms?: number) => {
-        callback = cb;
-        return 1 as unknown as ReturnType<typeof globalThis.setInterval>;
-      }) as typeof globalThis.setInterval,
-      clearInterval: (() => undefined) as typeof globalThis.clearInterval,
-    });
+    let now = new Date("2026-04-28T00:00:00.000Z");
+    const scheduler = new LocalMemoryScheduler(
+      [
+        makeJob({
+          runOnStart: true,
+          run: () => {
+            calls += 1;
+          },
+        }),
+      ],
+      {
+        now: () => now,
+        setTimeout: ((
+          cb: Parameters<typeof globalThis.setTimeout>[0],
+          ..._args: unknown[]
+        ) => {
+          callbacks.push(cb as () => void);
+          return callbacks.length as unknown as ReturnType<
+            typeof globalThis.setTimeout
+          >;
+        }) as typeof globalThis.setTimeout,
+        clearTimeout: (() => undefined) as typeof globalThis.clearTimeout,
+      },
+    );
 
     scheduler.start();
     await flushMicrotasks();
     assert.equal(calls, 1);
 
-    callback?.();
+    now = new Date("2026-04-28T00:00:01.000Z");
+    callbacks.shift()?.();
     await flushMicrotasks();
     assert.equal(calls, 2);
     await scheduler.stop();
@@ -194,9 +216,10 @@ describe("local memory scheduler", () => {
     let resolveRun: (() => void) | undefined;
     const scheduler = createLocalMemoryScheduler([
       makeJob({
-        run: () => new Promise<void>((resolve) => {
-          resolveRun = resolve;
-        }),
+        run: () =>
+          new Promise<void>((resolve) => {
+            resolveRun = resolve;
+          }),
       }),
     ]);
 
@@ -221,9 +244,101 @@ describe("local memory scheduler", () => {
   });
 
   test("[11] registerJob validates required fields", () => {
-    assert.throws(() => createLocalMemoryScheduler([makeJob({ id: "" })]), /id is required/);
-    assert.throws(() => createLocalMemoryScheduler([makeJob({ name: "" })]), /name is required/);
-    assert.throws(() => createLocalMemoryScheduler([makeJob({ intervalMs: 0 })]), /intervalMs must be > 0/);
+    assert.throws(
+      () => createLocalMemoryScheduler([makeJob({ id: "" })]),
+      /id is required/,
+    );
+    assert.throws(
+      () =>
+        createLocalMemoryScheduler([makeJob({ id: 123 as unknown as string })]),
+      /id is required/,
+    );
+    assert.throws(
+      () => createLocalMemoryScheduler([makeJob({ name: "" })]),
+      /name is required/,
+    );
+    assert.throws(
+      () =>
+        createLocalMemoryScheduler([
+          makeJob({ name: 123 as unknown as string }),
+        ]),
+      /name is required/,
+    );
+    assert.throws(
+      () => createLocalMemoryScheduler([makeJob({ intervalMs: 0 })]),
+      /intervalMs must be > 0/,
+    );
+  });
+
+  test("[12] concurrent runJob callers await the same in-flight run", async () => {
+    let calls = 0;
+    let resolveRun: (() => void) | undefined;
+    const scheduler = createLocalMemoryScheduler([
+      makeJob({
+        run: () => {
+          calls += 1;
+          return new Promise<void>((resolve) => {
+            resolveRun = resolve;
+          });
+        },
+      }),
+    ]);
+
+    const first = scheduler.runJob("job.test");
+    await flushMicrotasks();
+    const second = scheduler.runJob("job.test");
+    await flushMicrotasks();
+
+    assert.equal(calls, 1);
+    resolveRun?.();
+
+    const [firstSnapshot, secondSnapshot] = await Promise.all([first, second]);
+    assert.equal(firstSnapshot.status, "succeeded");
+    assert.deepEqual(secondSnapshot, firstSnapshot);
+    assert.equal(scheduler.getStatus().jobs[0].runCount, 1);
+  });
+
+  test("[13] timeout schedules exactly at nextRunAt after completion", async () => {
+    const scheduledDelays: number[] = [];
+    const callbacks: (() => void)[] = [];
+    let calls = 0;
+    let now = new Date("2026-04-28T00:00:00.000Z");
+    const scheduler = new LocalMemoryScheduler(
+      [
+        makeJob({
+          intervalMs: 1_000,
+          run: () => {
+            calls += 1;
+          },
+        }),
+      ],
+      {
+        now: () => now,
+        setTimeout: ((cb: () => void, ms?: number) => {
+          callbacks.push(cb);
+          scheduledDelays.push(ms ?? 0);
+          return callbacks.length as unknown as ReturnType<
+            typeof globalThis.setTimeout
+          >;
+        }) as typeof globalThis.setTimeout,
+        clearTimeout: (() => undefined) as typeof globalThis.clearTimeout,
+      },
+    );
+
+    scheduler.start();
+    assert.deepEqual(scheduledDelays, [1_000]);
+
+    now = new Date("2026-04-28T00:00:01.000Z");
+    callbacks.shift()?.();
+    await flushMicrotasks();
+    assert.equal(calls, 1);
+    assert.deepEqual(scheduledDelays, [1_000, 1_000]);
+
+    now = new Date("2026-04-28T00:00:02.100Z");
+    callbacks.shift()?.();
+    await flushMicrotasks();
+    assert.equal(calls, 2);
+    assert.deepEqual(scheduledDelays, [1_000, 1_000, 1_000]);
   });
 });
 

@@ -14,7 +14,10 @@ import {
   createSchedulerHealthJob,
 } from "../src/lib/memory/scheduler";
 
-void main();
+main().catch((err) => {
+  console.error("Fatal error in scheduler:", err);
+  process.exit(1);
+});
 
 async function main(): Promise<void> {
   const args = new Set(process.argv.slice(2));
@@ -36,8 +39,11 @@ async function main(): Promise<void> {
   }
 
   if (once) {
-    await scheduler.runJob("memory.scheduler.health");
+    const snapshot = await scheduler.runJob("memory.scheduler.health");
     printStatus(scheduler);
+    if (snapshot.status === "failed") {
+      process.exitCode = 1;
+    }
     return;
   }
 
@@ -72,5 +78,9 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
   }
 
   const parsed = Number.parseInt(value, 10);
+  if (Number.isNaN(parsed)) {
+    return fallback;
+  }
+
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
