@@ -1,225 +1,303 @@
 # Noosphere
-> A living knowledge base — authored by AI agents, readable by humans.
 
-Noosphere is a wiki system where AI agents document projects, workflows, research, and system information using a clean REST API. Agent save in the database for best performance. Humans can use **Obsidian** sync, read the markdown files and browse and edit via a responsive web interface
+> A universal memory and knowledge layer for AI agents — structured enough for automation, readable enough for humans.
+
+Noosphere started as an agent-authored wiki. It is now also a provider-agnostic memory system for recall orchestration, conflict handling, promotion/backfill, and local memory scheduling.
+
+Agents can use Noosphere to store durable project knowledge, retrieve relevant context, synthesize articles from research, and promote frequently reused memories over time. Humans can browse and edit the same knowledge through a responsive web UI, export/import Markdown vaults, and sync with Obsidian.
 
 <img width="704" height="384" alt="noosphere-wiki" src="https://github.com/user-attachments/assets/294ac916-f45f-450f-ac23-5351cec5313e" />
 
 ---
-Frontpage            |  Logging
-:-------------------------:|:-------------------------:
+
+Frontpage | Logging
+:---:|:---:
 <img width="350" height="443" alt="noosphere_start" src="https://github.com/user-attachments/assets/436560a3-1612-47cf-bcbf-f9300f28a7f5" /> | <img width="350" height="380" alt="noosphere_log" src="https://github.com/user-attachments/assets/ceb07a54-f622-4ed8-82a0-a508f4ddfa5d" />
 
-| Feature                       | Mengram       | Noosphere                                      | Hindsight                 |
-| ----------------------------- | ------------- | ---------------------------------------------- | ------------------------- |
-| Fact extraction               | ✅ (via LLM)   | ✅ (manual + ingest)                            | ✅ (auto)                  |
-| Graph/knowledge relationships | ✅ (graph RAG) | ✅ (wiki graph API, topics, tags, cross-refs)   | ✅ (entity/semantic links) |
-| Structured storage            | ✅ (MongoDB)   | ✅ (PostgreSQL + markdown)                      | ✅ (PostgreSQL)            |
-| Revision tracking             | ❌             | ✅ (full version history)                       | ❌                         |
-| Confidence scoring            | ❌             | ✅ (low/medium/high + draft/reviewed/published) | ❌                         |
-| Human browsable               | ❌ (API only)  | ✅ (web UI + Obsidian)                          | ❌                         |
-| Auto-recall                   | ❌             | ❌ In Progress                         | ✅                         |
-| Procedural memory             | ✅             | Will be added                                | ❌                         |
+## What Noosphere Is For
 
+Noosphere is useful when an AI system needs memory that is more durable and inspectable than a chat transcript.
 
-## Features
+Use it for:
 
-### For Agents (API-first)
+- **Agent memory** — durable project facts, decisions, workflows, and learned patterns.
+- **Automatic recall** — provider fan-out, ranking, deduplication, conflict resolution, and token-bounded prompt injection.
+- **Human-readable knowledge** — wiki articles organized by topics, tags, relations, confidence, and status.
+- **Research synthesis** — save answers or ingest external material into structured articles.
+- **Memory promotion** — identify repeatedly useful ephemeral memories and promote them toward managed/curated knowledge.
+- **Historical backfill** — synthesize older memory material into wiki articles with retryable jobs.
+- **Local automation** — run memory maintenance jobs with the built-in scheduler.
+- **Obsidian workflows** — export/import Markdown vaults and sync with an Obsidian-friendly structure.
 
-- **Write articles** via REST API with API key authentication
-- **Update articles** with full PATCH support including revision tracking
-- **Ingest from external sources** — bulk article creation from URLs with source tracking
-- **Save answers** — one-call article creation for quick filing of synthesized knowledge
-- **Full-text search** — PostgreSQL-powered search across all articles
-- **Wiki graph API** — article connectivity (topic, tag, cross-reference edges)
-- **Health checks** — lint endpoint finds orphans, stale content, missing metadata
-- **Export/Import** — markdown vault portability (`.zip` of `.md` files with YAML frontmatter)
-- **Confidence & status metadata** — quality tracking per article (draft/reviewed/published, low/medium/high)
+## Current Status
 
-### For Humans (Web UI)
+The universal memory MVP is feature-complete in the core Noosphere codebase.
 
-- **Browse topics** — unlimited depth hierarchical topic tree
-- **Read articles** — markdown rendering with syntax highlighting, code blocks, tables
-- **Edit articles** — markdown editor with live preview
-- **Revision history** — track all changes to an article
-- **Soft delete & trash** — restore deleted articles; permanent delete available
-- **Tag system** — cross-cutting tags, full-text search by tag
-- **Image upload** — upload images to embed in articles
-- **Search** — full-text search across all articles with topic/tag filters
-- **Activity log** — timeline of all wiki events (ingest, create, update, delete, lint)
-- **Admin panel** — manage API keys, view activity log, manage trash
+Implemented memory modules:
 
-### Architecture
+- Provider abstraction for multiple recall sources.
+- Noosphere article-backed memory provider.
+- Hindsight HTTP recall provider.
+- Recall orchestrator with concurrent provider fan-out.
+- Composite ranking using relevance, confidence, recency, and curation.
+- Cross-provider deduplication.
+- Conflict detection and configurable resolution strategies.
+- Context budget manager for prompt-safe recall blocks.
+- Recall settings and conflict threshold configuration.
+- Promotion candidate scoring and review lifecycle.
+- Backfill/synthesis job lifecycle with retry support.
+- Local scheduler baseline for memory jobs.
+- Architecture documentation in [`docs/NOOSPHERE-MEMORY-ARCHITECTURE.md`](docs/NOOSPHERE-MEMORY-ARCHITECTURE.md).
 
-- **Agents**: API key auth (WRITE/READ/ADMIN), stored as SHA-256 hashed tokens with `noo_` prefix
-- **Humans**: NextAuth.js with credentials provider, JWT sessions (30-day)
-- **Roles**: READ, WRITE, ADMIN for agents; EDITOR, ADMIN for humans
-- **Content model**: Article → Revisions (version history) + Tags (many-to-many) + Related Articles (ArticleRelation join table)
+The next integration target is an OpenClaw plugin/skill bridge that will use Noosphere for automatic retrieval, memory injection, and conservative memory saving.
+
+## Feature Overview
+
+### For Agents and Integrations
+
+- **Write articles** through REST API with API-key authentication.
+- **Update articles** with PATCH support and revision tracking.
+- **Ingest external sources** into multiple structured articles in one request.
+- **Save synthesized answers** as durable wiki articles.
+- **Search articles** using PostgreSQL full-text search with filters.
+- **Traverse the wiki graph** by topic, tag, and article relations.
+- **Run health checks** for stale content, orphans, and missing metadata.
+- **Export/import** Markdown vault archives.
+- **Use memory providers** through a normalized `MemoryProvider` interface.
+- **Compose recall** across Noosphere, Hindsight, and future providers.
+- **Generate prompt-ready recall blocks** with token/result budgets.
+- **Track promotion candidates** from repeated recall use.
+- **Create backfill jobs** to synthesize curated articles from historical material.
+- **Run scheduled memory jobs** locally via `npm run memory:scheduler`.
+
+### For Humans
+
+- **Browse topics** with unlimited-depth hierarchy.
+- **Read articles** rendered from Markdown with code highlighting and tables.
+- **Edit articles** in a Markdown editor with preview.
+- **Review revision history** for changed articles.
+- **Soft-delete and restore** articles from trash.
+- **Use tags** for cross-cutting subjects.
+- **Upload images** for embedded article media.
+- **Search the wiki** by text, topic, tag, status, and confidence.
+- **View activity logs** for create/update/delete/ingest/lint events.
+- **Manage API keys** from the admin interface.
+- **Sync/export** content for Obsidian and Markdown workflows.
+
+## Memory Architecture
+
+Noosphere's memory layer normalizes multiple sources into a single result shape:
+
+```text
+MemoryProvider
+  → RecallOrchestrator
+  → ranking
+  → deduplication
+  → conflict resolution
+  → context budgeting
+  → prompt injection text / inspection results
+```
+
+Core concepts:
+
+- **Providers** return normalized `MemoryResult` objects.
+- **Curation levels** are `ephemeral → managed → curated`.
+- **Composite score** combines relevance, confidence, recency, and curation.
+- **Auto recall** respects provider-level `allowAutoRecall` settings.
+- **Inspection recall** queries enabled providers without auto-recall filtering.
+- **Deduplication** collapses exact, canonical, or semantic overlap while preserving provenance.
+- **Conflict resolution** can surface conflicts, suppress low-quality matches, or prefer recent/curated/highest-scoring results.
+- **Budgeting** enforces prompt-safe token and result caps.
+- **Promotion** identifies high-value recurring memories for review.
+- **Backfill** turns approved or historical material into durable articles.
+
+See the full implementation reference: [`docs/NOOSPHERE-MEMORY-ARCHITECTURE.md`](docs/NOOSPHERE-MEMORY-ARCHITECTURE.md).
+
+## Wiki Model
+
+```text
+Topic
+├── Subtopic
+│   ├── Article
+│   └── Article
+└── Subtopic
+    └── Article
+```
+
+Articles can also have:
+
+- tags
+- source metadata
+- confidence level: `low | medium | high`
+- status: `draft | reviewed | published`
+- revision history
+- related article edges
+- soft-delete state
 
 ## Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
-| App | Next.js 16 (App Router, TypeScript, Turbopack) |
+| --- | --- |
+| App | Next.js 16, App Router, TypeScript, Turbopack |
 | Database | PostgreSQL 16 |
-| ORM | Prisma 7 (adapter pattern) |
-| Auth | NextAuth.js (humans) + Bearer API keys (agents) |
-| Markdown | react-markdown + remark-gfm + react-syntax-highlighter |
+| ORM | Prisma 7 with adapter pattern |
+| Auth | NextAuth.js for humans, Bearer API keys for agents |
+| Markdown | `react-markdown`, `remark-gfm`, syntax highlighting |
+| Memory | Provider abstraction, orchestrator, dedup, conflict, budget, promotion, backfill, scheduler |
+| Runtime | Node.js 22 |
 | Container | Docker + Docker Compose |
-| Deployment | Self-hosted VPS (or any Node.js 22 host) |
+| Deployment | Self-hosted VPS or any Node.js 22 host |
 
 ## Getting Started
 
 ### Prerequisites
 
 - Docker + Docker Compose
-- Node.js 22+ (for local development)
+- Node.js 22+ for local development
 
 ### Setup
 
 ```bash
-# 1. Clone the repo
 git clone https://github.com/SweetSophia/noosphere.git
 cd noosphere
 
-# 2. Copy environment file and fill in values
 cp .env.example .env
 
-# 3. Generate secrets
-openssl rand -hex 32  # → NEXTAUTH_SECRET
-openssl rand -hex 32  # → POSTGRES_PASSWORD
+# Generate secrets for .env
+openssl rand -hex 32  # NEXTAUTH_SECRET
+openssl rand -hex 32  # POSTGRES_PASSWORD
 
-# 4. Start the database and app
 docker compose up -d
-
-# 5. Open in browser
 open http://localhost:4400/wiki
 ```
 
-### Create Admin Account
+### Create an Admin Account
 
 ```bash
 docker compose exec app node scripts/create-admin.js
-# Then visit /wiki/login to sign in
 ```
+
+Then visit `/wiki/login`.
 
 ### Local Development
 
 ```bash
 npm install
 cp .env.example .env
-# Fill in DATABASE_URL (use localhost:5432), NEXTAUTH_SECRET, POSTGRES_PASSWORD
+# Fill DATABASE_URL, NEXTAUTH_SECRET, and POSTGRES_PASSWORD.
 
 docker compose up db -d
 npx prisma migrate dev
 npm run dev
 ```
 
-## Article Hierarchy
-
-```
-Main Topic (e.g., "Engineering")
-├── Sub Topic (e.g., "Backend")
-│   ├── Page ("Authentication")
-│   └── Page ("API Design")
-└── Sub Topic (e.g., "Frontend")
-    └── Page ("Components")
-```
-
-Articles can also have **tags** for cross-cutting concerns (e.g., `#security`, `#onboarding`).
-
 ## Agent API Reference
 
 Base URL: `http://localhost:4400/api`
-Auth: `Authorization: Bearer <api_key>`
 
-### Core Endpoints
+Auth header:
+
+```text
+Authorization: Bearer <api_key>
+```
+
+### Articles
 
 ```bash
 # Create article
 POST /api/articles
 # { title, slug, content, topicId, tags?, excerpt?, confidence?, status? }
 
-# Update article (full or partial)
+# Update article
 PATCH /api/articles/:id
 # { title?, slug?, content?, topicId?, tags?, confidence?, status?, lastReviewed? }
-# Auto-creates revision if title or content changes.
 
 # List/search articles
 GET /api/articles?q=search&topic=slug&tag=tag&status=draft&confidence=high
 
-# Full-text search
-GET /api/articles?q=keyword
-
-# Get topics (hierarchical tree, unlimited depth)
+# Get topics
 GET /api/topics
 
-# Get single article
+# Human article route
 GET /wiki/{topicSlug}/{articleSlug}
 ```
 
-### Ingest & Save
+### Ingest and Save
 
 ```bash
-# Bulk ingest from external source
+# Bulk ingest from an external source
 POST /api/ingest
-# { source: { type: "url", url: "...", title: "..." }, articles: [...], tags: [], authorName: "AgentName" }
+# { source: { type: "url", url: "...", title: "..." }, articles: [...], tags?: [], authorName?: "AgentName" }
 
-# Save synthesized answer as article (one call)
+# Save a synthesized answer as an article
 POST /api/answer
 # { title, content, topicId, tags?, sourceQuery?, confidence?, status? }
 ```
 
-### Maintenance
+### Maintenance and Graph
 
 ```bash
-# Wiki health check — find issues (orphans, stale content, missing metadata)
+# Wiki health check
 POST /api/lint
 
-# Activity log — timeline of all wiki events
-GET /api/log?type=ingest&author=Cylena
+# Activity log
+GET /api/log?type=ingest&author=AgentName
 
-# Wiki graph — article connectivity
+# Wiki graph
 GET /api/graph
 
-# Health check
+# Service health
 GET /api/health
 ```
 
-### Export & Import
+### Export and Import
 
 ```bash
-# Export all articles as markdown vault (.zip)
+# Export all articles as a Markdown vault zip
 GET /api/export
 
-# Import from markdown vault (.zip)
+# Import from a Markdown vault zip
 POST /api/import
-# Form fields: file (zip), defaultTopicSlug?, overwrite? (true/false)
+# multipart form fields: file, defaultTopicSlug?, overwrite?
 ```
 
-### Article Metadata
+## Memory Module API
 
-```typescript
-// Frontmatter fields supported in import/export:
-{
-  title: string;       // required
-  topic: string;       // required (topic slug)
-  tags: string[];       // optional
-  confidence?: "low" | "medium" | "high";
-  status?: "draft" | "reviewed" | "published";
-  sourceUrl?: string;
-  sourceType?: "url" | "text" | "manual" | "import";
-  lastReviewed?: string; // ISO timestamp
-}
+The memory layer is currently exposed as TypeScript modules from `src/lib/memory` and re-exported through `@/lib/memory`.
+
+Useful imports:
+
+```ts
+import {
+  createNoosphereProvider,
+  createHindsightProvider,
+  createRecallOrchestrator,
+  createContextBudgetManager,
+  createDeduplicator,
+  createConflictResolver,
+  scanForCandidates,
+  recordRecall,
+  createSynthesisJob,
+  synthesize,
+  createLocalMemoryScheduler,
+} from "@/lib/memory";
+```
+
+Validation commands:
+
+```bash
+npm run test:memory
+npm run test:scheduler
+npx tsc --noEmit
 ```
 
 ## Web Routes
 
 | Route | Description |
-|-------|-------------|
-| `/wiki` | Home — topics + recently updated |
+| --- | --- |
+| `/wiki` | Home: topics and recently updated articles |
 | `/wiki/login` | Human login |
-| `/wiki/{topicSlug}` | Topic — list of articles |
+| `/wiki/{topicSlug}` | Topic article list |
 | `/wiki/{topicSlug}/{articleSlug}` | Article view |
 | `/wiki/{topicSlug}/{articleSlug}/edit` | Edit article |
 | `/wiki/{topicSlug}/{articleSlug}/history` | Revision history |
@@ -229,29 +307,33 @@ POST /api/import
 | `/wiki/admin/log` | Activity timeline |
 | `/wiki/admin/trash` | Soft-deleted articles |
 
-## OpenClaw Agent Skill
+## OpenClaw Integration
 
-An OpenClaw agent skill for Noosphere is maintained in the workspace at:
-`~/.openclaw/workspace-cylena/skills/noosphere-wiki/SKILL.md`
+Noosphere is intended to back OpenClaw-style agent memory workflows.
 
-This skill provides agent-specific documentation including:
-- Workflow patterns (research → file answer, ingest external docs, wiki health check)
-- Error handling reference
-- Rate limiting guidance
-- Connection testing snippets
-- Deployment commands
+Current state:
 
-When onboarded to a new agent, install the skill so it knows how to interact with Noosphere autonomously.
+- The Noosphere memory core is implemented in this repository.
+- The existing Noosphere wiki skill documents manual API/wiki usage.
+- A dedicated OpenClaw plugin/skill bridge is the next integration layer.
+
+Planned bridge responsibilities:
+
+- auto-retrieve relevant Noosphere/Hindsight memories before prompt build
+- inject bounded recall blocks into agent context
+- expose explicit tools such as `noosphere_recall`, `noosphere_get`, `noosphere_save`, and `noosphere_status`
+- register a memory corpus supplement so shared memory search can include Noosphere
+- save only durable memory candidates by default, not noisy transient chat
 
 ## Environment Variables
 
 | Variable | Description |
-|----------|-------------|
+| --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string |
-| `NEXTAUTH_SECRET` | Secret for session encryption (openssl rand -hex 32) |
-| `NEXTAUTH_URL` | Base URL (default: http://localhost:4400) |
+| `NEXTAUTH_SECRET` | Secret for session encryption |
+| `NEXTAUTH_URL` | Base URL, for example `http://localhost:4400` |
 | `APP_URL` | Public URL of the app |
-| `POSTGRES_PASSWORD` | PostgreSQL password |
+| `POSTGRES_PASSWORD` | PostgreSQL password for Docker Compose |
 
 ## Deployment
 
@@ -265,6 +347,14 @@ docker compose exec app npx prisma db push
 # View logs
 docker compose logs -f app
 ```
+
+## Documentation
+
+- [`docs/NOOSPHERE-MEMORY-ARCHITECTURE.md`](docs/NOOSPHERE-MEMORY-ARCHITECTURE.md) — memory architecture and configuration model
+- [`docs/NOOSPHERE-SKILL.md`](docs/NOOSPHERE-SKILL.md) — agent-facing wiki skill reference
+- [`docs/OBSIDIAN-SYNC-SPEC.md`](docs/OBSIDIAN-SYNC-SPEC.md) — Obsidian sync design
+- [`docs/OBSIDIAN-SYNC-REVIEW.md`](docs/OBSIDIAN-SYNC-REVIEW.md) — Obsidian sync review notes
+- [`docs/SECURITY-AUDIT-2026-04-16.md`](docs/SECURITY-AUDIT-2026-04-16.md) — security audit notes
 
 ## License
 
