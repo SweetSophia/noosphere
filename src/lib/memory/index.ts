@@ -138,7 +138,6 @@ export type {
   PromotionConfig,
   PromotionReview,
   PromotionStatus,
-  PromotionTargetLevel,
 } from "./promotion";
 
 export {

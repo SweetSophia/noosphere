@@ -330,11 +330,18 @@ export function canRetry(
 
 /**
  * Increment the retry count and reset status to pending.
+ * @throws If the job is not in "failed" status.
  */
 export function retryJob(
   job: SynthesisJob,
   now: string = new Date().toISOString(),
 ): SynthesisJob {
+  if (job.status !== "failed") {
+    throw new Error(
+      `Cannot retry job ${job.id}: expected status "failed", got "${job.status}"`,
+    );
+  }
+
   return {
     ...job,
     status: "pending",

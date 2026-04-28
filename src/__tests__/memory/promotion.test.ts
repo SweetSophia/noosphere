@@ -357,4 +357,13 @@ describe("promotion config", () => {
     assert.ok(candidate);
     assert.equal(candidate!.targetLevel, "curated");
   });
+
+  // [27] scanForCandidates: intra-batch dedup
+  test("[27] scan deduplicates within a single batch", () => {
+    const stats = makeStats({ recallCount: 5, relevanceSum: 3.5 });
+    // Same provider:memoryId twice in the same batch
+    const candidates = scanForCandidates([stats, stats]);
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].memoryId, "mem-1");
+  });
 });

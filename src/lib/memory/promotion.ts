@@ -29,8 +29,6 @@ import type { MemoryCurationLevel, MemoryResult } from "./types";
 
 export type PromotionStatus = "pending" | "approved" | "rejected";
 
-export type PromotionTargetLevel = Exclude<MemoryCurationLevel, "ephemeral">;
-
 /** Tracks recall statistics for a memory over time. */
 export interface MemoryRecallStats {
   /** Provider-local memory ID. */
@@ -138,14 +136,6 @@ export const DEFAULT_PROMOTION_CONFIG: PromotionConfig = {
   maxPendingCandidates: 100,
 };
 
-/** Next curation level in the promotion ladder. */
-const CURATION_LADDER: Record<MemoryCurationLevel, MemoryCurationLevel | null> =
-  {
-    ephemeral: "managed",
-    managed: "curated",
-    curated: null,
-  };
-
 // ─── Functions ──────────────────────────────────────────────────────────────
 
 /**
@@ -160,13 +150,13 @@ export function computeCandidateKey(
 }
 
 /**
- * Determine the next curation level for a memory.
+ * Determine the next curation level for a memory using the default promotion ladder.
  * Returns null if already at the highest level ("curated").
  */
 export function getNextCurationLevel(
   current: MemoryCurationLevel,
 ): MemoryCurationLevel | null {
-  return CURATION_LADDER[current] ?? null;
+  return DEFAULT_PROMOTION_CONFIG.promotionTargets[current] ?? null;
 }
 
 /**
@@ -249,7 +239,8 @@ export function applyReview(
 
 /**
  * Scan a set of recall stats and produce promotion candidates.
- * Filters out ineligible memories and deduplicates by provider:memoryId.
+ * Filters out ineligible memories and deduplicates by provider:memoryId
+ * both against the existing candidate set and within the current batch.
  */
 export function scanForCandidates(
   statsList: MemoryRecallStats[],
@@ -263,7 +254,7 @@ export function scanForCandidates(
   for (const stats of statsList) {
     const key = computeCandidateKey(stats.provider, stats.memoryId);
 
-    // Skip if already a candidate or already seen in this scan
+    // Skip if already a candidate (external or within this batch)
     if (seenCandidateKeys.has(key)) {
       continue;
     }

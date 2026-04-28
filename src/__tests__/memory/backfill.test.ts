@@ -337,4 +337,34 @@ describe("backfill", () => {
     assert.equal(result.content, "Brand new content");
     assert.ok(!result.content!.includes("Old"));
   });
+
+  // [27] retryJob clears completedAt
+  test("[27] retryJob clears completedAt from previous attempt", () => {
+    const job = makeJob({
+      status: "failed",
+      retryCount: 1,
+      completedAt: "2026-04-27T12:00:00Z",
+      error: "DB error",
+    });
+    const retried = retryJob(job, "2026-04-27T13:00:00Z");
+    assert.equal(retried.completedAt, undefined);
+    assert.equal(retried.status, "pending");
+  });
+
+  // [28] slugify: special-char-only input gets fallback
+  test("[28] slugify returns untitled for special-char-only input", () => {
+    assert.equal(slugify("@@@!!!###"), "untitled");
+  });
+
+  // [29] retryJob throws on non-failed job
+  test("[29] retryJob throws when job is not failed", () => {
+    const job = makeJob({ status: "completed" });
+    let threw = false;
+    try {
+      retryJob(job, "2026-04-27T14:00:00Z");
+    } catch {
+      threw = true;
+    }
+    assert.ok(threw, "Expected retryJob to throw on completed job");
+  });
 });
