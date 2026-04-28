@@ -36,14 +36,14 @@ Operational constraints:
 | Concern | Main entry points | File |
 | --- | --- | --- |
 | Normalized schema/scoring | `MemoryResult`, `computeBaseCompositeScore()` | `src/lib/memory/types.ts` |
-| Provider contract | `MemoryProvider`, `MemoryProviderConfig` | `src/lib/memory/provider.ts` |
+| Provider contract | `MemoryProvider`, `MemoryProviderConfig`, `getEffectiveAutoRecall()` | `src/lib/memory/provider.ts` |
 | Hindsight adapter | `HindsightProvider`, `createHindsightProvider()` | `src/lib/memory/hindsight.ts` |
 | Noosphere adapter | `NoosphereProvider`, `createNoosphereProvider()` | `src/lib/memory/noosphere.ts` |
 | Recall orchestration | `RecallOrchestrator`, `createRecallOrchestrator()` | `src/lib/memory/orchestrator.ts` |
 | Context budget | `ContextBudgetManager`, `createContextBudgetManager()` | `src/lib/memory/budget.ts` |
 | Deduplication | `CrossProviderDeduplicator`, `createDeduplicator()` | `src/lib/memory/dedup.ts` |
 | Conflict handling | `resolveConflicts()`, `createConflictResolver()` | `src/lib/memory/conflict.ts` |
-| User settings | `RecallSettings`, `normalizeRecallSettings()` | `src/lib/memory/settings.ts` |
+| User settings | `RecallSettings`, `normalizeRecallSettings()`, `mergeRecallSettings()`, `toConflictConfig()` | `src/lib/memory/settings.ts` |
 | Promotion | `scanForCandidates()`, `recordRecall()` | `src/lib/memory/promotion.ts` |
 | Backfill/synthesis | `createSynthesisJob()`, `synthesize()` | `src/lib/memory/backfill.ts` |
 | Local jobs | `LocalMemoryScheduler`, `createSchedulerHealthJob()` | `src/lib/memory/scheduler.ts` |
@@ -248,12 +248,13 @@ configured strategy:
 | --- | --- |
 | `surface` | Keep both results and attach conflict metadata. |
 | `suppress-low` | Suppress the lower-scoring result. |
-| `accept-highest` | Keep the highest adjusted score. |
-| `accept-recent` | Prefer the most recently updated result. |
-| `accept-curated` | Prefer the more curated result. |
+| `accept-highest` | Select the highest adjusted score for stats, keep both results, and suppress conflict metadata. |
+| `accept-recent` | Select the most recently updated result for stats, keep both results, and suppress conflict metadata. |
+| `accept-curated` | Select the more curated result for stats, keep both results, and suppress conflict metadata. |
 
-`ConflictConfig.threshold` controls sensitivity. Use `toConflictConfig()` from
-`settings.ts` to derive conflict config from user-facing recall settings.
+`ConflictConfig.conflictThreshold` controls sensitivity. Use
+`toConflictConfig()` from `settings.ts` to derive conflict config from
+user-facing recall settings.
 
 ---
 
@@ -336,7 +337,7 @@ Job lifecycle:
 
 ```text
 pending → in_progress → completed
-                    ↘ failed → retry → pending
+                    ↘ failed ──retry──▶ pending
 ```
 
 Content strategies:
