@@ -97,6 +97,7 @@ export {
   DEFAULT_RECALL_SETTINGS,
   mergeRecallSettings,
   normalizeRecallSettings,
+  toConflictConfig,
 } from "./settings";
 
 export type { RecallSettings } from "./settings";
