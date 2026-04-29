@@ -1,6 +1,6 @@
 # OpenClaw ↔ Noosphere Memory Bridge Roadmap
 
-Status: planning document
+Status: implementation in progress — PRs 0–2 merged; PR 3 underway
 Owner: Noosphere/OpenClaw integration workstream
 Last updated: 2026-04-29
 
@@ -63,6 +63,8 @@ Therefore the bridge must not assume OpenClaw `memory-core` or QMD (the local-fi
 
 ### PR 0 — Roadmap and contract documentation
 
+Status: merged.
+
 Purpose: document architecture, operating modes, API contract, and PR split before code changes.
 
 Deliverables:
@@ -78,6 +80,8 @@ git diff --check
 ```
 
 ### PR 1 — Memory status API
+
+Status: merged.
 
 Purpose: expose a safe status endpoint for OpenClaw/plugin health checks.
 
@@ -142,6 +146,8 @@ Targeted tests should cover:
 - no secret fields in response.
 
 ### PR 2 — Memory recall API
+
+Status: merged.
 
 Purpose: expose the Noosphere recall orchestrator over HTTP.
 
@@ -219,6 +225,8 @@ Targeted tests should cover:
 - provider error metadata/fail-open behavior.
 
 ### PR 3 — OpenClaw plugin skeleton and explicit tools
+
+Status: in progress.
 
 Purpose: create a thin OpenClaw plugin that calls Noosphere HTTP endpoints manually.
 
