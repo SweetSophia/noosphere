@@ -1,10 +1,15 @@
 import { NoosphereMemoryClient } from "./client.js";
-import { resolveNoosphereMemoryConfig } from "./config.js";
+import {
+  resolveNoosphereMemoryConfig,
+  type ResolvedNoosphereMemoryConfig,
+} from "./config.js";
 
-export interface NoospherePluginRuntimeLike {
-  pluginConfig?: unknown;
+export interface NoosphereClientContext {
+  config: ResolvedNoosphereMemoryConfig;
+  client: NoosphereMemoryClient;
 }
 
-export function createNoosphereClient(api: NoospherePluginRuntimeLike): NoosphereMemoryClient {
-  return new NoosphereMemoryClient(resolveNoosphereMemoryConfig(api.pluginConfig));
+export function createNoosphereClientContext(rawConfig: unknown): NoosphereClientContext {
+  const config = resolveNoosphereMemoryConfig(rawConfig);
+  return { config, client: new NoosphereMemoryClient(config) };
 }

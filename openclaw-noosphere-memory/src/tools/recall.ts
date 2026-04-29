@@ -1,7 +1,8 @@
-import { NoosphereMemoryClient, NoosphereRecallRequest } from "../client.js";
-import { resolveNoosphereMemoryConfig } from "../config.js";
+import { NoosphereRecallRequest } from "../client.js";
 import { errorResult, jsonResult } from "../format.js";
+import { createNoosphereClientContext } from "../shared-init.js";
 
+const QUERY_MAX_LENGTH = 1000;
 const RESULT_CAP_MIN = 1;
 const RESULT_CAP_MAX = 10;
 const TOKEN_BUDGET_MIN = 1;
@@ -26,15 +27,14 @@ const RecallToolParameters = {
 } as const;
 
 export function createNoosphereRecallTool(rawConfig: unknown) {
-  const config = resolveNoosphereMemoryConfig(rawConfig);
-  const client = new NoosphereMemoryClient(config);
+  const { config, client } = createNoosphereClientContext(rawConfig);
 
   return {
     name: "noosphere_recall",
     label: "Noosphere Recall",
     description: "Recall durable memories from Noosphere over HTTP. Use inspection mode for manual lookup and auto mode to request bounded prompt text.",
     parameters: RecallToolParameters,
-    async execute(_toolCallId: string, rawParams: Record<string, unknown>) {
+    async execute(_toolCallId: string, rawParams: unknown) {
       try {
         const params = normalizeRecallParams(rawParams);
         return jsonResult(await client.recall(params));
@@ -45,20 +45,34 @@ export function createNoosphereRecallTool(rawConfig: unknown) {
   };
 }
 
-function normalizeRecallParams(rawParams: Record<string, unknown>): NoosphereRecallRequest {
+function normalizeRecallParams(rawParams: unknown): NoosphereRecallRequest {
+  const params = isRecord(rawParams) ? rawParams : {};
+
   return {
-    query: readRequiredString(rawParams.query, "query"),
-    mode: rawParams.mode === "auto" ? "auto" : rawParams.mode === "inspection" ? "inspection" : undefined,
-    resultCap: readOptionalNumber(rawParams.resultCap, RESULT_CAP_MIN, RESULT_CAP_MAX),
-    tokenBudget: readOptionalNumber(rawParams.tokenBudget, TOKEN_BUDGET_MIN, TOKEN_BUDGET_MAX),
-    scope: readOptionalString(rawParams.scope),
-    providers: readOptionalStringArray(rawParams.providers),
+    query: readRequiredString(params.query, "query", QUERY_MAX_LENGTH),
+    mode: readOptionalMode(params.mode) ?? "inspection",
+    resultCap: readOptionalNumber(params.resultCap, RESULT_CAP_MIN, RESULT_CAP_MAX),
+    tokenBudget: readOptionalNumber(params.tokenBudget, TOKEN_BUDGET_MIN, TOKEN_BUDGET_MAX),
+    scope: readOptionalString(params.scope),
+    providers: readOptionalStringArray(params.providers),
   };
 }
 
-function readRequiredString(value: unknown, field: string): string {
-  if (typeof value === "string" && value.trim()) return value.trim();
+function readRequiredString(value: unknown, field: string, maxLength?: number): string {
+  if (typeof value === "string" && value.trim()) {
+    const trimmed = value.trim();
+    if (maxLength !== undefined && trimmed.length > maxLength) {
+      throw new Error(`${field} is too long (max ${maxLength} characters)`);
+    }
+    return trimmed;
+  }
   throw new Error(`${field} is required`);
+}
+
+function readOptionalMode(value: unknown): NoosphereRecallRequest["mode"] {
+  if (value === undefined) return undefined;
+  if (value === "auto" || value === "inspection") return value;
+  throw new Error("mode must be auto or inspection");
 }
 
 function readOptionalString(value: unknown): string | undefined {
@@ -71,7 +85,16 @@ function readOptionalNumber(value: unknown, min: number, max: number): number | 
 }
 
 function readOptionalStringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error("providers must be an array of provider ID strings");
+  if (value.some((item) => typeof item !== "string")) {
+    throw new Error("providers must be an array of provider ID strings");
+  }
   const values = value.filter((item): item is string => typeof item === "string" && !!item.trim()).map((item) => item.trim());
-  return values.length > 0 ? values : undefined;
+  if (values.length === 0) throw new Error("providers must contain at least one non-empty provider ID");
+  return values;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }

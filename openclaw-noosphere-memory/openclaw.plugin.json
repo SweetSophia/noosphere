@@ -1,7 +1,7 @@
 {
   "id": "noosphere-memory",
   "name": "Noosphere Memory Bridge",
-  "description": "Explicit OpenClaw tools for Noosphere memory status and recall over HTTP.",
+  "description": "Explicit OpenClaw tools for Noosphere memory status and recall over HTTP. Recall requires READ permission; status requires an ADMIN-scoped Noosphere API key.",
   "contracts": {
     "tools": [
       "noosphere_status",
@@ -21,7 +21,7 @@
     },
     "apiKey": {
       "label": "Noosphere API Key",
-      "help": "API key used as Authorization: Bearer <key>. Fallback: NOOSPHERE_API_KEY.",
+      "help": "API key used as Authorization: Bearer <key>. Recall requires READ permission; status requires ADMIN. Fallback: NOOSPHERE_API_KEY.",
       "sensitive": true,
       "placeholder": "noo_..."
     },

@@ -1,15 +1,13 @@
-import { NoosphereMemoryClient } from "../client.js";
-import { resolveNoosphereMemoryConfig } from "../config.js";
 import { errorResult, jsonResult } from "../format.js";
+import { createNoosphereClientContext } from "../shared-init.js";
 
 export function createNoosphereStatusTool(rawConfig: unknown) {
-  const config = resolveNoosphereMemoryConfig(rawConfig);
-  const client = new NoosphereMemoryClient(config);
+  const { config, client } = createNoosphereClientContext(rawConfig);
 
   return {
     name: "noosphere_status",
     label: "Noosphere Status",
-    description: "Check Noosphere memory API health, provider metadata, and public recall settings.",
+    description: "Check Noosphere memory API health, provider metadata, and public recall settings. Requires an ADMIN-scoped Noosphere API key.",
     parameters: {
       type: "object",
       additionalProperties: false,
