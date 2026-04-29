@@ -1,0 +1,52 @@
+{
+  "id": "noosphere-memory",
+  "name": "Noosphere Memory Bridge",
+  "description": "Explicit OpenClaw tools for Noosphere memory status and recall over HTTP. Recall requires READ permission; status requires an ADMIN-scoped Noosphere API key.",
+  "contracts": {
+    "tools": [
+      "noosphere_status",
+      "noosphere_recall"
+    ]
+  },
+  "providerAuthEnvVars": {
+    "noosphere-memory": [
+      "NOOSPHERE_API_KEY"
+    ]
+  },
+  "uiHints": {
+    "baseUrl": {
+      "label": "Noosphere Base URL",
+      "help": "Base URL for Noosphere, for example http://100.122.171.30:3000.",
+      "placeholder": "http://localhost:3000"
+    },
+    "apiKey": {
+      "label": "Noosphere API Key",
+      "help": "API key used as Authorization: Bearer <key>. Recall requires READ permission; status requires ADMIN. Fallback: NOOSPHERE_API_KEY.",
+      "sensitive": true,
+      "placeholder": "noo_..."
+    },
+    "timeoutMs": {
+      "label": "HTTP Timeout (ms)",
+      "help": "Maximum time for explicit status/recall requests before failing safely."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "baseUrl": {
+        "type": "string"
+      },
+      "apiKey": {
+        "type": [
+          "string",
+          "object"
+        ]
+      },
+      "timeoutMs": {
+        "type": "number",
+        "minimum": 1
+      }
+    }
+  }
+}

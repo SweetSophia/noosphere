@@ -1,0 +1,20 @@
+{
+  "name": "@sweetsophia/openclaw-noosphere-memory",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenClaw plugin for explicit Noosphere memory status and recall tools.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.21.0",
+    "typescript": "^5"
+  },
+  "openclaw": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}
