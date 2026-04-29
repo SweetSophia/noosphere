@@ -7,9 +7,9 @@ export async function GET(request: NextRequest) {
   // ADMIN required: status exposes internal provider configuration
   // (priority weights, capabilities, max results) — operational data,
   // not article content, so WRITE is insufficient.
-  // NOTE: requirePermission checks API key first (no DB hit) and falls back
-  // to session auth only if API key is absent/invalid — so DB is not a hard
-  // dependency for valid API key requests.
+  // NOTE: API key validation requires the database (key lookup + lastUsedAt
+  // update). If the DB is unreachable, API key auth fails and the request
+  // falls back to session auth, which also requires the DB.
   const auth = await requirePermission(request, ["ADMIN"] as Permissions[]);
   if (!auth.success) {
     return auth.response;

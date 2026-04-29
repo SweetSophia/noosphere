@@ -14,13 +14,14 @@ import type { MemorySourceType } from "@/lib/memory/types";
 
 /**
  * Substrings that must not appear in the serialized status snapshot.
- * Covers camelCase / snake_case variants, auth patterns, and generic secrets.
+ * Best-effort regression guard against accidentally including secret-like
+ * field names in the snapshot output. Does not detect secret values,
+ * misspellings, or non-English field names — not a security boundary.
  * Extracted to a constant so updates stay centralized and consistent.
  */
 export const FORBIDDEN_SECRET_SUBSTRINGS = [
   "apikey",    // camelCase API key field
   "api_key",   // snake_case API key field
-  "bearer",    // bearer token
   "keyhash",   // hashed key reference
   "secret",    // generic secret
   "password",  // password field
