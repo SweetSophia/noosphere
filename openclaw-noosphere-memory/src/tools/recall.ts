@@ -1,6 +1,6 @@
 import { NoosphereRecallRequest } from "../client.js";
 import { errorResult, jsonResult } from "../format.js";
-import { createNoosphereClientContext } from "../shared-init.js";
+import { createNoosphereClientContext, NoosphereClientContext } from "../shared-init.js";
 
 const QUERY_MAX_LENGTH = 1000;
 const RESULT_CAP_MIN = 1;
@@ -26,8 +26,8 @@ const RecallToolParameters = {
   },
 } as const;
 
-export function createNoosphereRecallTool(rawConfig: unknown) {
-  const { config, client } = createNoosphereClientContext(rawConfig);
+export function createNoosphereRecallTool(rawConfig: unknown, context?: NoosphereClientContext) {
+  const { config, client } = context ?? createNoosphereClientContext(rawConfig);
 
   return {
     name: "noosphere_recall",

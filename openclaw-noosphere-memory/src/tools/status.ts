@@ -1,8 +1,8 @@
 import { errorResult, jsonResult } from "../format.js";
-import { createNoosphereClientContext } from "../shared-init.js";
+import { createNoosphereClientContext, NoosphereClientContext } from "../shared-init.js";
 
-export function createNoosphereStatusTool(rawConfig: unknown) {
-  const { config, client } = createNoosphereClientContext(rawConfig);
+export function createNoosphereStatusTool(rawConfig: unknown, context?: NoosphereClientContext) {
+  const { config, client } = context ?? createNoosphereClientContext(rawConfig);
 
   return {
     name: "noosphere_status",

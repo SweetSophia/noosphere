@@ -44,11 +44,11 @@ function readSecret(value: unknown): string | undefined {
   return undefined;
 }
 
-function readString(value: unknown): string | undefined {
+export function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function readNumber(value: unknown): number | undefined {
+export function readNumber(value: unknown): number | undefined {
   if (typeof value === "number") return value;
   if (typeof value !== "string" || !value.trim()) return undefined;
   const parsed = Number(value);
@@ -62,6 +62,23 @@ function clampTimeout(value: unknown, fallback: number): number {
   return Math.min(Math.floor(value), MAX_NOOSPHERE_TIMEOUT_MS);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function readBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(normalized)) return true;
+  if (["false", "0", "no", "off"].includes(normalized)) return false;
+  return undefined;
+}
+
+export function readStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const values = value
+    .filter((item): item is string => typeof item === "string" && !!item.trim())
+    .map((item) => item.trim());
+  return values.length > 0 ? values : undefined;
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
