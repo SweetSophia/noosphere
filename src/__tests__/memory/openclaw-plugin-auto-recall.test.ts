@@ -67,6 +67,7 @@ describe("resolveAutoRecallConfig", () => {
 
   it("normalizes recallInjectionPosition with prepend as fallback", () => {
     assert.equal(resolveAutoRecallConfig({ recallInjectionPosition: "system-prepend" }).recallInjectionPosition, "system-prepend");
+    assert.equal(resolveAutoRecallConfig({ recallInjectionPosition: "append" }).recallInjectionPosition, "prepend");
     assert.equal(resolveAutoRecallConfig({ recallInjectionPosition: "unexpected" }).recallInjectionPosition, "prepend");
   });
 });
@@ -78,7 +79,8 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
 
     const result = await hook({ prompt: "what do we know about Noosphere?", messages: [] }, { agentId: "cylena" });
 
-    assert.equal(result?.prependContext?.includes("<recall>"), true);
+    assert.equal(result?.prependContext?.includes("<noosphere_auto_recall>"), true);
+    assert.equal(result?.prependContext?.includes("<hindsight_memories>"), false);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].mode, "auto");
     assert.deepEqual(calls[0].providers, ["noosphere"]);
@@ -136,7 +138,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
 
     const result = await hook({ prompt: "Noosphere memory", messages: [] }, { agentId: "cylena", messageProvider: "telegram" });
 
-    assert.equal(result?.prependContext?.includes("<recall>"), true);
+    assert.equal(result?.prependContext?.includes("<noosphere_auto_recall>"), true);
     assert.equal(calls.length, 1);
   });
 
@@ -163,7 +165,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     const result = await hook({ prompt: "Noosphere bridge", messages: [] }, {});
 
     assert.equal(result?.prependContext, undefined);
-    assert.equal(result?.prependSystemContext?.includes("<recall>"), true);
+    assert.equal(result?.prependSystemContext?.includes("<noosphere_auto_recall>"), true);
   });
 
   it("returns nothing when promptInjectionText is missing", async () => {
@@ -183,6 +185,62 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
 
     assert.equal(result, undefined);
     assert.equal(calls.length, 1);
+  });
+
+
+
+  it("skips injection when Noosphere does not return auto-mode prompt text", async () => {
+    const calls: NoosphereRecallRequest[] = [];
+    const context = {
+      config: { baseUrl: "http://noosphere.local", apiKey: "noo_test", timeoutMs: 5000 },
+      client: {
+        async recall(request: NoosphereRecallRequest): Promise<NoosphereRecallResponse> {
+          calls.push(request);
+          return {
+            results: [],
+            totalBeforeCap: 1,
+            mode: "inspection",
+            tokenBudgetUsed: 12,
+            providerMeta: [],
+            promptInjectionText: "<recall>inspection text</recall>",
+          };
+        },
+      },
+    } as unknown as NoosphereClientContext;
+    const hook = createNoosphereAutoRecallHook({ autoRecall: true }, context);
+
+    const result = await hook({ prompt: "Noosphere bridge", messages: [] }, {});
+
+    assert.equal(result, undefined);
+    assert.equal(calls.length, 1);
+  });
+
+  it("uses autoRecallTimeoutMs instead of the shared HTTP timeout", async () => {
+    const calls: NoosphereRecallRequest[] = [];
+    const timeouts: Array<number | undefined> = [];
+    const context = {
+      config: { baseUrl: "http://noosphere.local", apiKey: "noo_test", timeoutMs: 5000 },
+      client: {
+        async recall(request: NoosphereRecallRequest, options?: { timeoutMs?: number }): Promise<NoosphereRecallResponse> {
+          calls.push(request);
+          timeouts.push(options?.timeoutMs);
+          return {
+            results: [],
+            totalBeforeCap: 1,
+            mode: "auto",
+            tokenBudgetUsed: 12,
+            providerMeta: [],
+            promptInjectionText: "<recall>timeout text</recall>",
+          };
+        },
+      },
+    } as unknown as NoosphereClientContext;
+    const hook = createNoosphereAutoRecallHook({ autoRecall: true, autoRecallTimeoutMs: 1234 }, context);
+
+    await hook({ prompt: "Noosphere bridge", messages: [] }, {});
+
+    assert.equal(calls.length, 1);
+    assert.deepEqual(timeouts, [1234]);
   });
 
   it("skips recall when the assembled query is shorter than minQueryLength", async () => {

@@ -10,7 +10,7 @@ declare module "openclaw/plugin-sdk/plugin-entry" {
     registerTool(tool: unknown, options?: unknown): void;
     on?<TEvent = unknown, TContext = unknown>(
       hookName: "before_prompt_build",
-      handler: (event: TEvent, ctx: TContext) => unknown | Promise<unknown>,
+      handler: ((event: TEvent, ctx: TContext) => unknown | Promise<unknown>) & { registrationWarning?: () => void },
       options?: unknown,
     ): void;
   }

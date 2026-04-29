@@ -13,6 +13,8 @@ export interface ResolvedNoosphereMemoryConfig {
 export const DEFAULT_NOOSPHERE_BASE_URL = "http://localhost:3000";
 export const DEFAULT_NOOSPHERE_TIMEOUT_MS = 5_000;
 export const MAX_NOOSPHERE_TIMEOUT_MS = 30_000;
+export const DEFAULT_AUTO_RECALL_TIMEOUT_MS = 1_500;
+export const MAX_AUTO_RECALL_TIMEOUT_MS = 5_000;
 
 export function resolveNoosphereMemoryConfig(
   rawConfig: unknown,
@@ -55,11 +57,11 @@ export function readNumber(value: unknown): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function clampTimeout(value: unknown, fallback: number): number {
+export function clampTimeout(value: unknown, fallback: number, max: number = MAX_NOOSPHERE_TIMEOUT_MS): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     return fallback;
   }
-  return Math.min(Math.floor(value), MAX_NOOSPHERE_TIMEOUT_MS);
+  return Math.min(Math.floor(value), max);
 }
 
 export function readBoolean(value: unknown): boolean | undefined {

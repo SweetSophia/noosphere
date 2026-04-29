@@ -50,7 +50,11 @@
     },
     "recallInjectionPosition": {
       "label": "Recall Injection Position",
-      "help": "Where to inject auto-recall text: prepend, append, system-prepend, or system-append. Default: prepend."
+      "help": "Where to inject auto-recall text. OpenClaw supports prependContext plus system prompt prepend/append."
+    },
+    "autoRecallTimeoutMs": {
+      "label": "Auto Recall Timeout (ms)",
+      "help": "Short timeout for per-prompt auto recall. Defaults to 1500ms and fails open."
     },
     "minQueryLength": {
       "label": "Minimum Auto-Recall Query Length",
@@ -105,8 +109,14 @@
       },
       "recallInjectionPosition": {
         "type": "string",
-        "enum": ["prepend", "append", "system-prepend", "system-append"],
+        "enum": ["prepend", "system-prepend", "system-append"],
         "default": "prepend"
+      },
+      "autoRecallTimeoutMs": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 5000,
+        "default": 1500
       },
       "minQueryLength": {
         "type": "number",

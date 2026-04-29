@@ -12,6 +12,11 @@ export default definePluginEntry({
     const clientContext = createNoosphereClientContext(api.pluginConfig);
     api.registerTool(createNoosphereStatusTool(api.pluginConfig, clientContext));
     api.registerTool(createNoosphereRecallTool(api.pluginConfig, clientContext));
-    api.on?.("before_prompt_build", createNoosphereAutoRecallHook(api.pluginConfig, clientContext, api.logger));
+    const hook = createNoosphereAutoRecallHook(api.pluginConfig, clientContext, api.logger);
+    if (typeof api.on === "function") {
+      api.on("before_prompt_build", hook);
+    } else {
+      hook.registrationWarning?.();
+    }
   },
 });

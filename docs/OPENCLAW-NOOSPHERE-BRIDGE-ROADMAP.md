@@ -283,7 +283,7 @@ Config:
 interface NoosphereAutoRecallConfig {
   autoRecall: boolean;
   autoProviders: string[];
-  recallInjectionPosition: "prepend" | "append" | "system-prepend" | "system-append";
+  recallInjectionPosition: "prepend" | "system-prepend" | "system-append";
   maxInjectedMemories: number;
   maxInjectedTokens: number;
   timeoutMs: number;
