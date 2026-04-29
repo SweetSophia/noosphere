@@ -187,8 +187,8 @@ export async function executeMemoryRecallRequest(
       orchestrator.recall({
         query: validation.request.query,
         mode: validation.request.mode,
-        resultCap: validation.request.resultCap,
-        tokenBudget: validation.request.tokenBudget,
+        resultCap: Math.min(validation.request.resultCap, Math.min(settings.maxInjectedMemories, MEMORY_RECALL_LIMITS.maxResultCap)),
+        tokenBudget: Math.min(validation.request.tokenBudget, Math.min(settings.maxInjectedTokens, MEMORY_RECALL_LIMITS.maxTokenBudget)),
         scope: validation.request.scope,
         signal: controller.signal,
       }),
