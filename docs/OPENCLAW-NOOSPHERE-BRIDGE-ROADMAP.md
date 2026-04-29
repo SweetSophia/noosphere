@@ -180,6 +180,11 @@ interface MemoryRecallResponse {
 }
 ```
 
+Contract notes:
+
+- `RecallResultRanked` is the existing ranked memory result shape returned by the orchestrator. It should keep the provider-agnostic memory fields needed by clients: stable `id`, provider/source metadata, content or summary text, relevance/ranking score, optional token estimate, and optional conflict/dedup metadata.
+- If the lookup endpoint later returns a non-ranked `MemoryResult`, document that exact shape in the implementation PR and keep it aligned with the shared memory provider types rather than inventing a second result contract.
+
 Initial provider policy:
 
 - default `auto` mode providers: `noosphere` only;
@@ -310,8 +315,9 @@ POST /api/memory/get
 Constraints:
 
 - support canonical refs like `noosphere:article:<id>`;
-- return normalized `MemoryResult`;
-- preserve provider-agnostic shape for future providers.
+- return the normalized memory result shape used by `MemoryProvider.getById()`;
+- preserve provider-agnostic shape for future providers;
+- define the concrete response interface in the lookup PR, reusing the shared memory provider/result fields instead of adding a Noosphere-only shape.
 
 ### PR 6 — Save/candidate API and tool
 
@@ -344,6 +350,8 @@ Verification:
 ### PR 7 — Optional corpus supplement compatibility
 
 Purpose: expose Noosphere as a searchable corpus for OpenClaw hosts that consume `registerMemoryCorpusSupplement()`.
+
+`registerMemoryCorpusSupplement()` is the OpenClaw SDK registration point for adding an external corpus to shared memory search/get flows. The supplement should adapt Noosphere recall/get responses into the host's corpus item contract, including stable IDs, display titles, snippets/content, source labels, and safe metadata. Keep this optional until the target OpenClaw runtime is confirmed to consume corpus supplements.
 
 This is not a first milestone because the current active memory slot is Hindsight, not `memory-core`.
 
