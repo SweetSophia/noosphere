@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getMemoryStatusSnapshot } from "@/lib/memory/api/providers";
+import {
+  getMemoryStatusSnapshot,
+  FORBIDDEN_SECRET_SUBSTRINGS,
+} from "@/lib/memory/api/providers";
 
 test("memory status exposes safe provider metadata", () => {
   const snapshot = getMemoryStatusSnapshot({
@@ -69,7 +72,7 @@ test("memory status respects provider auto-recall capability gates", () => {
 test("memory status does not expose secret-like fields", () => {
   const serialized = JSON.stringify(getMemoryStatusSnapshot()).toLowerCase();
 
-  for (const forbidden of ["apikey", "api_key", "bearer", "keyhash", "secret", "password"]) {
+  for (const forbidden of FORBIDDEN_SECRET_SUBSTRINGS) {
     assert.equal(serialized.includes(forbidden), false, `unexpected ${forbidden} in status`);
   }
 });
