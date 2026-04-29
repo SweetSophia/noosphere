@@ -9,8 +9,18 @@ export async function POST(request: NextRequest) {
     return auth.response;
   }
 
+  let body: unknown;
   try {
-    const result = await executeMemoryRecallRequest(await request.json());
+    body = await request.json();
+  } catch (error) {
+    return NextResponse.json(
+      { error: "Invalid JSON body" },
+      { status: 400 },
+    );
+  }
+
+  try {
+    const result = await executeMemoryRecallRequest(body);
     return NextResponse.json(result.body, { status: result.status });
   } catch (error) {
     console.error("[POST /api/memory/recall]", error);

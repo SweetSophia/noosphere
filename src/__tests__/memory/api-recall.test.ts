@@ -77,6 +77,20 @@ test("memory recall validation normalizes caps and defaults", () => {
   assert.equal(result.request.tokenBudget, 2000);
 });
 
+test("memory recall validation rejects non-string provider elements", () => {
+  assert.deepEqual(
+    validateMemoryRecallRequest({ query: "memory", providers: ["noosphere", 123 as unknown] }),
+    { ok: false, status: 400, error: "providers must be an array of provider ID strings" },
+  );
+});
+
+test("memory recall validation rejects empty providers array", () => {
+  assert.deepEqual(
+    validateMemoryRecallRequest({ query: "memory", providers: [] }),
+    { ok: false, status: 400, error: "providers must contain at least one non-empty provider ID" },
+  );
+});
+
 test("memory recall inspection mode returns results without prompt text", async () => {
   const response = await executeMemoryRecallRequest(
     { query: "deployment", mode: "inspection", resultCap: 5 },

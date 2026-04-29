@@ -111,12 +111,19 @@ export function validateMemoryRecallRequest(input: unknown): MemoryRecallValidat
     if (!Array.isArray(body.providers)) {
       return { ok: false, status: 400, error: "providers must be an array of provider IDs" };
     }
-    providers = [...new Set(body.providers.map((provider) => {
-      if (typeof provider !== "string") {
-        return "";
-      }
-      return provider.trim();
-    }).filter(Boolean))];
+    if (body.providers.some((provider: unknown) => typeof provider !== "string")) {
+      return { ok: false, status: 400, error: "providers must be an array of provider ID strings" };
+    }
+    providers = [
+      ...new Set(
+        (body.providers as string[])
+          .map((provider) => provider.trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (providers.length === 0) {
+      return { ok: false, status: 400, error: "providers must contain at least one non-empty provider ID" };
+    }
   }
 
   return {
@@ -160,7 +167,7 @@ export async function executeMemoryRecallRequest(
   const timeoutMs = clampPositiveInteger(
     options.timeoutMs,
     MEMORY_RECALL_LIMITS.timeoutMs,
-    MEMORY_RECALL_LIMITS.timeoutMs,
+    Number.MAX_SAFE_INTEGER,
   );
   const controller = new AbortController();
 
