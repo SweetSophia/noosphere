@@ -69,6 +69,7 @@ test("memory status respects provider auto-recall capability gates", () => {
 test("memory status does not expose secret-like fields", () => {
   const serialized = JSON.stringify(getMemoryStatusSnapshot()).toLowerCase();
 
+  // Covers camelCase, snake_case, bearer token, hashed refs, and generic secrets.
   for (const forbidden of ["apikey", "api_key", "bearer", "keyhash", "secret", "password"]) {
     assert.equal(serialized.includes(forbidden), false, `unexpected ${forbidden} in status`);
   }
