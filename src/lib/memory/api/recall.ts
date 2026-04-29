@@ -169,13 +169,21 @@ export async function executeMemoryRecallRequest(
     MEMORY_RECALL_LIMITS.timeoutMs,
     Number.MAX_SAFE_INTEGER,
   );
+  const effectiveResultCap = Math.min(
+    settings.maxInjectedMemories,
+    MEMORY_RECALL_LIMITS.maxResultCap,
+  );
+  const effectiveTokenBudget = Math.min(
+    settings.maxInjectedTokens,
+    MEMORY_RECALL_LIMITS.maxTokenBudget,
+  );
   const controller = new AbortController();
 
   try {
     const orchestrator = createRecallOrchestrator({
       providers: providers.entries,
-      globalResultCap: Math.min(settings.maxInjectedMemories, MEMORY_RECALL_LIMITS.maxResultCap),
-      autoRecallTokenBudget: Math.min(settings.maxInjectedTokens, MEMORY_RECALL_LIMITS.maxTokenBudget),
+      globalResultCap: effectiveResultCap,
+      autoRecallTokenBudget: effectiveTokenBudget,
       deduplication: {
         strategy: settings.deduplicationStrategy,
         providerPriority: settings.enabledProviders,
@@ -187,8 +195,8 @@ export async function executeMemoryRecallRequest(
       orchestrator.recall({
         query: validation.request.query,
         mode: validation.request.mode,
-        resultCap: Math.min(validation.request.resultCap, Math.min(settings.maxInjectedMemories, MEMORY_RECALL_LIMITS.maxResultCap)),
-        tokenBudget: Math.min(validation.request.tokenBudget, Math.min(settings.maxInjectedTokens, MEMORY_RECALL_LIMITS.maxTokenBudget)),
+        resultCap: Math.min(validation.request.resultCap, effectiveResultCap),
+        tokenBudget: Math.min(validation.request.tokenBudget, effectiveTokenBudget),
         scope: validation.request.scope,
         signal: controller.signal,
       }),
