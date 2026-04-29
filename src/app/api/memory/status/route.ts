@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { Permissions } from "@prisma/client";
+import { Permissions } from "@prisma/client";
 import { requirePermission } from "@/lib/api/auth";
 import { getMemoryStatusSnapshot } from "@/lib/memory/api/providers";
 
@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   // NOTE: API key validation requires the database (key lookup + lastUsedAt
   // update). If the DB is unreachable, API key auth fails and the request
   // falls back to session auth, which also requires the DB.
-  const auth = await requirePermission(request, ["ADMIN"] as Permissions[]);
+  const auth = await requirePermission(request, [Permissions.ADMIN]);
   if (!auth.success) {
     return auth.response;
   }

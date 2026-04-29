@@ -63,12 +63,12 @@ export interface MemoryProviderStatusSource {
 /**
  * Returns the static list of provider descriptors for the status snapshot.
  *
- * NOTE: This intentionally returns only the built-in Noosphere provider.
- * Returning live provider configs would require a database query; the status
- * endpoint deliberately avoids that dependency so it can respond even when
- * the database is unreachable. In production with additional providers (e.g.
- * hindsight), this function should be updated to reflect the active provider
- * landscape, or the status route should fall back gracefully.
+ * NOTE: This intentionally returns only the built-in Noosphere provider until
+ * there is a provider registry or persisted memory-settings store to read from.
+ * The snapshot builder stays DB-free, but the route itself still uses
+ * DB-backed auth; do not claim the endpoint is fully database-independent.
+ * In production with additional providers (e.g. hindsight), replace this
+ * static source list with live configuration plus a graceful static fallback.
  */
 export function getDefaultMemoryProviderStatusSources(): MemoryProviderStatusSource[] {
   return [{ descriptor: NOOSPHERE_PROVIDER_DESCRIPTOR }];
