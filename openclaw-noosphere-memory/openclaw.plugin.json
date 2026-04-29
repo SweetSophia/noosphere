@@ -43,6 +43,26 @@
     "maxInjectedTokens": {
       "label": "Max Injected Tokens",
       "help": "Upper bound for promptInjectionText returned by Noosphere auto mode."
+    },
+    "maxInjectedMemories": {
+      "label": "Max Injected Memories",
+      "help": "Maximum number of memory results to request for auto-recall injection."
+    },
+    "recallInjectionPosition": {
+      "label": "Recall Injection Position",
+      "help": "Where to inject auto-recall text: prepend, append, system-prepend, or system-append. Default: prepend."
+    },
+    "minQueryLength": {
+      "label": "Minimum Auto-Recall Query Length",
+      "help": "Skip auto-recall when the composed query is shorter than this many characters. Default: 8."
+    },
+    "enabledAgents": {
+      "label": "Enabled Agents",
+      "help": "Optional case-insensitive allowlist of agent IDs. Empty means all agents."
+    },
+    "allowedChatTypes": {
+      "label": "Allowed Chat Types",
+      "help": "Optional case-insensitive allowlist of message providers/channel IDs. Empty means all chat types."
     }
   },
   "configSchema": {
@@ -82,6 +102,11 @@
         "minimum": 1,
         "maximum": 2000,
         "default": 1200
+      },
+      "recallInjectionPosition": {
+        "type": "string",
+        "enum": ["prepend", "append", "system-prepend", "system-append"],
+        "default": "prepend"
       },
       "minQueryLength": {
         "type": "number",

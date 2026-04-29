@@ -15,7 +15,7 @@ const DEFAULT_TOKEN_BUDGET = 1_200;
 const DEFAULT_MIN_QUERY_LENGTH = 8;
 const MAX_RESULT_CAP = 10;
 const MAX_TOKEN_BUDGET = 2_000;
-const MAX_QUERY_LENGTH = 1_000;
+export const MAX_QUERY_LENGTH = 1_000;
 
 export interface NoosphereAutoRecallConfig {
   autoRecall: boolean;
@@ -23,11 +23,14 @@ export interface NoosphereAutoRecallConfig {
   resultCap: number;
   tokenBudget: number;
   minQueryLength: number;
+  recallInjectionPosition: RecallInjectionPosition;
   enabledAgents: string[];
   allowedChatTypes: string[];
   includeRecentTurns: boolean;
   recentTurnLimit: number;
 }
+
+export type RecallInjectionPosition = "prepend" | "append" | "system-prepend" | "system-append";
 
 export interface NoospherePluginLogger {
   warn?: (message: string) => void;
@@ -50,6 +53,8 @@ export interface BeforePromptBuildContextLike {
 
 export interface PromptInjectionResult {
   prependContext?: string;
+  appendSystemContext?: string;
+  prependSystemContext?: string;
 }
 
 export function resolveAutoRecallConfig(rawConfig: unknown): NoosphereAutoRecallConfig {
@@ -62,6 +67,7 @@ export function resolveAutoRecallConfig(rawConfig: unknown): NoosphereAutoRecall
     resultCap: clampNumber(config.maxInjectedMemories ?? config.resultCap, 1, MAX_RESULT_CAP, DEFAULT_RESULT_CAP),
     tokenBudget: clampNumber(config.maxInjectedTokens ?? config.tokenBudget, 1, MAX_TOKEN_BUDGET, DEFAULT_TOKEN_BUDGET),
     minQueryLength: clampNumber(config.minQueryLength, 1, MAX_QUERY_LENGTH, DEFAULT_MIN_QUERY_LENGTH),
+    recallInjectionPosition: readInjectionPosition(config.recallInjectionPosition),
     enabledAgents: readStringArray(config.enabledAgents) ?? [],
     allowedChatTypes: readStringArray(config.allowedChatTypes) ?? [],
     includeRecentTurns: readBoolean(config.includeRecentTurns) ?? true,
@@ -95,7 +101,7 @@ export function createNoosphereAutoRecallHook(
       });
       const promptText = extractPromptInjectionText(response);
       if (!promptText) return;
-      return { prependContext: promptText };
+      return buildInjectionResult(promptText, autoConfig.recallInjectionPosition);
     } catch (error) {
       logger?.warn?.(`noosphere-memory: auto-recall skipped: ${formatHookError(error)}`);
       return;
@@ -109,14 +115,45 @@ export function buildAutoRecallQuery(event: BeforePromptBuildEventLike, config: 
 
   const parts = [prompt];
   if (config.includeRecentTurns && Array.isArray(event.messages) && config.recentTurnLimit > 0) {
-    const recentTurns = extractRecentUserTurns(event.messages, config.recentTurnLimit)
+    const recentTurns = dedupeTurns(extractRecentUserTurns(event.messages, config.recentTurnLimit))
       .filter((turn) => turn && turn !== prompt);
     if (recentTurns.length > 0) {
       parts.unshift(...recentTurns);
     }
   }
 
-  return parts.join("\n\n").slice(0, MAX_QUERY_LENGTH);
+  return parts.join("\n\n").slice(-MAX_QUERY_LENGTH);
+}
+
+function buildInjectionResult(promptText: string, position: RecallInjectionPosition): PromptInjectionResult {
+  switch (position) {
+    case "system-prepend":
+      return { prependSystemContext: promptText };
+    case "system-append":
+      return { appendSystemContext: promptText };
+    case "append":
+      return { appendSystemContext: promptText };
+    case "prepend":
+    default:
+      return { prependContext: promptText };
+  }
+}
+
+function readInjectionPosition(value: unknown): RecallInjectionPosition {
+  if (value === "append" || value === "system-prepend" || value === "system-append") return value;
+  return "prepend";
+}
+
+function dedupeTurns(turns: string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const turn of turns) {
+    const key = turn.trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(turn);
+  }
+  return deduped;
 }
 
 function shouldAutoRecall(
@@ -147,7 +184,7 @@ function extractRecentUserTurns(messages: unknown[], limit: number): string[] {
     const message = messages[index];
     if (!isRecord(message)) continue;
     const role = readString(message.role);
-    if (role && role !== "user") continue;
+    if (role !== "user") continue;
     const text = extractMessageText(message.content);
     if (text) turns.push(text);
   }
