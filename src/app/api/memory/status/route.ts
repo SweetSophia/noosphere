@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Permissions } from "@prisma/client";
 import { requirePermission } from "@/lib/api/auth";
 import { getMemoryStatusSnapshot } from "@/lib/memory/api/providers";
 
@@ -6,7 +7,10 @@ export async function GET(request: NextRequest) {
   // ADMIN required: status exposes internal provider configuration
   // (priority weights, capabilities, max results) — operational data,
   // not article content, so WRITE is insufficient.
-  const auth = await requirePermission(request, ["ADMIN"]);
+  // NOTE: requirePermission checks API key first (no DB hit) and falls back
+  // to session auth only if API key is absent/invalid — so DB is not a hard
+  // dependency for valid API key requests.
+  const auth = await requirePermission(request, ["ADMIN"] as Permissions[]);
   if (!auth.success) {
     return auth.response;
   }
