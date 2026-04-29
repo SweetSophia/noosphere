@@ -21,7 +21,7 @@ export function resolveNoosphereMemoryConfig(
   const config = isRecord(rawConfig) ? rawConfig as Partial<NoosphereMemoryConfig> : {};
   const baseUrl = normalizeBaseUrl(readString(config.baseUrl) || env.NOOSPHERE_BASE_URL || DEFAULT_NOOSPHERE_BASE_URL);
   const apiKey = readSecret(config.apiKey) || env.NOOSPHERE_API_KEY;
-  const timeoutMs = clampTimeout(config.timeoutMs, DEFAULT_NOOSPHERE_TIMEOUT_MS);
+  const timeoutMs = clampTimeout(config.timeoutMs ?? readNumber(env.NOOSPHERE_TIMEOUT_MS), DEFAULT_NOOSPHERE_TIMEOUT_MS);
 
   return { baseUrl, apiKey, timeoutMs };
 }
@@ -46,6 +46,13 @@ function readSecret(value: unknown): string | undefined {
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function readNumber(value: unknown): number | undefined {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function clampTimeout(value: unknown, fallback: number): number {

@@ -73,13 +73,17 @@ export class NoosphereMemoryClient {
         },
       });
 
-      const payload = await parseJson(response);
+      const payload = await parseResponseBody(response);
       if (!response.ok) {
         throw new NoosphereClientError(
           extractError(payload) ?? `Noosphere request failed with HTTP ${response.status}`,
           response.status,
           payload,
         );
+      }
+
+      if (payload === null) {
+        throw new NoosphereClientError("Noosphere returned an empty response body", response.status);
       }
 
       return payload as T;
@@ -95,24 +99,41 @@ export class NoosphereMemoryClient {
   }
 }
 
-async function parseJson(response: Response): Promise<unknown> {
+async function parseResponseBody(response: Response): Promise<unknown> {
   const text = await response.text();
   if (!text) return null;
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    if (!response.ok) return { rawBody: text };
+    throw new NoosphereClientError("Noosphere returned a non-JSON response", response.status, { rawBody: text });
+  }
+
   try {
     return JSON.parse(text) as unknown;
   } catch {
+    if (!response.ok) return { rawBody: text };
     throw new NoosphereClientError("Noosphere returned invalid JSON", response.status);
   }
 }
 
 function extractError(payload: unknown): string | undefined {
-  if (payload && typeof payload === "object" && "error" in payload) {
+  if (!payload || typeof payload !== "object") return undefined;
+
+  if ("error" in payload) {
     const error = (payload as { error?: unknown }).error;
-    return typeof error === "string" ? error : undefined;
+    if (typeof error === "string") return error;
   }
+
+  if ("rawBody" in payload) {
+    const rawBody = (payload as { rawBody?: unknown }).rawBody;
+    if (typeof rawBody === "string" && rawBody.trim()) return rawBody.trim();
+  }
+
   return undefined;
 }
 
 function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
+  if (!(error instanceof Error)) return false;
+  return error.name === "AbortError" || /abort/i.test(error.message);
 }

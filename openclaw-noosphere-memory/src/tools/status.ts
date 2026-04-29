@@ -3,6 +3,9 @@ import { resolveNoosphereMemoryConfig } from "../config.js";
 import { errorResult, jsonResult } from "../format.js";
 
 export function createNoosphereStatusTool(rawConfig: unknown) {
+  const config = resolveNoosphereMemoryConfig(rawConfig);
+  const client = new NoosphereMemoryClient(config);
+
   return {
     name: "noosphere_status",
     label: "Noosphere Status",
@@ -13,8 +16,6 @@ export function createNoosphereStatusTool(rawConfig: unknown) {
       properties: {},
     },
     async execute() {
-      const config = resolveNoosphereMemoryConfig(rawConfig);
-      const client = new NoosphereMemoryClient(config);
       try {
         return jsonResult(await client.status());
       } catch (error) {
