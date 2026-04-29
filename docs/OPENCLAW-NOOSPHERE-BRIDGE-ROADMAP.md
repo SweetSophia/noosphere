@@ -23,7 +23,15 @@ Sophie's current OpenClaw runtime uses:
 - `lossless-claw` as the context engine;
 - Noosphere as a standalone web/wiki/memory application.
 
-Therefore the bridge must not assume OpenClaw `memory-core` or QMD is the active memory path.
+Therefore the bridge must not assume OpenClaw `memory-core` or QMD (the local-first search sidecar described in the OpenClaw memory docs) is the active memory path.
+
+## Shared API Rules
+
+- **Authentication:** memory endpoints require API key auth via `Authorization: Bearer <key>`, matching the existing Noosphere API key convention.
+- **Auth failures:** invalid or missing credentials return HTTP 401 with `{ "error": "Unauthorized" }`; the OpenClaw plugin should treat this as configuration failure, not as a transient outage.
+- **Transient failures:** dependency failures and provider timeouts should return structured provider metadata where possible; plugin auto-recall must fail open and inject nothing.
+- **Hard request limits:** implementation PRs should enforce a server-side timeout, max result cap, and max token budget even when the caller requests larger values. Initial target defaults: 5s HTTP timeout, 10 results, and 2,000 injected tokens unless the implementation PR justifies different limits.
+- **Deduplication and conflicts:** recall responses should preserve `dedupStats` and `conflictStats` when available. Conflict strategies should use the existing `ConflictStrategy` semantics (`accept-highest`, `accept-recent`, `accept-curated`, `surface`, `suppress-low`) and expose surfaced conflicts as metadata rather than silently mutating source content.
 
 ## Design Principles
 
@@ -82,9 +90,9 @@ GET /api/memory/status
 Proposed response:
 
 ```ts
-{
+interface MemoryStatusResponse {
   ok: boolean;
-  timestamp: string;
+  timestamp: string; // ISO 8601
   providers: Array<{
     id: string;
     displayName?: string;
@@ -96,23 +104,25 @@ Proposed response:
       score: boolean;
       autoRecall: boolean;
     };
-    sourceType: string;
+    sourceType: MemorySourceType;
   }>;
   settings: {
     autoRecallEnabled: boolean;
     maxInjectedMemories: number;
     maxInjectedTokens: number;
-    recallVerbosity: string;
-    deduplicationStrategy: string;
-    conflictStrategy: string;
+    recallVerbosity: BudgetVerbosity;
+    deduplicationStrategy: DeduplicationStrategy;
+    conflictStrategy: ConflictStrategy;
     conflictThreshold: number;
+    summaryFirst: boolean;
   };
 }
 ```
 
 Constraints:
 
-- require API key auth;
+- require API key auth via `Authorization: Bearer <key>`;
+- return HTTP 401 for auth failures and do not fail open for explicit status calls;
 - return no secrets;
 - include only safe provider metadata;
 - initially report the built-in Noosphere provider.
@@ -144,26 +154,25 @@ POST /api/memory/recall
 Request:
 
 ```ts
-{
+interface MemoryRecallRequest {
   query: string;
   mode?: "auto" | "inspection";
   resultCap?: number;
   tokenBudget?: number;
   scope?: string;
   providers?: string[];
-  includePromptText?: boolean;
 }
 ```
 
 Response:
 
 ```ts
-{
+interface MemoryRecallResponse {
   results: RecallResultRanked[];
   totalBeforeCap: number;
   mode: "auto" | "inspection";
   tokenBudgetUsed?: number;
-  promptInjectionText?: string;
+  promptInjectionText?: string; // present only when mode is "auto"
   providerMeta: RecallProviderMeta[];
   dedupStats?: DeduplicationStats;
   conflicts?: ConflictSignal[];
@@ -175,13 +184,15 @@ Initial provider policy:
 
 - default `auto` mode providers: `noosphere` only;
 - default `inspection` mode providers: enabled providers available in Noosphere wiring;
+- implement route-level provider filtering, because the current `RecallQuery` contract does not include `providers`;
 - reject unknown provider IDs with a validation error or report them as skipped, depending on final route design.
 
 Constraints:
 
-- require API key auth;
+- require API key auth via `Authorization: Bearer <key>`;
 - validate query and caps;
 - enforce server-side max result and token caps;
+- keep `promptInjectionText` tied to orchestrator `auto` mode unless a future PR explicitly adds an inspection formatter;
 - return provider errors as metadata instead of crashing where possible;
 - do not expose provider secrets.
 
@@ -197,7 +208,7 @@ Targeted tests should cover:
 
 - missing/empty query;
 - auto mode prompt text and token budget;
-- inspection mode without prompt text by default;
+- inspection mode without prompt text;
 - provider filtering;
 - result caps;
 - provider error metadata/fail-open behavior.
@@ -254,7 +265,7 @@ Hook:
 Config:
 
 ```ts
-{
+interface NoosphereAutoRecallConfig {
   autoRecall: boolean;
   autoProviders: string[];
   recallInjectionPosition: "prepend" | "append" | "system-prepend" | "system-append";
@@ -274,7 +285,7 @@ Default mode:
 
 Verification:
 
-- known prompt injects a bounded `<noosphere_memories>` block;
+- known prompt injects a bounded `<recall>` block;
 - empty recall injects nothing;
 - timeout injects nothing and logs warning;
 - generated block is distinct from `<hindsight_memories>`;
@@ -327,7 +338,7 @@ Verification:
 
 - saves candidate/draft;
 - rejects empty/noisy/transient content;
-- strips `<noosphere_memories>`, `<hindsight_memories>`, and related injected blocks;
+- strips `<recall>`, `<hindsight_memories>`, and related injected blocks;
 - no secrets in saved content or logs.
 
 ### PR 7 — Optional corpus supplement compatibility
