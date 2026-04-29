@@ -1,28 +1,26 @@
 import {
-  DEFAULT_RECALL_SETTINGS,
   normalizeRecallSettings,
   type RecallSettings,
 } from "@/lib/memory/settings";
 import {
+  getEffectiveAutoRecall,
   normalizeMemoryProviderConfig,
+  type MemoryProviderCapabilities,
   type MemoryProviderConfig,
   type MemoryProviderDescriptor,
 } from "@/lib/memory/provider";
+import { NOOSPHERE_PROVIDER_DESCRIPTOR } from "@/lib/memory/noosphere-descriptor";
+import type { MemorySourceType } from "@/lib/memory/types";
 
 export interface MemoryProviderStatus {
   id: string;
   displayName?: string;
-  sourceType: string;
+  sourceType: MemorySourceType;
   enabled: boolean;
   allowAutoRecall: boolean;
   priorityWeight: number;
   maxResults?: number;
-  capabilities: {
-    search: boolean;
-    getById: boolean;
-    score: boolean;
-    autoRecall: boolean;
-  };
+  capabilities: MemoryProviderCapabilities;
 }
 
 export interface MemoryStatusSnapshot {
@@ -38,37 +36,17 @@ export interface MemoryStatusSnapshot {
     | "deduplicationStrategy"
     | "conflictStrategy"
     | "conflictThreshold"
+    | "summaryFirst"
   >;
 }
 
-interface MemoryProviderStatusSource {
+export interface MemoryProviderStatusSource {
   descriptor: MemoryProviderDescriptor;
   config?: Partial<MemoryProviderConfig>;
 }
 
-const DEFAULT_NOOSPHERE_DESCRIPTOR: MemoryProviderDescriptor = {
-  id: "noosphere",
-  displayName: "Noosphere",
-  sourceType: "noosphere",
-  defaultConfig: {
-    enabled: true,
-    priorityWeight: 1.25,
-    maxResults: 10,
-    allowAutoRecall: true,
-  },
-  capabilities: {
-    search: true,
-    getById: true,
-    score: true,
-    autoRecall: true,
-  },
-  metadata: {
-    contentType: "article",
-  },
-};
-
 export function getDefaultMemoryProviderStatusSources(): MemoryProviderStatusSource[] {
-  return [{ descriptor: DEFAULT_NOOSPHERE_DESCRIPTOR }];
+  return [{ descriptor: NOOSPHERE_PROVIDER_DESCRIPTOR }];
 }
 
 export function getMemoryStatusSnapshot(
@@ -79,10 +57,7 @@ export function getMemoryStatusSnapshot(
   } = {},
 ): MemoryStatusSnapshot {
   const providers = options.providers ?? getDefaultMemoryProviderStatusSources();
-  const settings = normalizeRecallSettings({
-    ...DEFAULT_RECALL_SETTINGS,
-    ...options.settings,
-  });
+  const settings = normalizeRecallSettings(options.settings);
 
   return {
     ok: true,
@@ -96,6 +71,7 @@ export function getMemoryStatusSnapshot(
       deduplicationStrategy: settings.deduplicationStrategy,
       conflictStrategy: settings.conflictStrategy,
       conflictThreshold: settings.conflictThreshold,
+      summaryFirst: settings.summaryFirst,
     },
   };
 }
@@ -112,7 +88,7 @@ function toProviderStatus(source: MemoryProviderStatusSource): MemoryProviderSta
     displayName: descriptor.displayName,
     sourceType: descriptor.sourceType,
     enabled: config.enabled,
-    allowAutoRecall: config.allowAutoRecall !== false,
+    allowAutoRecall: getEffectiveAutoRecall(descriptor.capabilities, config),
     priorityWeight: config.priorityWeight,
     maxResults: config.maxResults,
     capabilities: { ...descriptor.capabilities },

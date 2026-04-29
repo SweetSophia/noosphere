@@ -28,6 +28,7 @@ test("memory status includes normalized public recall settings", () => {
       maxInjectedMemories: 3.8,
       maxInjectedTokens: -1,
       conflictThreshold: 5,
+      summaryFirst: false,
     },
   });
 
@@ -36,15 +37,39 @@ test("memory status includes normalized public recall settings", () => {
   assert.equal(snapshot.settings.conflictThreshold, 1);
   assert.equal(snapshot.settings.autoRecallEnabled, true);
   assert.equal(snapshot.settings.conflictStrategy, "surface");
+  assert.equal(snapshot.settings.summaryFirst, false);
+});
+
+test("memory status respects provider auto-recall capability gates", () => {
+  const snapshot = getMemoryStatusSnapshot({
+    providers: [
+      {
+        descriptor: {
+          id: "manual-only",
+          sourceType: "external",
+          defaultConfig: {
+            enabled: true,
+            priorityWeight: 1,
+            allowAutoRecall: true,
+          },
+          capabilities: {
+            search: true,
+            getById: true,
+            score: false,
+            autoRecall: false,
+          },
+        },
+      },
+    ],
+  });
+
+  assert.equal(snapshot.providers[0]?.allowAutoRecall, false);
 });
 
 test("memory status does not expose secret-like fields", () => {
   const serialized = JSON.stringify(getMemoryStatusSnapshot()).toLowerCase();
 
-  assert.equal(serialized.includes("apikey"), false);
-  assert.equal(serialized.includes("api_key"), false);
-  assert.equal(serialized.includes("apikey"), false);
-  assert.equal(serialized.includes("authorization"), false);
-  assert.equal(serialized.includes("secret"), false);
-  assert.equal(serialized.includes("password"), false);
+  for (const forbidden of ["apikey", "api_key", "bearer", "keyhash", "secret", "password"]) {
+    assert.equal(serialized.includes(forbidden), false, `unexpected ${forbidden} in status`);
+  }
 });

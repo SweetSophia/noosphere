@@ -18,6 +18,11 @@ import {
   removeUndefined,
 } from "./types";
 import type { MemoryProviderMetadata, MemoryResult } from "./types";
+import {
+  DEFAULT_NOOSPHERE_MAX_RESULTS,
+  NOOSPHERE_PROVIDER_DESCRIPTOR,
+  NOOSPHERE_PROVIDER_ID,
+} from "./noosphere-descriptor";
 
 export interface NoosphereProviderSettings {
   /** Optional Prisma client override for scripts, tests, or alternate runtimes. */
@@ -55,8 +60,6 @@ type NoosphereArticle = Prisma.ArticleGetPayload<{
   };
 }>;
 
-const NOOSPHERE_PROVIDER_ID = "noosphere";
-const DEFAULT_NOOSPHERE_MAX_RESULTS = 10;
 const RECENCY_HALF_LIFE_DAYS = 90;
 
 export class NoosphereProvider implements MemoryProvider {
@@ -68,25 +71,13 @@ export class NoosphereProvider implements MemoryProvider {
     this.prisma = settings.prisma ?? defaultPrisma;
 
     this.descriptor = {
-      id: NOOSPHERE_PROVIDER_ID,
-      displayName: "Noosphere",
-      sourceType: "noosphere",
+      ...NOOSPHERE_PROVIDER_DESCRIPTOR,
       defaultConfig: {
-        enabled: true,
-        priorityWeight: 1.25,
-        maxResults: DEFAULT_NOOSPHERE_MAX_RESULTS,
-        allowAutoRecall: true,
+        ...NOOSPHERE_PROVIDER_DESCRIPTOR.defaultConfig,
         ...settings.providerConfig,
       },
-      capabilities: {
-        search: true,
-        getById: true,
-        score: true,
-        autoRecall: true,
-      },
-      metadata: {
-        contentType: "article",
-      },
+      capabilities: { ...NOOSPHERE_PROVIDER_DESCRIPTOR.capabilities },
+      metadata: { ...NOOSPHERE_PROVIDER_DESCRIPTOR.metadata },
     };
   }
 
