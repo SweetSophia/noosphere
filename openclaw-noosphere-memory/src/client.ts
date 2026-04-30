@@ -20,6 +20,17 @@ export interface NoosphereRecallRequest {
   providers?: string[];
 }
 
+export interface NoosphereSaveRequest {
+  title: string;
+  content: string;
+  topicId: string;
+  excerpt?: string;
+  tags?: string[];
+  source?: string;
+  authorName?: string;
+  confidence?: "low" | "medium" | "high";
+}
+
 export type NoosphereGetRequest =
   | { canonicalRef: string; provider?: never; id?: never }
   | { provider: string; id: string; canonicalRef?: never };
@@ -27,6 +38,20 @@ export type NoosphereGetRequest =
 export interface NoosphereGetResponse {
   result: NoosphereMemoryResult | null;
   providerMeta: NoosphereMemoryGetProviderMeta[];
+}
+
+export interface NoosphereSaveResponse {
+  success: true;
+  candidate: {
+    id: string;
+    title: string;
+    slug: string;
+    topicId: string;
+    topic?: { id: string; name: string; slug: string };
+    status: "draft";
+    url?: string;
+  };
+  strippedBlocks: string[];
 }
 
 export interface NoosphereRecallResponse {
@@ -63,6 +88,14 @@ export class NoosphereMemoryClient {
 
   async get(request: NoosphereGetRequest): Promise<NoosphereGetResponse> {
     return this.request<NoosphereGetResponse>("/api/memory/get", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+    });
+  }
+
+  async save(request: NoosphereSaveRequest): Promise<NoosphereSaveResponse> {
+    return this.request<NoosphereSaveResponse>("/api/memory/save", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(request),

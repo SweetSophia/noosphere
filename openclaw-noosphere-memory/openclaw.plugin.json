@@ -1,21 +1,18 @@
 {
   "id": "noosphere-memory",
   "name": "Noosphere Memory Bridge",
-  "description": "Explicit OpenClaw tools and optional auto-recall prompt injection for Noosphere memory over HTTP. Recall requires READ permission; status requires an ADMIN-scoped Noosphere API key.",
+  "description": "Explicit OpenClaw tools and optional auto-recall prompt injection for Noosphere memory over HTTP. Recall/get require READ permission; save requires WRITE; status requires an ADMIN-scoped Noosphere API key.",
   "contracts": {
     "tools": [
       "noosphere_status",
       "noosphere_recall",
-      "noosphere_get"
+      "noosphere_get",
+      "noosphere_save"
     ],
-    "hooks": [
-      "before_prompt_build"
-    ]
+    "hooks": ["before_prompt_build"]
   },
   "providerAuthEnvVars": {
-    "noosphere-memory": [
-      "NOOSPHERE_API_KEY"
-    ]
+    "noosphere-memory": ["NOOSPHERE_API_KEY"]
   },
   "uiHints": {
     "baseUrl": {
@@ -25,7 +22,7 @@
     },
     "apiKey": {
       "label": "Noosphere API Key",
-      "help": "API key used as Authorization: Bearer <key>. Recall requires READ permission; status requires ADMIN. Fallback: NOOSPHERE_API_KEY.",
+      "help": "API key used as Authorization: Bearer <key>. Recall/get require READ permission; save requires WRITE; status requires ADMIN. Fallback: NOOSPHERE_API_KEY.",
       "sensitive": true,
       "placeholder": "noo_..."
     },
@@ -78,10 +75,7 @@
         "type": "string"
       },
       "apiKey": {
-        "type": [
-          "string",
-          "object"
-        ]
+        "type": ["string", "object"]
       },
       "timeoutMs": {
         "type": "number",

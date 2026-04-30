@@ -1,6 +1,6 @@
 # OpenClaw ↔ Noosphere Memory Bridge Roadmap
 
-Status: implementation in progress — PRs 0–4 merged; PR 5 underway
+Status: implementation in progress — PRs 0–5 merged; PR 6 underway
 Owner: Noosphere/OpenClaw integration workstream
 Last updated: 2026-04-30
 
@@ -308,6 +308,8 @@ Verification:
 
 ### PR 5 — Lookup endpoint/tool
 
+Status: merged.
+
 Purpose: support direct retrieval by provider-local memory identifier or canonical reference.
 
 Endpoint:
@@ -352,6 +354,8 @@ Constraints:
 - provider lookup failures fail open into `providerMeta.error` rather than 500ing the route.
 
 ### PR 6 — Save/candidate API and tool
+
+Status: in progress.
 
 Purpose: add explicit candidate memory saving.
 
