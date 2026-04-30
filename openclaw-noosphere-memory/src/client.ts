@@ -46,21 +46,26 @@ export class NoosphereMemoryClient {
     return this.request<NoosphereStatusResponse>("/api/memory/status", { method: "GET" });
   }
 
-  async recall(request: NoosphereRecallRequest): Promise<NoosphereRecallResponse> {
-    return this.request<NoosphereRecallResponse>("/api/memory/recall", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(request),
-    });
+  async recall(request: NoosphereRecallRequest, options: { timeoutMs?: number } = {}): Promise<NoosphereRecallResponse> {
+    return this.request<NoosphereRecallResponse>(
+      "/api/memory/recall",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(request),
+      },
+      options,
+    );
   }
 
-  private async request<T>(path: string, init: RequestInit): Promise<T> {
+  private async request<T>(path: string, init: RequestInit, options: { timeoutMs?: number } = {}): Promise<T> {
     if (!this.config.apiKey) {
       throw new NoosphereClientError("Noosphere API key is not configured");
     }
 
+    const requestTimeoutMs = options.timeoutMs ?? this.config.timeoutMs;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
+    const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
 
     try {
       const response = await fetch(`${this.config.baseUrl}${path}`, {
@@ -90,7 +95,7 @@ export class NoosphereMemoryClient {
     } catch (error) {
       if (error instanceof NoosphereClientError) throw error;
       if (isAbortError(error)) {
-        throw new NoosphereClientError(`Noosphere request timed out after ${this.config.timeoutMs}ms`);
+        throw new NoosphereClientError(`Noosphere request timed out after ${requestTimeoutMs}ms`);
       }
       throw new NoosphereClientError(error instanceof Error ? error.message : String(error));
     } finally {

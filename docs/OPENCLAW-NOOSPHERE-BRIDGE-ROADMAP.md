@@ -1,6 +1,6 @@
 # OpenClaw ↔ Noosphere Memory Bridge Roadmap
 
-Status: implementation in progress — PRs 0–2 merged; PR 3 underway
+Status: implementation in progress — PRs 0–3 merged; PR 4 underway
 Owner: Noosphere/OpenClaw integration workstream
 Last updated: 2026-04-29
 
@@ -226,7 +226,7 @@ Targeted tests should cover:
 
 ### PR 3 — OpenClaw plugin skeleton and explicit tools
 
-Status: in progress.
+Status: merged.
 
 Purpose: create a thin OpenClaw plugin that calls Noosphere HTTP endpoints manually.
 
@@ -269,6 +269,8 @@ Verification:
 
 ### PR 4 — Auto-recall prompt injection
 
+Status: in progress.
+
 Purpose: add optional bounded Noosphere recall injection to OpenClaw.
 
 Hook:
@@ -281,7 +283,7 @@ Config:
 interface NoosphereAutoRecallConfig {
   autoRecall: boolean;
   autoProviders: string[];
-  recallInjectionPosition: "prepend" | "append" | "system-prepend" | "system-append";
+  recallInjectionPosition: "prepend" | "system-prepend" | "system-append";
   maxInjectedMemories: number;
   maxInjectedTokens: number;
   timeoutMs: number;

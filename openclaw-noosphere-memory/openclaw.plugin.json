@@ -1,11 +1,14 @@
 {
   "id": "noosphere-memory",
   "name": "Noosphere Memory Bridge",
-  "description": "Explicit OpenClaw tools for Noosphere memory status and recall over HTTP. Recall requires READ permission; status requires an ADMIN-scoped Noosphere API key.",
+  "description": "Explicit OpenClaw tools and optional auto-recall prompt injection for Noosphere memory over HTTP. Recall requires READ permission; status requires an ADMIN-scoped Noosphere API key.",
   "contracts": {
     "tools": [
       "noosphere_status",
       "noosphere_recall"
+    ],
+    "hooks": [
+      "before_prompt_build"
     ]
   },
   "providerAuthEnvVars": {
@@ -28,6 +31,42 @@
     "timeoutMs": {
       "label": "HTTP Timeout (ms)",
       "help": "Maximum time for explicit status/recall requests before failing safely."
+    },
+    "autoRecall": {
+      "label": "Auto Recall",
+      "help": "When enabled, injects bounded Noosphere recall through before_prompt_build. Defaults off to avoid duplicate Hindsight auto-injection."
+    },
+    "autoProviders": {
+      "label": "Auto Recall Providers",
+      "help": "Provider IDs used for auto recall. Conservative default: noosphere only."
+    },
+    "maxInjectedTokens": {
+      "label": "Max Injected Tokens",
+      "help": "Upper bound for promptInjectionText returned by Noosphere auto mode."
+    },
+    "maxInjectedMemories": {
+      "label": "Max Injected Memories",
+      "help": "Maximum number of memory results to request for auto-recall injection."
+    },
+    "recallInjectionPosition": {
+      "label": "Recall Injection Position",
+      "help": "Where to inject auto-recall text. OpenClaw supports prependContext plus system prompt prepend/append."
+    },
+    "autoRecallTimeoutMs": {
+      "label": "Auto Recall Timeout (ms)",
+      "help": "Short timeout for per-prompt auto recall. Defaults to 1500ms and fails open."
+    },
+    "minQueryLength": {
+      "label": "Minimum Auto-Recall Query Length",
+      "help": "Skip auto-recall when the composed query is shorter than this many characters. Default: 8."
+    },
+    "enabledAgents": {
+      "label": "Enabled Agents",
+      "help": "Optional case-insensitive allowlist of agent IDs. Empty means all agents."
+    },
+    "allowedChatTypes": {
+      "label": "Allowed Chat Types",
+      "help": "Optional case-insensitive allowlist of message providers/channel IDs. Empty means all chat types."
     }
   },
   "configSchema": {
@@ -46,6 +85,61 @@
       "timeoutMs": {
         "type": "number",
         "minimum": 1
+      },
+      "autoRecall": {
+        "type": "boolean",
+        "default": false
+      },
+      "autoProviders": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": ["noosphere"]
+      },
+      "maxInjectedMemories": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 10,
+        "default": 5
+      },
+      "maxInjectedTokens": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 2000,
+        "default": 1200
+      },
+      "recallInjectionPosition": {
+        "type": "string",
+        "enum": ["prepend", "system-prepend", "system-append"],
+        "default": "prepend"
+      },
+      "autoRecallTimeoutMs": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 5000,
+        "default": 1500
+      },
+      "minQueryLength": {
+        "type": "number",
+        "minimum": 1,
+        "default": 8
+      },
+      "enabledAgents": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "allowedChatTypes": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "includeRecentTurns": {
+        "type": "boolean",
+        "default": true
+      },
+      "recentTurnLimit": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 10,
+        "default": 4
       }
     }
   }
