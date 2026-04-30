@@ -17,7 +17,7 @@ export function hashApiKey(key: string): string {
  * Generate a new API key and return { raw, hash, prefix }.
  * Show the raw key ONCE — store only the hash.
  */
-export function generateApiKey(name: string): {
+export function generateApiKey(_name: string): {
   raw: string;
   hash: string;
   prefix: string;

@@ -20,6 +20,7 @@ import {
   type MemoryRecallStats,
   type PromotionConfig,
 } from "@/lib/memory/promotion";
+import type { MemoryResult } from "@/lib/memory/types";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -185,10 +186,11 @@ describe("promotion", () => {
       {
         id: "mem-new",
         provider: "hindsight",
+        sourceType: "hindsight",
         content: "test",
         relevanceScore: 0.8,
-        curationLevel: "ephemeral",
-      } as any,
+        curationLevel: "ephemeral" as const,
+      },
       "2026-04-27T00:00:00Z",
     );
 
@@ -204,10 +206,11 @@ describe("promotion", () => {
     const result = {
       id: "mem-1",
       provider: "test",
+      sourceType: "hindsight",
       content: "test",
       relevanceScore: 0.9,
-      curationLevel: "ephemeral",
-    } as any;
+      curationLevel: "ephemeral" as const,
+    } satisfies MemoryResult;
 
     recordRecall(map, result, "2026-04-27T00:00:00Z");
     const stats = recordRecall(map, result, "2026-04-27T01:00:00Z");
@@ -321,17 +324,19 @@ describe("promotion config", () => {
     const result1 = {
       id: "mem-1",
       provider: "test",
+      sourceType: "hindsight",
       content: "test",
       relevanceScore: 0.5,
-      curationLevel: "ephemeral",
-    } as any;
+      curationLevel: "ephemeral" as const,
+    } satisfies MemoryResult;
     const result2 = {
       id: "mem-1",
       provider: "test",
+      sourceType: "hindsight",
       content: "test",
       relevanceScore: 0.7,
-      curationLevel: "managed",
-    } as any;
+      curationLevel: "managed" as const,
+    } satisfies MemoryResult;
 
     recordRecall(map, result1);
     const stats = recordRecall(map, result2);

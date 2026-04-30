@@ -45,7 +45,7 @@ function ok(value: unknown, msg = ""): void {
   if (!value) throw new Error(`${msg}\n  Expected truthy value, got: ${value}`);
 }
 
-function rejects(promise: Promise<unknown>, msg = ""): Promise<void> {
+function _rejects(promise: Promise<unknown>, msg = ""): Promise<void> {
   return promise.then(
     () => {
       throw new Error(`${msg}\n  Expected promise to reject, but it resolved`);
@@ -178,7 +178,7 @@ function computeContentHash(article: ArticleForSync, topicPath: string[]): strin
   return createHash("sha256").update(stable).digest("hex");
 }
 
-function renderMarkdown(article: ArticleForSync, topicPath: string[], contentHash: string, syncedAt: string): string {
+function _renderMarkdown(article: ArticleForSync, topicPath: string[], contentHash: string, syncedAt: string): string {
   const fm = buildFrontmatter(article, topicPath, contentHash, syncedAt);
   return `${fm}\n${article.content}`;
 }
@@ -411,8 +411,8 @@ test("same content with different topic path produces different hash", () => {
 });
 
 test("missing file triggers rewrite (content hash differs from missing file)", () => {
-  const article = makeArticle();
-  const path = ["prisma"];
+  const _article = makeArticle();
+  const _path = ["prisma"];
 
   // No manifest entry exists
   const existingEntry = null;

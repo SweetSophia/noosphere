@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { slugify } from "@/lib/memory/backfill";
 import type { Prisma } from "@prisma/client";
 
@@ -350,6 +351,11 @@ export async function getDefaultMemorySaveWriter(): Promise<MemorySaveWriter> {
       const candidate = index === 0 ? baseSlug : `${baseSlug}-${index + 1}`;
       if (!existingSlugs.has(candidate)) return candidate;
     }
+
+    // Fall back to UUID-based slug when all numeric suffixes exhausted
+    const uuidSuffix = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+    const fallback = `${baseSlug}-${uuidSuffix}`;
+    if (!existingSlugs.has(fallback)) return fallback;
 
     throw new MemorySaveError(
       "Could not generate a unique candidate slug",

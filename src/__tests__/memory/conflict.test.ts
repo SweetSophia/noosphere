@@ -15,8 +15,8 @@ import type { MemoryResult } from "@/lib/memory/types";
 // ─── Test runner ───────────────────────────────────────────────────────────
 
 let testCounter = 0;
-let passCount = 0;
-let failCount = 0;
+let _passCount = 0;
+let _failCount = 0;
 const pending: Promise<void>[] = [];
 
 function test(name: string, fn: () => void | Promise<void>): void {
@@ -25,18 +25,18 @@ function test(name: string, fn: () => void | Promise<void>): void {
   const p = Promise.resolve()
     .then(() => fn())
     .then(() => {
-      passCount++;
+      _passCount++;
       console.log(`  \u2713 ${label}`);
     })
     .catch((err: unknown) => {
-      failCount++;
+      _failCount++;
       const message = err instanceof Error ? err.message : String(err);
       console.error(`  \u2717 ${label}\n    ${message}`);
     });
   pending.push(p);
 }
 
-function assert(condition: boolean, message: string): void {
+function _assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(`Assertion failed: ${message}`);
 }
 

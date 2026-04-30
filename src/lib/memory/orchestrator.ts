@@ -21,8 +21,6 @@ import {
 } from "./provider";
 import {
   computeBaseCompositeScore,
-  COMPOSITE_WEIGHTS,
-  CURATION_SCORE_MAP,
   normalizeMemoryScore,
 } from "./types";
 import type { MemoryResult, MemoryScore } from "./types";

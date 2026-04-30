@@ -44,7 +44,7 @@ function test(name: string, fn: () => void | Promise<void>): void {
   pending.push(p);
 }
 
-function assert(condition: boolean, message: string): void {
+function _assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(`Assertion failed: ${message}`);
 }
 

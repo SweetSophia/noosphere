@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get("file");
-    const alt = String(formData.get("alt") ?? "").trim() || "image";
+    const alt = String(formData.get("alt") ?? "").replace(/<[^>]*>/g, "").trim() || "image";
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "No image uploaded" }, { status: 400 });

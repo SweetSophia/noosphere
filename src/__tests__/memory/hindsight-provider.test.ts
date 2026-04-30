@@ -893,7 +893,7 @@ test("search truncates sourceFacts when more than 5", async () => {
   const fact4 = { id: "f4", text: "f4", type: "world" };
   const fact5 = { id: "f5", text: "f5", type: "world" };
   const fact6 = { id: "f6", text: "f6", type: "world" };
-  const fact7 = { id: "f7", text: "f7", type: "world" };
+  const _fact7 = { id: "f7", text: "f7", type: "world" };
 
   const mockFetch = createMockFetch([
     {
