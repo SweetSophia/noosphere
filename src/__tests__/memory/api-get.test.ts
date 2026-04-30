@@ -56,7 +56,11 @@ test("memory get validation accepts provider and id", () => {
 test("memory get validation parses canonical refs", () => {
   assert.deepEqual(validateMemoryGetRequest({ canonicalRef: "noosphere:article:article-1" }), {
     ok: true,
-    request: { provider: "noosphere", id: "noosphere:article:article-1" },
+    request: {
+      provider: "noosphere",
+      id: "article-1",
+      canonicalRef: "noosphere:article:article-1",
+    },
   });
 });
 
@@ -74,7 +78,7 @@ test("memory get validation rejects malformed inputs", () => {
   assert.deepEqual(validateMemoryGetRequest({ canonicalRef: "not-a-ref" }), {
     ok: false,
     status: 400,
-    error: "canonicalRef must look like provider:article:id",
+    error: "canonicalRef must look like provider:type:id",
   });
   assert.deepEqual(validateMemoryGetRequest({ provider: "noosphere", id: "1", canonicalRef: "noosphere:article:1" }), {
     ok: false,
@@ -115,6 +119,29 @@ test("memory get returns null for missing results", async () => {
   if (!("result" in response.body)) return;
   assert.equal(response.body.result, null);
   assert.equal(response.body.providerMeta[0]?.found, false);
+});
+
+
+test("memory get reports disabled providers distinctly", async () => {
+  const response = await executeMemoryGetRequest(
+    { provider: "noosphere", id: "article-1" },
+    {
+      providerOptions: { config: { enabled: false } },
+      providers: [
+        mockProvider("noosphere", null, {
+          getById: () => Promise.reject(new Error("should not be called")),
+        }),
+      ],
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.ok("result" in response.body);
+  if (!("result" in response.body)) return;
+  assert.equal(response.body.result, null);
+  assert.equal(response.body.providerMeta[0]?.enabled, false);
+  assert.equal(response.body.providerMeta[0]?.found, false);
+  assert.equal(response.body.providerMeta[0]?.error, undefined);
 });
 
 test("memory get rejects unknown providers", async () => {

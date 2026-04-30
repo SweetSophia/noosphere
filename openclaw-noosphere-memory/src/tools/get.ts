@@ -2,8 +2,6 @@ import { NoosphereGetRequest } from "../client.js";
 import { errorResult, jsonResult } from "../format.js";
 import { createNoosphereClientContext, NoosphereClientContext } from "../shared-init.js";
 
-const ID_MAX_LENGTH = 512;
-
 const GetToolParameters = {
   type: "object",
   additionalProperties: false,
@@ -51,9 +49,7 @@ function normalizeGetParams(rawParams: unknown): NoosphereGetRequest {
 function readOptionalString(value: unknown, field: string): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string" || !value.trim()) throw new Error(`${field} must be a non-empty string`);
-  const trimmed = value.trim();
-  if (trimmed.length > ID_MAX_LENGTH) throw new Error(`${field} is too long (max ${ID_MAX_LENGTH} characters)`);
-  return trimmed;
+  return value.trim();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

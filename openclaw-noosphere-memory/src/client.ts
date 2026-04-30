@@ -1,4 +1,5 @@
 import { ResolvedNoosphereMemoryConfig } from "./config.js";
+import { NoosphereMemoryGetProviderMeta, NoosphereMemoryResult } from "./types.js";
 
 export interface NoosphereStatusResponse {
   ok: boolean;
@@ -23,8 +24,8 @@ export interface NoosphereGetRequest {
 }
 
 export interface NoosphereGetResponse {
-  result: unknown | null;
-  providerMeta: unknown[];
+  result: NoosphereMemoryResult | null;
+  providerMeta: NoosphereMemoryGetProviderMeta[];
 }
 
 export interface NoosphereRecallResponse {

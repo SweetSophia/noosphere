@@ -1,4 +1,4 @@
-import type { MemoryProvider, MemoryProviderGetOptions } from "@/lib/memory/provider";
+import { normalizeMemoryProviderConfig, type MemoryProvider, type MemoryProviderGetOptions } from "@/lib/memory/provider";
 import type { MemoryResult } from "@/lib/memory/types";
 
 export const MEMORY_GET_LIMITS = {
@@ -35,6 +35,7 @@ export type MemoryGetValidationResult =
       request: {
         provider: string;
         id: string;
+        canonicalRef?: string;
       };
     }
   | {
@@ -95,6 +96,28 @@ export async function executeMemoryGetRequest(
   }
 
   const startedAt = Date.now();
+  const config = normalizeMemoryProviderConfig({
+    ...provider.descriptor.defaultConfig,
+    ...options.providerOptions?.config,
+  });
+
+  if (!config.enabled) {
+    return {
+      status: 200,
+      body: {
+        result: null,
+        providerMeta: [
+          {
+            providerId: provider.descriptor.id,
+            enabled: false,
+            found: false,
+            durationMs: Date.now() - startedAt,
+          },
+        ],
+      },
+    };
+  }
+
   try {
     const result = await provider.getById(validation.request.id, options.providerOptions);
     return {
@@ -135,17 +158,17 @@ function parseCanonicalRef(canonicalRef: string): MemoryGetValidationResult {
     return { ok: false, status: 400, error: "canonicalRef is too long" };
   }
 
-  const separator = ":article:";
-  const separatorIndex = canonicalRef.indexOf(separator);
-  if (separatorIndex <= 0 || separatorIndex + separator.length >= canonicalRef.length) {
-    return { ok: false, status: 400, error: "canonicalRef must look like provider:article:id" };
+  const segments = canonicalRef.split(":");
+  if (segments.length < 3 || segments.some((segment) => !segment.trim())) {
+    return { ok: false, status: 400, error: "canonicalRef must look like provider:type:id" };
   }
 
   return {
     ok: true,
     request: {
-      provider: canonicalRef.slice(0, separatorIndex),
-      id: canonicalRef,
+      provider: segments[0],
+      id: segments.slice(2).join(":"),
+      canonicalRef,
     },
   };
 }
