@@ -8,6 +8,7 @@ import type { MemoryResult } from "@/lib/memory/types";
 export const MEMORY_GET_LIMITS = {
   maxIdLength: 512,
   maxProviderLength: 64,
+  timeoutMs: 5000,
 } as const;
 
 const PROVIDER_ID_PATTERN = /^[a-z0-9-]+$/;
@@ -37,6 +38,7 @@ export interface MemoryGetProviderMeta {
 export interface MemoryGetExecutionOptions {
   providers?: MemoryProvider[];
   providerOptions?: MemoryProviderGetOptions;
+  timeoutMs?: number;
 }
 
 export type MemoryGetValidationResult =
@@ -69,9 +71,16 @@ export function validateMemoryGetRequest(
   }
 
   const body = input as Record<string, unknown>;
-  const explicitProvider = readOptionalString(body.provider);
-  const explicitId = readOptionalString(body.id);
-  const canonicalRef = readOptionalString(body.canonicalRef);
+  const providerField = readOptionalRequestField(body, "provider");
+  if (!providerField.ok) return providerField;
+  const idField = readOptionalRequestField(body, "id");
+  if (!idField.ok) return idField;
+  const canonicalRefField = readOptionalRequestField(body, "canonicalRef");
+  if (!canonicalRefField.ok) return canonicalRefField;
+
+  const explicitProvider = providerField.value;
+  const explicitId = idField.value;
+  const canonicalRef = canonicalRefField.value;
 
   if (canonicalRef && (explicitProvider || explicitId)) {
     return {
@@ -163,10 +172,26 @@ export async function executeMemoryGetRequest(
     };
   }
 
+  const controller = new AbortController();
+  const timeoutMs = clampPositiveInteger(
+    options.timeoutMs,
+    MEMORY_GET_LIMITS.timeoutMs,
+    Number.MAX_SAFE_INTEGER,
+  );
+
   try {
-    const result = await provider.getById(
-      validation.request.id,
-      options.providerOptions,
+    const result = await withTimeout(
+      provider.getById(validation.request.id, {
+        ...options.providerOptions,
+        signal: controller.signal,
+      }),
+      timeoutMs,
+      () => {
+        controller.abort();
+        return Promise.reject(
+          new Error(`Provider lookup timed out after ${timeoutMs}ms`),
+        );
+      },
     );
     return {
       status: 200,
@@ -198,6 +223,8 @@ export async function executeMemoryGetRequest(
         ],
       },
     };
+  } finally {
+    controller.abort();
   }
 }
 
@@ -238,8 +265,23 @@ function parseCanonicalRef(canonicalRef: string): MemoryGetValidationResult {
   };
 }
 
-function readOptionalString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+function readOptionalRequestField(
+  body: Record<string, unknown>,
+  field: keyof MemoryGetRequest,
+):
+  | { ok: true; value: string | undefined }
+  | Extract<MemoryGetValidationResult, { ok: false }> {
+  if (!(field in body) || body[field] === undefined) {
+    return { ok: true, value: undefined };
+  }
+  if (typeof body[field] !== "string") {
+    return { ok: false, status: 400, error: `${field} must be a string` };
+  }
+  const value = body[field].trim();
+  if (!value) {
+    return { ok: true, value: undefined };
+  }
+  return { ok: true, value };
 }
 
 function validateProviderId(
@@ -257,4 +299,34 @@ function validateProviderId(
     };
   }
   return undefined;
+}
+
+function clampPositiveInteger(
+  value: unknown,
+  fallback: number,
+  max: number,
+): number {
+  const parsed = typeof value === "number" ? value : Number.NaN;
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(Math.floor(parsed), max);
+}
+
+export async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  onTimeout: () => T | Promise<T>,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve, reject) => {
+        timeout = setTimeout(() => {
+          Promise.resolve(onTimeout()).then(resolve, reject);
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }

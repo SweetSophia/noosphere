@@ -5,7 +5,10 @@ import {
   executeMemoryGetRequest,
   validateMemoryGetRequest,
 } from "@/lib/memory/api/get";
-import type { MemoryProvider } from "@/lib/memory/provider";
+import type {
+  MemoryProvider,
+  MemoryProviderGetOptions,
+} from "@/lib/memory/provider";
 import type { MemoryResult } from "@/lib/memory/types";
 
 function mockResult(
@@ -153,6 +156,23 @@ test("memory get validation rejects malformed inputs", () => {
       error: "provider is too long",
     },
   );
+  assert.deepEqual(
+    validateMemoryGetRequest({
+      provider: "noosphere",
+      id: "x",
+      canonicalRef: 123,
+    }),
+    {
+      ok: false,
+      status: 400,
+      error: "canonicalRef must be a string",
+    },
+  );
+  assert.deepEqual(validateMemoryGetRequest({ provider: 123, id: "x" }), {
+    ok: false,
+    status: 400,
+    error: "provider must be a string",
+  });
 });
 
 test("memory get returns normalized provider result", async () => {
@@ -257,6 +277,35 @@ test("memory get rejects unknown providers", async () => {
 
   assert.equal(response.status, 400);
   assert.deepEqual(response.body, { error: "Unknown provider ID: missing" });
+});
+
+test("memory get times out hanging providers", async () => {
+  let observedSignal: AbortSignal | undefined;
+  const response = await executeMemoryGetRequest(
+    { provider: "slow", id: "article-1" },
+    {
+      timeoutMs: 1,
+      providers: [
+        mockProvider("slow", null, {
+          getById: (_id: string, options?: MemoryProviderGetOptions) => {
+            observedSignal = options?.signal;
+            return new Promise(() => undefined);
+          },
+        }),
+      ],
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.ok("result" in response.body);
+  if (!("result" in response.body)) return;
+  assert.equal(response.body.result, null);
+  assert.equal(
+    response.body.providerMeta[0]?.error,
+    "Provider lookup timed out after 1ms",
+  );
+  assert.equal(observedSignal?.aborted, true);
+  assertProviderDuration(response.body.providerMeta[0]);
 });
 
 test("memory get preserves provider errors as metadata", async () => {
