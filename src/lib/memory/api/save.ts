@@ -155,12 +155,12 @@ export function validateMemorySaveRequest(
   if (durableError) return durableError;
 
   const secretError = detectSecretInInputs([
-    sanitizedContent,
-    title.value,
-    excerpt.value,
-    source.value,
-    authorName.value,
-    ...tags.value,
+    { field: "content", value: sanitizedContent },
+    { field: "title", value: title.value },
+    { field: "excerpt", value: excerpt.value },
+    { field: "source", value: source.value },
+    { field: "authorName", value: authorName.value },
+    ...tags.value.map((value) => ({ field: "tags", value })),
   ]);
   if (secretError) return secretError;
 
@@ -260,7 +260,7 @@ export async function getDefaultMemorySaveWriter(): Promise<MemorySaveWriter> {
         throw new MemorySaveError("Topic not found", 404);
       }
 
-      const baseSlug = slugify(input.title).slice(0, 80) || "memory-candidate";
+      const baseSlug = slugify(input.title).slice(0, 80);
       const excerpt = input.excerpt ?? createFallbackExcerpt(input.content);
 
       const article = await prisma.$transaction(async (tx) => {
@@ -379,11 +379,11 @@ function createFallbackExcerpt(content: string): string {
 }
 
 function detectSecretInInputs(
-  values: Array<string | undefined>,
+  values: Array<{ field: string; value: string | undefined }>,
 ): Extract<MemorySaveValidationResult, { ok: false }> | undefined {
-  for (const value of values) {
+  for (const { field, value } of values) {
     if (!value) continue;
-    const secretError = detectSecret(value);
+    const secretError = detectSecret(value, field);
     if (secretError) return secretError;
   }
   return undefined;
@@ -430,13 +430,14 @@ function validateDurableContent(
 
 function detectSecret(
   value: string,
+  field: string,
 ): Extract<MemorySaveValidationResult, { ok: false }> | undefined {
   const match = SECRET_PATTERNS.find((entry) => entry.pattern.test(value));
   if (!match) return undefined;
   return {
     ok: false,
     status: 400,
-    error: `content appears to contain a secret (${match.name})`,
+    error: `${field} appears to contain a secret (${match.name})`,
   };
 }
 

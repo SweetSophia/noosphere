@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   executeMemorySaveRequest,
+  MemorySaveError,
   stripInjectedMemoryBlocks,
   validateMemorySaveRequest,
   type SanitizedMemorySaveInput,
@@ -91,6 +92,21 @@ test("memory save rejects empty, transient, and noisy content", () => {
   );
 });
 
+for (const content of [
+  "I'll check this after the deployment review finishes.",
+  "We'll handle this once the deployment review has finished.",
+  "Remind me to check this tomorrow morning.",
+]) {
+  test(`memory save rejects transient-only content: ${content}`, () => {
+    assert.deepEqual(validateMemorySaveRequest(validRequest({ content })), {
+      ok: false,
+      status: 400,
+      error:
+        "content looks transient and should not be saved as durable memory",
+    });
+  });
+}
+
 test("memory save rejects likely secrets", () => {
   const result = validateMemorySaveRequest(
     validRequest({
@@ -105,7 +121,7 @@ test("memory save rejects likely secrets", () => {
   });
 });
 
-test("memory save rejects secrets in optional fields", () => {
+test("memory save rejects secrets in optional fields with field-aware errors", () => {
   const result = validateMemorySaveRequest(
     validRequest({
       excerpt: "Token noo_abcdefghijklmnopqrstuvwxyz should not persist",
@@ -115,7 +131,7 @@ test("memory save rejects secrets in optional fields", () => {
   assert.deepEqual(result, {
     ok: false,
     status: 400,
-    error: "content appears to contain a secret (Noosphere API key)",
+    error: "excerpt appears to contain a secret (Noosphere API key)",
   });
 });
 
@@ -163,4 +179,20 @@ test("memory save executes through injected writer", async () => {
   assert.equal(response.body.candidate.status, "draft");
   assert.equal(seen.length, 1);
   assert.equal(seen[0].status, "draft");
+});
+
+test("memory save propagates writer MemorySaveError", async () => {
+  await assert.rejects(
+    executeMemorySaveRequest(validRequest(), {
+      writer: {
+        async saveCandidate() {
+          throw new MemorySaveError("Topic not found", 404);
+        },
+      },
+    }),
+    (error: unknown) =>
+      error instanceof MemorySaveError &&
+      error.message === "Topic not found" &&
+      error.status === 404,
+  );
 });
