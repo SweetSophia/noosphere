@@ -1,5 +1,5 @@
 import { NoosphereClientError } from "./client.js";
-import { redactSecret, ResolvedNoosphereMemoryConfig } from "./config.js";
+import type { ResolvedNoosphereMemoryConfig } from "./config.js";
 
 export interface ToolTextResult {
   content: Array<{ type: "text"; text: string }>;
@@ -24,20 +24,18 @@ export function errorResult(error: unknown, config?: ResolvedNoosphereMemoryConf
 }
 
 export function formatError(error: unknown, config?: ResolvedNoosphereMemoryConfig): Record<string, unknown> {
+  void config;
+
   if (error instanceof NoosphereClientError) {
     return {
       ok: false,
       error: error.message,
       status: error.status,
-      baseUrl: config?.baseUrl,
-      apiKey: redactSecret(config?.apiKey),
     };
   }
 
   return {
     ok: false,
     error: error instanceof Error ? error.message : String(error),
-    baseUrl: config?.baseUrl,
-    apiKey: redactSecret(config?.apiKey),
   };
 }

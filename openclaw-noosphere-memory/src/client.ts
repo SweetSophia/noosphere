@@ -4,6 +4,8 @@ import {
   NoosphereMemoryResult,
 } from "./types.js";
 
+const MAX_RESPONSE_BODY_BYTES = 1_000_000;
+
 export interface NoosphereStatusResponse {
   ok: boolean;
   timestamp: string;
@@ -176,7 +178,7 @@ export class NoosphereMemoryClient {
 }
 
 async function parseResponseBody(response: Response): Promise<unknown> {
-  const text = await response.text();
+  const text = await readBoundedResponseText(response);
   if (!text) return null;
 
   const contentType = response.headers.get("content-type") ?? "";
@@ -197,6 +199,55 @@ async function parseResponseBody(response: Response): Promise<unknown> {
       "Noosphere returned invalid JSON",
       response.status,
     );
+  }
+}
+
+async function readBoundedResponseText(response: Response): Promise<string> {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength) {
+    const parsedLength = Number(contentLength);
+    if (Number.isFinite(parsedLength) && parsedLength > MAX_RESPONSE_BODY_BYTES) {
+      throw new NoosphereClientError(
+        "Noosphere response body is too large",
+        response.status,
+      );
+    }
+  }
+
+  if (!response.body) {
+    const text = await response.text();
+    if (text.length > MAX_RESPONSE_BODY_BYTES) {
+      throw new NoosphereClientError(
+        "Noosphere response body is too large",
+        response.status,
+      );
+    }
+    return text;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let totalBytes = 0;
+  let text = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_RESPONSE_BODY_BYTES) {
+        await reader.cancel();
+        throw new NoosphereClientError(
+          "Noosphere response body is too large",
+          response.status,
+        );
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    return text;
+  } finally {
+    reader.releaseLock();
   }
 }
 

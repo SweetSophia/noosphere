@@ -41,20 +41,23 @@ export interface MemoryCorpusSupplement {
   search(params: {
     query: string;
     maxResults?: number;
-    agentSessionKey?: string;
   }): Promise<MemoryCorpusSearchResult[]>;
   get(params: {
     lookup: string;
     fromLine?: number;
     lineCount?: number;
-    agentSessionKey?: string;
   }): Promise<MemoryCorpusGetResult | null>;
 }
 
 const CORPUS_ID = "noosphere";
+const MAX_QUERY_LENGTH = 1_000;
 const DEFAULT_MAX_RESULTS = 10;
 const MAX_RESULTS = 10;
 const DEFAULT_LINE_COUNT = 200;
+const MAX_LINE_COUNT = 500;
+const MAX_CONTENT_LENGTH = 1_000_000;
+const MAX_SNIPPET_SOURCE_LENGTH = 10_000;
+const CANONICAL_REF_PATTERN = /^[A-Za-z][\w-]*:[A-Za-z][\w-]*:.+$/;
 
 export function createNoosphereCorpusSupplement(
   context: NoosphereClientContext,
@@ -62,7 +65,7 @@ export function createNoosphereCorpusSupplement(
 ): MemoryCorpusSupplement {
   return {
     async search(input) {
-      const query = input.query.trim();
+      const query = normalizeQuery(input.query);
       if (!query) return [];
 
       try {
@@ -88,7 +91,9 @@ export function createNoosphereCorpusSupplement(
 
       try {
         const response = await context.client.get(toNoosphereGetRequest(lookup));
-        if (!response.result) return null;
+        if (!response.result || !isNoosphereMemoryResult(response.result)) {
+          return null;
+        }
         return toCorpusGetResult(response.result, input.fromLine, input.lineCount);
       } catch (error) {
         warnAndFailOpen(logger, "get", error, context);
@@ -123,11 +128,17 @@ function toCorpusGetResult(
   result: NoosphereMemoryResult,
   fromLine: number | undefined,
   lineCount: number | undefined,
-): MemoryCorpusGetResult {
-  const lines = result.content.split(/\r?\n/);
+): MemoryCorpusGetResult | null {
+  const safeContent = result.content.slice(0, MAX_CONTENT_LENGTH);
+  const lines = safeContent.split(/\r?\n/);
   const startLine = normalizePositiveInteger(fromLine, 1);
-  const count = normalizePositiveInteger(lineCount, DEFAULT_LINE_COUNT);
+  const count = normalizePositiveInteger(
+    lineCount,
+    DEFAULT_LINE_COUNT,
+    MAX_LINE_COUNT,
+  );
   const selectedLines = lines.slice(startLine - 1, startLine - 1 + count);
+  if (selectedLines.length === 0) return null;
   const path = toCorpusPath(result);
 
   return {
@@ -147,19 +158,29 @@ function toCorpusGetResult(
 }
 
 function toNoosphereGetRequest(lookup: string) {
-  if (lookup.includes(":")) return { canonicalRef: lookup } as const;
+  if (lookup.includes(":")) {
+    if (!CANONICAL_REF_PATTERN.test(lookup)) {
+      throw new Error("lookup must be a valid canonicalRef or provider-local ID");
+    }
+    return { canonicalRef: lookup } as const;
+  }
   return { provider: "noosphere", id: lookup } as const;
 }
 
 function toCorpusPath(result: NoosphereMemoryResult): string {
   const ref = result.canonicalRef ?? `${result.provider}:${result.sourceType}:${result.id}`;
-  return ref.replace(/[^a-zA-Z0-9._:-]+/g, "-");
+  return ref.replace(/[^a-zA-Z0-9_:-]+/g, "-").replace(/-+/g, "-");
 }
 
 function toSnippet(result: NoosphereMemoryResult): string {
-  const source = result.summary?.trim() || result.content.trim();
+  const source = (result.summary?.trim() || result.content.slice(0, MAX_SNIPPET_SOURCE_LENGTH)).trim();
   const collapsed = source.replace(/\s+/g, " ").trim();
   return collapsed.length > 240 ? `${collapsed.slice(0, 237)}...` : collapsed;
+}
+
+function normalizeQuery(query: string): string {
+  const trimmed = query.trim();
+  return trimmed.length > MAX_QUERY_LENGTH ? trimmed.slice(0, MAX_QUERY_LENGTH) : trimmed;
 }
 
 function normalizeScore(score: number | undefined): number {
@@ -172,11 +193,16 @@ function clampMaxResults(value: number | undefined): number {
   return Math.max(1, Math.min(MAX_RESULTS, Math.floor(value)));
 }
 
-function normalizePositiveInteger(value: number | undefined, fallback: number): number {
+function normalizePositiveInteger(
+  value: number | undefined,
+  fallback: number,
+  max?: number,
+): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 1) {
     return fallback;
   }
-  return Math.floor(value);
+  const normalized = Math.floor(value);
+  return max === undefined ? normalized : Math.min(max, normalized);
 }
 
 function isNoosphereMemoryResult(value: unknown): value is NoosphereMemoryResult {

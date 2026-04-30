@@ -9,6 +9,7 @@ import {
 import { createNoosphereCorpusSupplement } from "../../../openclaw-noosphere-memory/src/corpus-supplement.js";
 import {
   NoosphereClientError,
+  NoosphereMemoryClient,
   type NoosphereGetRequest,
   type NoosphereGetResponse,
   type NoosphereSaveRequest,
@@ -542,14 +543,168 @@ describe("OpenClaw Noosphere corpus supplement", () => {
     });
   });
 
-  it("returns empty/null for blank corpus supplement inputs", async () => {
+  it("bounds corpus supplement search queries", async () => {
+    const { context, recallCalls } = makeCorpusContext();
+    const supplement = createNoosphereCorpusSupplement(context);
+
+    await supplement.search({ query: ` ${"x".repeat(1_100)} ` });
+
+    assert.equal(recallCalls.length, 1);
+    assert.equal(recallCalls[0].query.length, 1_000);
+  });
+
+  it("returns null for blank or empty-range corpus get inputs", async () => {
     const { context, recallCalls, getCalls } = makeCorpusContext();
     const supplement = createNoosphereCorpusSupplement(context);
 
     assert.deepEqual(await supplement.search({ query: "   " }), []);
     assert.equal(await supplement.get({ lookup: "   " }), null);
+    assert.equal(
+      await supplement.get({
+        lookup: "noosphere:article:article-1",
+        fromLine: 100,
+      }),
+      null,
+    );
     assert.equal(recallCalls.length, 0);
-    assert.equal(getCalls.length, 0);
+    assert.equal(getCalls.length, 1);
+  });
+
+  it("validates corpus get results and canonical refs", async () => {
+    const getCalls: NoosphereGetRequest[] = [];
+    const context = {
+      config: {
+        baseUrl: "http://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
+      client: {
+        async recall(): Promise<NoosphereRecallResponse> {
+          throw new Error("recall should not be called");
+        },
+        async get(request: NoosphereGetRequest): Promise<NoosphereGetResponse> {
+          getCalls.push(request);
+          return {
+            result: {
+              id: "article-1",
+              provider: "noosphere",
+              sourceType: "noosphere_article",
+            } as unknown as NoosphereGetResponse["result"],
+            providerMeta: [],
+          };
+        },
+      },
+    } as unknown as NoosphereClientContext;
+    const supplement = createNoosphereCorpusSupplement(context);
+
+    assert.equal(await supplement.get({ lookup: "article-1" }), null);
+    assert.equal(await supplement.get({ lookup: "noosphere:article:" }), null);
+    assert.deepEqual(getCalls, [{ provider: "noosphere", id: "article-1" }]);
+  });
+
+  it("bounds corpus get line counts", async () => {
+    const getCalls: NoosphereGetRequest[] = [];
+    const longContent = Array.from({ length: 600 }, (_, index) => `Line ${index + 1}`).join("\n");
+    const context = {
+      config: {
+        baseUrl: "http://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
+      client: {
+        async recall(): Promise<NoosphereRecallResponse> {
+          throw new Error("recall should not be called");
+        },
+        async get(request: NoosphereGetRequest): Promise<NoosphereGetResponse> {
+          getCalls.push(request);
+          return {
+            result: {
+              id: "article-1",
+              provider: "noosphere",
+              sourceType: "noosphere_article",
+              canonicalRef: "noosphere:article:article-1",
+              content: longContent,
+            },
+            providerMeta: [],
+          };
+        },
+      },
+    } as unknown as NoosphereClientContext;
+    const supplement = createNoosphereCorpusSupplement(context);
+
+    const result = await supplement.get({
+      lookup: "article-1",
+      lineCount: 2_147_483_647,
+    });
+
+    assert.equal(result?.lineCount, 500);
+    assert.equal(getCalls.length, 1);
+  });
+
+  it("normalizes snippets and relevance scores in corpus supplement search results", async () => {
+    const longContent = `   This   is   text \n\n with  irregular   whitespace ${"and more text ".repeat(40)}`;
+    const context = {
+      config: {
+        baseUrl: "http://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
+      client: {
+        async recall(): Promise<NoosphereRecallResponse> {
+          return {
+            results: [
+              {
+                id: "missing-summary",
+                provider: "noosphere",
+                sourceType: "noosphere_article",
+                content: longContent,
+                relevanceScore: undefined,
+              },
+              {
+                id: "high-score",
+                provider: "noosphere",
+                sourceType: "noosphere_article",
+                summary: "   Short    summary   text   ",
+                content: "Body not used when summary exists",
+                relevanceScore: 10,
+              },
+              {
+                id: "negative-score",
+                provider: "noosphere",
+                sourceType: "noosphere_article",
+                content: "Negative score",
+                relevanceScore: -5,
+              },
+              {
+                id: "nan-score",
+                provider: "noosphere",
+                sourceType: "noosphere_article",
+                content: "NaN score",
+                relevanceScore: NaN,
+              },
+            ],
+            totalBeforeCap: 4,
+            mode: "inspection",
+            providerMeta: [],
+          };
+        },
+        async get(): Promise<NoosphereGetResponse> {
+          throw new Error("get should not be called");
+        },
+      },
+    } as unknown as NoosphereClientContext;
+    const supplement = createNoosphereCorpusSupplement(context);
+
+    const results = await supplement.search({ query: "deployment" });
+
+    assert.equal(results.length, 4);
+    assert.equal(results[0].snippet.length, 240);
+    assert.equal(/\s{2,}/.test(results[0].snippet), false);
+    assert.equal(results[1].snippet, "Short summary text");
+    for (const result of results) {
+      assert.equal(Number.isFinite(result.score), true);
+      assert.equal(result.score >= 0 && result.score <= 1, true);
+    }
   });
 
   it("fails open and warns when corpus supplement HTTP calls fail", async () => {
@@ -578,6 +733,35 @@ describe("OpenClaw Noosphere corpus supplement", () => {
     assert.equal(warnings.length, 2);
     assert.match(warnings[0], /search skipped: network down/);
     assert.match(warnings[1], /get skipped: network down/);
+  });
+});
+
+describe("OpenClaw Noosphere client", () => {
+  it("rejects oversized response bodies before JSON parsing", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response("{\"ok\":true}", {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "content-length": "1000001",
+        },
+      });
+
+    try {
+      const client = new NoosphereMemoryClient({
+        baseUrl: "http://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      });
+
+      await assert.rejects(
+        () => client.status(),
+        /Noosphere response body is too large/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
@@ -688,6 +872,8 @@ describe("OpenClaw Noosphere get tool", () => {
 
     assert.equal(result.isError, true);
     assert.match(String(result.content[0]?.text), /HTTP 401/);
+    assert.doesNotMatch(String(result.content[0]?.text), /noo_test/);
+    assert.doesNotMatch(String(result.content[0]?.text), /noosphere\.local/);
   });
 });
 
