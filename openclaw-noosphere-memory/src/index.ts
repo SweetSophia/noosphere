@@ -1,5 +1,6 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { createNoosphereAutoRecallHook } from "./auto-recall.js";
+import { createNoosphereCorpusSupplement } from "./corpus-supplement.js";
 import { createNoosphereClientContext } from "./shared-init.js";
 import { createNoosphereGetTool } from "./tools/get.js";
 import { createNoosphereRecallTool } from "./tools/recall.js";
@@ -21,6 +22,11 @@ export default definePluginEntry({
     );
     api.registerTool(createNoosphereGetTool(api.pluginConfig, clientContext));
     api.registerTool(createNoosphereSaveTool(api.pluginConfig, clientContext));
+    if (typeof api.registerMemoryCorpusSupplement === "function") {
+      api.registerMemoryCorpusSupplement(
+        createNoosphereCorpusSupplement(clientContext, api.logger),
+      );
+    }
     const hook = createNoosphereAutoRecallHook(
       api.pluginConfig,
       clientContext,

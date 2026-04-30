@@ -8,6 +8,7 @@ declare module "openclaw/plugin-sdk/plugin-entry" {
       error?: (message: string) => void;
     };
     registerTool(tool: unknown, options?: unknown): void;
+    registerMemoryCorpusSupplement?(supplement: unknown): void;
     on?<TEvent = unknown, TContext = unknown>(
       hookName: "before_prompt_build",
       handler: ((event: TEvent, ctx: TContext) => unknown | Promise<unknown>) & { registrationWarning?: () => void },

@@ -6,6 +6,7 @@ import {
   MAX_QUERY_LENGTH,
   resolveAutoRecallConfig,
 } from "../../../openclaw-noosphere-memory/src/auto-recall.js";
+import { createNoosphereCorpusSupplement } from "../../../openclaw-noosphere-memory/src/corpus-supplement.js";
 import {
   NoosphereClientError,
   type NoosphereGetRequest,
@@ -418,6 +419,165 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     );
 
     assert.equal(query, "repeat\n\nunique\n\ncurrent question");
+  });
+});
+
+describe("OpenClaw Noosphere corpus supplement", () => {
+  function makeCorpusContext() {
+    const recallCalls: NoosphereRecallRequest[] = [];
+    const getCalls: NoosphereGetRequest[] = [];
+    const context = {
+      config: {
+        baseUrl: "http://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
+      client: {
+        async recall(request: NoosphereRecallRequest) {
+          recallCalls.push(request);
+          return {
+            results: [
+              {
+                id: "article-1",
+                provider: "noosphere",
+                sourceType: "noosphere_article",
+                canonicalRef: "noosphere:article:article-1",
+                title: "Deployment Notes",
+                content: "Line one.\nLine two.\nLine three.",
+                summary: "Use the deployment workflow.",
+                relevanceScore: 0.75,
+                updatedAt: "2026-04-30T12:00:00.000Z",
+              },
+              { malformed: true },
+            ],
+            totalBeforeCap: 2,
+            mode: "inspection",
+            providerMeta: [],
+          } as NoosphereRecallResponse;
+        },
+        async get(request: NoosphereGetRequest) {
+          getCalls.push(request);
+          return {
+            result: {
+              id: "article-1",
+              provider: "noosphere",
+              sourceType: "noosphere_article",
+              canonicalRef: "noosphere:article:article-1",
+              title: "Deployment Notes",
+              content: "Line one.\nLine two.\nLine three.",
+              updatedAt: "2026-04-30T12:00:00.000Z",
+            },
+            providerMeta: [
+              { providerId: "noosphere", enabled: true, found: true },
+            ],
+          } as NoosphereGetResponse;
+        },
+      },
+    } as unknown as NoosphereClientContext;
+
+    return { context, recallCalls, getCalls };
+  }
+
+  it("adapts Noosphere recall results into memory corpus search results", async () => {
+    const { context, recallCalls } = makeCorpusContext();
+    const supplement = createNoosphereCorpusSupplement(context);
+
+    const results = await supplement.search({
+      query: " deployment workflow ",
+      maxResults: 25,
+    });
+
+    assert.deepEqual(recallCalls, [
+      {
+        query: "deployment workflow",
+        mode: "inspection",
+        resultCap: 10,
+        providers: ["noosphere"],
+      },
+    ]);
+    assert.equal(results.length, 1);
+    assert.deepEqual(results[0], {
+      corpus: "noosphere",
+      path: "noosphere:article:article-1",
+      title: "Deployment Notes",
+      kind: "noosphere_article",
+      score: 0.75,
+      snippet: "Use the deployment workflow.",
+      id: "noosphere:article:article-1",
+      citation: "noosphere:article:article-1",
+      source: "noosphere",
+      provenanceLabel: "Noosphere",
+      sourceType: "noosphere_article",
+      sourcePath: "noosphere:article:article-1",
+      updatedAt: "2026-04-30T12:00:00.000Z",
+    });
+  });
+
+  it("adapts corpus get lookups through canonical refs and line ranges", async () => {
+    const { context, getCalls } = makeCorpusContext();
+    const supplement = createNoosphereCorpusSupplement(context);
+
+    const result = await supplement.get({
+      lookup: " noosphere:article:article-1 ",
+      fromLine: 2,
+      lineCount: 1,
+    });
+
+    assert.deepEqual(getCalls, [
+      { canonicalRef: "noosphere:article:article-1" },
+    ]);
+    assert.deepEqual(result, {
+      corpus: "noosphere",
+      path: "noosphere:article:article-1",
+      title: "Deployment Notes",
+      kind: "noosphere_article",
+      content: "Line two.",
+      fromLine: 2,
+      lineCount: 1,
+      id: "noosphere:article:article-1",
+      provenanceLabel: "Noosphere",
+      sourceType: "noosphere_article",
+      sourcePath: "noosphere:article:article-1",
+      updatedAt: "2026-04-30T12:00:00.000Z",
+    });
+  });
+
+  it("returns empty/null for blank corpus supplement inputs", async () => {
+    const { context, recallCalls, getCalls } = makeCorpusContext();
+    const supplement = createNoosphereCorpusSupplement(context);
+
+    assert.deepEqual(await supplement.search({ query: "   " }), []);
+    assert.equal(await supplement.get({ lookup: "   " }), null);
+    assert.equal(recallCalls.length, 0);
+    assert.equal(getCalls.length, 0);
+  });
+
+  it("fails open and warns when corpus supplement HTTP calls fail", async () => {
+    const warnings: string[] = [];
+    const context = {
+      config: {
+        baseUrl: "http://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
+      client: {
+        async recall(): Promise<NoosphereRecallResponse> {
+          throw new NoosphereClientError("network down");
+        },
+        async get(): Promise<NoosphereGetResponse> {
+          throw new NoosphereClientError("network down");
+        },
+      },
+    } as unknown as NoosphereClientContext;
+    const supplement = createNoosphereCorpusSupplement(context, {
+      warn: (message) => warnings.push(message),
+    });
+
+    assert.deepEqual(await supplement.search({ query: "deployment" }), []);
+    assert.equal(await supplement.get({ lookup: "article-1" }), null);
+    assert.equal(warnings.length, 2);
+    assert.match(warnings[0], /search skipped: network down/);
+    assert.match(warnings[1], /get skipped: network down/);
   });
 });
 
