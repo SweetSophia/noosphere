@@ -16,6 +16,17 @@ export interface NoosphereRecallRequest {
   providers?: string[];
 }
 
+export interface NoosphereGetRequest {
+  provider?: string;
+  id?: string;
+  canonicalRef?: string;
+}
+
+export interface NoosphereGetResponse {
+  result: unknown | null;
+  providerMeta: unknown[];
+}
+
 export interface NoosphereRecallResponse {
   results: unknown[];
   totalBeforeCap: number;
@@ -44,6 +55,14 @@ export class NoosphereMemoryClient {
 
   async status(): Promise<NoosphereStatusResponse> {
     return this.request<NoosphereStatusResponse>("/api/memory/status", { method: "GET" });
+  }
+
+  async get(request: NoosphereGetRequest): Promise<NoosphereGetResponse> {
+    return this.request<NoosphereGetResponse>("/api/memory/get", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+    });
   }
 
   async recall(request: NoosphereRecallRequest, options: { timeoutMs?: number } = {}): Promise<NoosphereRecallResponse> {

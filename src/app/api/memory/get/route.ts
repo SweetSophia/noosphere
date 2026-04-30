@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { requirePermission } from "@/lib/api/auth";
-import { executeMemoryRecallRequest } from "@/lib/memory/api/recall";
+import { executeMemoryGetRequest } from "@/lib/memory/api/get";
 
 export async function POST(request: NextRequest) {
   const auth = await requirePermission(request, [Permissions.READ]);
@@ -20,12 +20,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await executeMemoryRecallRequest(body);
+    const result = await executeMemoryGetRequest(body);
     return NextResponse.json(result.body, { status: result.status });
   } catch (error) {
-    console.error("[POST /api/memory/recall]", error);
+    console.error("[POST /api/memory/get]", error);
     return NextResponse.json(
-      { error: "Memory recall unavailable" },
+      { error: "Memory lookup unavailable" },
       { status: 503 },
     );
   }

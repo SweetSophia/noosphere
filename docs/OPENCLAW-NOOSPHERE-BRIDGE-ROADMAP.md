@@ -1,6 +1,6 @@
 # OpenClaw ↔ Noosphere Memory Bridge Roadmap
 
-Status: implementation in progress — PRs 0–3 merged; PR 4 underway
+Status: implementation in progress — PRs 0–4 merged; PR 5 underway
 Owner: Noosphere/OpenClaw integration workstream
 Last updated: 2026-04-29
 
@@ -308,18 +308,39 @@ Verification:
 
 ### PR 5 — Lookup endpoint/tool
 
-Purpose: support direct retrieval by Noosphere article/memory identifier.
+Purpose: support direct retrieval by provider-local memory identifier or canonical reference.
 
-Possible endpoint:
-
-```http
-GET /api/memory/get?provider=noosphere&id=<id>
-```
-
-or:
+Endpoint:
 
 ```http
 POST /api/memory/get
+Authorization: Bearer <key with READ or higher>
+Content-Type: application/json
+```
+
+Request shape:
+
+```ts
+interface MemoryGetRequest {
+  provider?: string;
+  id?: string;
+  canonicalRef?: string; // e.g. "noosphere:article:<id>"
+}
+```
+
+Response shape:
+
+```ts
+interface MemoryGetResponse {
+  result: MemoryResult | null;
+  providerMeta: Array<{
+    providerId: string;
+    enabled: boolean;
+    found: boolean;
+    error?: string;
+    durationMs?: number;
+  }>;
+}
 ```
 
 Constraints:
@@ -327,7 +348,8 @@ Constraints:
 - support canonical refs like `noosphere:article:<id>`;
 - return the normalized memory result shape used by `MemoryProvider.getById()`;
 - preserve provider-agnostic shape for future providers;
-- define the concrete response interface in the lookup PR, reusing the shared memory provider/result fields instead of adding a Noosphere-only shape.
+- route-level provider selection mirrors recall API provider filtering;
+- provider lookup failures fail open into `providerMeta.error` rather than 500ing the route.
 
 ### PR 6 — Save/candidate API and tool
 

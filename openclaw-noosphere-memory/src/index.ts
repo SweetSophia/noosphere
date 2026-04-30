@@ -1,6 +1,7 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { createNoosphereAutoRecallHook } from "./auto-recall.js";
 import { createNoosphereClientContext } from "./shared-init.js";
+import { createNoosphereGetTool } from "./tools/get.js";
 import { createNoosphereRecallTool } from "./tools/recall.js";
 import { createNoosphereStatusTool } from "./tools/status.js";
 
@@ -12,6 +13,7 @@ export default definePluginEntry({
     const clientContext = createNoosphereClientContext(api.pluginConfig);
     api.registerTool(createNoosphereStatusTool(api.pluginConfig, clientContext));
     api.registerTool(createNoosphereRecallTool(api.pluginConfig, clientContext));
+    api.registerTool(createNoosphereGetTool(api.pluginConfig, clientContext));
     const hook = createNoosphereAutoRecallHook(api.pluginConfig, clientContext, api.logger);
     if (typeof api.on === "function") {
       api.on("before_prompt_build", hook);
