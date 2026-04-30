@@ -2,7 +2,7 @@
 
 Status: implementation in progress — PRs 0–4 merged; PR 5 underway
 Owner: Noosphere/OpenClaw integration workstream
-Last updated: 2026-04-29
+Last updated: 2026-04-30
 
 ## Goal
 
@@ -269,7 +269,7 @@ Verification:
 
 ### PR 4 — Auto-recall prompt injection
 
-Status: in progress.
+Status: merged in PR #43.
 
 Purpose: add optional bounded Noosphere recall injection to OpenClaw.
 

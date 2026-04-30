@@ -1,5 +1,8 @@
 import { ResolvedNoosphereMemoryConfig } from "./config.js";
-import { NoosphereMemoryGetProviderMeta, NoosphereMemoryResult } from "./types.js";
+import {
+  NoosphereMemoryGetProviderMeta,
+  NoosphereMemoryResult,
+} from "./types.js";
 
 export interface NoosphereStatusResponse {
   ok: boolean;
@@ -17,11 +20,9 @@ export interface NoosphereRecallRequest {
   providers?: string[];
 }
 
-export interface NoosphereGetRequest {
-  provider?: string;
-  id?: string;
-  canonicalRef?: string;
-}
+export type NoosphereGetRequest =
+  | { canonicalRef: string; provider?: never; id?: never }
+  | { provider: string; id: string; canonicalRef?: never };
 
 export interface NoosphereGetResponse {
   result: NoosphereMemoryResult | null;
@@ -55,7 +56,9 @@ export class NoosphereMemoryClient {
   constructor(private readonly config: ResolvedNoosphereMemoryConfig) {}
 
   async status(): Promise<NoosphereStatusResponse> {
-    return this.request<NoosphereStatusResponse>("/api/memory/status", { method: "GET" });
+    return this.request<NoosphereStatusResponse>("/api/memory/status", {
+      method: "GET",
+    });
   }
 
   async get(request: NoosphereGetRequest): Promise<NoosphereGetResponse> {
@@ -66,7 +69,10 @@ export class NoosphereMemoryClient {
     });
   }
 
-  async recall(request: NoosphereRecallRequest, options: { timeoutMs?: number } = {}): Promise<NoosphereRecallResponse> {
+  async recall(
+    request: NoosphereRecallRequest,
+    options: { timeoutMs?: number } = {},
+  ): Promise<NoosphereRecallResponse> {
     return this.request<NoosphereRecallResponse>(
       "/api/memory/recall",
       {
@@ -78,7 +84,11 @@ export class NoosphereMemoryClient {
     );
   }
 
-  private async request<T>(path: string, init: RequestInit, options: { timeoutMs?: number } = {}): Promise<T> {
+  private async request<T>(
+    path: string,
+    init: RequestInit,
+    options: { timeoutMs?: number } = {},
+  ): Promise<T> {
     if (!this.config.apiKey) {
       throw new NoosphereClientError("Noosphere API key is not configured");
     }
@@ -101,23 +111,31 @@ export class NoosphereMemoryClient {
       const payload = await parseResponseBody(response);
       if (!response.ok) {
         throw new NoosphereClientError(
-          extractError(payload) ?? `Noosphere request failed with HTTP ${response.status}`,
+          extractError(payload) ??
+            `Noosphere request failed with HTTP ${response.status}`,
           response.status,
           payload,
         );
       }
 
       if (payload === null) {
-        throw new NoosphereClientError("Noosphere returned an empty response body", response.status);
+        throw new NoosphereClientError(
+          "Noosphere returned an empty response body",
+          response.status,
+        );
       }
 
       return payload as T;
     } catch (error) {
       if (error instanceof NoosphereClientError) throw error;
       if (isAbortError(error)) {
-        throw new NoosphereClientError(`Noosphere request timed out after ${requestTimeoutMs}ms`);
+        throw new NoosphereClientError(
+          `Noosphere request timed out after ${requestTimeoutMs}ms`,
+        );
       }
-      throw new NoosphereClientError(error instanceof Error ? error.message : String(error));
+      throw new NoosphereClientError(
+        error instanceof Error ? error.message : String(error),
+      );
     } finally {
       clearTimeout(timeout);
     }
@@ -131,14 +149,21 @@ async function parseResponseBody(response: Response): Promise<unknown> {
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().includes("application/json")) {
     if (!response.ok) return { rawBody: text };
-    throw new NoosphereClientError("Noosphere returned a non-JSON response", response.status, { rawBody: text });
+    throw new NoosphereClientError(
+      "Noosphere returned a non-JSON response",
+      response.status,
+      { rawBody: text },
+    );
   }
 
   try {
     return JSON.parse(text) as unknown;
   } catch {
     if (!response.ok) return { rawBody: text };
-    throw new NoosphereClientError("Noosphere returned invalid JSON", response.status);
+    throw new NoosphereClientError(
+      "Noosphere returned invalid JSON",
+      response.status,
+    );
   }
 }
 
