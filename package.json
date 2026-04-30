@@ -7,7 +7,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "test": "npm run test:memory",
-    "test:memory": "node --import tsx --test src/__tests__/memory/api-recall.test.ts src/__tests__/memory/api-status.test.ts src/__tests__/memory/budget.test.ts src/__tests__/memory/conflict.test.ts src/__tests__/memory/dedup.test.ts src/__tests__/memory/hindsight-provider.test.ts src/__tests__/memory/openclaw-plugin-auto-recall.test.ts src/__tests__/memory/promotion.test.ts src/__tests__/memory/backfill.test.ts src/__tests__/memory/recall-orchestrator.test.ts src/__tests__/memory/settings.test.ts src/__tests__/memory/scheduler.test.ts",
+    "test:memory": "node --import tsx --test src/__tests__/memory/api-recall.test.ts src/__tests__/memory/api-get.test.ts src/__tests__/memory/api-status.test.ts src/__tests__/memory/budget.test.ts src/__tests__/memory/conflict.test.ts src/__tests__/memory/dedup.test.ts src/__tests__/memory/hindsight-provider.test.ts src/__tests__/memory/openclaw-plugin-auto-recall.test.ts src/__tests__/memory/promotion.test.ts src/__tests__/memory/backfill.test.ts src/__tests__/memory/recall-orchestrator.test.ts src/__tests__/memory/settings.test.ts src/__tests__/memory/scheduler.test.ts",
     "test:scheduler": "node --import tsx --test src/__tests__/memory/scheduler.test.ts",
     "lint": "eslint",
     "db:migrate": "prisma migrate dev",

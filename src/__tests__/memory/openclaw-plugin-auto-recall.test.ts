@@ -6,10 +6,21 @@ import {
   MAX_QUERY_LENGTH,
   resolveAutoRecallConfig,
 } from "../../../openclaw-noosphere-memory/src/auto-recall.js";
-import type { NoosphereRecallRequest, NoosphereRecallResponse } from "../../../openclaw-noosphere-memory/src/client.js";
+import {
+  NoosphereClientError,
+  type NoosphereGetRequest,
+  type NoosphereGetResponse,
+} from "../../../openclaw-noosphere-memory/src/client.js";
+import type {
+  NoosphereRecallRequest,
+  NoosphereRecallResponse,
+} from "../../../openclaw-noosphere-memory/src/client.js";
+import { createNoosphereGetTool } from "../../../openclaw-noosphere-memory/src/tools/get.js";
 import type { NoosphereClientContext } from "../../../openclaw-noosphere-memory/src/shared-init.js";
 
-function makeContext(overrides: Partial<NoosphereClientContext["config"]> = {}) {
+function makeContext(
+  overrides: Partial<NoosphereClientContext["config"]> = {},
+) {
   const calls: NoosphereRecallRequest[] = [];
   const response: NoosphereRecallResponse = {
     results: [],
@@ -17,7 +28,8 @@ function makeContext(overrides: Partial<NoosphereClientContext["config"]> = {}) 
     mode: "auto",
     tokenBudgetUsed: 12,
     providerMeta: [],
-    promptInjectionText: "<recall>\n  <item>Remember the Omnissiah.</item>\n</recall>",
+    promptInjectionText:
+      "<recall>\n  <item>Remember the Omnissiah.</item>\n</recall>",
   };
 
   const context = {
@@ -59,16 +71,31 @@ describe("resolveAutoRecallConfig", () => {
     assert.deepEqual(truthy.enabledAgents, ["cylena", "seriania"]);
     assert.deepEqual(truthy.allowedChatTypes, ["telegram", "discord"]);
 
-    const falsy = resolveAutoRecallConfig({ autoRecall: "false", includeRecentTurns: "0" });
+    const falsy = resolveAutoRecallConfig({
+      autoRecall: "false",
+      includeRecentTurns: "0",
+    });
 
     assert.equal(falsy.autoRecall, false);
     assert.equal(falsy.includeRecentTurns, false);
   });
 
   it("normalizes recallInjectionPosition with prepend as fallback", () => {
-    assert.equal(resolveAutoRecallConfig({ recallInjectionPosition: "system-prepend" }).recallInjectionPosition, "system-prepend");
-    assert.equal(resolveAutoRecallConfig({ recallInjectionPosition: "append" }).recallInjectionPosition, "prepend");
-    assert.equal(resolveAutoRecallConfig({ recallInjectionPosition: "unexpected" }).recallInjectionPosition, "prepend");
+    assert.equal(
+      resolveAutoRecallConfig({ recallInjectionPosition: "system-prepend" })
+        .recallInjectionPosition,
+      "system-prepend",
+    );
+    assert.equal(
+      resolveAutoRecallConfig({ recallInjectionPosition: "append" })
+        .recallInjectionPosition,
+      "prepend",
+    );
+    assert.equal(
+      resolveAutoRecallConfig({ recallInjectionPosition: "unexpected" })
+        .recallInjectionPosition,
+      "prepend",
+    );
   });
 });
 
@@ -77,10 +104,19 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     const { context, calls } = makeContext();
     const hook = createNoosphereAutoRecallHook({ autoRecall: true }, context);
 
-    const result = await hook({ prompt: "what do we know about Noosphere?", messages: [] }, { agentId: "cylena" });
+    const result = await hook(
+      { prompt: "what do we know about Noosphere?", messages: [] },
+      { agentId: "cylena" },
+    );
 
-    assert.equal(result?.prependContext?.includes("<noosphere_auto_recall>"), true);
-    assert.equal(result?.prependContext?.includes("<hindsight_memories>"), false);
+    assert.equal(
+      result?.prependContext?.includes("<noosphere_auto_recall>"),
+      true,
+    );
+    assert.equal(
+      result?.prependContext?.includes("<hindsight_memories>"),
+      false,
+    );
     assert.equal(calls.length, 1);
     assert.equal(calls[0].mode, "auto");
     assert.deepEqual(calls[0].providers, ["noosphere"]);
@@ -91,17 +127,32 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
   it("returns nothing when recall is empty", async () => {
     const calls: NoosphereRecallRequest[] = [];
     const context = {
-      config: { baseUrl: "http://noosphere.local", apiKey: "noo_test", timeoutMs: 5000 },
+      config: {
+        baseUrl: "http://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
       client: {
-        async recall(request: NoosphereRecallRequest): Promise<NoosphereRecallResponse> {
+        async recall(
+          request: NoosphereRecallRequest,
+        ): Promise<NoosphereRecallResponse> {
           calls.push(request);
-          return { results: [], totalBeforeCap: 0, mode: "auto", providerMeta: [], promptInjectionText: "   " };
+          return {
+            results: [],
+            totalBeforeCap: 0,
+            mode: "auto",
+            providerMeta: [],
+            promptInjectionText: "   ",
+          };
         },
       },
     } as unknown as NoosphereClientContext;
     const hook = createNoosphereAutoRecallHook({ autoRecall: true }, context);
 
-    const result = await hook({ prompt: "No matching durable memory", messages: [] }, {});
+    const result = await hook(
+      { prompt: "No matching durable memory", messages: [] },
+      {},
+    );
 
     assert.equal(result, undefined);
     assert.equal(calls.length, 1);
@@ -110,14 +161,20 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
   it("fails open and logs a warning on recall errors", async () => {
     const warnings: string[] = [];
     const context = {
-      config: { baseUrl: "http://noosphere.local", apiKey: "noo_test", timeoutMs: 5000 },
+      config: {
+        baseUrl: "http://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
       client: {
         async recall(): Promise<NoosphereRecallResponse> {
           throw new Error("network down");
         },
       },
     } as unknown as NoosphereClientContext;
-    const hook = createNoosphereAutoRecallHook({ autoRecall: true }, context, { warn: (message) => warnings.push(message) });
+    const hook = createNoosphereAutoRecallHook({ autoRecall: true }, context, {
+      warn: (message) => warnings.push(message),
+    });
 
     const result = await hook({ prompt: "Noosphere bridge", messages: [] }, {});
 
@@ -129,16 +186,38 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
   it("honors enabledAgents and allowedChatTypes gates", async () => {
     const { context, calls } = makeContext();
     const hook = createNoosphereAutoRecallHook(
-      { autoRecall: true, enabledAgents: ["cylena"], allowedChatTypes: ["telegram"] },
+      {
+        autoRecall: true,
+        enabledAgents: ["cylena"],
+        allowedChatTypes: ["telegram"],
+      },
       context,
     );
 
-    assert.equal(await hook({ prompt: "Noosphere memory", messages: [] }, { agentId: "other", messageProvider: "telegram" }), undefined);
-    assert.equal(await hook({ prompt: "Noosphere memory", messages: [] }, { agentId: "cylena", messageProvider: "discord" }), undefined);
+    assert.equal(
+      await hook(
+        { prompt: "Noosphere memory", messages: [] },
+        { agentId: "other", messageProvider: "telegram" },
+      ),
+      undefined,
+    );
+    assert.equal(
+      await hook(
+        { prompt: "Noosphere memory", messages: [] },
+        { agentId: "cylena", messageProvider: "discord" },
+      ),
+      undefined,
+    );
 
-    const result = await hook({ prompt: "Noosphere memory", messages: [] }, { agentId: "cylena", messageProvider: "telegram" });
+    const result = await hook(
+      { prompt: "Noosphere memory", messages: [] },
+      { agentId: "cylena", messageProvider: "telegram" },
+    );
 
-    assert.equal(result?.prependContext?.includes("<noosphere_auto_recall>"), true);
+    assert.equal(
+      result?.prependContext?.includes("<noosphere_auto_recall>"),
+      true,
+    );
     assert.equal(calls.length, 1);
   });
 
@@ -149,7 +228,10 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
         messages: [
           { role: "user", content: "older user turn" },
           { role: "assistant", content: "assistant text ignored" },
-          { role: "user", content: [{ type: "text", text: "recent user turn" }] },
+          {
+            role: "user",
+            content: [{ type: "text", text: "recent user turn" }],
+          },
         ],
       },
       resolveAutoRecallConfig({ autoRecall: true, recentTurnLimit: 1 }),
@@ -160,22 +242,39 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
 
   it("supports configured injection positions", async () => {
     const { context } = makeContext();
-    const hook = createNoosphereAutoRecallHook({ autoRecall: true, recallInjectionPosition: "system-prepend" }, context);
+    const hook = createNoosphereAutoRecallHook(
+      { autoRecall: true, recallInjectionPosition: "system-prepend" },
+      context,
+    );
 
     const result = await hook({ prompt: "Noosphere bridge", messages: [] }, {});
 
     assert.equal(result?.prependContext, undefined);
-    assert.equal(result?.prependSystemContext?.includes("<noosphere_auto_recall>"), true);
+    assert.equal(
+      result?.prependSystemContext?.includes("<noosphere_auto_recall>"),
+      true,
+    );
   });
 
   it("returns nothing when promptInjectionText is missing", async () => {
     const calls: NoosphereRecallRequest[] = [];
     const context = {
-      config: { baseUrl: "http://noosphere.local", apiKey: "noo_test", timeoutMs: 5000 },
+      config: {
+        baseUrl: "http://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
       client: {
-        async recall(request: NoosphereRecallRequest): Promise<NoosphereRecallResponse> {
+        async recall(
+          request: NoosphereRecallRequest,
+        ): Promise<NoosphereRecallResponse> {
           calls.push(request);
-          return { results: [], totalBeforeCap: 0, mode: "auto", providerMeta: [] } as NoosphereRecallResponse;
+          return {
+            results: [],
+            totalBeforeCap: 0,
+            mode: "auto",
+            providerMeta: [],
+          } as NoosphereRecallResponse;
         },
       },
     } as unknown as NoosphereClientContext;
@@ -187,14 +286,18 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     assert.equal(calls.length, 1);
   });
 
-
-
   it("skips injection when Noosphere does not return auto-mode prompt text", async () => {
     const calls: NoosphereRecallRequest[] = [];
     const context = {
-      config: { baseUrl: "http://noosphere.local", apiKey: "noo_test", timeoutMs: 5000 },
+      config: {
+        baseUrl: "http://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
       client: {
-        async recall(request: NoosphereRecallRequest): Promise<NoosphereRecallResponse> {
+        async recall(
+          request: NoosphereRecallRequest,
+        ): Promise<NoosphereRecallResponse> {
           calls.push(request);
           return {
             results: [],
@@ -219,9 +322,16 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     const calls: NoosphereRecallRequest[] = [];
     const timeouts: Array<number | undefined> = [];
     const context = {
-      config: { baseUrl: "http://noosphere.local", apiKey: "noo_test", timeoutMs: 5000 },
+      config: {
+        baseUrl: "http://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
       client: {
-        async recall(request: NoosphereRecallRequest, options?: { timeoutMs?: number }): Promise<NoosphereRecallResponse> {
+        async recall(
+          request: NoosphereRecallRequest,
+          options?: { timeoutMs?: number },
+        ): Promise<NoosphereRecallResponse> {
           calls.push(request);
           timeouts.push(options?.timeoutMs);
           return {
@@ -235,7 +345,10 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
         },
       },
     } as unknown as NoosphereClientContext;
-    const hook = createNoosphereAutoRecallHook({ autoRecall: true, autoRecallTimeoutMs: 1234 }, context);
+    const hook = createNoosphereAutoRecallHook(
+      { autoRecall: true, autoRecallTimeoutMs: 1234 },
+      context,
+    );
 
     await hook({ prompt: "Noosphere bridge", messages: [] }, {});
 
@@ -245,9 +358,15 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
 
   it("skips recall when the assembled query is shorter than minQueryLength", async () => {
     const { context, calls } = makeContext();
-    const hook = createNoosphereAutoRecallHook({ autoRecall: true, minQueryLength: 1000 }, context);
+    const hook = createNoosphereAutoRecallHook(
+      { autoRecall: true, minQueryLength: 1000 },
+      context,
+    );
 
-    const result = await hook({ prompt: "short", messages: [{ role: "user", content: "tiny" }] }, {});
+    const result = await hook(
+      { prompt: "short", messages: [{ role: "user", content: "tiny" }] },
+      {},
+    );
 
     assert.equal(result, undefined);
     assert.equal(calls.length, 0);
@@ -256,13 +375,19 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
   it("truncates overlong auto-recall queries from the start to preserve the current prompt", async () => {
     const { context, calls } = makeContext();
     const currentPrompt = `${"x".repeat(MAX_QUERY_LENGTH + 100)} current question`;
-    const hook = createNoosphereAutoRecallHook({ autoRecall: true, recentTurnLimit: 3 }, context);
+    const hook = createNoosphereAutoRecallHook(
+      { autoRecall: true, recentTurnLimit: 3 },
+      context,
+    );
 
     await hook(
       {
         prompt: currentPrompt,
         messages: [
-          { role: "user", content: "older user turn that should be dropped first" },
+          {
+            role: "user",
+            content: "older user turn that should be dropped first",
+          },
           { role: "user", content: "recent user turn" },
         ],
       },
@@ -290,5 +415,115 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     );
 
     assert.equal(query, "repeat\n\nunique\n\ncurrent question");
+  });
+});
+
+describe("OpenClaw Noosphere get tool", () => {
+  function makeGetContext() {
+    const calls: NoosphereGetRequest[] = [];
+    const response: NoosphereGetResponse = {
+      result: {
+        id: "article-1",
+        provider: "noosphere",
+        sourceType: "noosphere_article",
+        canonicalRef: "noosphere:article:article-1",
+        title: "Deployment Notes",
+        content: "Use the deployment workflow.",
+      },
+      providerMeta: [{ providerId: "noosphere", enabled: true, found: true }],
+    };
+
+    const context = {
+      config: {
+        baseUrl: "http://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
+      client: {
+        async get(request: NoosphereGetRequest) {
+          calls.push(request);
+          return response;
+        },
+      },
+    } as unknown as NoosphereClientContext;
+
+    return { context, calls, response };
+  }
+
+  it("normalizes provider/id get requests", async () => {
+    const { context, calls } = makeGetContext();
+    const tool = createNoosphereGetTool({}, context);
+
+    const result = await tool.execute("tool-1", {
+      provider: " noosphere ",
+      id: " article-1 ",
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.deepEqual(calls, [{ provider: "noosphere", id: "article-1" }]);
+  });
+
+  it("normalizes canonicalRef get requests", async () => {
+    const { context, calls } = makeGetContext();
+    const tool = createNoosphereGetTool({}, context);
+
+    const result = await tool.execute("tool-1", {
+      canonicalRef: " noosphere:article:article-1 ",
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.deepEqual(calls, [{ canonicalRef: "noosphere:article:article-1" }]);
+  });
+
+  it("rejects mixed or wrong-typed get params before calling the client", async () => {
+    const { context, calls } = makeGetContext();
+    const tool = createNoosphereGetTool({}, context);
+
+    const mixed = await tool.execute("tool-1", {
+      provider: "noosphere",
+      id: "article-1",
+      canonicalRef: "noosphere:article:article-1",
+    });
+    const wrongTyped = await tool.execute("tool-2", {
+      provider: "noosphere",
+      id: 123,
+    });
+
+    assert.equal(mixed.isError, true);
+    assert.equal(wrongTyped.isError, true);
+    assert.equal(calls.length, 0);
+    assert.match(String(mixed.content[0]?.text), /Use either canonicalRef/);
+    assert.match(
+      String(wrongTyped.content[0]?.text),
+      /id must be a non-empty string/,
+    );
+  });
+
+  it("formats get client errors as tool errors", async () => {
+    const context = {
+      config: {
+        baseUrl: "http://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
+      client: {
+        async get(): Promise<NoosphereGetResponse> {
+          throw new NoosphereClientError(
+            "Noosphere request failed with HTTP 401",
+            401,
+            { error: "Unauthorized" },
+          );
+        },
+      },
+    } as unknown as NoosphereClientContext;
+    const tool = createNoosphereGetTool({}, context);
+
+    const result = await tool.execute("tool-1", {
+      provider: "noosphere",
+      id: "article-1",
+    });
+
+    assert.equal(result.isError, true);
+    assert.match(String(result.content[0]?.text), /HTTP 401/);
   });
 });

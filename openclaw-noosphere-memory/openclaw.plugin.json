@@ -5,7 +5,8 @@
   "contracts": {
     "tools": [
       "noosphere_status",
-      "noosphere_recall"
+      "noosphere_recall",
+      "noosphere_get"
     ],
     "hooks": [
       "before_prompt_build"
