@@ -9,7 +9,8 @@
       "noosphere_get",
       "noosphere_save"
     ],
-    "hooks": ["before_prompt_build"]
+    "hooks": ["before_prompt_build"],
+    "memoryCorpusSupplements": ["noosphere"]
   },
   "providerAuthEnvVars": {
     "noosphere-memory": ["NOOSPHERE_API_KEY"]
