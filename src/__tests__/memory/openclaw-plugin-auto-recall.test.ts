@@ -10,12 +10,15 @@ import {
   NoosphereClientError,
   type NoosphereGetRequest,
   type NoosphereGetResponse,
+  type NoosphereSaveRequest,
+  type NoosphereSaveResponse,
 } from "../../../openclaw-noosphere-memory/src/client.js";
 import type {
   NoosphereRecallRequest,
   NoosphereRecallResponse,
 } from "../../../openclaw-noosphere-memory/src/client.js";
 import { createNoosphereGetTool } from "../../../openclaw-noosphere-memory/src/tools/get.js";
+import { createNoosphereSaveTool } from "../../../openclaw-noosphere-memory/src/tools/save.js";
 import type { NoosphereClientContext } from "../../../openclaw-noosphere-memory/src/shared-init.js";
 
 function makeContext(
@@ -525,5 +528,88 @@ describe("OpenClaw Noosphere get tool", () => {
 
     assert.equal(result.isError, true);
     assert.match(String(result.content[0]?.text), /HTTP 401/);
+  });
+});
+
+describe("OpenClaw Noosphere save tool", () => {
+  function makeSaveContext() {
+    const calls: NoosphereSaveRequest[] = [];
+    const response: NoosphereSaveResponse = {
+      success: true,
+      candidate: {
+        id: "article-1",
+        title: "Save Candidate",
+        slug: "save-candidate",
+        topicId: "topic-1",
+        status: "draft",
+        url: "/wiki/memory/save-candidate",
+      },
+      strippedBlocks: [],
+    };
+
+    const context = {
+      config: {
+        baseUrl: "http://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
+      client: {
+        async save(request: NoosphereSaveRequest) {
+          calls.push(request);
+          return response;
+        },
+      },
+    } as unknown as NoosphereClientContext;
+
+    return { context, calls };
+  }
+
+  it("normalizes save candidate requests", async () => {
+    const { context, calls } = makeSaveContext();
+    const tool = createNoosphereSaveTool({}, context);
+
+    const result = await tool.execute("tool-1", {
+      title: " Save Candidate ",
+      content: " Durable content worth saving for future agents. ",
+      topicId: " topic-1 ",
+      tags: [" memory ", "bridge"],
+      confidence: "low",
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.deepEqual(calls, [
+      {
+        title: "Save Candidate",
+        content: "Durable content worth saving for future agents.",
+        topicId: "topic-1",
+        excerpt: undefined,
+        tags: ["memory", "bridge"],
+        source: undefined,
+        authorName: undefined,
+        confidence: "low",
+      },
+    ]);
+  });
+
+  it("rejects malformed save params before calling the client", async () => {
+    const { context, calls } = makeSaveContext();
+    const tool = createNoosphereSaveTool({}, context);
+
+    const missing = await tool.execute("tool-1", {
+      title: "Save Candidate",
+      content: "Durable content worth saving for future agents.",
+    });
+    const badTags = await tool.execute("tool-2", {
+      title: "Save Candidate",
+      content: "Durable content worth saving for future agents.",
+      topicId: "topic-1",
+      tags: "memory",
+    });
+
+    assert.equal(missing.isError, true);
+    assert.equal(badTags.isError, true);
+    assert.equal(calls.length, 0);
+    assert.match(String(missing.content[0]?.text), /topicId is required/);
+    assert.match(String(badTags.content[0]?.text), /tags must be an array/);
   });
 });
