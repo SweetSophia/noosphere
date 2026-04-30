@@ -49,7 +49,7 @@ Implemented memory modules:
 - Local scheduler baseline for memory jobs.
 - Architecture documentation in [`docs/NOOSPHERE-MEMORY-ARCHITECTURE.md`](docs/NOOSPHERE-MEMORY-ARCHITECTURE.md).
 
-The next integration target is an OpenClaw plugin/skill bridge that will use Noosphere for automatic retrieval, memory injection, and conservative memory saving.
+The OpenClaw plugin/skill bridge is implemented and ships in this repository at `openclaw-noosphere-memory/`. It provides explicit tools, optional auto-recall prompt injection, and memory corpus supplement wiring.
 
 ## Feature Overview
 
@@ -269,9 +269,11 @@ POST /api/import
 
 ## Memory Module API
 
-The memory layer is currently exposed as TypeScript modules from `src/lib/memory` and re-exported through `@/lib/memory`.
+The memory layer is exposed in two ways:
 
-Useful imports:
+### TypeScript modules (for custom integrations)
+
+Exposed from `src/lib/memory` via `@/lib/memory`:
 
 ```ts
 import {
@@ -297,6 +299,45 @@ npm run test:scheduler
 npx tsc --noEmit
 ```
 
+### HTTP API (for agents and OpenClaw plugins)
+
+Base URL: `http://localhost:4400/api`
+Auth: `Authorization: Bearer <api_key>`
+
+| Endpoint | Method | Description |
+| --- | --- | --- |
+| `/api/memory/status` | GET | Provider and settings overview |
+| `/api/memory/recall` | POST | Multi-provider recall with ranking/dedup/conflict/budget |
+| `/api/memory/get` | POST | Direct lookup by ID or canonical ref |
+| `/api/memory/save` | POST | Save a memory candidate (draft only, never auto-publishes) |
+
+Example recall request:
+
+```bash
+curl -s -X POST http://localhost:4400/api/memory/recall \
+  -H "Authorization: Bearer noo_..." \
+  -H "Content-Type: application/json" \
+  -d '{"query": "pk-pro database schema", "mode": "auto", "resultCap": 5}'
+```
+
+Example memory get:
+
+```bash
+curl -s -X POST http://localhost:4400/api/memory/get \
+  -H "Authorization: Bearer noo_..." \
+  -H "Content-Type: application/json" \
+  -d '{"canonicalRef": "noosphere:article:abc123"}'
+```
+
+Example memory save:
+
+```bash
+curl -s -X POST http://localhost:4400/api/memory/save \
+  -H "Authorization: Bearer noo_..." \
+  -H "Content-Type: application/json" \
+  -d '{"title": "PK-PRO Database Schema", "content": "...", "topicId": "...", "tags": ["pk-pro"]}'
+```
+
 ## Web Routes
 
 | Route | Description |
@@ -317,19 +358,120 @@ npx tsc --noEmit
 
 Noosphere is intended to back OpenClaw-style agent memory workflows.
 
-Current state:
+The OpenClaw bridge is a first-class citizen of this repository and lives at `openclaw-noosphere-memory/`.
 
-- The Noosphere memory core is implemented in this repository.
-- The existing Noosphere wiki skill documents manual API/wiki usage.
-- A dedicated OpenClaw plugin/skill bridge is the next integration layer.
+### Plugin Capabilities
 
-Planned bridge responsibilities:
+**Explicit tools:**
 
-- auto-retrieve relevant Noosphere/Hindsight memories before prompt build
-- inject bounded recall blocks into agent context
-- expose explicit tools such as `noosphere_recall`, `noosphere_get`, `noosphere_save`, and `noosphere_status`
-- register a memory corpus supplement so shared memory search can include Noosphere
-- save only durable memory candidates by default, not noisy transient chat
+| Tool | Permission | Description |
+| --- | --- | --- |
+| `noosphere_status` | READ+ | Health check: providers, settings, capabilities |
+| `noosphere_recall` | READ+ | Multi-provider recall query (auto or inspection mode) |
+| `noosphere_get` | READ+ | Direct lookup by ID or canonical ref |
+| `noosphere_save` | WRITE+ | Save a memory candidate (draft only) |
+
+**Hooks:**
+
+- `before_prompt_build` — optional bounded Noosphere recall injection at prompt build time. Disabled by default to avoid duplicate Hindsight auto-injection.
+
+**Corpus supplement:**
+
+- `registerMemoryCorpusSupplement` — wires Noosphere into OpenClaw's shared `memory_search`/`memory_get` flows so all agents can query Noosphere content through the unified memory interface.
+
+### Setup (OpenClaw Agent)
+
+**1. Load the plugin**
+
+The plugin package is at `openclaw-noosphere-memory/` in this repository. Add it to your OpenClaw agent's plugin config:
+
+```json
+{
+  "plugins": {
+    "noosphere-memory": {
+      "baseUrl": "http://100.122.171.30:4400",
+      "apiKey": "noo_your_key_here",
+      "autoRecall": false,
+      "autoProviders": ["noosphere"],
+      "maxInjectedMemories": 5,
+      "maxInjectedTokens": 2000
+    }
+  }
+}
+```
+
+**2. Keys and permissions**
+
+| Task | Required permission |
+| --- | --- |
+| `noosphere_status` | ADMIN |
+| `noosphere_recall` (read) | READ |
+| `noosphere_get` (read) | READ |
+| `noosphere_save` (write) | WRITE |
+
+Create a key with the appropriate scope at `/wiki/admin/keys`.
+
+**3. Conservative first activation**
+
+```json
+{
+  "noosphere-memory": {
+    "baseUrl": "http://100.122.171.30:4400",
+    "apiKey": "noo_admin_key_with_write",
+    "autoRecall": false,
+    "autoProviders": ["noosphere"],
+    "maxInjectedMemories": 3,
+    "maxInjectedTokens": 1000,
+    "recallInjectionPosition": "system-prepend"
+  }
+}
+```
+
+Keep `autoRecall: false` initially. Verify explicit tools first (`noosphere_status` → `noosphere_recall` → `noosphere_get` → `noosphere_save`). Then enable auto-recall conservatively.
+
+**4. Verify**
+
+```bash
+# Explicit tool tests
+/noosphere_status   # should return ok: true and provider list
+/noosphere_recall   # query: "your project name", mode: inspection
+/noosphere_get      # canonicalRef: "noosphere:article:<some-id>"
+
+# Auto-recall verification
+# Enable autoRecall, send a prompt, confirm bounded Noosphere block is injected.
+# Confirm Hindsight is not double-injected in conservative mode (autoProviders: ["noosphere"] only).
+# Confirm timeouts fail open (injects nothing, logs warning).
+```
+
+**5. Enable auto-recall (optional)**
+
+Once explicit tools are verified, enable auto-recall in the plugin config:
+
+```json
+{
+  "noosphere-memory": {
+    "autoRecall": true,
+    "autoProviders": ["noosphere"],
+    "maxInjectedMemories": 5,
+    "maxInjectedTokens": 2000
+  }
+}
+```
+
+### Key Safety Properties
+
+- Auto-recall **fails open**: if Noosphere is unreachable or the request times out, the agent prompt proceeds with no memory injected rather than erroring.
+- **No secrets in error payloads**: `apiKey` and `baseUrl` are never exposed in tool error responses.
+- **Bounded response bodies**: server enforces a hard cap on response body size regardless of what the plugin requests.
+- **Draft-only saves**: `noosphere_save` creates candidate articles, never directly publishes curated knowledge.
+- **Secret scanning**: saves strip content that looks like API keys, tokens, or Bearer credentials before storing.
+
+### Architecture Notes
+
+- The plugin calls Noosphere over HTTP. It does **not** import Noosphere internals directly.
+- Default mode is **conservative coexistence**: Hindsight keeps its own auto-recall; Noosphere auto-recalls curated Noosphere content only. This avoids double injection.
+- **Coordinated mode**: set Hindsight `autoRecall: false` and enable Noosphere `autoRecall: true` with `autoProviders: ["noosphere", "hindsight"]` to get one unified recall block.
+- See [`docs/OPENCLAW-NOOSPHERE-BRIDGE-ROADMAP.md`](docs/OPENCLAW-NOOSPHERE-BRIDGE-ROADMAP.md) for the full implementation history and API contracts.
 
 ## Environment Variables
 
