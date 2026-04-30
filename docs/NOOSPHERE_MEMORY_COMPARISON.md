@@ -1,6 +1,7 @@
 # Noosphere vs. AI Agent Memory Systems — Feature Comparison
 
 > **Date:** 2026-04-30 | **Author:** Descartes (Research Agent)  
+> **Review:** Cylena — corrections applied 2026-04-30  
 > Comparing [Noosphere](https://github.com/SweetSophia/noosphere) against [Hindsight](https://github.com/vectorize-io/hindsight/tree/main/hindsight-integrations/openclaw), [QMD](https://docs.openclaw.ai) (OpenClaw built-in), [memU](https://github.com/NevaMind-AI/memU), [mem0](https://github.com/mem0ai/mem0), and [LanceDB Pro](https://github.com/CortexReach/memory-lancedb-pro).
 
 ---
@@ -24,9 +25,9 @@
 | Feature | **Noosphere** | **Hindsight** | **QMD** | **memU** | **mem0** | **LanceDB Pro** |
 |---|---|---|---|---|---|---|
 | **Auto-Capture** | ✅ (ingest API + backfill) | ✅ Every turn | ❌ Manual indexing | ✅ Continuous learning | ✅ `memory.add()` | ✅ Smart extraction |
-| **Auto-Recall** | ✅ Hook injection + tools | ✅ Before each turn | ✅ Keyword search only | ✅ Proactive context loading | ✅ `memory.search()` | ✅ Before prompt build |
+| **Auto-Recall** | ✅ Hook injection + tools (opt-in) | ✅ Before each turn | ✅ Keyword search only | ✅ Proactive context loading | ✅ `memory.search()` | ✅ Before prompt build |
 | **Manual Recall** | ✅ REST API + tools | ✅ MCP tools | ✅ CLI / tool query | ✅ REST API | ✅ SDK + REST | ✅ CLI + MCP tools |
-| **Semantic Search** | ✅ PostgreSQL FTS + planned vector | ✅ Vector + biomimetic | ⚠️ Keyword + pending vector | ✅ pgvector | ✅ Semantic + BM25 + entity fusion | ✅ Vector + BM25 hybrid |
+| **Semantic Search** | ✅ PostgreSQL FTS (live) + vector (planned) | ✅ Vector + biomimetic | ⚠️ Keyword + pending vector | ✅ pgvector | ✅ Semantic + BM25 + entity fusion | ✅ Vector + BM25 hybrid |
 | **Keyword Search** | ✅ PostgreSQL full-text | ✅ | ✅ Primary mode | ✅ | ✅ BM25 | ✅ BM25 |
 | **Cross-Encoder Rerank** | ❌ (planned) | ❌ | ❌ | ❌ | ❌ | ✅ Cross-encoder |
 | **Memory Types** | Articles (wiki) | world / experience / observation | Markdown files | Categories / Items / Resources | Facts (ADD-only v3) | 6-category classification |
@@ -45,7 +46,7 @@
 | **Cross-Provider Dedup** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Conflict Detection** | ✅ Configurable strategies | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Token Budget Manager** | ✅ Prompt-safe recall blocks | ✅ `recallMaxTokens` | ❌ | ❌ | ❌ | ❌ |
-| **Promotion (ephemeral → curated)** | ✅ Scoring + review lifecycle | ❌ | ❌ | ❌ | ❌ | ⚠️ Decay model (Weibull) |
+| **Promotion (ephemeral → curated)** | ✅ Scheduled + manual threshold triggers | ❌ | ❌ | ❌ | ❌ | ⚠️ Decay model (Weibull) |
 | **Backfill / Synthesis** | ✅ Job lifecycle with retry | ✅ Historical backfill CLI | ❌ | ❌ | ❌ | ❌ |
 | **Local Scheduler** | ✅ Built-in memory job runner | ❌ | ❌ | ✅ Continuous sync loop | ❌ | ❌ |
 | **Revision History** | ✅ Per-article | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -88,8 +89,8 @@
 
 | Feature | **Noosphere** | **Hindsight** | **QMD** | **memU** | **mem0** | **LanceDB Pro** |
 |---|---|---|---|---|---|---|
-| **OpenClaw Plugin** | ✅ First-party bridge | ✅ Official plugin | ✅ Built-in | ❌ | ❌ | ✅ Official plugin |
-| **REST API** | ✅ Full CRUD + memory | ❌ (daemon RPC) | ❌ | ✅ | ✅ | ❌ |
+| **OpenClaw Plugin** | ✅ Community bridge (SweetSophia) | ✅ Official plugin | ✅ Built-in | ❌ | ❌ | ✅ Official plugin |
+| **REST API** | ✅ Full CRUD + memory (Next.js route) | ❌ (daemon RPC) | ❌ | ✅ | ✅ | ❌ |
 | **SDK** | ❌ (REST only) | ❌ | ❌ | ✅ Python | ✅ Python + Node | ❌ |
 | **CLI Management** | ✅ API key admin | ❌ | ✅ CLI query | ❌ | ✅ `mem0` CLI | ✅ Full CLI toolkit |
 | **Docker Compose** | ✅ One-command | ✅ Embedded daemon | ❌ (built-in) | ✅ | ✅ | ❌ (local files) |
