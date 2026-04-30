@@ -1,5 +1,5 @@
 import { slugify } from "@/lib/memory/backfill";
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 
 export const MEMORY_SAVE_LIMITS = {
   maxTitleLength: 160,
@@ -12,9 +12,9 @@ export const MEMORY_SAVE_LIMITS = {
 } as const;
 
 const INJECTED_MEMORY_BLOCKS = [
-  "noosphere_auto_recall",
-  "hindsight_memories",
   "recall",
+  "hindsight_memories",
+  "noosphere_auto_recall",
 ] as const;
 
 const SECRET_PATTERNS: Array<{ name: string; pattern: RegExp }> = [
@@ -154,8 +154,14 @@ export function validateMemorySaveRequest(
   const durableError = validateDurableContent(sanitizedContent);
   if (durableError) return durableError;
 
-  const secretError =
-    detectSecret(sanitizedContent) ?? detectSecret(title.value);
+  const secretError = detectSecretInInputs([
+    sanitizedContent,
+    title.value,
+    excerpt.value,
+    source.value,
+    authorName.value,
+    ...tags.value,
+  ]);
   if (secretError) return secretError;
 
   return {
@@ -183,14 +189,62 @@ export function stripInjectedMemoryBlocks(content: string): {
   const strippedBlocks: string[] = [];
 
   for (const tag of INJECTED_MEMORY_BLOCKS) {
-    const pattern = new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}>`, "gi");
-    strippedContent = strippedContent.replace(pattern, () => {
+    let nextContent = stripOneInjectedTag(strippedContent, tag);
+    while (nextContent.changed) {
       strippedBlocks.push(tag);
-      return "\n";
-    });
+      strippedContent = nextContent.content;
+      nextContent = stripOneInjectedTag(strippedContent, tag);
+    }
   }
 
   return { content: strippedContent, strippedBlocks };
+}
+
+function stripOneInjectedTag(
+  content: string,
+  tag: string,
+): { content: string; changed: boolean } {
+  const openPattern = new RegExp(`<${tag}\\b[^>]*>`, "i");
+  const openMatch = openPattern.exec(content);
+  if (!openMatch) return { content, changed: false };
+
+  const closePattern = new RegExp(`<\/${tag}>`, "gi");
+  const openSearchPattern = new RegExp(`<${tag}\\b[^>]*>`, "gi");
+  closePattern.lastIndex = openMatch.index + openMatch[0].length;
+  openSearchPattern.lastIndex = openMatch.index + openMatch[0].length;
+  let depth = 1;
+  let cursor = openMatch.index + openMatch[0].length;
+
+  while (true) {
+    openSearchPattern.lastIndex = cursor;
+    closePattern.lastIndex = cursor;
+    const nestedOpen = openSearchPattern.exec(content);
+    const closeMatch = closePattern.exec(content);
+
+    if (!closeMatch) {
+      return {
+        content: `${content.slice(0, openMatch.index)}
+`,
+        changed: true,
+      };
+    }
+
+    if (nestedOpen && nestedOpen.index < closeMatch.index) {
+      depth += 1;
+      cursor = nestedOpen.index + nestedOpen[0].length;
+      continue;
+    }
+
+    depth -= 1;
+    cursor = closeMatch.index + closeMatch[0].length;
+    if (depth === 0) {
+      return {
+        content: `${content.slice(0, openMatch.index)}
+${content.slice(cursor)}`,
+        changed: true,
+      };
+    }
+  }
 }
 
 export async function getDefaultMemorySaveWriter(): Promise<MemorySaveWriter> {
@@ -207,19 +261,18 @@ export async function getDefaultMemorySaveWriter(): Promise<MemorySaveWriter> {
       }
 
       const baseSlug = slugify(input.title).slice(0, 80) || "memory-candidate";
-      const slug = await findAvailableSlug(input.topicId, baseSlug);
-      const excerpt =
-        input.excerpt ??
-        input.content
-          .slice(0, 200)
-          .replace(/[#*`_>\-\[\]]/g, "")
-          .trim();
+      const excerpt = input.excerpt ?? createFallbackExcerpt(input.content);
 
       const article = await prisma.$transaction(async (tx) => {
-        const tagConnections = await buildTagConnectionsForClient(
-          input.tags,
-          tx,
-        );
+        const slug = await findAvailableSlug(tx, input.topicId, baseSlug);
+        const tagConnections = input.tags.map((tagName) => ({
+          tag: {
+            connectOrCreate: {
+              where: { slug: slugify(tagName) },
+              create: { name: tagName, slug: slugify(tagName) },
+            },
+          },
+        }));
         const created = await tx.article.create({
           data: {
             title: input.title,
@@ -281,44 +334,28 @@ export async function getDefaultMemorySaveWriter(): Promise<MemorySaveWriter> {
   };
 
   async function findAvailableSlug(
+    tx: Prisma.TransactionClient,
     topicId: string,
     baseSlug: string,
   ): Promise<string> {
+    const existingArticles = await tx.article.findMany({
+      where: { topicId, slug: { startsWith: baseSlug } },
+      select: { slug: true },
+    });
+    const existingSlugs = new Set(
+      existingArticles.map((article) => article.slug),
+    );
+
     for (let index = 0; index < 100; index += 1) {
       const candidate = index === 0 ? baseSlug : `${baseSlug}-${index + 1}`;
-      const existing = await prisma.article.findUnique({
-        where: { topicId_slug: { topicId, slug: candidate } },
-        select: { id: true },
-      });
-      if (!existing) return candidate;
+      if (!existingSlugs.has(candidate)) return candidate;
     }
+
     throw new MemorySaveError(
       "Could not generate a unique candidate slug",
       409,
     );
   }
-}
-
-type TagWriter = Pick<PrismaClient, "tag"> | Prisma.TransactionClient;
-
-async function buildTagConnectionsForClient(
-  tagNames: string[],
-  client: TagWriter,
-): Promise<Array<{ tagId: string }>> {
-  if (!tagNames.length) return [];
-
-  return Promise.all(
-    tagNames.map(async (tagName) => {
-      const tagSlug = slugify(tagName);
-      const tag = await client.tag.upsert({
-        where: { slug: tagSlug },
-        create: { name: tagName, slug: tagSlug },
-        update: { name: tagName },
-      });
-
-      return { tagId: tag.id };
-    }),
-  );
 }
 
 export class MemorySaveError extends Error {
@@ -329,6 +366,27 @@ export class MemorySaveError extends Error {
     super(message);
     this.name = "MemorySaveError";
   }
+}
+
+function createFallbackExcerpt(content: string): string {
+  return content
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 200)
+    .trim();
+}
+
+function detectSecretInInputs(
+  values: Array<string | undefined>,
+): Extract<MemorySaveValidationResult, { ok: false }> | undefined {
+  for (const value of values) {
+    if (!value) continue;
+    const secretError = detectSecret(value);
+    if (secretError) return secretError;
+  }
+  return undefined;
 }
 
 function normalizeContent(content: string): string {
@@ -445,12 +503,16 @@ function readOptionalTags(
         error: "tags must be an array of strings",
       };
     }
-    const normalized = tag.trim().toLowerCase();
+    const normalized = tag.trim();
     if (!normalized) continue;
     if (normalized.length > MEMORY_SAVE_LIMITS.maxTagLength) {
       return { ok: false, status: 400, error: "tag is too long" };
     }
-    if (!tags.includes(normalized)) tags.push(normalized);
+    const normalizedSlug = slugify(normalized);
+    if (!normalizedSlug) continue;
+    if (!tags.some((existing) => slugify(existing) === normalizedSlug)) {
+      tags.push(normalized);
+    }
   }
   return { ok: true, value: tags };
 }

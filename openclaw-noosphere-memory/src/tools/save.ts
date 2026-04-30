@@ -35,21 +35,25 @@ const SaveToolParameters = {
     },
     excerpt: {
       type: "string",
+      maxLength: 500,
       description: "Optional short summary/excerpt.",
     },
     tags: {
       type: "array",
       maxItems: SAVE_TAG_MAX_COUNT,
       items: { type: "string", maxLength: SAVE_TAG_MAX_LENGTH },
-      description: "Optional tags. Duplicates are normalized server-side.",
+      description:
+        "Optional tags. Duplicates are normalized by slug server-side while preserving first-seen display casing.",
     },
     source: {
       type: "string",
+      maxLength: 500,
       description:
         "Optional source pointer, e.g. session key, URL, or canonical ref.",
     },
     authorName: {
       type: "string",
+      maxLength: 100,
       description: "Optional display author name.",
     },
     confidence: {

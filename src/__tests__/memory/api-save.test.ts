@@ -28,7 +28,7 @@ test("memory save validation accepts durable draft candidates", () => {
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.equal(result.input.status, "draft");
-  assert.deepEqual(result.input.tags, ["memory", "bridge"]);
+  assert.deepEqual(result.input.tags, ["Memory", "bridge"]);
   assert.equal(result.input.confidence, "medium");
 });
 
@@ -55,7 +55,19 @@ test("memory save strip helper handles noosphere auto recall blocks", () => {
   );
 
   assert.equal(stripped.content.includes("nested"), false);
-  assert.deepEqual(stripped.strippedBlocks, ["noosphere_auto_recall"]);
+  assert.deepEqual(
+    new Set(stripped.strippedBlocks),
+    new Set(["recall", "noosphere_auto_recall"]),
+  );
+});
+
+test("memory save strip helper handles nested same-type blocks", () => {
+  const stripped = stripInjectedMemoryBlocks(
+    "before <recall>outer <recall>inner</recall> content</recall> after",
+  );
+
+  assert.equal(stripped.content, "before \n after");
+  assert.deepEqual(stripped.strippedBlocks, ["recall"]);
 });
 
 test("memory save rejects empty, transient, and noisy content", () => {
@@ -83,6 +95,20 @@ test("memory save rejects likely secrets", () => {
   const result = validateMemorySaveRequest(
     validRequest({
       content: `${durableContent}\nToken: noo_abcdefghijklmnopqrstuvwxyz`,
+    }),
+  );
+
+  assert.deepEqual(result, {
+    ok: false,
+    status: 400,
+    error: "content appears to contain a secret (Noosphere API key)",
+  });
+});
+
+test("memory save rejects secrets in optional fields", () => {
+  const result = validateMemorySaveRequest(
+    validRequest({
+      excerpt: "Token noo_abcdefghijklmnopqrstuvwxyz should not persist",
     }),
   );
 
