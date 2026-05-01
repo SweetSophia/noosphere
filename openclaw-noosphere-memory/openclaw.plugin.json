@@ -22,9 +22,6 @@
       }
     }
   },
-  "providerAuthEnvVars": {
-    "noosphere-memory": ["NOOSPHERE_API_KEY"]
-  },
   "setup": {
     "providers": [
       {
