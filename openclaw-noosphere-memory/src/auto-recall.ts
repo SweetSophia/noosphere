@@ -1,4 +1,4 @@
-import { NoosphereRecallRequest, NoosphereRecallResponse } from "./client.js";
+import { NoosphereRecallRequest, NoosphereRecallResponse, NoosphereSettingsResponse } from "./client.js";
 import {
   clampTimeout,
   DEFAULT_AUTO_RECALL_TIMEOUT_MS,
@@ -19,6 +19,14 @@ const DEFAULT_MIN_QUERY_LENGTH = 8;
 const MAX_RESULT_CAP = 10;
 const MAX_TOKEN_BUDGET = 2_000;
 export const MAX_QUERY_LENGTH = 1_000;
+
+// Settings cache TTL in milliseconds (30 seconds)
+const SETTINGS_CACHE_TTL_MS = 30_000;
+
+interface SettingsCache {
+  settings: NoosphereSettingsResponse | null;
+  fetchedAt: number;
+}
 
 export interface NoosphereAutoRecallConfig {
   autoRecall: boolean;
@@ -89,30 +97,75 @@ export function createNoosphereAutoRecallHook(
   clientContext: NoosphereClientContext,
   logger?: NoospherePluginLogger,
 ) {
-  const autoConfig = resolveAutoRecallConfig(rawConfig);
+  const staticConfig = resolveAutoRecallConfig(rawConfig);
+  const settingsCache: SettingsCache = { settings: null, fetchedAt: 0 };
+
+  /**
+   * Fetches recall settings from the DB (with 30s cache TTL).
+   * Falls back to null on error (log + return null).
+   */
+  async function fetchRecallSettings(): Promise<NoosphereSettingsResponse | null> {
+    const now = Date.now();
+    if (settingsCache.settings && (now - settingsCache.fetchedAt) < SETTINGS_CACHE_TTL_MS) {
+      return settingsCache.settings;
+    }
+    try {
+      const dbSettings = await clientContext.client.settings();
+      settingsCache.settings = dbSettings;
+      settingsCache.fetchedAt = now;
+      return dbSettings;
+    } catch (err) {
+      logger?.warn?.(`noosphere-memory: failed to fetch recall settings from DB: ${formatHookError(err)}`);
+      // Return cached settings if available (even if stale), otherwise null
+      return settingsCache.settings ?? null;
+    }
+  }
+
+  /**
+   * Returns the effective auto-recall config by merging DB settings over static config.
+   * DB settings take precedence for: autoRecall, resultCap, tokenBudget, autoProviders.
+   * Static config is used as fallback for all other fields.
+   */
+  async function getEffectiveConfig(): Promise<NoosphereAutoRecallConfig> {
+    const dbSettings = await fetchRecallSettings();
+    if (!dbSettings) {
+      // No DB settings — fall back entirely to static config
+      return staticConfig;
+    }
+    // Merge: DB values override static config for the fields it manages
+    return {
+      ...staticConfig,
+      autoRecall: dbSettings.autoRecallEnabled,
+      resultCap: clampNumber(dbSettings.maxInjectedMemories, 1, MAX_RESULT_CAP, staticConfig.resultCap),
+      tokenBudget: clampNumber(dbSettings.maxInjectedTokens, 1, MAX_TOKEN_BUDGET, staticConfig.tokenBudget),
+      autoProviders: dbSettings.enabledProviders.length > 0 ? dbSettings.enabledProviders : staticConfig.autoProviders,
+    };
+  }
+
   const hook = async (
     event: BeforePromptBuildEventLike,
     ctx: BeforePromptBuildContextLike = {},
   ): Promise<PromptInjectionResult | void> => {
-    if (!shouldAutoRecall(autoConfig, event, ctx, clientContext.config)) return;
+    const effectiveConfig = await getEffectiveConfig();
+    if (!shouldAutoRecall(effectiveConfig, event, ctx, clientContext.config)) return;
 
-    const query = buildAutoRecallQuery(event, autoConfig);
-    if (!query || query.length < autoConfig.minQueryLength) return;
+    const query = buildAutoRecallQuery(event, effectiveConfig);
+    if (!query || query.length < effectiveConfig.minQueryLength) return;
 
     try {
       const response = await clientContext.client.recall(
         {
           query,
           mode: "auto",
-          resultCap: autoConfig.resultCap,
-          tokenBudget: autoConfig.tokenBudget,
-          providers: autoConfig.autoProviders,
+          resultCap: effectiveConfig.resultCap,
+          tokenBudget: effectiveConfig.tokenBudget,
+          providers: effectiveConfig.autoProviders,
         },
-        { timeoutMs: autoConfig.timeoutMs },
+        { timeoutMs: effectiveConfig.timeoutMs },
       );
-      const promptText = extractPromptInjectionText(response, autoConfig);
+      const promptText = extractPromptInjectionText(response, effectiveConfig);
       if (!promptText) return;
-      return buildInjectionResult(promptText, autoConfig.recallInjectionPosition);
+      return buildInjectionResult(promptText, effectiveConfig.recallInjectionPosition);
     } catch (error) {
       logger?.warn?.(`noosphere-memory: auto-recall skipped: ${formatHookError(error)}`);
       return;
@@ -120,7 +173,7 @@ export function createNoosphereAutoRecallHook(
   };
 
   hook.registrationWarning = () => {
-    if (!autoConfig.autoRecall) return;
+    if (!staticConfig.autoRecall) return;
     logger?.warn?.("noosphere-memory: autoRecall is enabled but this OpenClaw runtime does not support before_prompt_build hooks");
   };
 

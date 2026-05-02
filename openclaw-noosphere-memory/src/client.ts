@@ -6,6 +6,19 @@ import {
 
 const MAX_RESPONSE_BODY_BYTES = 1_000_000;
 
+export interface NoosphereSettingsResponse {
+  autoRecallEnabled: boolean;
+  maxInjectedMemories: number;
+  maxInjectedTokens: number;
+  recallVerbosity: string;
+  deduplicationStrategy: string;
+  enabledProviders: string[];
+  providerPriorityWeights: Record<string, number>;
+  summaryFirst: boolean;
+  conflictStrategy: string;
+  conflictThreshold: number;
+}
+
 export interface NoosphereStatusResponse {
   ok: boolean;
   timestamp: string;
@@ -84,6 +97,12 @@ export class NoosphereMemoryClient {
 
   async status(): Promise<NoosphereStatusResponse> {
     return this.request<NoosphereStatusResponse>("/api/memory/status", {
+      method: "GET",
+    });
+  }
+
+  async settings(): Promise<NoosphereSettingsResponse> {
+    return this.request<NoosphereSettingsResponse>("/api/memory/settings", {
       method: "GET",
     });
   }
