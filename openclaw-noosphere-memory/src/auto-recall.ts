@@ -102,12 +102,16 @@ export function createNoosphereAutoRecallHook(
 
   /**
    * Fetches recall settings from the DB (with 30s cache TTL).
-   * Falls back to null on error (log + return null).
+   * Falls back to null if no settings() method is available (backward compat).
    */
   async function fetchRecallSettings(): Promise<NoosphereSettingsResponse | null> {
     const now = Date.now();
     if (settingsCache.settings && (now - settingsCache.fetchedAt) < SETTINGS_CACHE_TTL_MS) {
       return settingsCache.settings;
+    }
+    // Guard: client.settings() may not exist in test mocks or older clients
+    if (typeof clientContext.client.settings !== "function") {
+      return null;
     }
     try {
       const dbSettings = await clientContext.client.settings();
