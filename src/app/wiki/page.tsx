@@ -115,7 +115,6 @@ export default async function WikiHomePage() {
   }
 
   const totalArticles = Object.values(countMap).reduce((total, count) => total + count, 0);
-  const [featuredArticle, ...secondaryArticles] = recentArticles;
   const topicTree = roots.map((topic) => buildTopicRenderNode(topic, countMap));
 
   return (
@@ -157,57 +156,32 @@ export default async function WikiHomePage() {
             </div>
           </div>
 
-          <div className="recent-updates-shell">
-            {featuredArticle ? (
+          <div className="recent-updates-grid">
+            {recentArticles.map((article) => (
               <Link
-                href={`/wiki/${featuredArticle.topic.slug}/${featuredArticle.slug}`}
-                className="article-card article-card-featured"
+                key={article.id}
+                href={`/wiki/${article.topic.slug}/${article.slug}`}
+                className="article-card article-card-grid"
               >
                 <div className="article-card-header-row">
-                  <span className="article-kicker">Featured update</span>
-                  <span className="article-date">{new Date(featuredArticle.updatedAt).toLocaleDateString()}</span>
+                  <span className="article-kicker">{article.topic.name}</span>
+                  <span className="article-date">{new Date(article.updatedAt).toLocaleDateString()}</span>
                 </div>
-                <h3>{featuredArticle.title}</h3>
+                <h3>{article.title}</h3>
                 <p>
-                  {featuredArticle.excerpt ??
-                    "Fresh edits landed here recently. Open the article for the latest revision and linked context."}
+                  {article.excerpt ?? "Open the latest revision to read the current summary and linked references."}
                 </p>
-                <div className="article-meta article-meta-rich">
-                  <span>{featuredArticle.topic.name}</span>
-                  {featuredArticle.tags.length > 0 ? (
-                    <span>{featuredArticle.tags.slice(0, 3).map((tag) => tag.tag.name).join(" · ")}</span>
-                  ) : null}
-                </div>
-              </Link>
-            ) : null}
-
-            <div className="recent-updates-list">
-              {secondaryArticles.map((article) => (
-                <Link
-                  key={article.id}
-                  href={`/wiki/${article.topic.slug}/${article.slug}`}
-                  className="article-card article-card-compact"
-                >
-                  <div className="article-card-header-row">
-                    <span className="article-kicker">{article.topic.name}</span>
-                    <span className="article-date">{new Date(article.updatedAt).toLocaleDateString()}</span>
+                {article.tags.length > 0 ? (
+                  <div className="article-tag-row article-tag-row-muted">
+                    {article.tags.slice(0, 3).map((tag) => (
+                      <span key={tag.tag.id} className="tag-badge">
+                        {tag.tag.name}
+                      </span>
+                    ))}
                   </div>
-                  <h3>{article.title}</h3>
-                  <p>
-                    {article.excerpt ?? "Open the latest revision to read the current summary and linked references."}
-                  </p>
-                  {article.tags.length > 0 ? (
-                    <div className="article-tag-row article-tag-row-muted">
-                      {article.tags.slice(0, 3).map((tag) => (
-                        <span key={tag.tag.id} className="tag-badge">
-                          {tag.tag.name}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                </Link>
-              ))}
-            </div>
+                ) : null}
+              </Link>
+            ))}
           </div>
         </section>
       )}

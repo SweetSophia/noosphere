@@ -499,6 +499,11 @@
   height: 100%;
 }
 
+.article-card-grid {
+  height: 100%;
+  padding: 1.25rem;
+}
+
 .article-card-header-row {
   display: flex;
   align-items: center;
@@ -585,10 +590,16 @@
   color: var(--accent-color);
 }
 
-.recent-updates-shell {
+.recent-updates-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 1rem;
+}
+
+@media (max-width: 768px) {
+  .recent-updates-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .recent-updates-list {
@@ -1261,6 +1272,99 @@
   gap: 0.75rem;
   flex-wrap: wrap;
   margin-top: 1.5rem;
+}
+
+.form-group-wide {
+  grid-column: 1 / -1;
+}
+
+.form-hint-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-top: 0.3rem;
+}
+
+.form-hint-row input[type="checkbox"] {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+
+.form-range {
+  width: 100%;
+  margin-top: 0.4rem;
+  accent-color: var(--accent-color);
+}
+
+.form-range-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.3rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.form-range-value {
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+.checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  accent-color: var(--accent-color);
+}
+
+.form-textarea-code {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  min-height: 80px;
+  resize: vertical;
+}
+
+.form-actions-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 1rem 0;
+  border-top: 1px solid var(--border-color);
+  margin-top: 1.5rem;
+}
+
+.settings-debug {
+  margin-top: 2rem;
+  padding: 1rem;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 0.82rem;
+}
+
+.settings-debug summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.settings-debug pre {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: var(--surface-color);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
 }
 
 .breadcrumb {

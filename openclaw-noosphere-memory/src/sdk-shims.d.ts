@@ -1,5 +1,6 @@
 declare module "openclaw/plugin-sdk/plugin-entry" {
   export interface OpenClawPluginApi {
+    config?: unknown;
     pluginConfig?: unknown;
     logger?: {
       warn?: (message: string) => void;
