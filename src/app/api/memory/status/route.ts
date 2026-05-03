@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { requirePermission } from "@/lib/api/auth";
 import { getMemoryStatusSnapshot } from "@/lib/memory/api/providers";
+import { getRecallSettingsFromDB } from "@/lib/memory/api/settings";
 
 export async function GET(request: NextRequest) {
   // ADMIN required: status exposes internal provider configuration
@@ -16,7 +17,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    return NextResponse.json(getMemoryStatusSnapshot());
+    const settings = await getRecallSettingsFromDB();
+    return NextResponse.json(getMemoryStatusSnapshot({ settings }));
   } catch (error) {
     console.error("[GET /api/memory/status]", error);
     return NextResponse.json(

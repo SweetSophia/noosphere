@@ -10,10 +10,25 @@
       "noosphere_save"
     ],
     "hooks": ["before_prompt_build"],
-    "memoryCorpusSupplements": ["noosphere"]
+    "memoryCorpusSupplements": ["noosphere"],
+    "config": {
+      "secretInputs": {
+        "paths": [
+          {
+            "path": "apiKey",
+            "expected": "string"
+          }
+        ]
+      }
+    }
   },
-  "providerAuthEnvVars": {
-    "noosphere-memory": ["NOOSPHERE_API_KEY"]
+  "setup": {
+    "providers": [
+      {
+        "id": "noosphere-memory",
+        "envVars": ["NOOSPHERE_API_KEY"]
+      }
+    ]
   },
   "uiHints": {
     "baseUrl": {

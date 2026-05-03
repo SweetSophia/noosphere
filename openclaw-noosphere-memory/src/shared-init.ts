@@ -9,7 +9,7 @@ export interface NoosphereClientContext {
   client: NoosphereMemoryClient;
 }
 
-export function createNoosphereClientContext(rawConfig: unknown): NoosphereClientContext {
-  const config = resolveNoosphereMemoryConfig(rawConfig);
+export function createNoosphereClientContext(rawConfig: unknown, rootConfig?: unknown): NoosphereClientContext {
+  const config = resolveNoosphereMemoryConfig(rawConfig, process.env, rootConfig);
   return { config, client: new NoosphereMemoryClient(config) };
 }

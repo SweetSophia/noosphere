@@ -221,3 +221,36 @@ model ArticleRelation {
   @@index([sourceId])
   @@index([targetId])
 }
+
+// ─────────────────────────────────────────────
+// Recall Settings — singleton config for memory recall behavior
+// ─────────────────────────────────────────────
+model RecallSettings {
+  id        String   @id @default("singleton")
+
+  // Auto-recall
+  autoRecallEnabled     Boolean   @default(true)
+
+  // Budget limits
+  maxInjectedMemories   Int       @default(20)
+  maxInjectedTokens     Int       @default(2000)
+
+  // Output control
+  recallVerbosity      String    @default("standard")  // "minimal" | "standard" | "detailed"
+  summaryFirst          Boolean   @default(true)
+
+  // Dedup
+  deduplicationStrategy String    @default("best-score")  // "best-score" | "provider-priority" | "most-recent"
+
+  // Provider config
+  enabledProviders      String[]  @default([])
+  providerPriorityWeights Json    @default("{}")
+
+  // Conflict resolution
+  conflictStrategy      String    @default("surface")  // "accept-highest" | "accept-recent" | "accept-curated" | "surface" | "suppress-low"
+  conflictThreshold     Float     @default(0.1)
+
+  updatedAt            DateTime  @updatedAt
+
+  @@unique([id])
+}

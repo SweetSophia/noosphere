@@ -13,7 +13,7 @@ export default definePluginEntry({
   description:
     "Explicit OpenClaw tools and optional auto-recall prompt injection for Noosphere memory over HTTP.",
   register(api) {
-    const clientContext = createNoosphereClientContext(api.pluginConfig);
+    const clientContext = createNoosphereClientContext(api.pluginConfig, api.config);
     api.registerTool(
       createNoosphereStatusTool(api.pluginConfig, clientContext),
     );
