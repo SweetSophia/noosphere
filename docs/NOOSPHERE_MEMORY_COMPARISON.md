@@ -24,8 +24,8 @@
 
 | Feature | **Noosphere** | **Hindsight** | **QMD** | **memU** | **mem0** | **LanceDB Pro** |
 |---|---|---|---|---|---|---|
-| **Auto-Capture** | ✅ (ingest API + backfill) | ✅ Every turn | ❌ Manual indexing | ✅ Continuous learning | ✅ `memory.add()` | ✅ Smart extraction |
-| **Auto-Recall** | ✅ Hook injection + tools (opt-in) | ✅ Before each turn | ✅ Keyword search only | ✅ Proactive context loading | ✅ `memory.search()` | ✅ Before prompt build |
+| **Auto-Capture** | ✅ Bundled capture guidance + ingest API + backfill | ✅ Every turn | ❌ Manual indexing | ✅ Continuous learning | ✅ `memory.add()` | ✅ Smart extraction |
+| **Auto-Recall** | ✅ Hook injection with dual-block (memory capture guidance + recall results) | ✅ Before each turn | ✅ Keyword search only | ✅ Proactive context loading | ✅ `memory.search()` | ✅ Before prompt build |
 | **Manual Recall** | ✅ REST API + tools | ✅ MCP tools | ✅ CLI / tool query | ✅ REST API | ✅ SDK + REST | ✅ CLI + MCP tools |
 | **Semantic Search** | ✅ PostgreSQL FTS (live) + vector (planned) | ✅ Vector + biomimetic | ⚠️ Keyword + pending vector | ✅ pgvector | ✅ Semantic + BM25 + entity fusion | ✅ Vector + BM25 hybrid |
 | **Keyword Search** | ✅ PostgreSQL full-text | ✅ | ✅ Primary mode | ✅ | ✅ BM25 | ✅ BM25 |
@@ -117,7 +117,7 @@
 | Category | **Noosphere** | **Hindsight** | **QMD** | **memU** | **mem0** | **LanceDB Pro** |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
 | Structured Knowledge | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐⭐ | ⭐⭐ |
-| Auto-Recall Quality | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+| Auto-Recall Quality | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
 | Human Readability | ⭐⭐⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐ | ⭐⭐ | ⭐ |
 | Multi-Provider | ⭐⭐⭐⭐⭐ | ⭐ | ⭐ | ⭐ | ⭐ | ⭐ |
 | Proactive Intelligence | ⭐ | ⭐ | ⭐ | ⭐⭐⭐⭐⭐ | ⭐ | ⭐ |
@@ -133,7 +133,7 @@
 
 | System | Best For |
 |---|---|
-| **Noosphere** 🏆 | Structured, curated, human-readable knowledge with multi-provider recall orchestration. Best for agents that need durable wiki-style memory, research synthesis, and human review workflows. |
+| **Noosphere** 🏆 | Structured, curated, human-readable knowledge with multi-provider recall orchestration and bundled memory capture guidance. Best for agents that need durable wiki-style memory, research synthesis, human review workflows, and proactive memory guidance. |
 | **Hindsight** | Drop-in biomimetic auto-recall for OpenClaw. Best for "install and forget" — captures everything, surfaces what's relevant, no manual curation needed. |
 | **QMD** | Lightweight, zero-dependency keyword search for OpenClaw workspaces. Best for fast local retrieval without external services. |
 | **memU** | 24/7 proactive agents that need to anticipate user needs. Best for always-on assistants that predict intent and act autonomously. |
@@ -147,8 +147,9 @@
 **Noosphere + Hindsight** is the strongest combination:
 
 - **Hindsight** handles **automatic capture and recall** — every turn, every session, zero effort
-- **Noosphere** handles **structured knowledge** — curated articles, research synthesis, human review, multi-provider orchestration
+- **Noosphere** handles **structured knowledge + proactive capture guidance** — curated articles, research synthesis, human review, multi-provider orchestration, and bundled guidance telling agents when to save important information
 - Noosphere's recall orchestrator can **fan out to Hindsight as a provider**, deduplicate results, and merge both sources into a single prompt-safe context block
+- Noosphere's memory capture instructions **guide agents to save** significant decisions, task completions, and error fixes to the wiki — turning passive recall into active knowledge building
 - Hindsight captures the ephemeral; Noosphere promotes the durable
 
 ```
