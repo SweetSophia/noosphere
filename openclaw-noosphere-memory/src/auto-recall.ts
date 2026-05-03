@@ -23,6 +23,38 @@ export const MAX_QUERY_LENGTH = 1_000;
 // Settings cache TTL in milliseconds (30 seconds)
 const SETTINGS_CACHE_TTL_MS = 30_000;
 
+/**
+ * Default memory capture instructions injected into the prompt to guide the agent
+ * on when and how to use the noosphere_save tool.
+ */
+const DEFAULT_MEMORY_CAPTURE_INSTRUCTIONS = `<noosphere_memory_capture>
+You have access to the noosphere_save tool to persist important information to a long-term memory wiki.
+
+WHEN TO SAVE:
+- After completing a significant task (deployment, bug fix, feature implementation)
+- When you fix an error or resolve an issue
+- When the user makes an important decision or architecture choice
+- When you discover or confirm an important fact about systems, procedures, or preferences
+- When the user explicitly asks you to "remember this" or "save this"
+
+HOW TO SAVE:
+- Use the noosphere_save tool with these parameters:
+  - topicId: The relevant topic (e.g., "engineering", "projects", "decisions", "workflows")
+  - title: A brief descriptive title (max 160 chars)
+  - content: The durable information to save (minimum 40 characters, meaningful prose)
+  - confidence: "high" for important facts/decisions, "medium" for task completions
+  - tags: Optional tags for categorization (e.g., ["server", "deployment", "error-fix"])
+
+WHAT NOT TO SAVE:
+- Transient acknowledgments ("thanks", "done", "ok", "sure")
+- Quick confirmations that aren't important
+- Information already clearly in the knowledge base
+- Secrets, credentials, API keys, or sensitive information
+- Content shorter than 40 characters or lacking meaningful prose
+
+The noosphere_save tool is available as a tool. Use it when you encounter important information worth preserving for future reference.
+</noosphere_memory_capture>`;
+
 interface SettingsCache {
   settings: NoosphereSettingsResponse | null;
   fetchedAt: number;
@@ -40,6 +72,8 @@ export interface NoosphereAutoRecallConfig {
   includeRecentTurns: boolean;
   recentTurnLimit: number;
   timeoutMs: number;
+  memoryCaptureInstructionsEnabled: boolean;
+  memoryCaptureInstructions: string;
 }
 
 export type RecallInjectionPosition = "prepend" | "system-prepend" | "system-append";
@@ -89,6 +123,8 @@ export function resolveAutoRecallConfig(rawConfig: unknown): NoosphereAutoRecall
       DEFAULT_AUTO_RECALL_TIMEOUT_MS,
       MAX_AUTO_RECALL_TIMEOUT_MS,
     ),
+    memoryCaptureInstructionsEnabled: readBoolean(config.memoryCaptureInstructionsEnabled) ?? true,
+    memoryCaptureInstructions: readString(config.memoryCaptureInstructions) ?? DEFAULT_MEMORY_CAPTURE_INSTRUCTIONS,
   };
 }
 
@@ -151,6 +187,8 @@ export function createNoosphereAutoRecallHook(
     ctx: BeforePromptBuildContextLike = {},
   ): Promise<PromptInjectionResult | void> => {
     const effectiveConfig = await getEffectiveConfig();
+
+    // Only proceed if auto-recall is enabled and agent is eligible
     if (!shouldAutoRecall(effectiveConfig, event, ctx, clientContext.config)) return;
 
     const query = buildAutoRecallQuery(event, effectiveConfig);
@@ -167,9 +205,23 @@ export function createNoosphereAutoRecallHook(
         },
         { timeoutMs: effectiveConfig.timeoutMs },
       );
-      const promptText = extractPromptInjectionText(response, effectiveConfig);
-      if (!promptText) return;
-      return buildInjectionResult(promptText, effectiveConfig.recallInjectionPosition);
+
+      // Build injection parts: instructions (if enabled) + recall results
+      const recallText = extractPromptInjectionText(response, effectiveConfig);
+
+      // Only inject if there's actual recall text to return
+      if (!recallText) return;
+
+      const injectionParts: string[] = [];
+      if (effectiveConfig.memoryCaptureInstructionsEnabled) {
+        injectionParts.push(effectiveConfig.memoryCaptureInstructions);
+      }
+      injectionParts.push(recallText);
+
+      return buildInjectionResult(
+        injectionParts.join("\n\n"),
+        effectiveConfig.recallInjectionPosition,
+      );
     } catch (error) {
       logger?.warn?.(`noosphere-memory: auto-recall skipped: ${formatHookError(error)}`);
       return;
