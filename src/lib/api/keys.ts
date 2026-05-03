@@ -22,6 +22,7 @@ export function generateApiKey(_name: string): {
   hash: string;
   prefix: string;
 } {
+  void _name; // Stored by caller; not needed in this function's implementation
   // Format: noo_<base64url_random_32_bytes>
   const randomBytes = crypto.randomBytes(32).toString("base64url");
   const raw = `noo_${randomBytes}`;

@@ -63,3 +63,15 @@ export function safeJsonParse(raw: string): unknown {
     return value;
   });
 }
+
+/**
+ * Convenience wrapper: read a bounded request body and parse it as JSON.
+ * Throws RequestBodyTooLargeError (413) or JsonDepthExceededError (413) on failure.
+ */
+export async function readBoundedJson(
+  request: NextRequest,
+  maxBytes: number = 64 * 1024,
+): Promise<unknown> {
+  const rawBody = await readBoundedJsonBody(request, maxBytes);
+  return safeJsonParse(rawBody);
+}

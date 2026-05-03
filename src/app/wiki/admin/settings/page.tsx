@@ -5,7 +5,6 @@ import { getRecallSettingsFromDB } from "@/lib/memory/api/settings";
 import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import { updateSettingsAction } from "./actions";
-import { DEFAULT_RECALL_SETTINGS } from "@/lib/memory/settings";
 import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";

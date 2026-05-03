@@ -104,6 +104,7 @@ export async function deleteArticle(
   articleSlug: string,
   _formData: FormData
 ): Promise<void> {
+  void _formData; // Server action — FormData injected by Next.js but not used directly
   await requireAdminSession();
 
   const topic = await prisma.topic.findUnique({ where: { slug: topicSlug } });
