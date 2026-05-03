@@ -328,6 +328,18 @@ export async function POST(request: NextRequest) {
     if (error instanceof ConflictError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
+    // Handle Prisma unique constraint violation from concurrent race condition
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code: string }).code === "P2002"
+    ) {
+      return NextResponse.json(
+        { error: "Article with this slug already exists in this topic" },
+        { status: 409 }
+      );
+    }
     console.error("[POST /api/articles]", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

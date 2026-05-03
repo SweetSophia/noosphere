@@ -26,7 +26,12 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get("file");
-    const alt = String(formData.get("alt") ?? "").replace(/<[^>]*>/g, "").trim() || "image";
+    // Sanitize alt text: strip all HTML tags (case-insensitive) and reject JS patterns
+    const rawAlt = String(formData.get("alt") ?? "").trim();
+    if (/on\w+\s*=|javascript:/i.test(rawAlt)) {
+      return NextResponse.json({ error: "Alt text contains disallowed patterns" }, { status: 400 });
+    }
+    const alt = rawAlt.replace(/<[^>]*>/gi, "").trim() || "image";
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "No image uploaded" }, { status: 400 });

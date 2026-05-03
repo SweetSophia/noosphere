@@ -95,10 +95,10 @@ export function detectMimeType(bytes: Uint8Array): string | null {
     }
   }
 
-  // SVG: detect by content (text starting with `<svg` after UTF-8 decode of first 100 bytes)
+  // SVG: scan UTF-8-decoded first 100 bytes for <svg element (handles XML decl, doctype, whitespace)
   const preamble = bytes.slice(0, Math.min(100, bytes.length));
   const text = new TextDecoder("utf-8", { fatal: false }).decode(preamble);
-  if (text.trim().startsWith("<svg")) {
+  if (/<svg\b/i.test(text)) {
     return "image/svg+xml";
   }
 
@@ -120,10 +120,11 @@ export async function saveUploadedImage(filename: string, bytes: Uint8Array) {
     throw new Error("Image type mismatch or unrecognized format");
   }
 
-  // SVG XSS prevention: reject files containing <script> tags
+  // SVG XSS prevention: reject files with dangerous SVG features
   if (ext === ".svg") {
     const content = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-    if (/<script/i.test(content)) {
+    // Block <script tags, javascript: URIs, event handlers (on*=), and foreignObject
+    if (/<script|on\w+\s*=|javascript:|foreignObject/i.test(content)) {
       throw new Error("Image type mismatch or unrecognized format");
     }
   }
