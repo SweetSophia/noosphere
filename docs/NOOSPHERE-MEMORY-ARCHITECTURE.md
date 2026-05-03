@@ -506,3 +506,117 @@ npm run memory:scheduler -- --status
 
 Behavioral test coverage lives in `src/__tests__/memory/` and should be updated
 with any changes to public contracts described here.
+
+---
+
+## 16. OpenClaw Bridge Architecture
+
+Source: `openclaw-noosphere-memory/src/`
+
+The OpenClaw bridge is a plugin that wires Noosphere into the OpenClaw agent runtime.
+It provides explicit tools (`noosphere_status`, `noosphere_recall`, `noosphere_get`,
+`noosphere_save`) and an optional `before_prompt_build` hook for auto-injection.
+
+### Plugin Structure
+
+```
+openclaw-noosphere-memory/src/
+├── index.ts           — plugin manifest (tools, hooks, capabilities)
+├── config.ts          — NoosphereMemoryPluginConfig + defaults
+├── client.ts          — NoosphereMemoryClient (HTTP API wrapper)
+├── auto-recall.ts     — before_prompt_build hook implementation
+├── corpus-supplement.ts — memory corpus supplement wiring
+├── format.ts          — XML output formatting
+├── types.ts           — shared TypeScript types
+└── tools/
+    ├── status.ts
+    ├── recall.ts
+    ├── get.ts
+    └── save.ts
+```
+
+### NoosphereAutoRecallConfig
+
+Source: `openclaw-noosphere-memory/src/config.ts`
+
+The auto-recall hook uses `NoosphereAutoRecallConfig`:
+
+| Field | Default | Purpose |
+| --- | --- | --- |
+| `autoRecall` | `false` | Enable/disable auto-injection |
+| `enabledAgents` | `[]` | Agent IDs allowed to receive auto-injection |
+| `chatTypes` | `["direct"]` | Chat types for injection (direct, group, etc.) |
+| `maxInjectedMemories` | `5` | Result count cap for injected recall |
+| `maxInjectedTokens` | `1200` | Token budget for injected recall |
+| `recallInjectionPosition` | `prepend` | Where to inject in prompt context |
+| `memoryCaptureInstructionsEnabled` | `true` | Inject memory capture guidance block |
+| `memoryCaptureInstructions` | (see below) | Custom override for capture guidance text |
+| `autoProviders` | `["noosphere"]` | Which providers to query in auto mode |
+| `baseUrl` | (required) | Noosphere API base URL |
+| `apiKey` | (required) | API key for authentication |
+| `timeoutMs` | `5000` | Request timeout |
+
+### Memory Capture Instructions
+
+When `memoryCaptureInstructionsEnabled: true`, the `before_prompt_build` hook injects
+a `<noosphere_memory_capture>` XML block containing guidance on when and how to use
+`noosphere_save`. The default instructions tell agents:
+
+**WHEN TO SAVE:**
+- After completing a significant task (deployment, bug fix, feature implementation)
+- After fixing an error or resolving a technical issue
+- After making an important architectural decision or trade-off
+- When the user explicitly asks to remember something
+
+**HOW TO SAVE (via `noosphere_save`):**
+- `topicId`: which topic to file under
+- `title`: concise description of what was learned
+- `content`: detailed explanation (≥40 chars, ≥6 words)
+- `confidence`: low/medium/high based on certainty
+- `tags`: relevant topic tags
+
+**WHAT NOT TO SAVE:**
+- Transient acknowledgments ("I'll check...", "Got it", "Sure")
+- Content that is too short (<40 chars or <6 words)
+- Secrets, API keys, tokens, or credentials
+- Non-durable operational text
+
+### Hook Injection Flow
+
+```
+before_prompt_build hook
+  → shouldAutoRecall() gates (enabled + agent + chat type + query length)
+  → fetchRecallSettings() from DB (with 30s cache)
+  → executeMemoryRecallRequest() via HTTP API
+  → extractPromptInjectionText() from response
+  → IF recall text exists AND memoryCaptureInstructionsEnabled:
+      → inject <noosphere_memory_capture> + <noosphere_auto_recall> blocks
+    ELSE IF recall text exists:
+      → inject <noosphere_auto_recall> only
+    ELSE:
+      → return undefined (no injection)
+```
+
+### Settings Cache
+
+The auto-recall hook caches recall settings from the DB for 30 seconds to avoid
+excessive API calls. This cache is invalidated on any settings change through the
+admin UI or API.
+
+### Backward Compatibility
+
+The plugin guards against older config shapes that may not have new fields:
+- `memoryCaptureInstructionsEnabled` guarded with `?? true`
+- `memoryCaptureInstructions` guarded with `?? DEFAULT_MEMORY_CAPTURE_INSTRUCTIONS`
+- `clientContext.client.settings` existence checked before calling
+
+### Safety Properties
+
+- **Fails open**: if the recall request times out or the server is unreachable,
+  the hook returns `undefined` and the prompt proceeds without memory injection.
+- **Instructions are informational**: they guide agent behavior but do not execute
+  saves. Agents must explicitly call `noosphere_save` to persist anything.
+- **No forced saves**: even with instructions enabled, saves only happen when the
+  agent decides to call the tool.
+- **Bounded results**: orchestrator enforces `maxInjectedMemories` and
+  `maxInjectedTokens` caps at the server level.

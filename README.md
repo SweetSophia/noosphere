@@ -66,6 +66,7 @@ The OpenClaw plugin/skill bridge is implemented and ships in this repository at 
 - **Use memory providers** through a normalized `MemoryProvider` interface.
 - **Compose recall** across Noosphere, Hindsight, and future providers.
 - **Generate prompt-ready recall blocks** with token/result budgets.
+- **Bundled memory capture instructions** — auto-injected guidance telling agents when/how to use `noosphere_save`; no manual policy files needed.
 - **Track promotion candidates** from repeated recall use.
 - **Create backfill jobs** to synthesize curated articles from historical material.
 - **Run scheduled memory jobs** locally via `npm run memory:scheduler`.
@@ -369,11 +370,20 @@ The OpenClaw bridge is a first-class citizen of this repository and lives at `op
 | `noosphere_status` | READ+ | Health check: providers, settings, capabilities |
 | `noosphere_recall` | READ+ | Multi-provider recall query (auto or inspection mode) |
 | `noosphere_get` | READ+ | Direct lookup by ID or canonical ref |
-| `noosphere_save` | WRITE+ | Save a memory candidate (draft only) |
+| `noosphere_save` | WRITE+ | Save a memory candidate (draft only, never auto-publishes) |
+
+**Auto-injection (via `before_prompt_build` hook):**
+
+When `autoRecall: true` and the agent is eligible, the hook injects two XML blocks into `prependContext`:
+
+1. `<noosphere_memory_capture>` — bundled guidance telling the agent when to save important information and how to use the `noosphere_save` tool (topicId, title, content, confidence, tags). Includes "what NOT to save" rules (transient text, secrets, short content).
+2. `<noosphere_auto_recall>` — ranked, deduplicated, conflict-resolved recall results within token budget.
+
+After compaction, the next `before_prompt_build` re-injects both blocks automatically.
 
 **Hooks:**
 
-- `before_prompt_build` — optional bounded Noosphere recall injection at prompt build time. Disabled by default to avoid duplicate Hindsight auto-injection.
+- `before_prompt_build` — optional bounded Noosphere recall injection with bundled memory capture instructions. When `autoRecall` is enabled and gates pass, injects `<noosphere_memory_capture>` block (when/how to save) alongside `<noosphere_auto_recall>` block (recall results). Disabled by default to avoid duplicate Hindsight auto-injection.
 
 **Corpus supplement:**
 
@@ -394,7 +404,8 @@ The plugin package is at `openclaw-noosphere-memory/` in this repository. Add it
       "autoRecall": false,
       "autoProviders": ["noosphere"],
       "maxInjectedMemories": 5,
-      "maxInjectedTokens": 2000
+      "maxInjectedTokens": 2000,
+      "memoryCaptureInstructionsEnabled": true
     }
   }
 }
@@ -453,14 +464,25 @@ Once explicit tools are verified, enable auto-recall in the plugin config:
     "autoRecall": true,
     "autoProviders": ["noosphere"],
     "maxInjectedMemories": 5,
-    "maxInjectedTokens": 2000
+    "maxInjectedTokens": 2000,
+    "memoryCaptureInstructionsEnabled": true
   }
 }
 ```
 
+**Memory capture instructions** are enabled by default (`memoryCaptureInstructionsEnabled: true`). When enabled, the `before_prompt_build` hook injects guidance telling the agent:
+
+- **When to save**: after completing significant tasks, error fixes, important decisions, or when the user asks to remember something
+- **How to save**: which parameters to pass to `noosphere_save` (topicId, title, content ≥40 chars, confidence level, tags)
+- **What NOT to save**: transient acknowledgments ("I'll check...", "Got it"), secrets, short content, or non-durable text
+
+Disable by setting `memoryCaptureInstructionsEnabled: false` if you prefer a purely recall-based workflow.
+
 ### Key Safety Properties
 
 - Auto-recall **fails open**: if Noosphere is unreachable or the request times out, the agent prompt proceeds with no memory injected rather than erroring.
+- **Memory capture instructions are informational**: the instructions guide agent behavior but do not execute saves. Agents must explicitly call `noosphere_save` to persist anything.
+- **No forced saves**: even with instructions enabled, agents only save when they decide to call `noosphere_save`.
 - **No secrets in error payloads**: `apiKey` and `baseUrl` are never exposed in tool error responses.
 - **Bounded response bodies**: server enforces a hard cap on response body size regardless of what the plugin requests.
 - **Draft-only saves**: `noosphere_save` creates candidate articles, never directly publishes curated knowledge.
