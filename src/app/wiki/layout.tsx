@@ -83,6 +83,11 @@ export default async function WikiLayout({
                   Trash
                 </Link>
               )}
+              {role === "ADMIN" && (
+                <Link href="/wiki/admin/settings" className="nav-link">
+                  Settings
+                </Link>
+              )}
             </nav>
           </div>
         </div>
