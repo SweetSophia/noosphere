@@ -192,7 +192,7 @@ export default async function ArticlePage({ params }: Props) {
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
-            code({ node, className, children, ...props }) {
+            code({ className, children, ...props }) {
               const inline = !className;
               const match = /language-(\w+)/.exec(className || "");
               if (!inline && match) {

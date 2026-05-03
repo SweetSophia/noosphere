@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiKey } from "@/lib/api/keys";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { buildTagConnections } from "@/lib/wiki";
+
 
 // Security limits
 const MAX_ARTICLE_CONTENT_SIZE = 1024 * 1024; // 1 MB per article

@@ -6,7 +6,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { PageHeader } from "@/components/wiki/PageHeader";
-import { EmptyState } from "@/components/wiki/EmptyState";
+
 import { DeleteArticleForm } from "@/components/wiki/DeleteArticleForm";
 import { ImageUploadPanel } from "@/components/wiki/ImageUploadPanel";
 import { MarkdownPreviewTabs } from "@/components/wiki/MarkdownPreviewTabs";

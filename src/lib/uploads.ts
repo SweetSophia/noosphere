@@ -40,10 +40,95 @@ export function assertAllowedImage(filename: string) {
   }
 }
 
+export function detectMimeType(bytes: Uint8Array): string | null {
+  if (bytes.length < 2) return null;
+
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (bytes.length >= 8) {
+    if (
+      bytes[0] === 0x89 &&
+      bytes[1] === 0x50 &&
+      bytes[2] === 0x4e &&
+      bytes[3] === 0x47 &&
+      bytes[4] === 0x0d &&
+      bytes[5] === 0x0a &&
+      bytes[6] === 0x1a &&
+      bytes[7] === 0x0a
+    ) {
+      return "image/png";
+    }
+  }
+
+  // JPEG: FF D8
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+    return "image/jpeg";
+  }
+
+  // GIF: 47 49 46 38 39 61 or 47 49 46 38 37 61
+  if (bytes.length >= 6) {
+    if (
+      bytes[0] === 0x47 &&
+      bytes[1] === 0x49 &&
+      bytes[2] === 0x46 &&
+      bytes[3] === 0x38 &&
+      (bytes[4] === 0x39 || bytes[4] === 0x37) &&
+      bytes[5] === 0x61
+    ) {
+      return "image/gif";
+    }
+  }
+
+  // WebP: 52 49 46 46 ... 57 45 42 50 (RIFF....WEBP)
+  // RIFF header at 0, WEBP at 8
+  if (bytes.length >= 12) {
+    if (
+      bytes[0] === 0x52 && // R
+      bytes[1] === 0x49 && // I
+      bytes[2] === 0x46 && // F
+      bytes[3] === 0x46 && // F
+      bytes[8] === 0x57 && // W
+      bytes[9] === 0x45 && // E
+      bytes[10] === 0x42 && // B
+      bytes[11] === 0x50 // P
+    ) {
+      return "image/webp";
+    }
+  }
+
+  // SVG: scan UTF-8-decoded first 100 bytes for <svg element (handles XML decl, doctype, whitespace)
+  const preamble = bytes.slice(0, Math.min(100, bytes.length));
+  const text = new TextDecoder("utf-8", { fatal: false }).decode(preamble);
+  if (/<svg\b/i.test(text)) {
+    return "image/svg+xml";
+  }
+
+  return null;
+}
+
 export async function saveUploadedImage(filename: string, bytes: Uint8Array) {
   assertAllowedImage(filename);
 
   const ext = getExtension(filename);
+  const detectedMime = detectMimeType(bytes);
+
+  if (detectedMime === null) {
+    throw new Error("Image type mismatch or unrecognized format");
+  }
+
+  const expectedMime = MIME_TYPES[ext];
+  if (detectedMime !== expectedMime) {
+    throw new Error("Image type mismatch or unrecognized format");
+  }
+
+  // SVG XSS prevention: reject files with dangerous SVG features
+  if (ext === ".svg") {
+    const content = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    // Block <script tags, javascript: URIs, event handlers (on*=), and foreignObject
+    if (/<script|on\w+\s*=|javascript:|foreignObject/i.test(content)) {
+      throw new Error("Image type mismatch or unrecognized format");
+    }
+  }
+
   const base = sanitizeFilename(path.basename(filename, ext));
   const unique = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
   const finalName = `${base || "image"}-${unique}${ext}`;

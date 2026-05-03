@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { requirePermission } from "@/lib/api/auth";
+import { readBoundedJson, RequestBodyTooLargeError, JsonDepthExceededError } from "@/lib/api/body";
 import { executeMemoryGetRequest } from "@/lib/memory/api/get";
 
 export async function POST(request: NextRequest) {
@@ -11,12 +12,12 @@ export async function POST(request: NextRequest) {
 
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: "Invalid JSON body" },
-      { status: 400 },
-    );
+    body = await readBoundedJson(request);
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError || error instanceof JsonDepthExceededError) {
+      return NextResponse.json({ error: error.message }, { status: 413 });
+    }
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   try {

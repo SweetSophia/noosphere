@@ -251,16 +251,6 @@ export async function POST(request: NextRequest) {
     }
 
     // Check slug uniqueness within topic
-    const existing = await prisma.article.findUnique({
-      where: { topicId_slug: { topicId, slug } },
-    });
-    if (existing) {
-      return NextResponse.json(
-        { error: "Article with this slug already exists in this topic" },
-        { status: 409 }
-      );
-    }
-
     // Validate tags is an array of strings
     if (tags !== undefined && (!Array.isArray(tags) || !(tags as unknown[]).every((t) => typeof t === "string"))) {
       return NextResponse.json(
@@ -273,6 +263,17 @@ export async function POST(request: NextRequest) {
     const tagConnections = await buildTagConnections(tags ?? []);
 
     const article = await prisma.$transaction(async (tx) => {
+      // Race-condition fix: check slug uniqueness INSIDE the transaction so the
+      // unique constraint violation is impossible to trigger from outside.
+      // If a concurrent request creates the same slug between our check and
+      // insert, Prisma's unique constraint catches it — we convert that to 409.
+      const existing = await tx.article.findUnique({
+        where: { topicId_slug: { topicId, slug } },
+      });
+      if (existing) {
+        throw new ConflictError("Article with this slug already exists in this topic");
+      }
+
       const created = await tx.article.create({
         data: {
           title,
@@ -324,7 +325,29 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (error) {
+    if (error instanceof ConflictError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    // Handle Prisma unique constraint violation from concurrent race condition
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code: string }).code === "P2002"
+    ) {
+      return NextResponse.json(
+        { error: "Article with this slug already exists in this topic" },
+        { status: 409 }
+      );
+    }
     console.error("[POST /api/articles]", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+class ConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConflictError";
   }
 }

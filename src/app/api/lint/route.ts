@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
   });
 
   const articleMap = new Map(articles.map((a) => [a.slug, a]));
-  const articleIdMap = new Map(articles.map((a) => [a.id, a]));
+
   const topicSlugSet = new Set(articles.map((a) => a.topic.slug));
 
   // ── 1. Orphan articles ──
@@ -153,7 +153,7 @@ export async function POST(request: NextRequest) {
       );
       issues.push({
         type: "stale",
-        severity: daysSince > staleDays * 2 ? "low" : "low",
+        severity: daysSince > staleDays * 3 ? "high" : daysSince > staleDays * 2 ? "medium" : "low",
         articleId: a.id,
         title: a.title,
         details: `Not updated in ${daysSince} days (threshold: ${staleDays}).`,
