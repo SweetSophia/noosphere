@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { NoosphereRecallRequest, NoosphereRecallResponse, NoosphereSettingsResponse } from "./client.js";
 import {
   clampTimeout,
@@ -74,6 +75,10 @@ export interface NoosphereAutoRecallConfig {
   timeoutMs: number;
   memoryCaptureInstructionsEnabled: boolean;
   memoryCaptureInstructions: string;
+  // Session pattern filtering (Hindsight-inspired)
+  ignoreSessionPatterns: string[];
+  statelessSessionPatterns: string[];
+  skipStatelessSessions: boolean;
 }
 
 export type RecallInjectionPosition = "prepend" | "system-prepend" | "system-append";
@@ -86,6 +91,7 @@ export interface NoospherePluginLogger {
 
 export interface BeforePromptBuildEventLike {
   prompt?: unknown;
+  rawMessage?: unknown; // Hindsight-inspired: clean user text without metadata envelopes
   messages?: unknown[];
 }
 
@@ -125,6 +131,10 @@ export function resolveAutoRecallConfig(rawConfig: unknown): NoosphereAutoRecall
     ),
     memoryCaptureInstructionsEnabled: readBoolean(config.memoryCaptureInstructionsEnabled) ?? true,
     memoryCaptureInstructions: readString(config.memoryCaptureInstructions) ?? DEFAULT_MEMORY_CAPTURE_INSTRUCTIONS,
+    // Session pattern filtering
+    ignoreSessionPatterns: readStringArray(config.ignoreSessionPatterns) ?? [],
+    statelessSessionPatterns: readStringArray(config.statelessSessionPatterns) ?? [],
+    skipStatelessSessions: readBoolean(config.skipStatelessSessions) ?? true,
   };
 }
 
@@ -135,6 +145,9 @@ export function createNoosphereAutoRecallHook(
 ) {
   const staticConfig = resolveAutoRecallConfig(rawConfig);
   const settingsCache: SettingsCache = { settings: null, fetchedAt: 0 };
+
+  // In-flight recall deduplication (Hindsight-inspired)
+  const inflightRecalls = new Map<string, Promise<NoosphereRecallResponse>>();
 
   /**
    * Fetches recall settings from the DB (with 30s cache TTL).
@@ -188,6 +201,25 @@ export function createNoosphereAutoRecallHook(
   ): Promise<PromptInjectionResult | void> => {
     const effectiveConfig = await getEffectiveConfig();
 
+    // Session pattern filtering (Hindsight-inspired)
+    const sessionKey = ctx.sessionKey;
+    if (sessionKey) {
+      // Check ignoreSessionPatterns first
+      if (effectiveConfig.ignoreSessionPatterns.length > 0) {
+        if (matchesSessionPattern(sessionKey, effectiveConfig.ignoreSessionPatterns)) {
+          logger?.debug?.(`[Noosphere] Skipping recall: session '${sessionKey}' matches ignoreSessionPatterns`);
+          return;
+        }
+      }
+      // Check statelessSessionPatterns
+      if (effectiveConfig.skipStatelessSessions && effectiveConfig.statelessSessionPatterns.length > 0) {
+        if (matchesSessionPattern(sessionKey, effectiveConfig.statelessSessionPatterns)) {
+          logger?.debug?.(`[Noosphere] Skipping recall: session '${sessionKey}' matches statelessSessionPatterns (skipStatelessSessions=true)`);
+          return;
+        }
+      }
+    }
+
     // Only proceed if auto-recall is enabled and agent is eligible
     if (!shouldAutoRecall(effectiveConfig, event, ctx, clientContext.config)) return;
 
@@ -195,16 +227,28 @@ export function createNoosphereAutoRecallHook(
     if (!query || query.length < effectiveConfig.minQueryLength) return;
 
     try {
-      const response = await clientContext.client.recall(
-        {
-          query,
-          mode: "auto",
-          resultCap: effectiveConfig.resultCap,
-          tokenBudget: effectiveConfig.tokenBudget,
-          providers: effectiveConfig.autoProviders,
-        },
-        { timeoutMs: effectiveConfig.timeoutMs },
-      );
+      // Deduplicate concurrent recalls for the same query (Hindsight-inspired)
+      const normalizedQuery = query.trim().toLowerCase().replace(/\s+/g, " ");
+      const queryHash = createHash("sha256").update(normalizedQuery).digest("hex").slice(0, 16);
+      const recallKey = queryHash;
+
+      let recallPromise = inflightRecalls.get(recallKey);
+      if (!recallPromise) {
+        recallPromise = clientContext.client.recall(
+          {
+            query,
+            mode: "auto",
+            resultCap: effectiveConfig.resultCap,
+            tokenBudget: effectiveConfig.tokenBudget,
+            providers: effectiveConfig.autoProviders,
+          },
+          { timeoutMs: effectiveConfig.timeoutMs },
+        );
+        inflightRecalls.set(recallKey, recallPromise);
+        void recallPromise.catch(() => {}).finally(() => inflightRecalls.delete(recallKey));
+      }
+
+      const response = await recallPromise;
 
       // Build injection parts: instructions (if enabled) + recall results
       const recallText = extractPromptInjectionText(response, effectiveConfig);
@@ -236,20 +280,95 @@ export function createNoosphereAutoRecallHook(
   return hook;
 }
 
+/**
+ * Build recall query from the event, using rawMessage first (like Hindsight).
+ * Strips channel metadata envelopes from the query text.
+ */
 export function buildAutoRecallQuery(event: BeforePromptBuildEventLike, config: NoosphereAutoRecallConfig): string | undefined {
+  // Hindsight-inspired: use rawMessage first (clean user text), then fall back to prompt
+  const rawMessage = readString(event.rawMessage);
   const prompt = readString(event.prompt);
-  if (!prompt) return undefined;
 
-  const parts = [prompt];
+  // Try rawMessage first, then prompt as fallback
+  let recallQuery = rawMessage ?? prompt;
+  if (!recallQuery) return undefined;
+
+  // Strip channel metadata envelopes (Hindsight-inspired)
+  recallQuery = stripMetadataEnvelopes(recallQuery);
+
+  // If rawMessage was empty/invalid but prompt worked, clean the prompt too
+  if (!rawMessage && prompt) {
+    recallQuery = stripMetadataEnvelopes(prompt);
+  }
+
+  // Also clean the rawMessage if we're using it directly
+  if (rawMessage) {
+    recallQuery = stripMetadataEnvelopes(rawMessage);
+  }
+
+  // Build parts: recent turns (if enabled) + current query
+  const parts: string[] = [];
+
   if (config.includeRecentTurns && Array.isArray(event.messages) && config.recentTurnLimit > 0) {
     const recentTurns = dedupeTurns(extractRecentUserTurns(event.messages, config.recentTurnLimit))
-      .filter((turn) => turn && turn !== prompt);
+      .filter((turn) => {
+        if (!turn) return false;
+        const cleaned = stripMetadataEnvelopes(turn);
+        return cleaned && cleaned !== recallQuery;
+      });
     if (recentTurns.length > 0) {
-      parts.unshift(...recentTurns);
+      parts.push(...recentTurns);
     }
   }
 
+  // Add the current query
+  if (recallQuery && recallQuery.trim().length >= 5) {
+    parts.push(recallQuery.trim());
+  }
+
+  if (parts.length === 0) return undefined;
+
   return parts.join("\n\n").slice(-MAX_QUERY_LENGTH);
+}
+
+/**
+ * Strip channel metadata envelopes from text (Hindsight-inspired).
+ * Removes patterns like:
+ * - [Telegram 123456789] message
+ * - [Channel metadata ...] blocks
+ * - [from: SenderName] metadata
+ * - System: ... prefixes
+ * - Conversation info (untrusted metadata) blocks
+ */
+function stripMetadataEnvelopes(text: string): string {
+  if (!text) return text;
+
+  let cleaned = text;
+
+  // Remove leading "System: ..." lines (from prependSystemEvents)
+  cleaned = cleaned.replace(/^(?:System:.*\n)+\n?/gm, "");
+
+  // Remove session abort hints
+  cleaned = cleaned.replace(/^Note: The previous agent run was aborted[^\n]*\n\n/, "");
+
+  // Remove channel envelope headers like [Telegram 1782981446] or [TelegramDirect 1782981446]
+  cleaned = cleaned.replace(/^\[Telegram[^\]]*\]\s*/i, "");
+
+  // Remove [ChannelName ...] style envelope headers
+  cleaned = cleaned.replace(/\[[A-Z][A-Za-z]*(?:\s[^\]]+)?\]\s*/g, "");
+
+  // Remove trailing [from: SenderName] metadata (group chats)
+  cleaned = cleaned.replace(/\n\[from:[^\]]*\]\s*$/, "");
+
+  // Remove conversation info metadata blocks
+  cleaned = cleaned.replace(/^\s*conversation info\s*\(untrusted metadata\).*$/gim, "");
+  cleaned = cleaned.replace(/^\s*\(untrusted metadata\).*$/gim, "");
+  cleaned = cleaned.replace(/^\s*\[Channel metadata[^\]]*\].*$/gim, "");
+
+  // Remove any remaining channel envelope patterns
+  cleaned = cleaned.replace(/^\s*\[[^\]]*\]\s*/gm, "");
+
+  return cleaned.trim();
 }
 
 function buildInjectionResult(promptText: string, position: RecallInjectionPosition): PromptInjectionResult {
@@ -281,6 +400,36 @@ function dedupeTurns(turns: string[]): string[] {
   return deduped;
 }
 
+/**
+ * Match a session key against glob patterns (Hindsight-inspired).
+ * Supports:
+ * - * matches any characters except colon
+ * - ** matches any characters including colon
+ */
+function matchesSessionPattern(sessionKey: string, patterns: string[]): boolean {
+  for (const pattern of patterns) {
+    if (matchGlob(sessionKey, pattern)) return true;
+  }
+  return false;
+}
+
+/**
+ * Simple glob matching for session patterns.
+ * * matches anything except colon
+ * ** matches anything including colon
+ */
+function matchGlob(str: string, pattern: string): boolean {
+  // Convert glob pattern to regex
+  const regexPattern = pattern
+    .replace(/[.+?^${}()|[\]\\]/g, "\\$&") // Escape special regex chars except * and **
+    .replace(/\*\*/g, "⟨DOUBLE_STAR⟩") // Placeholder for **
+    .replace(/\*/g, "[^:]*") // * matches anything except colon
+    .replace(/⟨DOUBLE_STAR⟩/g, ".*"); // ** matches anything including colon
+
+  const regex = new RegExp(`^${regexPattern}$`);
+  return regex.test(str);
+}
+
 function shouldAutoRecall(
   config: NoosphereAutoRecallConfig,
   event: BeforePromptBuildEventLike,
@@ -289,7 +438,10 @@ function shouldAutoRecall(
 ): boolean {
   if (!config.autoRecall) return false;
   if (!resolvedConfig.apiKey) return false;
-  if (!readString(event.prompt)) return false;
+
+  // Hindsight-inspired: check rawMessage first, then prompt
+  const hasMessage = readString(event.rawMessage) || readString(event.prompt);
+  if (!hasMessage) return false;
 
   if (config.enabledAgents.length > 0 && !matchesAny(config.enabledAgents, ctx.agentId)) return false;
   if (config.allowedChatTypes.length > 0 && !matchesAny(config.allowedChatTypes, resolveChatType(ctx))) return false;
