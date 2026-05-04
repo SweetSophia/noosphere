@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { NoosphereRecallRequest, NoosphereRecallResponse, NoosphereSettingsResponse } from "./client.js";
 import {
   clampTimeout,
@@ -146,8 +145,52 @@ export function createNoosphereAutoRecallHook(
   const staticConfig = resolveAutoRecallConfig(rawConfig);
   const settingsCache: SettingsCache = { settings: null, fetchedAt: 0 };
 
-  // In-flight recall deduplication (Hindsight-inspired)
+  // Precompiled glob regexes (cached per config update)
+  const compiledIgnorePatterns: RegExp[] = [];
+  const compiledStatelessPatterns: RegExp[] = [];
+  let lastCompiledPatterns: string[] = [];
+
+  // In-flight recall deduplication - key is normalized query string
   const inflightRecalls = new Map<string, Promise<NoosphereRecallResponse>>();
+
+  /**
+   * Compile glob patterns to regexes once and cache them.
+   * Only recompiles when the pattern list changes.
+   */
+  function ensureCompiledPatterns(patterns: string[], compiled: RegExp[]): RegExp[] {
+    if (patterns.length !== lastCompiledPatterns.length) {
+      lastCompiledPatterns = [...patterns];
+      compiled.length = 0;
+      for (const pattern of patterns) {
+        compiled.push(compileGlobPattern(pattern));
+      }
+    }
+    return compiled;
+  }
+
+  /**
+   * Compile a single glob pattern to a RegExp.
+   * * matches anything except colon
+   * ** matches anything including colon
+   */
+  function compileGlobPattern(pattern: string): RegExp {
+    const regexPattern = pattern
+      .replace(/[.+?^${}()|[\]\\]/g, "\\$&") // Escape special regex chars except * and **
+      .replace(/\*\*/g, "⟨DOUBLE_STAR⟩") // Placeholder for **
+      .replace(/\*/g, "[^:]*") // * matches anything except colon
+      .replace(/⟨DOUBLE_STAR⟩/g, ".*"); // ** matches anything including colon
+    return new RegExp(`^${regexPattern}$`);
+  }
+
+  /**
+   * Check if a session key matches any of the compiled patterns.
+   */
+  function matchesSessionPatternCached(sessionKey: string, compiledPatterns: RegExp[]): boolean {
+    for (const regex of compiledPatterns) {
+      if (regex.test(sessionKey)) return true;
+    }
+    return false;
+  }
 
   /**
    * Fetches recall settings from the DB (with 30s cache TTL).
@@ -201,19 +244,21 @@ export function createNoosphereAutoRecallHook(
   ): Promise<PromptInjectionResult | void> => {
     const effectiveConfig = await getEffectiveConfig();
 
-    // Session pattern filtering (Hindsight-inspired)
+    // Session pattern filtering (Hindsight-inspired) with cached regexes
     const sessionKey = ctx.sessionKey;
     if (sessionKey) {
       // Check ignoreSessionPatterns first
       if (effectiveConfig.ignoreSessionPatterns.length > 0) {
-        if (matchesSessionPattern(sessionKey, effectiveConfig.ignoreSessionPatterns)) {
+        const compiled = ensureCompiledPatterns(effectiveConfig.ignoreSessionPatterns, compiledIgnorePatterns);
+        if (matchesSessionPatternCached(sessionKey, compiled)) {
           logger?.debug?.(`[Noosphere] Skipping recall: session '${sessionKey}' matches ignoreSessionPatterns`);
           return;
         }
       }
       // Check statelessSessionPatterns
       if (effectiveConfig.skipStatelessSessions && effectiveConfig.statelessSessionPatterns.length > 0) {
-        if (matchesSessionPattern(sessionKey, effectiveConfig.statelessSessionPatterns)) {
+        const compiled = ensureCompiledPatterns(effectiveConfig.statelessSessionPatterns, compiledStatelessPatterns);
+        if (matchesSessionPatternCached(sessionKey, compiled)) {
           logger?.debug?.(`[Noosphere] Skipping recall: session '${sessionKey}' matches statelessSessionPatterns (skipStatelessSessions=true)`);
           return;
         }
@@ -227,12 +272,10 @@ export function createNoosphereAutoRecallHook(
     if (!query || query.length < effectiveConfig.minQueryLength) return;
 
     try {
-      // Deduplicate concurrent recalls for the same query (Hindsight-inspired)
+      // Deduplicate concurrent recalls for the same normalized query
       const normalizedQuery = query.trim().toLowerCase().replace(/\s+/g, " ");
-      const queryHash = createHash("sha256").update(normalizedQuery).digest("hex").slice(0, 16);
-      const recallKey = queryHash;
 
-      let recallPromise = inflightRecalls.get(recallKey);
+      let recallPromise = inflightRecalls.get(normalizedQuery);
       if (!recallPromise) {
         recallPromise = clientContext.client.recall(
           {
@@ -244,8 +287,8 @@ export function createNoosphereAutoRecallHook(
           },
           { timeoutMs: effectiveConfig.timeoutMs },
         );
-        inflightRecalls.set(recallKey, recallPromise);
-        void recallPromise.catch(() => {}).finally(() => inflightRecalls.delete(recallKey));
+        inflightRecalls.set(normalizedQuery, recallPromise);
+        void recallPromise.catch(() => {}).finally(() => inflightRecalls.delete(normalizedQuery));
       }
 
       const response = await recallPromise;
@@ -282,49 +325,47 @@ export function createNoosphereAutoRecallHook(
 
 /**
  * Build recall query from the event, using rawMessage first (like Hindsight).
- * Strips channel metadata envelopes from the query text.
+ * Strips OpenClaw-specific channel metadata envelopes from the query text.
  */
 export function buildAutoRecallQuery(event: BeforePromptBuildEventLike, config: NoosphereAutoRecallConfig): string | undefined {
-  // Hindsight-inspired: use rawMessage first (clean user text), then fall back to prompt
-  const rawMessage = readString(event.rawMessage);
-  const prompt = readString(event.prompt);
+  // Hindsight-inspired: use rawMessage first (clean user text), fallback to prompt
+  const source = readString(event.rawMessage) ?? readString(event.prompt);
+  if (!source) return undefined;
 
-  // Try rawMessage first, then prompt as fallback
-  let recallQuery = rawMessage ?? prompt;
-  if (!recallQuery) return undefined;
-
-  // Strip channel metadata envelopes (Hindsight-inspired)
-  recallQuery = stripMetadataEnvelopes(recallQuery);
-
-  // If rawMessage was empty/invalid but prompt worked, clean the prompt too
-  if (!rawMessage && prompt) {
-    recallQuery = stripMetadataEnvelopes(prompt);
-  }
-
-  // Also clean the rawMessage if we're using it directly
-  if (rawMessage) {
-    recallQuery = stripMetadataEnvelopes(rawMessage);
-  }
+  // Clean the source once - removes OpenClaw channel metadata envelopes
+  const recallQuery = stripMetadataEnvelopes(source);
+  if (!recallQuery || recallQuery.length < 5) return undefined;
 
   // Build parts: recent turns (if enabled) + current query
   const parts: string[] = [];
 
   if (config.includeRecentTurns && Array.isArray(event.messages) && config.recentTurnLimit > 0) {
-    const recentTurns = dedupeTurns(extractRecentUserTurns(event.messages, config.recentTurnLimit))
-      .filter((turn) => {
-        if (!turn) return false;
-        const cleaned = stripMetadataEnvelopes(turn);
-        return cleaned && cleaned !== recallQuery;
-      });
-    if (recentTurns.length > 0) {
-      parts.push(...recentTurns);
+    // Extract, clean, and deduplicate recent turns
+    const recentTurns = extractRecentUserTurns(event.messages, config.recentTurnLimit);
+    const cleanedTurns: string[] = [];
+    const seen = new Set<string>();
+
+    for (const turn of recentTurns) {
+      // Clean the turn
+      const cleaned = stripMetadataEnvelopes(turn);
+      const key = cleaned.trim().toLowerCase();
+
+      // Skip empty, too short, or duplicates
+      if (!cleaned || cleaned.length < 5 || seen.has(key)) continue;
+      // Skip if same as the main recall query
+      if (cleaned.toLowerCase() === recallQuery.toLowerCase()) continue;
+
+      seen.add(key);
+      cleanedTurns.push(cleaned);
+    }
+
+    if (cleanedTurns.length > 0) {
+      parts.push(...cleanedTurns);
     }
   }
 
-  // Add the current query
-  if (recallQuery && recallQuery.trim().length >= 5) {
-    parts.push(recallQuery.trim());
-  }
+  // Add the main query
+  parts.push(recallQuery);
 
   if (parts.length === 0) return undefined;
 
@@ -332,13 +373,8 @@ export function buildAutoRecallQuery(event: BeforePromptBuildEventLike, config: 
 }
 
 /**
- * Strip channel metadata envelopes from text (Hindsight-inspired).
- * Removes patterns like:
- * - [Telegram 123456789] message
- * - [Channel metadata ...] blocks
- * - [from: SenderName] metadata
- * - System: ... prefixes
- * - Conversation info (untrusted metadata) blocks
+ * Strip OpenClaw channel metadata envelopes from text.
+ * Only targets OpenClaw-specific patterns, not general bracketed text.
  */
 function stripMetadataEnvelopes(text: string): string {
   if (!text) return text;
@@ -351,22 +387,28 @@ function stripMetadataEnvelopes(text: string): string {
   // Remove session abort hints
   cleaned = cleaned.replace(/^Note: The previous agent run was aborted[^\n]*\n\n/, "");
 
-  // Remove channel envelope headers like [Telegram 1782981446] or [TelegramDirect 1782981446]
-  cleaned = cleaned.replace(/^\[Telegram[^\]]*\]\s*/i, "");
+  // Remove OpenClaw channel envelope headers: [Telegram ...], [TelegramDirect ...], [ChannelName ...]
+  // These are specifically OpenClaw's injected channel metadata, not general user content
+  cleaned = cleaned.replace(/^\[Telegram[^\]]*\]\s*/gim, "");
+  cleaned = cleaned.replace(/^\[Channel[^\]]*\]\s*/gim, "");
+  cleaned = cleaned.replace(/^\[Discord[^\]]*\]\s*/gim, "");
+  cleaned = cleaned.replace(/^\[Slack[^\]]*\]\s*/gim, "");
+  cleaned = cleaned.replace(/^\[Signal[^\]]*\]\s*/gim, "");
+  cleaned = cleaned.replace(/^\[WhatsApp[^\]]*\]\s*/gim, "");
 
-  // Remove [ChannelName ...] style envelope headers
-  cleaned = cleaned.replace(/\[[A-Z][A-Za-z]*(?:\s[^\]]+)?\]\s*/g, "");
+  // Remove conversation info metadata blocks (OpenClaw-injected)
+  cleaned = cleaned.replace(/^---\nConversation info \(untrusted metadata\)[^\n]*\n```json[\s\S]*?```\n?/gm, "");
+  cleaned = cleaned.replace(/^Conversation info \(untrusted metadata\)[^\n]*\n```json[\s\S]*?```\n?/gm, "");
+
+  // Remove sender metadata blocks (OpenClaw-injected)
+  cleaned = cleaned.replace(/^---\nSender \(untrusted metadata\)[^\n]*\n```json[\s\S]*?```\n?/gm, "");
+  cleaned = cleaned.replace(/^Sender \(untrusted metadata\)[^\n]*\n```json[\s\S]*?```\n?/gm, "");
 
   // Remove trailing [from: SenderName] metadata (group chats)
   cleaned = cleaned.replace(/\n\[from:[^\]]*\]\s*$/, "");
 
-  // Remove conversation info metadata blocks
-  cleaned = cleaned.replace(/^\s*conversation info\s*\(untrusted metadata\).*$/gim, "");
-  cleaned = cleaned.replace(/^\s*\(untrusted metadata\).*$/gim, "");
-  cleaned = cleaned.replace(/^\s*\[Channel metadata[^\]]*\].*$/gim, "");
-
-  // Remove any remaining channel envelope patterns
-  cleaned = cleaned.replace(/^\s*\[[^\]]*\]\s*/gm, "");
+  // Remove trailing --- markers from metadata blocks
+  cleaned = cleaned.replace(/\n---$/, "");
 
   return cleaned.trim();
 }
@@ -388,46 +430,34 @@ function readInjectionPosition(value: unknown): RecallInjectionPosition {
   return "prepend";
 }
 
-function dedupeTurns(turns: string[]): string[] {
-  const seen = new Set<string>();
-  const deduped: string[] = [];
-  for (const turn of turns) {
-    const key = turn.trim();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(turn);
+function extractRecentUserTurns(messages: unknown[], limit: number): string[] {
+  const turns: string[] = [];
+  for (let index = messages.length - 1; index >= 0 && turns.length < limit; index -= 1) {
+    const message = messages[index];
+    if (!isRecord(message)) continue;
+    const role = readString(message.role);
+    if (role !== "user") continue;
+    const text = extractMessageText(message.content);
+    if (text) turns.push(text);
   }
-  return deduped;
+  return turns.reverse();
 }
 
-/**
- * Match a session key against glob patterns (Hindsight-inspired).
- * Supports:
- * - * matches any characters except colon
- * - ** matches any characters including colon
- */
-function matchesSessionPattern(sessionKey: string, patterns: string[]): boolean {
-  for (const pattern of patterns) {
-    if (matchGlob(sessionKey, pattern)) return true;
+function extractMessageText(content: unknown): string | undefined {
+  if (typeof content === "string") return content.trim() || undefined;
+  if (Array.isArray(content)) {
+    const text = content
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (isRecord(item) && typeof item.text === "string") return item.text;
+        return undefined;
+      })
+      .filter((item): item is string => !!item && !!item.trim())
+      .join("\n");
+    return text.trim() || undefined;
   }
-  return false;
-}
-
-/**
- * Simple glob matching for session patterns.
- * * matches anything except colon
- * ** matches anything including colon
- */
-function matchGlob(str: string, pattern: string): boolean {
-  // Convert glob pattern to regex
-  const regexPattern = pattern
-    .replace(/[.+?^${}()|[\]\\]/g, "\\$&") // Escape special regex chars except * and **
-    .replace(/\*\*/g, "⟨DOUBLE_STAR⟩") // Placeholder for **
-    .replace(/\*/g, "[^:]*") // * matches anything except colon
-    .replace(/⟨DOUBLE_STAR⟩/g, ".*"); // ** matches anything including colon
-
-  const regex = new RegExp(`^${regexPattern}$`);
-  return regex.test(str);
+  if (isRecord(content) && typeof content.text === "string") return content.text.trim() || undefined;
+  return undefined;
 }
 
 function shouldAutoRecall(
@@ -464,36 +494,6 @@ function wrapPromptInjectionText(promptText: string): string {
     promptText,
     "</noosphere_auto_recall>",
   ].join("\n");
-}
-
-function extractRecentUserTurns(messages: unknown[], limit: number): string[] {
-  const turns: string[] = [];
-  for (let index = messages.length - 1; index >= 0 && turns.length < limit; index -= 1) {
-    const message = messages[index];
-    if (!isRecord(message)) continue;
-    const role = readString(message.role);
-    if (role !== "user") continue;
-    const text = extractMessageText(message.content);
-    if (text) turns.push(text);
-  }
-  return turns.reverse();
-}
-
-function extractMessageText(content: unknown): string | undefined {
-  if (typeof content === "string") return content.trim() || undefined;
-  if (Array.isArray(content)) {
-    const text = content
-      .map((item) => {
-        if (typeof item === "string") return item;
-        if (isRecord(item) && typeof item.text === "string") return item.text;
-        return undefined;
-      })
-      .filter((item): item is string => !!item && !!item.trim())
-      .join("\n");
-    return text.trim() || undefined;
-  }
-  if (isRecord(content) && typeof content.text === "string") return content.text.trim() || undefined;
-  return undefined;
 }
 
 function resolveChatType(ctx: BeforePromptBuildContextLike): string | undefined {
