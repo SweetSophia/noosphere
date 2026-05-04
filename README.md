@@ -431,25 +431,39 @@ After compaction, the next `before_prompt_build` re-injects both blocks automati
 
 ### Setup (OpenClaw Agent)
 
-**1. Load the plugin**
+**⚠️ CRITICAL: `allowPromptInjection` Setting**
 
-The plugin package is at `openclaw-noosphere-memory/` in this repository. Add it to your OpenClaw agent's plugin config:
+For the `before_prompt_build` hook to actually inject memory capture instructions and recall results into the agent's context, you **must** set `allowPromptInjection: true` in the `hooks` section of the plugin entry:
 
 ```json
 {
   "plugins": {
-    "noosphere-memory": {
-      "baseUrl": "http://100.122.171.30:4400",
-      "apiKey": "noo_your_key_here",
-      "autoRecall": false,
-      "autoProviders": ["noosphere"],
-      "maxInjectedMemories": 5,
-      "maxInjectedTokens": 2000,
-      "memoryCaptureInstructionsEnabled": true
+    "entries": {
+      "noosphere-memory": {
+        "enabled": true,
+        "config": {
+          "baseUrl": "http://100.111.85.48:4400",
+          "apiKey": "noo_your_key_here",
+          "autoRecall": false,
+          "autoProviders": ["noosphere"],
+          "maxInjectedMemories": 5,
+          "maxInjectedTokens": 2000,
+          "memoryCaptureInstructionsEnabled": true
+        },
+        "hooks": {
+          "allowPromptInjection": true
+        }
+      }
     }
   }
 }
 ```
+
+Without `allowPromptInjection: true`, the hook runs but the injection is blocked by the gateway — agents will not see memory capture guidance or recall results auto-injected.
+
+**1. Load the plugin**
+
+The plugin package is at `openclaw-noosphere-memory/` in this repository. Add it to your OpenClaw agent's plugin config (include the `hooks` section as shown above):
 
 **2. Keys and permissions**
 
@@ -496,16 +510,21 @@ Keep `autoRecall: false` initially. Verify explicit tools first (`noosphere_stat
 
 **5. Enable auto-recall (optional)**
 
-Once explicit tools are verified, enable auto-recall in the plugin config:
+Once explicit tools are verified, enable auto-recall in the plugin config. Make sure `allowPromptInjection: true` is set in the `hooks` section:
 
 ```json
 {
   "noosphere-memory": {
-    "autoRecall": true,
-    "autoProviders": ["noosphere"],
-    "maxInjectedMemories": 5,
-    "maxInjectedTokens": 2000,
-    "memoryCaptureInstructionsEnabled": true
+    "config": {
+      "autoRecall": true,
+      "autoProviders": ["noosphere"],
+      "maxInjectedMemories": 5,
+      "maxInjectedTokens": 2000,
+      "memoryCaptureInstructionsEnabled": true
+    },
+    "hooks": {
+      "allowPromptInjection": true
+    }
   }
 }
 ```
@@ -534,6 +553,41 @@ Disable by setting `memoryCaptureInstructionsEnabled: false` if you prefer a pur
 - Default mode is **conservative coexistence**: Hindsight keeps its own auto-recall; Noosphere auto-recalls curated Noosphere content only. This avoids double injection.
 - **Coordinated mode**: set Hindsight `autoRecall: false` and enable Noosphere `autoRecall: true` with `autoProviders: ["noosphere", "hindsight"]` to get one unified recall block.
 - See [`docs/OPENCLAW-NOOSPHERE-BRIDGE-ROADMAP.md`](docs/OPENCLAW-NOOSPHERE-BRIDGE-ROADMAP.md) for the full implementation history and API contracts.
+
+### Troubleshooting
+
+**Memory capture instructions or recall results not appearing in agent context**
+
+The most common cause is `allowPromptInjection: false` in the gateway config. This blocks the `before_prompt_build` hook from injecting content even when `autoRecall: true` is set.
+
+Check your `openclaw.json`:
+
+```json
+"plugins": {
+  "entries": {
+    "noosphere-memory": {
+      "config": {
+        "autoRecall": true
+      },
+      "hooks": {
+        "allowPromptInjection": true  ← THIS MUST BE TRUE
+      }
+    }
+  }
+}
+```
+
+After changing `openclaw.json`, restart the gateway:
+
+```bash
+openclaw gateway restart
+```
+
+**Gateway config location**: `~/.openclaw/openclaw.json` on the machine running the OpenClaw gateway (not the noosphere server).
+
+**Tools work but auto-injection doesn't**: This is the `allowPromptInjection` issue above. The tools call the HTTP API directly (which works), but the hook's text injection is blocked by the gateway setting.
+
+**Gateway not loading the plugin**: Check that the plugin is registered in `openclaw.json` under `plugins.entries` with `enabled: true`.
 
 ## Environment Variables
 
