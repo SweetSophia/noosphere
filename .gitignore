@@ -41,3 +41,12 @@ yarn-error.log*
 next-env.d.ts
 
 /src/generated/prisma
+
+# nested dependencies and local package artifacts
+node_modules/
+*.tgz
+*.tar.gz
+
+# local runtime data
+uploads/
+.noosphere/

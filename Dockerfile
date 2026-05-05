@@ -12,7 +12,7 @@ RUN npm ci
 # Rebuild the source code when the source changes
 FROM base AS builder
 ARG DATABASE_URL
-ENV DATABASE_URL $DATABASE_URL
+ENV DATABASE_URL=$DATABASE_URL
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -38,7 +38,13 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=noosphere:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=noosphere:nodejs /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
+COPY --from=builder /app/docker ./docker
+# Keep full node_modules in the runner so the installer can run Prisma CLI
+# migrations/bootstrap commands inside the published image. The standalone
+# Next.js bundle contains only traced runtime deps, which is not enough for
+# `prisma db push` on first install.
+COPY --from=builder /app/node_modules ./node_modules
 
 USER noosphere
 
