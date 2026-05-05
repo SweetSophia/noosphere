@@ -1,6 +1,25 @@
 # Noosphere production Compose template for OpenClaw users.
 # Defaults are intentionally localhost-only. Override NOOSPHERE_PORT or APP_URL in .env if needed.
 services:
+  init:
+    image: ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION:-latest}
+    container_name: noosphere-openclaw-init
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://noosphere:${POSTGRES_PASSWORD}@db:5432/noosphere
+      NOOSPHERE_ADMIN_PASSWORD: ${NOOSPHERE_ADMIN_PASSWORD:-}
+      NOOSPHERE_BOOTSTRAP_API_KEY: ${NOOSPHERE_BOOTSTRAP_API_KEY:-}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      NEXTAUTH_URL: ${APP_URL:-http://127.0.0.1:6578}
+      APP_URL: ${APP_URL:-http://127.0.0.1:6578}
+      UPLOAD_DIR: /app/uploads
+    command: ["sh", "-c", "node docker/migrate-or-baseline.mjs && node docker/bootstrap.mjs"]
+    volumes:
+      - noosphere_uploads:/app/uploads:rw
+    depends_on:
+      db:
+        condition: service_healthy
+
   app:
     image: ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION:-latest}
     container_name: noosphere-openclaw-app
@@ -16,8 +35,8 @@ services:
     volumes:
       - noosphere_uploads:/app/uploads:rw
     depends_on:
-      db:
-        condition: service_healthy
+      init:
+        condition: service_completed_successfully
     healthcheck:
       test:
         [

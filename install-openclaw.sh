@@ -88,11 +88,30 @@ NOOSPHERE_PORT=${NOOSPHERE_PORT}
 APP_URL=${APP_URL}
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+NOOSPHERE_ADMIN_PASSWORD=${ADMIN_PASSWORD}
+NOOSPHERE_BOOTSTRAP_API_KEY=${API_KEY}
 ENV
 chmod 600 "$NOOSPHERE_HOME/.env"
 
 cat > "$NOOSPHERE_HOME/docker-compose.yml" <<YAML
 services:
+  init:
+    image: ${NOOSPHERE_IMAGE}
+    container_name: noosphere-openclaw-init
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://noosphere:\${POSTGRES_PASSWORD}@db:5432/noosphere
+      NEXTAUTH_SECRET: \${NEXTAUTH_SECRET}
+      NEXTAUTH_URL: \${APP_URL:-http://127.0.0.1:6578}
+      APP_URL: \${APP_URL:-http://127.0.0.1:6578}
+      UPLOAD_DIR: /app/uploads
+    command: ["sh", "-c", "node docker/migrate-or-baseline.mjs && node docker/bootstrap.mjs"]
+    volumes:
+      - noosphere_uploads:/app/uploads:rw
+    depends_on:
+      db:
+        condition: service_healthy
+
   app:
     image: ${NOOSPHERE_IMAGE}
     container_name: noosphere-openclaw-app
@@ -108,8 +127,8 @@ services:
     volumes:
       - noosphere_uploads:/app/uploads:rw
     depends_on:
-      db:
-        condition: service_healthy
+      init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
@@ -146,15 +165,13 @@ echo "Starting Noosphere at ${APP_URL}..."
 docker compose pull
 docker compose up -d db
 wait_for_container_healthy noosphere-openclaw-db 60
+
+echo "Applying database schema and bootstrap data..."
+BOOTSTRAP_JSON="$(docker compose run --rm -T -e NOOSPHERE_ADMIN_PASSWORD="${ADMIN_PASSWORD}" -e NOOSPHERE_BOOTSTRAP_API_KEY="${API_KEY}" init | tail -n 1)"
+printf '%s' "$BOOTSTRAP_JSON" | node -e 'let s=""; process.stdin.on("data", d => s += d); process.stdin.on("end", () => JSON.parse(s));' >/dev/null
+
 docker compose up -d app
 wait_for_container_healthy noosphere-openclaw-app 30
-
-echo "Applying database schema..."
-docker compose exec -T -u root app node node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma
-
-echo "Bootstrapping admin, topics, and API key..."
-BOOTSTRAP_JSON="$(docker compose exec -T -e NOOSPHERE_ADMIN_PASSWORD="$ADMIN_PASSWORD" -e NOOSPHERE_BOOTSTRAP_API_KEY="$API_KEY" app node docker/bootstrap.mjs | tail -n 1)"
-printf '%s' "$BOOTSTRAP_JSON" | node -e 'let s=""; process.stdin.on("data", d => s += d); process.stdin.on("end", () => JSON.parse(s));' >/dev/null
 
 cat > "$SECRETS_FILE" <<JSON
 {

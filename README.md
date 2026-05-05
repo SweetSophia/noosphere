@@ -220,6 +220,24 @@ docker compose exec app node scripts/create-admin.js
 
 Then visit `/wiki/login`.
 
+
+### Official Docker Compose image
+
+For the published image flow, copy `noosphere.env.example` next to the production Compose template and set strong secrets before starting:
+
+```bash
+cp noosphere.env.example .env
+# edit .env: POSTGRES_PASSWORD, NEXTAUTH_SECRET, NOOSPHERE_ADMIN_PASSWORD, NOOSPHERE_BOOTSTRAP_API_KEY
+docker compose -f docker-compose.noosphere.yml up -d
+```
+
+The production Compose template includes a one-shot `init` service. It waits for Postgres, applies Prisma migrations with `docker/migrate-or-baseline.mjs`, bootstraps the admin/API key/topics, and only then lets the app start. This prevents `/api/health` from reporting healthy before the schema exists.
+
+Database ports differ by caller:
+
+- App container: `db:5432` on the internal Compose network.
+- Host/local Prisma CLI: `localhost:5433` when using the development Compose mapping.
+
 ### Local Development
 
 ```bash

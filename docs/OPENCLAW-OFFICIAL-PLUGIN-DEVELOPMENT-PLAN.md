@@ -214,6 +214,7 @@ NEXTAUTH_URL=http://127.0.0.1:6578
 ```bash
 docker compose -f docker-compose.noosphere.yml up -d
 curl -fsS http://127.0.0.1:6578/api/health
+curl -fsS http://127.0.0.1:6578/wiki
 ```
 
 ### Completion Criteria
@@ -279,6 +280,7 @@ Make first-run and upgrades safe for public users.
    - Prefer Prisma migrations for official release.
    - Avoid requiring `prisma db push --accept-data-loss` for users.
 2. Add startup/bootstrap command or setup script step that applies migrations safely.
+   - Use `docker/migrate-or-baseline.mjs` to baseline old `db push` schemas before `migrate deploy`.
 3. Add a first-run bootstrap mechanism for:
    - initial admin user
    - API key with required permissions
@@ -294,6 +296,7 @@ Fresh volume test:
 docker compose down -v
 docker compose up -d
 curl -fsS http://127.0.0.1:6578/api/health
+curl -fsS http://127.0.0.1:6578/wiki
 ```
 
 Then verify:
