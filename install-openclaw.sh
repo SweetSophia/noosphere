@@ -26,7 +26,7 @@ random_secret() {
 json_get() {
   local file="$1"
   local key="$2"
-  node -e 'const fs=require("fs"); const p=process.argv[1]; const k=process.argv[2]; if (!fs.existsSync(p)) process.exit(0); const data=JSON.parse(fs.readFileSync(p,"utf8")); if (typeof data[k] === "string") process.stdout.write(data[k]);' "$file" "$key"
+  JSON_GET_FILE="$file" JSON_GET_KEY="$key" node -e 'const fs=require("fs"); const p=process.env.JSON_GET_FILE; const k=process.env.JSON_GET_KEY; if (!p || !k || !fs.existsSync(p)) process.exit(0); const data=JSON.parse(fs.readFileSync(p,"utf8")); if (typeof data[k] === "string") process.stdout.write(data[k]);'
 }
 
 wait_for_container_healthy() {
@@ -150,11 +150,11 @@ docker compose up -d app
 wait_for_container_healthy noosphere-openclaw-app 30
 
 echo "Applying database schema..."
-docker compose exec -T -u root app node node_modules/prisma/build/index.js db push --schema prisma/schema.prisma
+docker compose exec -T -u root app node node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma
 
 echo "Bootstrapping admin, topics, and API key..."
 BOOTSTRAP_JSON="$(docker compose exec -T -e NOOSPHERE_ADMIN_PASSWORD="$ADMIN_PASSWORD" -e NOOSPHERE_BOOTSTRAP_API_KEY="$API_KEY" app node docker/bootstrap.mjs | tail -n 1)"
-node -e 'JSON.parse(process.argv[1]);' "$BOOTSTRAP_JSON" >/dev/null
+printf '%s' "$BOOTSTRAP_JSON" | node -e 'let s=""; process.stdin.on("data", d => s += d); process.stdin.on("end", () => JSON.parse(s));' >/dev/null
 
 cat > "$SECRETS_FILE" <<JSON
 {

@@ -68,16 +68,20 @@ export function createNoosphereAutoRecallHook(rawConfig, clientContext, logger) 
     // Precompiled glob regexes (cached per config update)
     const compiledIgnorePatterns = [];
     const compiledStatelessPatterns = [];
-    let lastCompiledPatterns = [];
+    let lastIgnorePatterns = [];
+    let lastStatelessPatterns = [];
     // In-flight recall deduplication - key is normalized query string
     const inflightRecalls = new Map();
     /**
      * Compile glob patterns to regexes once and cache them.
      * Only recompiles when the pattern list changes.
      */
-    function ensureCompiledPatterns(patterns, compiled) {
-        if (patterns.length !== lastCompiledPatterns.length) {
-            lastCompiledPatterns = [...patterns];
+    function ensureCompiledPatterns(patterns, compiled, getLastPatterns, setLastPatterns) {
+        const lastPatterns = getLastPatterns();
+        const hasChanged = patterns.length !== lastPatterns.length
+            || patterns.some((pattern, index) => pattern !== lastPatterns[index]);
+        if (hasChanged) {
+            setLastPatterns([...patterns]);
             compiled.length = 0;
             for (const pattern of patterns) {
                 compiled.push(compileGlobPattern(pattern));
@@ -160,7 +164,7 @@ export function createNoosphereAutoRecallHook(rawConfig, clientContext, logger) 
         if (sessionKey) {
             // Check ignoreSessionPatterns first
             if (effectiveConfig.ignoreSessionPatterns.length > 0) {
-                const compiled = ensureCompiledPatterns(effectiveConfig.ignoreSessionPatterns, compiledIgnorePatterns);
+                const compiled = ensureCompiledPatterns(effectiveConfig.ignoreSessionPatterns, compiledIgnorePatterns, () => lastIgnorePatterns, (patterns) => { lastIgnorePatterns = patterns; });
                 if (matchesSessionPatternCached(sessionKey, compiled)) {
                     logger?.debug?.(`[Noosphere] Skipping recall: session '${sessionKey}' matches ignoreSessionPatterns`);
                     return;
@@ -168,7 +172,7 @@ export function createNoosphereAutoRecallHook(rawConfig, clientContext, logger) 
             }
             // Check statelessSessionPatterns
             if (effectiveConfig.skipStatelessSessions && effectiveConfig.statelessSessionPatterns.length > 0) {
-                const compiled = ensureCompiledPatterns(effectiveConfig.statelessSessionPatterns, compiledStatelessPatterns);
+                const compiled = ensureCompiledPatterns(effectiveConfig.statelessSessionPatterns, compiledStatelessPatterns, () => lastStatelessPatterns, (patterns) => { lastStatelessPatterns = patterns; });
                 if (matchesSessionPatternCached(sessionKey, compiled)) {
                     logger?.debug?.(`[Noosphere] Skipping recall: session '${sessionKey}' matches statelessSessionPatterns (skipStatelessSessions=true)`);
                     return;

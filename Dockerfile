@@ -9,6 +9,18 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci
 
+# Build a production-only node_modules tree with generated Prisma client.
+# The runner needs Prisma CLI for first-install migrations/bootstrap, but it should
+# not carry dev dependencies from the full build stage.
+FROM base AS prod-deps
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+COPY prisma ./prisma
+COPY prisma.config.ts ./prisma.config.ts
+RUN npm ci --omit=dev && npx prisma generate
+
 # Rebuild the source code when the source changes
 FROM base AS builder
 ARG DATABASE_URL
@@ -37,14 +49,10 @@ RUN mkdir -p /app/uploads/images && chown noosphere:nodejs /app/uploads /app/upl
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=noosphere:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=noosphere:nodejs /app/.next/static ./.next/static
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
+COPY --from=prod-deps /app/prisma ./prisma
+COPY --from=prod-deps /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/docker ./docker
-# Keep full node_modules in the runner so the installer can run Prisma CLI
-# migrations/bootstrap commands inside the published image. The standalone
-# Next.js bundle contains only traced runtime deps, which is not enough for
-# `prisma db push` on first install.
-COPY --from=builder /app/node_modules ./node_modules
+COPY --from=prod-deps /app/node_modules ./node_modules
 
 USER noosphere
 
