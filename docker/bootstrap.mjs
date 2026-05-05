@@ -68,7 +68,19 @@ function id() {
 }
 
 async function upsertTopic(client, topic, parentId = null) {
-  const topicId = id();
+  const updateResult = await client.query(
+    `UPDATE "Topic"
+     SET name = $2,
+         description = $3,
+         "parentId" = $4,
+         "updatedAt" = NOW()
+     WHERE slug = $1
+     RETURNING id`,
+    [topic.slug, topic.name, topic.description ?? null, parentId],
+  );
+
+  if (updateResult.rows[0]?.id) return updateResult.rows[0].id;
+
   const result = await client.query(
     `INSERT INTO "Topic" (id, name, slug, description, "parentId", "createdAt", "updatedAt")
      VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
@@ -78,7 +90,7 @@ async function upsertTopic(client, topic, parentId = null) {
        "parentId" = EXCLUDED."parentId",
        "updatedAt" = NOW()
      RETURNING id`,
-    [topicId, topic.name, topic.slug, topic.description ?? null, parentId],
+    [id(), topic.name, topic.slug, topic.description ?? null, parentId],
   );
   return result.rows[0].id;
 }

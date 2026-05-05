@@ -82,6 +82,7 @@ NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(random_secret 32)}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(random_secret 24)}"
 API_KEY="${API_KEY:-noo_$(random_secret 32)}"
 
+install -m 600 /dev/null "$NOOSPHERE_HOME/.env"
 cat > "$NOOSPHERE_HOME/.env" <<ENV
 NOOSPHERE_VERSION=${NOOSPHERE_VERSION}
 NOOSPHERE_PORT=${NOOSPHERE_PORT}
@@ -91,7 +92,6 @@ NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
 NOOSPHERE_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 NOOSPHERE_BOOTSTRAP_API_KEY=${API_KEY}
 ENV
-chmod 600 "$NOOSPHERE_HOME/.env"
 
 cat > "$NOOSPHERE_HOME/docker-compose.yml" <<YAML
 services:
@@ -173,6 +173,7 @@ printf '%s' "$BOOTSTRAP_JSON" | node -e 'let s=""; process.stdin.on("data", d =>
 docker compose up -d app
 wait_for_container_healthy noosphere-openclaw-app 30
 
+install -m 600 /dev/null "$SECRETS_FILE"
 cat > "$SECRETS_FILE" <<JSON
 {
   "baseUrl": "${APP_URL}",
@@ -183,7 +184,6 @@ cat > "$SECRETS_FILE" <<JSON
   "nextAuthSecret": "${NEXTAUTH_SECRET}"
 }
 JSON
-chmod 600 "$SECRETS_FILE"
 
 wait_for_http_health "$APP_URL" 60
 
