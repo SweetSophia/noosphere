@@ -623,8 +623,8 @@ openclaw gateway restart
 # Build and start
 docker compose up -d --build
 
-# Run migrations after first deploy or schema changes
-docker compose exec app npx prisma db push
+# Run production migrations after first deploy or schema changes
+docker compose exec app node node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma
 
 # View logs
 docker compose logs -f app
