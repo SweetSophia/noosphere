@@ -44,6 +44,8 @@ jobs:
           file: ./Dockerfile
           push: true
           build-args: |
-            DATABASE_URL=postgresql://noosphere:buildtime@db:5432/noosphere
+            # Note: prisma generate doesn't need a real database connection,
+            # just a valid-format URL. Runtime DATABASE_URL comes from docker-compose env.
+            DATABASE_URL=postgresql://placeholder@localhost/placeholder
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
