@@ -20,7 +20,7 @@ need() {
 }
 
 random_secret() {
-  node -e "console.log(require('crypto').randomBytes(Number(process.argv[1])).toString('base64url'))" "$1"
+  node -e "console.log(require('crypto').randomBytes(Number(process.argv[2])).toString('base64url'))" "$1"
 }
 
 json_get() {
@@ -169,8 +169,22 @@ docker compose up -d db
 wait_for_container_healthy noosphere-openclaw-db 60
 
 echo "Applying database schema and bootstrap data..."
-BOOTSTRAP_JSON="$(docker compose run --rm -T -e NOOSPHERE_ADMIN_PASSWORD="${ADMIN_PASSWORD}" -e NOOSPHERE_BOOTSTRAP_API_KEY="${API_KEY}" init | tail -n 1)"
-printf '%s' "$BOOTSTRAP_JSON" | node -e 'let s=""; process.stdin.on("data", d => s += d); process.stdin.on("end", () => JSON.parse(s));' >/dev/null
+# Capture all output, then extract the last line which should be JSON
+BOOTSTRAP_OUTPUT="$(docker compose run --rm -T -e NOOSPHERE_ADMIN_PASSWORD="${ADMIN_PASSWORD}" -e NOOSPHERE_BOOTSTRAP_API_KEY="${API_KEY}" init 2>&1 || true)"
+BOOTSTRAP_JSON="$(echo "$BOOTSTRAP_OUTPUT" | tail -n 1)"
+if [ -z "$BOOTSTRAP_JSON" ]; then
+  echo "Bootstrap failed - no output received" >&2
+  echo "$BOOTSTRAP_OUTPUT" | tail -20 >&2
+  exit 1
+fi
+# Validate JSON is parseable
+if ! printf '%s' "$BOOTSTRAP_JSON" | node -e 'let s=""; process.stdin.on("data", d => s += d); process.stdin.on("end", () => { try { JSON.parse(s); process.exit(0); } catch { console.error(s); process.exit(1); } });' >/dev/null 2>&1; then
+  echo "Bootstrap output was not valid JSON:" >&2
+  echo "$BOOTSTRAP_JSON" >&2
+  echo "Full output:" >&2
+  echo "$BOOTSTRAP_OUTPUT" | tail -20 >&2
+  exit 1
+fi
 
 docker compose up -d app
 wait_for_container_healthy noosphere-openclaw-app 30

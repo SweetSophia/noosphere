@@ -42,6 +42,9 @@ CREATE TABLE "Article" (
     CONSTRAINT "Article_pkey" PRIMARY KEY ("id")
 );
 
+ALTER TABLE "Article" ADD CONSTRAINT "Article_status_check" CHECK (status IN ('draft', 'reviewed', 'published'));
+ALTER TABLE "Article" ADD CONSTRAINT "Article_confidence_check" CHECK (confidence IS NULL OR confidence IN ('low', 'medium', 'high'));
+
 -- CreateTable
 CREATE TABLE "Tag" (
     "id" TEXT NOT NULL,
@@ -150,6 +153,11 @@ CREATE TABLE "RecallSettings" (
     CONSTRAINT "RecallSettings_pkey" PRIMARY KEY ("id")
 );
 
+ALTER TABLE "RecallSettings" ADD CONSTRAINT "RecallSettings_maxInjectedMemories_check" CHECK ("maxInjectedMemories" > 0);
+ALTER TABLE "RecallSettings" ADD CONSTRAINT "RecallSettings_maxInjectedTokens_check" CHECK ("maxInjectedTokens" > 0);
+ALTER TABLE "RecallSettings" ADD CONSTRAINT "RecallSettings_recallVerbosity_check" CHECK ("recallVerbosity" IN ('terse', 'standard', 'verbose'));
+ALTER TABLE "RecallSettings" ADD CONSTRAINT "RecallSettings_conflictStrategy_check" CHECK ("conflictStrategy" IN ('surface', 'deep', 'hybrid'));
+
 -- CreateIndex
 CREATE UNIQUE INDEX "Topic_slug_key" ON "Topic"("slug");
 
@@ -176,6 +184,9 @@ CREATE INDEX "Article_status_idx" ON "Article"("status");
 
 -- CreateIndex
 CREATE INDEX "Article_confidence_idx" ON "Article"("confidence");
+
+-- CreateIndex
+CREATE INDEX "Article_deletedAt_idx" ON "Article"("deletedAt");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Article_topicId_slug_key" ON "Article"("topicId", "slug");

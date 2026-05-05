@@ -13,6 +13,15 @@ function requireEnv(name) {
   return value;
 }
 
+/**
+ * Validates that an identifier is safe for use in SQL queries.
+ * PostgreSQL identifier rules: starts with letter or underscore,
+ * contains only letters, digits, underscores, and optionally quotes for special chars.
+ */
+function isValidIdentifier(name) {
+  return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name);
+}
+
 function runPrisma(args) {
   const result = spawnSync("node", ["node_modules/prisma/build/index.js", ...args], {
     stdio: "inherit",
@@ -26,6 +35,10 @@ function runPrisma(args) {
 }
 
 async function hasRegclass(client, regclassName) {
+  // Validate identifier to prevent SQL injection even though we control the input
+  if (!isValidIdentifier(regclassName)) {
+    throw new Error(`Invalid identifier: ${regclassName}`);
+  }
   const result = await client.query("SELECT to_regclass($1) AS name", [regclassName]);
   return Boolean(result.rows[0]?.name);
 }
@@ -43,6 +56,10 @@ async function getPublicTableCount(client) {
 async function getExistingRequiredTables(client) {
   const existing = [];
   for (const table of REQUIRED_NOOSPHERE_TABLES) {
+    // Validate table name is a safe identifier
+    if (!isValidIdentifier(table)) {
+      throw new Error(`Invalid table name in REQUIRED_NOOSPHERE_TABLES: ${table}`);
+    }
     if (await hasRegclass(client, `public."${table}"`)) {
       existing.push(table);
     }
