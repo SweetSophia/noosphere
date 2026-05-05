@@ -101,6 +101,8 @@ services:
     restart: "no"
     environment:
       DATABASE_URL: postgresql://noosphere:\${POSTGRES_PASSWORD}@db:5432/noosphere
+      NOOSPHERE_ADMIN_PASSWORD: \${NOOSPHERE_ADMIN_PASSWORD}
+      NOOSPHERE_BOOTSTRAP_API_KEY: \${NOOSPHERE_BOOTSTRAP_API_KEY}
       NEXTAUTH_SECRET: \${NEXTAUTH_SECRET}
       NEXTAUTH_URL: \${APP_URL:-http://127.0.0.1:6578}
       APP_URL: \${APP_URL:-http://127.0.0.1:6578}
@@ -199,7 +201,7 @@ cat > "$PATCH_FILE" <<JSON5
 {
   secrets: {
     providers: {
-      ${SECRET_PROVIDER_ID}: {
+      "${SECRET_PROVIDER_ID}": {
         source: "file",
         path: "${SECRETS_FILE}",
         mode: "json",
