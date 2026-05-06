@@ -23,3 +23,4 @@ export interface NoosphereMemoryGetProviderMeta {
     error?: string;
     durationMs?: number;
 }
+//# sourceMappingURL=types.d.ts.map

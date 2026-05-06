@@ -142,3 +142,4 @@ function warnAndFailOpen(logger, operation, error, context) {
     const formatted = formatError(error, context.config);
     logger?.warn?.(`Noosphere corpus supplement ${operation} skipped: ${String(formatted.error)}`);
 }
+//# sourceMappingURL=corpus-supplement.js.map

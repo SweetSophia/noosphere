@@ -69,3 +69,4 @@ function readOptionalString(value, field) {
 function isRecord(value) {
     return !!value && typeof value === "object" && !Array.isArray(value);
 }
+//# sourceMappingURL=get.js.map

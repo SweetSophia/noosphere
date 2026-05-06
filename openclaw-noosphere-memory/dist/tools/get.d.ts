@@ -38,3 +38,4 @@ export declare function createNoosphereGetTool(rawConfig: unknown, context?: Noo
     };
     execute(_toolCallId: string, rawParams: unknown): Promise<import("../format.js").ToolTextResult>;
 };
+//# sourceMappingURL=get.d.ts.map

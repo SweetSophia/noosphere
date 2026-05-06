@@ -43,3 +43,4 @@ export interface MemoryCorpusSupplement {
     }): Promise<MemoryCorpusGetResult | null>;
 }
 export declare function createNoosphereCorpusSupplement(context: NoosphereClientContext, logger?: CorpusSupplementLogger): MemoryCorpusSupplement;
+//# sourceMappingURL=corpus-supplement.d.ts.map

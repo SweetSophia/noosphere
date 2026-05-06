@@ -70,7 +70,7 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 mkdir -p "$NOOSPHERE_HOME" "$SECRETS_DIR"
-chmod 700 "$SECRETS_DIR" || true
+chmod 700 "$SECRETS_DIR"
 
 POSTGRES_PASSWORD="$(json_get "$SECRETS_FILE" postgresPassword)"
 NEXTAUTH_SECRET="$(json_get "$SECRETS_FILE" nextAuthSecret)"
@@ -82,17 +82,10 @@ NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(random_secret 32)}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(random_secret 24)}"
 API_KEY="${API_KEY:-noo_$(random_secret 32)}"
 
-install -m 600 /dev/null "$NOOSPHERE_HOME/.env"
-# Write a minimal .env before bootstrap. Bootstrap-only secrets
-# (NOOSPHERE_ADMIN_PASSWORD, NOOSPHERE_BOOTSTRAP_API_KEY) are passed via -e flags
-# to docker compose run. The full .env with all secrets is written after bootstrap succeeds.
-cat > "$NOOSPHERE_HOME/.env" <<ENV
-NOOSPHERE_VERSION=${NOOSPHERE_VERSION}
-NOOSPHERE_PORT=${NOOSPHERE_PORT}
-APP_URL=${APP_URL}
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
-ENV
+# Export compose variables instead of writing .env before bootstrap.
+# The persistent .env is written atomically only after bootstrap succeeds, so a
+# failed install does not leave generated secrets behind on disk.
+export NOOSPHERE_VERSION NOOSPHERE_PORT NOOSPHERE_IMAGE APP_URL POSTGRES_PASSWORD NEXTAUTH_SECRET
 
 cat > "$NOOSPHERE_HOME/docker-compose.yml" <<YAML
 services:
@@ -196,12 +189,19 @@ if ! printf '%s' "$BOOTSTRAP_JSON" | node -e 'let s=""; process.stdin.on("data",
   exit 1
 fi
 
-# Write the full .env (including bootstrap-only secrets) only after bootstrap succeeded.
-# These are not needed by the app at runtime but are kept for documentation/manual runs.
-cat >> "$NOOSPHERE_HOME/.env" <<ENV
+# Write the full .env atomically only after bootstrap succeeded.
+ENV_TMP=$(mktemp)
+cat > "$ENV_TMP" <<ENV
+NOOSPHERE_VERSION=${NOOSPHERE_VERSION}
+NOOSPHERE_PORT=${NOOSPHERE_PORT}
+APP_URL=${APP_URL}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
 NOOSPHERE_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 NOOSPHERE_BOOTSTRAP_API_KEY=${API_KEY}
 ENV
+chmod 600 "$ENV_TMP"
+mv "$ENV_TMP" "$NOOSPHERE_HOME/.env"
 
 docker compose up -d app
 wait_for_container_healthy noosphere-openclaw-app 30

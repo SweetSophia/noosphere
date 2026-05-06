@@ -10,3 +10,4 @@ export declare function createNoosphereStatusTool(rawConfig: unknown, context?: 
     };
     execute(): Promise<import("../format.js").ToolTextResult>;
 };
+//# sourceMappingURL=status.d.ts.map

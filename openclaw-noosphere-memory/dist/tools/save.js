@@ -135,3 +135,4 @@ function readOptionalConfidence(value) {
 function isRecord(value) {
     return !!value && typeof value === "object" && !Array.isArray(value);
 }
+//# sourceMappingURL=save.js.map

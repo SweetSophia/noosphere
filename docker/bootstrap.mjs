@@ -130,7 +130,6 @@ async function main() {
          ON CONFLICT (email) DO UPDATE SET
            name = EXCLUDED.name,
            "passwordHash" = EXCLUDED."passwordHash",
-           role = EXCLUDED.role,
            "updatedAt" = NOW()`;
     await client.query(upsertQuery, [id(), adminEmail, adminName, passwordHash]);
 

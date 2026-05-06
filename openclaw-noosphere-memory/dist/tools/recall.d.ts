@@ -43,3 +43,4 @@ export declare function createNoosphereRecallTool(rawConfig: unknown, context?: 
     };
     execute(_toolCallId: string, rawParams: unknown): Promise<import("../format.js").ToolTextResult>;
 };
+//# sourceMappingURL=recall.d.ts.map

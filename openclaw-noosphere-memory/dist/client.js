@@ -162,3 +162,4 @@ function isAbortError(error) {
         return false;
     return error.name === "AbortError" || /abort/i.test(error.message);
 }
+//# sourceMappingURL=client.js.map

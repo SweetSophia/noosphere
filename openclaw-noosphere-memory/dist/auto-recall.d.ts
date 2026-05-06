@@ -53,3 +53,4 @@ export declare function createNoosphereAutoRecallHook(rawConfig: unknown, client
  */
 export declare function buildAutoRecallQuery(event: BeforePromptBuildEventLike, config: NoosphereAutoRecallConfig): string | undefined;
 export type AutoRecallRequestForTests = NoosphereRecallRequest;
+//# sourceMappingURL=auto-recall.d.ts.map

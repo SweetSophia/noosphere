@@ -27,3 +27,4 @@ export function formatError(error, config) {
         error: error instanceof Error ? error.message : String(error),
     };
 }
+//# sourceMappingURL=format.js.map

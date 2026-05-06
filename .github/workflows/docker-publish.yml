@@ -35,6 +35,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify OpenClaw plugin dist is current
+        run: |
+          cd openclaw-noosphere-memory
+          npm ci
+          npm run build
+          git diff --exit-code -- dist
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 

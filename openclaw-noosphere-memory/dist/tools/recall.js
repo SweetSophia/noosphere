@@ -92,3 +92,4 @@ function readOptionalStringArray(value) {
 function isRecord(value) {
     return !!value && typeof value === "object" && !Array.isArray(value);
 }
+//# sourceMappingURL=recall.js.map

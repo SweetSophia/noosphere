@@ -29,3 +29,4 @@ export declare function readBoolean(value: unknown): boolean | undefined;
 export declare function readStringArray(value: unknown): string[] | undefined;
 export declare function isRecord(value: unknown): value is Record<string, unknown>;
 export {};
+//# sourceMappingURL=config.d.ts.map

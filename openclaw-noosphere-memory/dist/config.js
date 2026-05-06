@@ -124,3 +124,4 @@ export function readStringArray(value) {
 export function isRecord(value) {
     return !!value && typeof value === "object" && !Array.isArray(value);
 }
+//# sourceMappingURL=config.js.map

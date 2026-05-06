@@ -5,3 +5,4 @@ export interface NoosphereClientContext {
     client: NoosphereMemoryClient;
 }
 export declare function createNoosphereClientContext(rawConfig: unknown, rootConfig?: unknown): NoosphereClientContext;
+//# sourceMappingURL=shared-init.d.ts.map

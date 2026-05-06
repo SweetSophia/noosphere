@@ -56,3 +56,4 @@ export declare function createNoosphereSaveTool(rawConfig: unknown, context?: No
     };
     execute(_toolCallId: string, rawParams: unknown): Promise<import("../format.js").ToolTextResult>;
 };
+//# sourceMappingURL=save.d.ts.map

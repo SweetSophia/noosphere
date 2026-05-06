@@ -28,3 +28,4 @@ export default definePluginEntry({
         }
     },
 });
+//# sourceMappingURL=index.js.map

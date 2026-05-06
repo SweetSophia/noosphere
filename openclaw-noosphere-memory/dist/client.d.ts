@@ -94,3 +94,4 @@ export declare class NoosphereMemoryClient {
     }): Promise<NoosphereRecallResponse>;
     private request;
 }
+//# sourceMappingURL=client.d.ts.map

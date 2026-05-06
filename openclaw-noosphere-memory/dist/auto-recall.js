@@ -402,3 +402,4 @@ function clampNumber(value, min, max, fallback) {
 function formatHookError(error) {
     return error instanceof Error ? error.message : String(error);
 }
+//# sourceMappingURL=auto-recall.js.map
