@@ -1,0 +1,74 @@
+# Noosphere production Compose template for OpenClaw users.
+# Defaults are intentionally localhost-only. Override NOOSPHERE_PORT or APP_URL in .env if needed.
+services:
+  init:
+    image: ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION:-latest}
+    container_name: noosphere-openclaw-init
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://noosphere:${POSTGRES_PASSWORD}@db:5432/noosphere
+      NOOSPHERE_ADMIN_PASSWORD: ${NOOSPHERE_ADMIN_PASSWORD:-}
+      NOOSPHERE_BOOTSTRAP_API_KEY: ${NOOSPHERE_BOOTSTRAP_API_KEY:-}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      NEXTAUTH_URL: ${APP_URL:-http://127.0.0.1:6578}
+      APP_URL: ${APP_URL:-http://127.0.0.1:6578}
+      UPLOAD_DIR: /app/uploads
+    command: ["sh", "-c", "node docker/migrate-or-baseline.mjs && node docker/bootstrap.mjs"]
+    volumes:
+      - noosphere_uploads:/app/uploads:rw
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    image: ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION:-latest}
+    container_name: noosphere-openclaw-app
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${NOOSPHERE_PORT:-6578}:3000"
+    environment:
+      DATABASE_URL: postgresql://noosphere:${POSTGRES_PASSWORD}@db:5432/noosphere
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      NEXTAUTH_URL: ${APP_URL:-http://127.0.0.1:6578}
+      APP_URL: ${APP_URL:-http://127.0.0.1:6578}
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - noosphere_uploads:/app/uploads:rw
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+
+  db:
+    image: postgres:16-alpine
+    container_name: noosphere-openclaw-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: noosphere
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: noosphere
+    volumes:
+      - noosphere_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U noosphere -d noosphere"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  noosphere_postgres_data:
+    driver: local
+  noosphere_uploads:
+    driver: local

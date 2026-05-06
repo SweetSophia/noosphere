@@ -1,11 +1,25 @@
 {
   "name": "@sweetsophia/openclaw-noosphere-memory",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "OpenClaw plugin for Noosphere memory status, recall tools, and optional auto-recall prompt injection.",
   "type": "module",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist/",
+    "src/",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p build-tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "npm run build"
   },
   "devDependencies": {
     "@types/node": "^20",
@@ -14,7 +28,16 @@
   },
   "openclaw": {
     "extensions": [
-      "./src/index.ts"
-    ]
+      "./dist/index.js"
+    ],
+    "install": {
+      "npmSpec": "@sweetsophia/openclaw-noosphere-memory",
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.5.3-1"
+    },
+    "compat": {
+      "pluginApi": ">=2026.5.3-1",
+      "minGatewayVersion": "2026.5.3-1"
+    }
   }
 }

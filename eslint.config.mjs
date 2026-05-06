@@ -11,6 +11,7 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    "openclaw-noosphere-memory/dist/**",
     "next-env.d.ts",
   ]),
   // Allow underscore-prefixed variables to be unused in test files (intentional discard pattern)
