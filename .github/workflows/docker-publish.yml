@@ -4,6 +4,24 @@ on:
   push:
     branches: [main, master]
     tags: ["v*"]
+    paths:
+      - "Dockerfile"
+      - "next.config.ts"
+      - "src/**"
+      - "prisma/**"
+      - "package.json"
+      - "package-lock.json"
+      - "openclaw-noosphere-memory/**"
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "Dockerfile"
+      - "next.config.ts"
+      - "src/**"
+      - "prisma/**"
+      - "package.json"
+      - "package-lock.json"
+      - "openclaw-noosphere-memory/**"
   workflow_dispatch:
 
 permissions:

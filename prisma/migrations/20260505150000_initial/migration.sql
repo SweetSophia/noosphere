@@ -155,8 +155,9 @@ CREATE TABLE "RecallSettings" (
 
 ALTER TABLE "RecallSettings" ADD CONSTRAINT "RecallSettings_maxInjectedMemories_check" CHECK ("maxInjectedMemories" > 0);
 ALTER TABLE "RecallSettings" ADD CONSTRAINT "RecallSettings_maxInjectedTokens_check" CHECK ("maxInjectedTokens" > 0);
-ALTER TABLE "RecallSettings" ADD CONSTRAINT "RecallSettings_recallVerbosity_check" CHECK ("recallVerbosity" IN ('terse', 'standard', 'verbose'));
-ALTER TABLE "RecallSettings" ADD CONSTRAINT "RecallSettings_conflictStrategy_check" CHECK ("conflictStrategy" IN ('surface', 'deep', 'hybrid'));
+ALTER TABLE "RecallSettings" ADD CONSTRAINT "RecallSettings_recallVerbosity_check" CHECK ("recallVerbosity" IN ('minimal', 'standard', 'detailed'));
+ALTER TABLE "RecallSettings" ADD CONSTRAINT "RecallSettings_deduplicationStrategy_check" CHECK ("deduplicationStrategy" IN ('best-score', 'provider-priority', 'most-recent'));
+ALTER TABLE "RecallSettings" ADD CONSTRAINT "RecallSettings_conflictStrategy_check" CHECK ("conflictStrategy" IN ('accept-highest', 'accept-recent', 'accept-curated', 'surface', 'suppress-low'));
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Topic_slug_key" ON "Topic"("slug");
