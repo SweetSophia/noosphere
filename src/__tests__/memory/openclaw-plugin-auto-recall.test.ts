@@ -6,6 +6,10 @@ import {
   MAX_QUERY_LENGTH,
   resolveAutoRecallConfig,
 } from "../../../openclaw-noosphere-memory/src/auto-recall.js";
+import {
+  buildNoosphereDoctorReport,
+  buildNoosphereStatusReport,
+} from "../../../openclaw-noosphere-memory/src/cli.js";
 import { createNoosphereCorpusSupplement } from "../../../openclaw-noosphere-memory/src/corpus-supplement.js";
 import {
   NoosphereClientError,
@@ -957,5 +961,74 @@ describe("OpenClaw Noosphere save tool", () => {
     assert.equal(calls.length, 0);
     assert.match(String(missing.content[0]?.text), /topicId is required/);
     assert.match(String(badTags.content[0]?.text), /tags must be an array/);
+  });
+});
+
+describe("OpenClaw Noosphere CLI helpers", () => {
+  const rootConfig = {
+    plugins: {
+      entries: {
+        "noosphere-memory": {
+          hooks: { allowPromptInjection: true },
+        },
+      },
+    },
+  };
+
+  const rawConfig = {
+    baseUrl: "http://noosphere.local",
+    apiKey: { value: "noo_test" },
+    autoRecall: true,
+    enabledAgents: ["cylena"],
+  };
+
+
+  const client = {
+    async status() {
+      return {
+        ok: true,
+        timestamp: "2026-05-06T00:00:00.000Z",
+        providers: [{ id: "noosphere" }],
+        settings: { autoRecallEnabled: true },
+      };
+    },
+  };
+
+  const fetchImpl = async () => new Response(JSON.stringify({ status: "ok" }), { status: 200 });
+
+  it("builds a passing doctor report when runtime prerequisites are satisfied", async () => {
+    const report = await buildNoosphereDoctorReport(rawConfig, rootConfig, {
+      fetchImpl,
+      client,
+    });
+
+    assert.equal(report.ok, true);
+    assert.equal(report.baseUrl, "http://noosphere.local");
+    assert.equal(report.apiKeyConfigured, true);
+    assert.equal(report.checks.find((check) => check.id === "hooks.allowPromptInjection")?.status, "pass");
+    assert.equal(report.checks.find((check) => check.id === "api.memoryStatus")?.status, "pass");
+    assert.equal(report.checks.find((check) => check.id === "docker.manualCheck")?.status, "warn");
+  });
+
+  it("flags missing prompt-injection permission as a doctor failure", async () => {
+    const report = await buildNoosphereDoctorReport(rawConfig, {}, {
+      fetchImpl,
+      client,
+    });
+
+    assert.equal(report.ok, false);
+    assert.equal(report.checks.find((check) => check.id === "hooks.allowPromptInjection")?.status, "fail");
+  });
+
+  it("builds a compact status report", async () => {
+    const report = await buildNoosphereStatusReport(rawConfig, rootConfig, {
+      fetchImpl,
+      client,
+    });
+
+    assert.equal(report.ok, true);
+    assert.equal(report.health?.ok, true);
+    assert.equal(report.memoryStatus?.ok, true);
+    assert.equal(report.memoryStatus?.providers.length, 1);
   });
 });

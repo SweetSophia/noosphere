@@ -446,6 +446,21 @@ After compaction, the next `before_prompt_build` re-injects both blocks automati
 
 - `registerMemoryCorpusSupplement` — wires Noosphere into OpenClaw's shared `memory_search`/`memory_get` flows so all agents can query Noosphere content through the unified memory interface.
 
+**OpenClaw CLI helpers:**
+
+```bash
+openclaw noosphere status
+openclaw noosphere doctor
+openclaw noosphere logs [service]
+openclaw noosphere setup
+openclaw noosphere upgrade
+```
+
+- `status` checks Noosphere health and authenticated memory status.
+- `doctor` audits plugin config, API key resolution, `allowPromptInjection`, auto-recall settings, `/api/health`, and authenticated `/api/memory/status`.
+- `logs` prints the safe Docker Compose command to run for logs. The plugin does not execute Docker itself, so package installation stays within OpenClaw's third-party plugin safety policy.
+- `setup` and `upgrade` print the recommended installer/upgrade commands.
+
 ### Setup (OpenClaw Agent)
 
 **⚠️ CRITICAL: `allowPromptInjection` Setting**
