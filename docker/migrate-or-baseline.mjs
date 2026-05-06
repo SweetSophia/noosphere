@@ -35,8 +35,9 @@ function runPrisma(args) {
 }
 
 async function hasRegclass(client, regclassName) {
-  // to_regclass() is fully parameterized — no SQL injection risk.
-  // Callers are responsible for validating any user-controlled input they build into regclassName.
+  // to_regclass() accepts a text OID/regclass argument and is called with
+  // a parameterized query ($1). Table names from REQUIRED_NOOSPHERE_TABLES are
+  // validated as belt-and-suspenders since we control the input source.
   const result = await client.query("SELECT to_regclass($1) AS name", [regclassName]);
   return Boolean(result.rows[0]?.name);
 }

@@ -114,16 +114,25 @@ async function main() {
     await client.query("BEGIN");
 
     const passwordHash = await bcrypt.hash(adminPassword, 12);
-    await client.query(
-      `INSERT INTO "User" (id, email, name, "passwordHash", role, "createdAt", "updatedAt")
-       VALUES ($1, $2, $3, $4, 'ADMIN', NOW(), NOW())
-       ON CONFLICT (email) DO UPDATE SET
-         name = EXCLUDED.name,
-         "passwordHash" = EXCLUDED."passwordHash",
-         role = 'ADMIN',
-         "updatedAt" = NOW()`,
-      [id(), adminEmail, adminName, passwordHash],
-    );
+    const forceAdmin = process.env.NOOSPHERE_FORCE_ADMIN === 'true';
+    // When NOOSPHERE_FORCE_ADMIN=true, always reset role to ADMIN on conflict.
+    // Otherwise, preserve whatever role is currently set in the database.
+    const upsertQuery = forceAdmin
+      ? `INSERT INTO "User" (id, email, name, "passwordHash", role, "createdAt", "updatedAt")
+         VALUES ($1, $2, $3, $4, 'ADMIN', NOW(), NOW())
+         ON CONFLICT (email) DO UPDATE SET
+           name = EXCLUDED.name,
+           "passwordHash" = EXCLUDED."passwordHash",
+           role = 'ADMIN',
+           "updatedAt" = NOW()`
+      : `INSERT INTO "User" (id, email, name, "passwordHash", role, "createdAt", "updatedAt")
+         VALUES ($1, $2, $3, $4, 'ADMIN', NOW(), NOW())
+         ON CONFLICT (email) DO UPDATE SET
+           name = EXCLUDED.name,
+           "passwordHash" = EXCLUDED."passwordHash",
+           role = EXCLUDED.role,
+           "updatedAt" = NOW()`;
+    await client.query(upsertQuery, [id(), adminEmail, adminName, passwordHash]);
 
     for (const topic of TOPICS) {
       const parentId = await upsertTopic(client, topic, null);
