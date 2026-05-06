@@ -35,10 +35,8 @@ function runPrisma(args) {
 }
 
 async function hasRegclass(client, regclassName) {
-  // Validate identifier to prevent SQL injection even though we control the input
-  if (!isValidIdentifier(regclassName)) {
-    throw new Error(`Invalid identifier: ${regclassName}`);
-  }
+  // to_regclass() is fully parameterized — no SQL injection risk.
+  // Callers are responsible for validating any user-controlled input they build into regclassName.
   const result = await client.query("SELECT to_regclass($1) AS name", [regclassName]);
   return Boolean(result.rows[0]?.name);
 }
