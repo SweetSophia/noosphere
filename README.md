@@ -27,25 +27,6 @@ Agents can use Noosphere to store durable project knowledge, retrieve relevant c
 
 ---
 
-## Advanced Memory Features
-
-| Feature | **Noosphere** | **Hindsight** | **QMD** | **memU** | **mem0** | **LanceDB Pro** |
-|---|---|---|---|---|---|---|
-| **Multi-Provider Recall** | ✅ Noosphere + Hindsight + extensible | ❌ (single provider) | ❌ (single store) | ❌ (single provider) | ❌ (single provider) | ❌ (single store) |
-| **Recall Orchestration** | ✅ Concurrent fan-out + ranking | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Cross-Provider Dedup** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Conflict Detection** | ✅ Configurable strategies | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Token Budget Manager** | ✅ Prompt-safe recall blocks | ✅ `recallMaxTokens` | ❌ | ❌ | ❌ | ❌ |
-| **Promotion (ephemeral → curated)** | ✅ Scheduled + manual threshold triggers | ❌ | ❌ | ❌ | ❌ | ⚠️ Decay model (Weibull) |
-| **Backfill / Synthesis** | ✅ Job lifecycle with retry | ✅ Historical backfill CLI | ❌ | ❌ | ❌ | ❌ |
-| **Local Scheduler** | ✅ Built-in memory job runner | ❌ | ❌ | ✅ Continuous sync loop | ❌ | ❌ |
-| **Revision History** | ✅ Per-article | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Topic Hierarchy** | ✅ Unlimited depth | ❌ | ❌ | ✅ Category hierarchy | ❌ | ❌ |
-| **Tags / Relations** | ✅ Tags + article edges | ❌ | ❌ | ✅ Cross-references | ✅ Entity linking (v3) | ❌ |
-| **Soft Delete / Trash** | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
-
---
-
 ## What Noosphere Is For
 
 Noosphere is useful when an AI system needs memory that is more durable and inspectable than a chat transcript.
@@ -82,6 +63,11 @@ Implemented memory modules:
 - Architecture documentation in [`docs/NOOSPHERE-MEMORY-ARCHITECTURE.md`](docs/NOOSPHERE-MEMORY-ARCHITECTURE.md).
 
 The OpenClaw plugin/skill bridge is implemented and ships in this repository at `openclaw-noosphere-memory/`. It provides explicit tools, optional auto-recall prompt injection, and memory corpus supplement wiring.
+
+Frontpage | Logging
+:---:|:---:
+<img width="350" height="443" alt="noosphere_start" src="https://github.com/user-attachments/assets/436560a3-1612-47cf-bcbf-f9300f28a7f5" /> | <img width="350" height="380" alt="noosphere_log" src="https://github.com/user-attachments/assets/ceb07a54-f622-4ed8-82a0-a508f4ddfa5d" />
+
 
 ## Feature Overview
 
@@ -148,9 +134,22 @@ See the full implementation reference: [`docs/NOOSPHERE-MEMORY-ARCHITECTURE.md`]
 
 ---
 
-Frontpage | Logging
-:---:|:---:
-<img width="350" height="443" alt="noosphere_start" src="https://github.com/user-attachments/assets/436560a3-1612-47cf-bcbf-f9300f28a7f5" /> | <img width="350" height="380" alt="noosphere_log" src="https://github.com/user-attachments/assets/ceb07a54-f622-4ed8-82a0-a508f4ddfa5d" />
+## Advanced Memory Features
+
+| Feature | **Noosphere** | **Hindsight** | **QMD** | **memU** | **mem0** | **LanceDB Pro** |
+|---|---|---|---|---|---|---|
+| **Multi-Provider Recall** | ✅ Noosphere + Hindsight + extensible | ❌ (single provider) | ❌ (single store) | ❌ (single provider) | ❌ (single provider) | ❌ (single store) |
+| **Recall Orchestration** | ✅ Concurrent fan-out + ranking | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Cross-Provider Dedup** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Conflict Detection** | ✅ Configurable strategies | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Token Budget Manager** | ✅ Prompt-safe recall blocks | ✅ `recallMaxTokens` | ❌ | ❌ | ❌ | ❌ |
+| **Promotion (ephemeral → curated)** | ✅ Scheduled + manual threshold triggers | ❌ | ❌ | ❌ | ❌ | ⚠️ Decay model (Weibull) |
+| **Backfill / Synthesis** | ✅ Job lifecycle with retry | ✅ Historical backfill CLI | ❌ | ❌ | ❌ | ❌ |
+| **Local Scheduler** | ✅ Built-in memory job runner | ❌ | ❌ | ✅ Continuous sync loop | ❌ | ❌ |
+| **Revision History** | ✅ Per-article | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Topic Hierarchy** | ✅ Unlimited depth | ❌ | ❌ | ✅ Category hierarchy | ❌ | ❌ |
+| **Tags / Relations** | ✅ Tags + article edges | ❌ | ❌ | ✅ Cross-references | ✅ Entity linking (v3) | ❌ |
+| **Soft Delete / Trash** | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
 
 ---
 
