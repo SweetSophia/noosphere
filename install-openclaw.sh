@@ -83,14 +83,15 @@ ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(random_secret 24)}"
 API_KEY="${API_KEY:-noo_$(random_secret 32)}"
 
 install -m 600 /dev/null "$NOOSPHERE_HOME/.env"
+# Write a minimal .env before bootstrap. Bootstrap-only secrets
+# (NOOSPHERE_ADMIN_PASSWORD, NOOSPHERE_BOOTSTRAP_API_KEY) are passed via -e flags
+# to docker compose run. The full .env with all secrets is written after bootstrap succeeds.
 cat > "$NOOSPHERE_HOME/.env" <<ENV
 NOOSPHERE_VERSION=${NOOSPHERE_VERSION}
 NOOSPHERE_PORT=${NOOSPHERE_PORT}
 APP_URL=${APP_URL}
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
-NOOSPHERE_ADMIN_PASSWORD=${ADMIN_PASSWORD}
-NOOSPHERE_BOOTSTRAP_API_KEY=${API_KEY}
 ENV
 
 cat > "$NOOSPHERE_HOME/docker-compose.yml" <<YAML
@@ -101,8 +102,6 @@ services:
     restart: "no"
     environment:
       DATABASE_URL: postgresql://noosphere:\${POSTGRES_PASSWORD}@db:5432/noosphere
-      NOOSPHERE_ADMIN_PASSWORD: \${NOOSPHERE_ADMIN_PASSWORD}
-      NOOSPHERE_BOOTSTRAP_API_KEY: \${NOOSPHERE_BOOTSTRAP_API_KEY}
       NEXTAUTH_SECRET: \${NEXTAUTH_SECRET}
       NEXTAUTH_URL: \${APP_URL:-http://127.0.0.1:6578}
       APP_URL: \${APP_URL:-http://127.0.0.1:6578}
@@ -169,22 +168,40 @@ docker compose up -d db
 wait_for_container_healthy noosphere-openclaw-db 60
 
 echo "Applying database schema and bootstrap data..."
-# Capture all output, then extract the last line which should be JSON
-BOOTSTRAP_OUTPUT="$(docker compose run --rm -T -e NOOSPHERE_ADMIN_PASSWORD="${ADMIN_PASSWORD}" -e NOOSPHERE_BOOTSTRAP_API_KEY="${API_KEY}" init 2>&1 || true)"
-BOOTSTRAP_JSON="$(echo "$BOOTSTRAP_OUTPUT" | tail -n 1)"
+# Run bootstrap to a temp file so we can check exit status separately.
+# Admin/API credentials passed via -e flags -- never written to .env before bootstrap succeeds.
+BOOTSTRAP_TMP=$(mktemp)
+docker compose run --rm -T \
+  -e NOOSPHERE_ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
+  -e NOOSPHERE_BOOTSTRAP_API_KEY="${API_KEY}" \
+  init > "$BOOTSTRAP_TMP" 2>&1
+BOOTSTRAP_EXIT=$?
+if [ $BOOTSTRAP_EXIT -ne 0 ]; then
+  echo "Bootstrap failed with exit code $BOOTSTRAP_EXIT:" >&2
+  cat "$BOOTSTRAP_TMP" >&2
+  rm -f "$BOOTSTRAP_TMP"
+  exit 1
+fi
+# Bootstrap writes JSON to stdout. Filter out [bootstrap] log lines and extract last non-empty line.
+BOOTSTRAP_JSON=$(grep -v '^\[bootstrap\]' "$BOOTSTRAP_TMP" | grep -v '^$' | tail -n 1)
+rm -f "$BOOTSTRAP_TMP"
 if [ -z "$BOOTSTRAP_JSON" ]; then
-  echo "Bootstrap failed - no output received" >&2
-  echo "$BOOTSTRAP_OUTPUT" | tail -20 >&2
+  echo "Bootstrap produced no parseable JSON output" >&2
   exit 1
 fi
 # Validate JSON is parseable
 if ! printf '%s' "$BOOTSTRAP_JSON" | node -e 'let s=""; process.stdin.on("data", d => s += d); process.stdin.on("end", () => { try { JSON.parse(s); process.exit(0); } catch { console.error(s); process.exit(1); } });' >/dev/null 2>&1; then
   echo "Bootstrap output was not valid JSON:" >&2
   echo "$BOOTSTRAP_JSON" >&2
-  echo "Full output:" >&2
-  echo "$BOOTSTRAP_OUTPUT" | tail -20 >&2
   exit 1
 fi
+
+# Write the full .env (including bootstrap-only secrets) only after bootstrap succeeded.
+# These are not needed by the app at runtime but are kept for documentation/manual runs.
+cat >> "$NOOSPHERE_HOME/.env" <<ENV
+NOOSPHERE_ADMIN_PASSWORD=${ADMIN_PASSWORD}
+NOOSPHERE_BOOTSTRAP_API_KEY=${API_KEY}
+ENV
 
 docker compose up -d app
 wait_for_container_healthy noosphere-openclaw-app 30
