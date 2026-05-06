@@ -72,7 +72,7 @@ function readOptionalString(value) {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 function readOptionalNumber(value, min, max) {
-    if (typeof value !== "number" || !Number.isFinite(value))
+    if (value === null || typeof value !== "number" || !Number.isFinite(value))
         return undefined;
     return Math.min(max, Math.max(min, value));
 }

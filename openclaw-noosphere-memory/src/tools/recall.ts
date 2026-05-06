@@ -80,7 +80,7 @@ function readOptionalString(value: unknown): string | undefined {
 }
 
 function readOptionalNumber(value: unknown, min: number, max: number): number | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  if (value === null || typeof value !== "number" || !Number.isFinite(value)) return undefined;
   return Math.min(max, Math.max(min, value));
 }
 
