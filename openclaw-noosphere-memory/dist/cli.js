@@ -76,7 +76,7 @@ export async function buildNoosphereStatusReport(rawConfig, rootConfig, options 
         }
     }
     return {
-        ok: Boolean(health.ok && (!config.apiKey || memoryStatus?.ok === true)),
+        ok: Boolean(health.ok && config.apiKey && memoryStatus?.ok === true),
         baseUrl: config.baseUrl,
         apiKeyConfigured: Boolean(config.apiKey),
         health,
@@ -170,7 +170,7 @@ export async function buildNoosphereDoctorReport(rawConfig, rootConfig, options 
         ok: checks.every((check) => check.status !== "fail"),
         baseUrl: config.baseUrl,
         apiKeyConfigured: Boolean(config.apiKey),
-        apiKeyRedacted: redactSecret(config.apiKey),
+        ...(config.apiKey ? { apiKeyRedacted: redactSecret(config.apiKey) } : {}),
         checks,
     };
 }
@@ -186,10 +186,21 @@ function printStatusReport(report, json) {
         console.log(`Health: ${report.health.ok ? "OK" : "FAILED"}${report.health.status ? ` (HTTP ${report.health.status})` : ""}`);
     }
     if (report.memoryStatus) {
-        const providers = Array.isArray(report.memoryStatus.providers)
-            ? report.memoryStatus.providers.length
-            : "unknown";
-        console.log(`Memory API: OK (${providers} providers)`);
+        if (report.memoryStatus.ok) {
+            const providers = Array.isArray(report.memoryStatus.providers)
+                ? report.memoryStatus.providers.length
+                : "unknown";
+            console.log(`Memory API: OK (${providers} providers)`);
+        }
+        else {
+            console.log("Memory API: FAILED (ok=false)");
+        }
+    }
+    else if (report.apiKeyConfigured) {
+        console.log("Memory API: FAILED (no authenticated status response)");
+    }
+    else {
+        console.log("Memory API: skipped (missing API key)");
     }
 }
 function printDoctorReport(report, json) {
@@ -211,15 +222,27 @@ function statusIcon(status) {
     return "✗";
 }
 async function checkHealthEndpoint(config, fetchImpl) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
     try {
         const response = await fetchImpl(`${config.baseUrl}/api/health`, {
             headers: { accept: "application/json" },
+            signal: controller.signal,
         });
         return { ok: response.ok, status: response.status };
     }
     catch (error) {
+        if (isAbortError(error)) {
+            return { ok: false, error: `health check timed out after ${config.timeoutMs}ms` };
+        }
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
+    finally {
+        clearTimeout(timeout);
+    }
+}
+function isAbortError(error) {
+    return error instanceof DOMException && error.name === "AbortError";
 }
 function readAllowPromptInjection(rootConfig) {
     if (!isRecord(rootConfig))
@@ -238,10 +261,10 @@ function readAllowPromptInjection(rootConfig) {
 }
 function parsePositiveInteger(value) {
     const parsed = Number(value);
-    if (!Number.isFinite(parsed) || parsed < 1) {
+    if (!Number.isInteger(parsed) || parsed < 1) {
         throw new Error("value must be a positive integer");
     }
-    return Math.floor(parsed);
+    return parsed;
 }
 function expandHome(input) {
     if (input === "~")

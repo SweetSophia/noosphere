@@ -33,10 +33,12 @@ export interface NoosphereDoctorOptions {
 interface CliCommand {
     command(name: string): CliCommand;
     description(text: string): CliCommand;
-    option(...args: unknown[]): CliCommand;
-    argument(...args: unknown[]): CliCommand;
-    action(handler: unknown): CliCommand;
+    option(flags: string, description?: string, parserOrDefault?: CliOptionParser | unknown, defaultValue?: unknown): CliCommand;
+    argument(name: string, description?: string, defaultValue?: unknown): CliCommand;
+    action<TArgs extends readonly unknown[]>(handler: CliActionHandler<TArgs>): CliCommand;
 }
+type CliOptionParser = (value: string) => unknown;
+type CliActionHandler<TArgs extends readonly unknown[]> = (...args: TArgs) => void | Promise<void>;
 export declare function registerNoosphereCli(program: CliCommand, rawConfig: unknown, rootConfig: unknown): void;
 export declare function buildNoosphereStatusReport(rawConfig: unknown, rootConfig: unknown, options?: NoosphereDoctorOptions): Promise<NoosphereStatusReport>;
 export declare function buildNoosphereDoctorReport(rawConfig: unknown, rootConfig: unknown, options?: NoosphereDoctorOptions): Promise<NoosphereDoctorReport>;
