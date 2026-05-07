@@ -1,5 +1,6 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { createNoosphereAutoRecallHook } from "./auto-recall.js";
+import { registerNoosphereCli } from "./cli.js";
 import { createNoosphereCorpusSupplement } from "./corpus-supplement.js";
 import { createNoosphereClientContext } from "./shared-init.js";
 import { createNoosphereGetTool } from "./tools/get.js";
@@ -11,6 +12,17 @@ export default definePluginEntry({
     name: "Noosphere Memory Bridge",
     description: "Explicit OpenClaw tools and optional auto-recall prompt injection for Noosphere memory over HTTP.",
     register(api) {
+        if (typeof api.registerCli === "function") {
+            api.registerCli(({ program }) => registerNoosphereCli(program, api.pluginConfig, api.config), {
+                descriptors: [{
+                        name: "noosphere",
+                        description: "Inspect and operate the Noosphere memory integration",
+                        hasSubcommands: true,
+                    }],
+            });
+        }
+        if (api.registrationMode === "cli-metadata")
+            return;
         const clientContext = createNoosphereClientContext(api.pluginConfig, api.config);
         api.registerTool(createNoosphereStatusTool(api.pluginConfig, clientContext));
         api.registerTool(createNoosphereRecallTool(api.pluginConfig, clientContext));

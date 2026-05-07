@@ -2,6 +2,7 @@ declare module "openclaw/plugin-sdk/plugin-entry" {
   export interface OpenClawPluginApi {
     config?: unknown;
     pluginConfig?: unknown;
+    registrationMode?: string;
     logger?: {
       warn?: (message: string) => void;
       info?: (message: string) => void;
@@ -10,6 +11,7 @@ declare module "openclaw/plugin-sdk/plugin-entry" {
     };
     registerTool(tool: unknown, options?: unknown): void;
     registerMemoryCorpusSupplement?(supplement: unknown): void;
+    registerCli?(registrar: (ctx: { program: unknown }) => void | Promise<void>, options?: unknown): void;
     on?<TEvent = unknown, TContext = unknown>(
       hookName: "before_prompt_build",
       handler: ((event: TEvent, ctx: TContext) => unknown | Promise<unknown>) & { registrationWarning?: () => void },
