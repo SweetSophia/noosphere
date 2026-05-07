@@ -1032,6 +1032,29 @@ describe("OpenClaw Noosphere CLI helpers", () => {
     assert.equal(report.checks.find((check) => check.id === "hooks.allowPromptInjection")?.status, "fail");
   });
 
+  it("does not fail missing prompt-injection permission when auto-recall is disabled", async () => {
+    const report = await buildNoosphereDoctorReport(
+      { ...rawConfig, autoRecall: false },
+      {},
+      {
+        fetchImpl,
+        client: {
+          async status() {
+            return {
+              ok: true,
+              timestamp: "2026-05-06T00:00:00.000Z",
+              providers: [{ id: "noosphere" }],
+              settings: { autoRecallEnabled: false },
+            };
+          },
+        },
+      },
+    );
+
+    assert.equal(report.ok, true);
+    assert.equal(report.checks.find((check) => check.id === "hooks.allowPromptInjection")?.status, "warn");
+  });
+
   it("builds a compact status report", async () => {
     const report = await buildNoosphereStatusReport(rawConfig, rootConfig, {
       fetchImpl,

@@ -106,15 +106,6 @@ export async function buildNoosphereDoctorReport(rawConfig, rootConfig, options 
         status: autoRecall ? "pass" : "warn",
         message: autoRecall ? "enabled" : "disabled in plugin config",
     });
-    const allowPromptInjection = readAllowPromptInjection(rootConfig);
-    checks.push({
-        id: "hooks.allowPromptInjection",
-        label: "Prompt injection hook permission",
-        status: allowPromptInjection ? "pass" : "fail",
-        message: allowPromptInjection
-            ? "plugins.entries.noosphere-memory.hooks.allowPromptInjection=true"
-            : "set plugins.entries.noosphere-memory.hooks.allowPromptInjection=true",
-    });
     const enabledAgents = readStringArray(isRecord(rawConfig) ? rawConfig.enabledAgents : undefined) ?? [];
     checks.push({
         id: "config.enabledAgents",
@@ -129,6 +120,7 @@ export async function buildNoosphereDoctorReport(rawConfig, rootConfig, options 
         status: health.ok ? "pass" : "fail",
         message: health.ok ? `HTTP ${health.status}` : health.error ?? `HTTP ${health.status ?? "unknown"}`,
     });
+    let dbAutoRecall;
     if (config.apiKey) {
         try {
             const client = options.client ?? new NoosphereMemoryClient(config);
@@ -141,13 +133,14 @@ export async function buildNoosphereDoctorReport(rawConfig, rootConfig, options 
                 details: status,
             });
             const settings = isRecord(status.settings) ? status.settings : {};
-            const dbAutoRecall = settings.autoRecallEnabled;
-            if (typeof dbAutoRecall === "boolean") {
+            const dbAutoRecallValue = settings.autoRecallEnabled;
+            if (typeof dbAutoRecallValue === "boolean") {
+                dbAutoRecall = dbAutoRecallValue;
                 checks.push({
                     id: "settings.autoRecallEnabled",
                     label: "DB auto-recall setting",
-                    status: dbAutoRecall ? "pass" : "warn",
-                    message: dbAutoRecall ? "enabled" : "disabled in Noosphere recall settings",
+                    status: dbAutoRecallValue ? "pass" : "warn",
+                    message: dbAutoRecallValue ? "enabled" : "disabled in Noosphere recall settings",
                 });
             }
         }
@@ -160,6 +153,18 @@ export async function buildNoosphereDoctorReport(rawConfig, rootConfig, options 
             });
         }
     }
+    const allowPromptInjection = readAllowPromptInjection(rootConfig);
+    const promptInjectionRequired = dbAutoRecall ?? autoRecall;
+    checks.push({
+        id: "hooks.allowPromptInjection",
+        label: "Prompt injection hook permission",
+        status: allowPromptInjection ? "pass" : promptInjectionRequired ? "fail" : "warn",
+        message: allowPromptInjection
+            ? "plugins.entries.noosphere-memory.hooks.allowPromptInjection=true"
+            : promptInjectionRequired
+                ? "set plugins.entries.noosphere-memory.hooks.allowPromptInjection=true"
+                : "not required while auto-recall is disabled",
+    });
     checks.push({
         id: "docker.manualCheck",
         label: "Docker container check",

@@ -14,20 +14,6 @@ export default definePluginEntry({
   description:
     "Explicit OpenClaw tools and optional auto-recall prompt injection for Noosphere memory over HTTP.",
   register(api) {
-    const clientContext = createNoosphereClientContext(api.pluginConfig, api.config);
-    api.registerTool(
-      createNoosphereStatusTool(api.pluginConfig, clientContext),
-    );
-    api.registerTool(
-      createNoosphereRecallTool(api.pluginConfig, clientContext),
-    );
-    api.registerTool(createNoosphereGetTool(api.pluginConfig, clientContext));
-    api.registerTool(createNoosphereSaveTool(api.pluginConfig, clientContext));
-    if (typeof api.registerMemoryCorpusSupplement === "function") {
-      api.registerMemoryCorpusSupplement(
-        createNoosphereCorpusSupplement(clientContext, api.logger),
-      );
-    }
     if (typeof api.registerCli === "function") {
       api.registerCli(
         ({ program }: { program: unknown }) => registerNoosphereCli(
@@ -42,6 +28,22 @@ export default definePluginEntry({
             hasSubcommands: true,
           }],
         },
+      );
+    }
+    if (api.registrationMode === "cli-metadata") return;
+
+    const clientContext = createNoosphereClientContext(api.pluginConfig, api.config);
+    api.registerTool(
+      createNoosphereStatusTool(api.pluginConfig, clientContext),
+    );
+    api.registerTool(
+      createNoosphereRecallTool(api.pluginConfig, clientContext),
+    );
+    api.registerTool(createNoosphereGetTool(api.pluginConfig, clientContext));
+    api.registerTool(createNoosphereSaveTool(api.pluginConfig, clientContext));
+    if (typeof api.registerMemoryCorpusSupplement === "function") {
+      api.registerMemoryCorpusSupplement(
+        createNoosphereCorpusSupplement(clientContext, api.logger),
       );
     }
     const hook = createNoosphereAutoRecallHook(
