@@ -85,7 +85,12 @@ API_KEY="${API_KEY:-noo_$(random_secret 32)}"
 # Export compose variables instead of writing .env before bootstrap.
 # The persistent .env is written atomically only after bootstrap succeeds, so a
 # failed install does not leave generated secrets behind on disk.
+# Bootstrap credentials are exported too because docker compose up may run the
+# init service again through app.depends_on; the second run must see the same
+# admin/API credentials as the explicit bootstrap run below.
 export NOOSPHERE_VERSION NOOSPHERE_PORT NOOSPHERE_IMAGE APP_URL POSTGRES_PASSWORD NEXTAUTH_SECRET
+export NOOSPHERE_ADMIN_PASSWORD="$ADMIN_PASSWORD"
+export NOOSPHERE_BOOTSTRAP_API_KEY="$API_KEY"
 
 cat > "$NOOSPHERE_HOME/docker-compose.yml" <<YAML
 services:
@@ -95,6 +100,8 @@ services:
     restart: "no"
     environment:
       DATABASE_URL: postgresql://noosphere:\${POSTGRES_PASSWORD}@db:5432/noosphere
+      NOOSPHERE_ADMIN_PASSWORD: \${NOOSPHERE_ADMIN_PASSWORD}
+      NOOSPHERE_BOOTSTRAP_API_KEY: \${NOOSPHERE_BOOTSTRAP_API_KEY}
       NEXTAUTH_SECRET: \${NEXTAUTH_SECRET}
       NEXTAUTH_URL: \${APP_URL:-http://127.0.0.1:6578}
       APP_URL: \${APP_URL:-http://127.0.0.1:6578}
@@ -162,12 +169,10 @@ wait_for_container_healthy noosphere-openclaw-db 60
 
 echo "Applying database schema and bootstrap data..."
 # Run bootstrap to a temp file so we can check exit status separately.
-# Admin/API credentials passed via -e flags -- never written to .env before bootstrap succeeds.
+# Admin/API credentials are passed through exported Compose variables; they are
+# not written to .env until bootstrap succeeds.
 BOOTSTRAP_TMP=$(mktemp)
-docker compose run --rm -T \
-  -e NOOSPHERE_ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
-  -e NOOSPHERE_BOOTSTRAP_API_KEY="${API_KEY}" \
-  init > "$BOOTSTRAP_TMP" 2>&1
+docker compose run --rm -T init > "$BOOTSTRAP_TMP" 2>&1
 BOOTSTRAP_EXIT=$?
 if [ $BOOTSTRAP_EXIT -ne 0 ]; then
   echo "Bootstrap failed with exit code $BOOTSTRAP_EXIT:" >&2
