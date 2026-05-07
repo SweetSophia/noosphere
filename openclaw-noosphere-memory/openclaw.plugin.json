@@ -9,8 +9,12 @@
       "noosphere_get",
       "noosphere_save"
     ],
-    "hooks": ["before_prompt_build"],
-    "memoryCorpusSupplements": ["noosphere"],
+    "hooks": [
+      "before_prompt_build"
+    ],
+    "memoryCorpusSupplements": [
+      "noosphere"
+    ],
     "config": {
       "secretInputs": {
         "paths": [
@@ -26,15 +30,17 @@
     "providers": [
       {
         "id": "noosphere-memory",
-        "envVars": ["NOOSPHERE_API_KEY"]
+        "envVars": [
+          "NOOSPHERE_API_KEY"
+        ]
       }
     ]
   },
   "uiHints": {
     "baseUrl": {
       "label": "Noosphere Base URL",
-      "help": "Base URL for Noosphere, for example http://100.122.171.30:3000.",
-      "placeholder": "http://localhost:3000"
+      "help": "Base URL for Noosphere, for example http://127.0.0.1:6578.",
+      "placeholder": "http://127.0.0.1:6578"
     },
     "apiKey": {
       "label": "Noosphere API Key",
@@ -91,7 +97,10 @@
         "type": "string"
       },
       "apiKey": {
-        "type": ["string", "object"]
+        "type": [
+          "string",
+          "object"
+        ]
       },
       "timeoutMs": {
         "type": "number",
@@ -103,8 +112,12 @@
       },
       "autoProviders": {
         "type": "array",
-        "items": { "type": "string" },
-        "default": ["noosphere"]
+        "items": {
+          "type": "string"
+        },
+        "default": [
+          "noosphere"
+        ]
       },
       "maxInjectedMemories": {
         "type": "number",
@@ -120,7 +133,11 @@
       },
       "recallInjectionPosition": {
         "type": "string",
-        "enum": ["prepend", "system-prepend", "system-append"],
+        "enum": [
+          "prepend",
+          "system-prepend",
+          "system-append"
+        ],
         "default": "prepend"
       },
       "autoRecallTimeoutMs": {
@@ -136,11 +153,15 @@
       },
       "enabledAgents": {
         "type": "array",
-        "items": { "type": "string" }
+        "items": {
+          "type": "string"
+        }
       },
       "allowedChatTypes": {
         "type": "array",
-        "items": { "type": "string" }
+        "items": {
+          "type": "string"
+        }
       },
       "includeRecentTurns": {
         "type": "boolean",
@@ -151,6 +172,29 @@
         "minimum": 0,
         "maximum": 10,
         "default": 4
+      },
+      "memoryCaptureInstructionsEnabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "memoryCaptureInstructions": {
+        "type": "string"
+      },
+      "ignoreSessionPatterns": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "statelessSessionPatterns": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "skipStatelessSessions": {
+        "type": "boolean",
+        "default": true
       }
     }
   }

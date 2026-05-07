@@ -414,74 +414,54 @@ curl -s -X POST http://localhost:4400/api/memory/save \
 
 ## OpenClaw Integration
 
-Noosphere is intended to back OpenClaw-style agent memory workflows.
+Noosphere ships an OpenClaw plugin at `openclaw-noosphere-memory/` and an official local Docker Compose install path for OpenClaw users.
 
-The OpenClaw bridge is a first-class citizen of this repository and lives at `openclaw-noosphere-memory/`.
+For the full setup, operations, troubleshooting, upgrade, and uninstall guide, see:
 
-### Plugin Capabilities
+- [`docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md`](docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md)
+
+### Quick install
+
+On the machine running OpenClaw Gateway:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/master/install-openclaw.sh | bash
+openclaw noosphere doctor
+openclaw noosphere status
+```
+
+Defaults are local-only and safe for personal OpenClaw deployments:
+
+- Noosphere URL: `http://127.0.0.1:6578`
+- Runtime directory: `~/.noosphere`
+- OpenClaw secret file: `~/.openclaw/secrets/noosphere-memory.json`
+- Docker image: `ghcr.io/sweetsophia/noosphere:latest`
+
+### Plugin capabilities
 
 **Explicit tools:**
 
 | Tool | Permission | Description |
 | --- | --- | --- |
-| `noosphere_status` | READ+ | Health check: providers, settings, capabilities |
-| `noosphere_recall` | READ+ | Multi-provider recall query (auto or inspection mode) |
-| `noosphere_get` | READ+ | Direct lookup by ID or canonical ref |
-| `noosphere_save` | WRITE+ | Save a memory candidate (draft only, never auto-publishes) |
+| `noosphere_status` | ADMIN | Health check: providers, settings, capabilities |
+| `noosphere_recall` | READ | Multi-provider recall query in `auto` or `inspection` mode |
+| `noosphere_get` | READ | Direct lookup by provider/id or canonical ref |
+| `noosphere_save` | WRITE | Save a draft memory candidate; never auto-publishes |
 
-**Auto-injection (via `before_prompt_build` hook):**
+**Auto-injection:**
 
-When `autoRecall: true` and the agent is eligible, the hook injects two XML blocks into `prependContext`:
+When `autoRecall: true`, OpenClaw permits hook injection, and recall returns non-empty prompt text, the plugin's `before_prompt_build` hook can inject:
 
-1. `<noosphere_memory_capture>` — bundled guidance telling the agent when to save important information and how to use the `noosphere_save` tool (topicId, title, content, confidence, tags). Includes "what NOT to save" rules (transient text, secrets, short content).
-2. `<noosphere_auto_recall>` — ranked, deduplicated, conflict-resolved recall results within token budget.
+1. `<noosphere_memory_capture>` — guidance telling agents when/how to call `noosphere_save`.
+2. `<noosphere_auto_recall>` — ranked, deduplicated, conflict-resolved recall results within budget.
 
-After compaction, the next `before_prompt_build` re-injects both blocks automatically.
-
-**Hooks:**
-
-- `before_prompt_build` — optional bounded Noosphere recall injection with bundled memory capture instructions. When `autoRecall` is enabled and gates pass, injects `<noosphere_memory_capture>` block (when/how to save) alongside `<noosphere_auto_recall>` block (recall results). Disabled by default to avoid duplicate Hindsight auto-injection.
-
-**Corpus supplement:**
-
-- `registerMemoryCorpusSupplement` — wires Noosphere into OpenClaw's shared `memory_search`/`memory_get` flows so all agents can query Noosphere content through the unified memory interface.
-
-**OpenClaw CLI helpers:**
-
-```bash
-openclaw noosphere status
-openclaw noosphere doctor
-openclaw noosphere logs [service]
-openclaw noosphere setup
-openclaw noosphere upgrade
-```
-
-- `status` checks Noosphere health and authenticated memory status.
-- `doctor` audits plugin config, API key resolution, `allowPromptInjection`, auto-recall settings, `/api/health`, and authenticated `/api/memory/status`.
-- `logs` prints the safe Docker Compose command to run for logs. The plugin does not execute Docker itself, so package installation stays within OpenClaw's third-party plugin safety policy.
-- `setup` and `upgrade` print the recommended installer/upgrade commands.
-
-### Setup (OpenClaw Agent)
-
-**⚠️ CRITICAL: `allowPromptInjection` Setting**
-
-For the `before_prompt_build` hook to actually inject memory capture instructions and recall results into the agent's context, you **must** set `allowPromptInjection: true` in the `hooks` section of the plugin entry:
+Important: OpenClaw requires this hook permission before any prompt text can be injected:
 
 ```json
 {
   "plugins": {
     "entries": {
       "noosphere-memory": {
-        "enabled": true,
-        "config": {
-          "baseUrl": "http://100.111.85.48:4400",
-          "apiKey": "noo_your_key_here",
-          "autoRecall": false,
-          "autoProviders": ["noosphere"],
-          "maxInjectedMemories": 5,
-          "maxInjectedTokens": 2000,
-          "memoryCaptureInstructionsEnabled": true
-        },
         "hooks": {
           "allowPromptInjection": true
         }
@@ -491,135 +471,25 @@ For the `before_prompt_build` hook to actually inject memory capture instruction
 }
 ```
 
-Without `allowPromptInjection: true`, the hook runs but the injection is blocked by the gateway — agents will not see memory capture guidance or recall results auto-injected.
+Without `hooks.allowPromptInjection: true`, explicit tools still work, but auto-recall and memory capture instructions will not appear in agent context.
 
-**1. Load the plugin**
+**Memory corpus supplement:**
 
-The plugin package is at `openclaw-noosphere-memory/` in this repository. Add it to your OpenClaw agent's plugin config (include the `hooks` section as shown above):
+The plugin registers a Noosphere memory corpus supplement so OpenClaw shared memory flows can query Noosphere content through the unified memory interface.
 
-**2. Keys and permissions**
+**OpenClaw CLI helpers:**
 
-| Task | Required permission |
-| --- | --- |
-| `noosphere_status` | ADMIN |
-| `noosphere_recall` (read) | READ |
-| `noosphere_get` (read) | READ |
-| `noosphere_save` (write) | WRITE |
+The plugin registers `openclaw noosphere ...` helpers for status, diagnostics, logs guidance, setup guidance, and upgrade guidance. See the setup guide for the canonical command reference.
 
-Create a key with the appropriate scope at `/wiki/admin/keys`.
+### Safety properties
 
-**3. Conservative first activation**
-
-```json
-{
-  "noosphere-memory": {
-    "baseUrl": "http://100.122.171.30:4400",
-    "apiKey": "noo_admin_key_with_write",
-    "autoRecall": false,
-    "autoProviders": ["noosphere"],
-    "maxInjectedMemories": 3,
-    "maxInjectedTokens": 1000,
-    "recallInjectionPosition": "system-prepend"
-  }
-}
-```
-
-Keep `autoRecall: false` initially. Verify explicit tools first (`noosphere_status` → `noosphere_recall` → `noosphere_get` → `noosphere_save`). Then enable auto-recall conservatively.
-
-**4. Verify**
-
-```bash
-# Explicit tool tests
-/noosphere_status   # should return ok: true and provider list
-/noosphere_recall   # query: "your project name", mode: inspection
-/noosphere_get      # canonicalRef: "noosphere:article:<some-id>"
-
-# Auto-recall verification
-# Enable autoRecall, send a prompt, confirm bounded Noosphere block is injected.
-# Confirm Hindsight is not double-injected in conservative mode (autoProviders: ["noosphere"] only).
-# Confirm timeouts fail open (injects nothing, logs warning).
-```
-
-**5. Enable auto-recall (optional)**
-
-Once explicit tools are verified, enable auto-recall in the plugin config. Make sure `allowPromptInjection: true` is set in the `hooks` section:
-
-```json
-{
-  "noosphere-memory": {
-    "config": {
-      "autoRecall": true,
-      "autoProviders": ["noosphere"],
-      "maxInjectedMemories": 5,
-      "maxInjectedTokens": 2000,
-      "memoryCaptureInstructionsEnabled": true
-    },
-    "hooks": {
-      "allowPromptInjection": true
-    }
-  }
-}
-```
-
-**Memory capture instructions** are enabled by default (`memoryCaptureInstructionsEnabled: true`). When enabled, the `before_prompt_build` hook injects guidance telling the agent:
-
-- **When to save**: after completing significant tasks, error fixes, important decisions, or when the user asks to remember something
-- **How to save**: which parameters to pass to `noosphere_save` (topicId, title, content ≥40 chars, confidence level, tags)
-- **What NOT to save**: transient acknowledgments ("I'll check...", "Got it"), secrets, short content, or non-durable text
-
-Disable by setting `memoryCaptureInstructionsEnabled: false` if you prefer a purely recall-based workflow.
-
-### Key Safety Properties
-
-- Auto-recall **fails open**: if Noosphere is unreachable or the request times out, the agent prompt proceeds with no memory injected rather than erroring.
-- **Memory capture instructions are informational**: the instructions guide agent behavior but do not execute saves. Agents must explicitly call `noosphere_save` to persist anything.
-- **No forced saves**: even with instructions enabled, agents only save when they decide to call `noosphere_save`.
-- **No secrets in error payloads**: `apiKey` and `baseUrl` are never exposed in tool error responses.
-- **Bounded response bodies**: server enforces a hard cap on response body size regardless of what the plugin requests.
-- **Draft-only saves**: `noosphere_save` creates candidate articles, never directly publishes curated knowledge.
-- **Secret scanning**: saves strip content that looks like API keys, tokens, or Bearer credentials before storing.
-
-### Architecture Notes
-
-- The plugin calls Noosphere over HTTP. It does **not** import Noosphere internals directly.
-- Default mode is **conservative coexistence**: Hindsight keeps its own auto-recall; Noosphere auto-recalls curated Noosphere content only. This avoids double injection.
-- **Coordinated mode**: set Hindsight `autoRecall: false` and enable Noosphere `autoRecall: true` with `autoProviders: ["noosphere", "hindsight"]` to get one unified recall block.
-- See [`docs/OPENCLAW-NOOSPHERE-BRIDGE-ROADMAP.md`](docs/OPENCLAW-NOOSPHERE-BRIDGE-ROADMAP.md) for the full implementation history and API contracts.
-
-### Troubleshooting
-
-**Memory capture instructions or recall results not appearing in agent context**
-
-The most common cause is `allowPromptInjection: false` in the gateway config. This blocks the `before_prompt_build` hook from injecting content even when `autoRecall: true` is set.
-
-Check your `openclaw.json`:
-
-```json
-"plugins": {
-  "entries": {
-    "noosphere-memory": {
-      "config": {
-        "autoRecall": true
-      },
-      "hooks": {
-        "allowPromptInjection": true  ← THIS MUST BE TRUE
-      }
-    }
-  }
-}
-```
-
-After changing `openclaw.json`, restart the gateway:
-
-```bash
-openclaw gateway restart
-```
-
-**Gateway config location**: `~/.openclaw/openclaw.json` on the machine running the OpenClaw gateway (not the noosphere server).
-
-**Tools work but auto-injection doesn't**: This is the `allowPromptInjection` issue above. The tools call the HTTP API directly (which works), but the hook's text injection is blocked by the gateway setting.
-
-**Gateway not loading the plugin**: Check that the plugin is registered in `openclaw.json` under `plugins.entries` with `enabled: true`.
+- Default Docker Compose binding is localhost-only: `127.0.0.1:6578`.
+- PostgreSQL stays internal to the production Compose network.
+- API keys are permission-scoped; READ/WRITE/ADMIN are used for different actions.
+- Secrets are stored outside the repo in OpenClaw secret files and `~/.noosphere/.env`.
+- Auto-recall fails open when Noosphere is unreachable.
+- The installer enables broad prompt injection by default (`autoRecall: true`, `allowPromptInjection: true`, no agent/chat allowlist); restrict it with `enabledAgents`/`allowedChatTypes` if needed.
+- `noosphere_save` creates draft candidates only.
 
 ## Environment Variables
 
@@ -646,6 +516,8 @@ docker compose logs -f app
 
 ## Documentation
 
+- [`docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md`](docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md) — official OpenClaw install, operations, upgrade, and troubleshooting guide
+- [`docs/OPENCLAW-OFFICIAL-PLUGIN-DEVELOPMENT-PLAN.md`](docs/OPENCLAW-OFFICIAL-PLUGIN-DEVELOPMENT-PLAN.md) — productization plan and release checklist
 - [`docs/NOOSPHERE-MEMORY-ARCHITECTURE.md`](docs/NOOSPHERE-MEMORY-ARCHITECTURE.md) — memory architecture and configuration model
 - [`docs/NOOSPHERE-SKILL.md`](docs/NOOSPHERE-SKILL.md) — agent-facing wiki skill reference
 - [`docs/OBSIDIAN-SYNC-SPEC.md`](docs/OBSIDIAN-SYNC-SPEC.md) — Obsidian sync design

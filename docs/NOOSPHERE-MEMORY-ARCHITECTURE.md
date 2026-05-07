@@ -525,6 +525,7 @@ openclaw-noosphere-memory/src/
 ├── config.ts          — NoosphereMemoryPluginConfig + defaults
 ├── client.ts          — NoosphereMemoryClient (HTTP API wrapper)
 ├── auto-recall.ts     — before_prompt_build hook implementation
+├── cli.ts             — OpenClaw `noosphere` CLI helpers
 ├── corpus-supplement.ts — memory corpus supplement wiring
 ├── format.ts          — XML output formatting
 ├── types.ts           — shared TypeScript types
@@ -537,30 +538,36 @@ openclaw-noosphere-memory/src/
 
 ### NoosphereAutoRecallConfig
 
-Source: `openclaw-noosphere-memory/src/config.ts`
+Source: `openclaw-noosphere-memory/src/config.ts` and
+`openclaw-noosphere-memory/src/auto-recall.ts`
 
-The auto-recall hook uses `NoosphereAutoRecallConfig`:
+The auto-recall hook uses `NoosphereAutoRecallConfig` for prompt injection gates,
+query construction, timeouts, and memory-capture guidance. The official installer
+sets secure local connection defaults plus installer-specific prompt-injection
+budget/timeout values that differ from the plugin's raw library defaults.
 
-| Field | Default | Purpose |
-| --- | --- | --- |
-| `autoRecall` | `false` | Enable/disable auto-injection |
-| `enabledAgents` | `[]` | Agent IDs allowed to receive auto-injection |
-| `chatTypes` | `["direct"]` | Chat types for injection (direct, group, etc.) |
-| `maxInjectedMemories` | `5` | Result count cap for injected recall |
-| `maxInjectedTokens` | `1200` | Token budget for injected recall |
-| `recallInjectionPosition` | `prepend` | Where to inject in prompt context |
-| `memoryCaptureInstructionsEnabled` | `true` | Inject memory capture guidance block |
-| `memoryCaptureInstructions` | (see below) | Custom override for capture guidance text |
-| `autoProviders` | `["noosphere"]` | Which providers to query in auto mode |
-| `baseUrl` | (required) | Noosphere API base URL |
-| `apiKey` | (required) | API key for authentication |
-| `timeoutMs` | `5000` | Request timeout |
+To avoid duplicated default tables drifting across documents, the canonical
+operator-facing field reference lives in
+[`OPENCLAW-OFFICIAL-PLUGIN-SETUP.md`](OPENCLAW-OFFICIAL-PLUGIN-SETUP.md#plugin-configuration-fields).
+
+Key groups:
+
+- **Connection**: `baseUrl`, `apiKey`, `timeoutMs`
+- **Auto-recall gates**: `autoRecall`, `enabledAgents`, `allowedChatTypes`,
+  `ignoreSessionPatterns`, `statelessSessionPatterns`, `skipStatelessSessions`
+- **Query construction**: `includeRecentTurns`, `recentTurnLimit`,
+  `minQueryLength`, `autoProviders`
+- **Prompt budget/placement**: `maxInjectedMemories`, `maxInjectedTokens`,
+  `recallInjectionPosition`, `autoRecallTimeoutMs`
+- **Capture guidance**: `memoryCaptureInstructionsEnabled`,
+  `memoryCaptureInstructions`
 
 ### Memory Capture Instructions
 
 When `memoryCaptureInstructionsEnabled: true`, the `before_prompt_build` hook injects
 a `<noosphere_memory_capture>` XML block containing guidance on when and how to use
-`noosphere_save`. The default instructions tell agents:
+`noosphere_save`. This block is appended only when auto-recall succeeds and returns
+non-empty prompt injection text. The default instructions tell agents:
 
 **WHEN TO SAVE:**
 - After completing a significant task (deployment, bug fix, feature implementation)
@@ -597,11 +604,27 @@ before_prompt_build hook
       → return undefined (no injection)
 ```
 
+### OpenClaw CLI Helpers
+
+The plugin registers a `noosphere` CLI command group:
+
+```bash
+openclaw noosphere status
+openclaw noosphere doctor
+openclaw noosphere logs [service]
+openclaw noosphere setup
+openclaw noosphere upgrade
+```
+
+`status` and `doctor` use the Noosphere HTTP API and resolved OpenClaw plugin
+config. `logs`, `setup`, and `upgrade` print operator commands instead of
+executing Docker or shell commands from the plugin package.
+
 ### Settings Cache
 
 The auto-recall hook caches recall settings from the DB for 30 seconds to avoid
-excessive API calls. This cache is invalidated on any settings change through the
-admin UI or API.
+excessive API calls. The effective settings are refreshed after the cache TTL;
+changes made through the admin UI or API are picked up on the next refresh.
 
 ### Backward Compatibility
 
@@ -620,3 +643,7 @@ The plugin guards against older config shapes that may not have new fields:
   agent decides to call the tool.
 - **Bounded results**: orchestrator enforces `maxInjectedMemories` and
   `maxInjectedTokens` caps at the server level.
+- **Local-first setup**: the official OpenClaw setup binds Noosphere to
+  `127.0.0.1:6578` by default and stores secrets outside the repository.
+
+See also: [`OPENCLAW-OFFICIAL-PLUGIN-SETUP.md`](OPENCLAW-OFFICIAL-PLUGIN-SETUP.md).
