@@ -10,8 +10,8 @@ Branch: `feat/phase-8-release-checklist`
 - [x] Root memory tests pass: `npm run test:memory` → 156/156 passing.
 - [x] Root production build passes: `npm run build` completed successfully.
 - [x] Plugin package builds: `openclaw-noosphere-memory npm run build` completed successfully.
-- [x] Plugin package archive builds: `npm pack` produced `sweetsophia-openclaw-noosphere-memory-0.1.0.tgz`.
-- [x] Plugin package archive installs: `openclaw plugins install ./sweetsophia-openclaw-noosphere-memory-0.1.0.tgz --force` completed.
+- [x] Plugin package archive builds: `npm pack` produced `sweetsophia-openclaw-noosphere-memory-1.3.0.tgz`.
+- [x] Plugin package archive installs: `openclaw plugins install ./sweetsophia-openclaw-noosphere-memory-1.3.0.tgz --force` completed.
 - [x] Plugin runtime inspect shows expected registrations:
   - Tools: `noosphere_status`, `noosphere_recall`, `noosphere_get`, `noosphere_save`
   - Hook: `before_prompt_build`
