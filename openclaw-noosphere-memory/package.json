@@ -39,5 +39,17 @@
       "pluginApi": ">=2026.5.3-1",
       "minGatewayVersion": "2026.5.3-1"
     }
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SweetSophia/noosphere.git",
+    "directory": "openclaw-noosphere-memory"
+  },
+  "bugs": {
+    "url": "https://github.com/SweetSophia/noosphere/issues"
+  },
+  "homepage": "https://github.com/SweetSophia/noosphere#readme"
 }
