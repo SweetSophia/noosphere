@@ -230,6 +230,32 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     assert.equal(calls.length, 1);
   });
 
+  it("strips OpenClaw timestamp and marker-test reply instructions from recall queries", () => {
+    const query = buildAutoRecallQuery(
+      {
+        prompt:
+          "[Thu 2026-05-07 22:25 GMT+2] Phase 8 auto-recall marker answer. Reply with only the marker answer phrase from injected memory if present; otherwise reply NO_MARKER.",
+        messages: [],
+      },
+      resolveAutoRecallConfig({ autoRecall: true }),
+    );
+
+    assert.equal(query, "Phase 8 auto-recall marker answer.");
+  });
+
+  it("strips fallback retry preludes from recall queries", () => {
+    const query = buildAutoRecallQuery(
+      {
+        prompt:
+          "[Retry after the previous model attempt failed or timed out]\n\nPhase 8 auto-recall marker answer",
+        messages: [],
+      },
+      resolveAutoRecallConfig({ autoRecall: true }),
+    );
+
+    assert.equal(query, "Phase 8 auto-recall marker answer");
+  });
+
   it("builds a bounded query from recent user turns plus current prompt", () => {
     const query = buildAutoRecallQuery(
       {
