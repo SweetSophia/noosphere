@@ -1,0 +1,84 @@
+name: Publish OpenClaw plugin to npm
+
+on:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - ".github/workflows/npm-publish.yml"
+      - "openclaw-noosphere-memory/**"
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the OpenClaw plugin package to npm"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  package-check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: openclaw-noosphere-memory
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: openclaw-noosphere-memory/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build package
+        run: npm run build
+
+      - name: Verify committed dist is current
+        run: git diff --exit-code -- dist
+
+      - name: Pack dry run
+        run: npm pack --dry-run
+
+  publish:
+    needs: package-check
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    defaults:
+      run:
+        working-directory: openclaw-noosphere-memory
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: openclaw-noosphere-memory/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build package
+        run: npm run build
+
+      - name: Verify committed dist is current
+        run: git diff --exit-code -- dist
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
