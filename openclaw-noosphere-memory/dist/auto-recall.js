@@ -269,13 +269,25 @@ export function buildAutoRecallQuery(event, config) {
     return parts.join("\n\n").slice(-MAX_QUERY_LENGTH);
 }
 /**
- * Strip OpenClaw channel metadata envelopes from text.
- * Only targets OpenClaw-specific patterns, not general bracketed text.
+ * Strip OpenClaw channel metadata envelopes and task-control boilerplate from text.
+ *
+ * The Noosphere article provider currently uses PostgreSQL websearch_to_tsquery,
+ * so extra operational words (timestamps, "reply with only...", fallback retry
+ * notes) can turn a good recall query into an over-constrained AND query. Keep
+ * this conservative: remove OpenClaw-generated wrappers, not arbitrary user
+ * content.
  */
 function stripMetadataEnvelopes(text) {
     if (!text)
         return text;
     let cleaned = text;
+    // Remove fallback retry prelude from OpenClaw CLI/Gateway retry attempts.
+    cleaned = cleaned.replace(/^\[Retry after the previous model attempt failed or timed out\]\s*/i, "");
+    // Remove timestamp prefix added by OpenClaw command/session routing.
+    cleaned = cleaned.replace(/^\[[A-Z][a-z]{2}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?:[^\]]*)\]\s*/i, "");
+    // Remove common marker-test/task-control suffixes that are instructions to the
+    // agent, not durable-memory search terms.
+    cleaned = cleaned.replace(/\bReply with only[\s\S]*$/i, "");
     // Remove leading "System: ..." lines (from prependSystemEvents)
     cleaned = cleaned.replace(/^(?:System:.*\n)+\n?/gm, "");
     // Remove session abort hints
