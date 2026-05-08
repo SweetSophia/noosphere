@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Keep Turbopack scoped to this repo even when parent directories contain lockfiles.
+  turbopack: {
+    root: process.cwd(),
+  },
+
   // Standalone output for Docker
   output: "standalone",
 
