@@ -81,7 +81,7 @@ By default the installer enables Noosphere auto-recall for all OpenClaw agents a
 Example using a pinned image tag and custom port:
 
 ```bash
-NOOSPHERE_VERSION=0.1.0 \
+NOOSPHERE_VERSION=v1.3 \
 NOOSPHERE_PORT=6678 \
 APP_URL=http://127.0.0.1:6678 \
 bash install-openclaw.sh
