@@ -1,6 +1,6 @@
 # OpenClaw ↔ Noosphere Memory Bridge Roadmap
 
-Status: implementation in progress — PRs 0–5 merged; PR 6 underway
+Status: implementation complete through PR 7; official plugin productization tracked separately in `OPENCLAW-OFFICIAL-PLUGIN-DEVELOPMENT-PLAN.md`.
 Owner: Noosphere/OpenClaw integration workstream
 Last updated: 2026-04-30
 
@@ -355,7 +355,7 @@ Constraints:
 
 ### PR 6 — Save/candidate API and tool
 
-Status: in progress.
+Status: merged.
 
 Purpose: add explicit candidate memory saving.
 
@@ -385,23 +385,23 @@ Verification:
 
 ### PR 7 — Optional corpus supplement compatibility
 
+Status: implemented. The plugin registers a Noosphere corpus supplement when the host OpenClaw runtime exposes `registerMemoryCorpusSupplement`; compatible hosts can include Noosphere in shared corpus search/get flows.
+
 Purpose: expose Noosphere as a searchable corpus for OpenClaw hosts that consume `registerMemoryCorpusSupplement()`.
 
-`registerMemoryCorpusSupplement()` is the OpenClaw SDK registration point for adding an external corpus to shared memory search/get flows. The supplement should adapt Noosphere recall/get responses into the host's corpus item contract, including stable IDs, display titles, snippets/content, source labels, and safe metadata. Keep this optional until the target OpenClaw runtime is confirmed to consume corpus supplements.
-
-This is not a first milestone because the current active memory slot is Hindsight, not `memory-core`.
+`registerMemoryCorpusSupplement()` is the OpenClaw SDK registration point for adding an external corpus to shared memory search/get flows. The supplement adapts Noosphere recall/get responses into the host corpus item contract, including stable IDs, display titles, snippets/content, source labels, and safe metadata.
 
 Verification:
 
-- only enable after confirming active host consumes supplements;
-- `memory_search corpus=all` includes Noosphere results in compatible setups.
+- plugin registers the supplement only when the host exposes `registerMemoryCorpusSupplement`;
+- compatible hosts can include Noosphere results in shared corpus search/get flows.
 
-## Open Questions
+## Resolved Design Decisions
 
-- Should Noosphere memory API settings come from environment variables, database-stored settings, or request overrides first?
-- Should unknown provider IDs be rejected or reported as skipped provider metadata?
-- Should `GET /api/memory/get` be implemented before the plugin skeleton, or deferred until after explicit recall works?
-- Where should the OpenClaw plugin live: inside Noosphere repo, separate repo, or OpenClaw extensions workspace?
+- Memory API runtime settings are DB-backed, with static plugin config as fallback.
+- Unknown provider IDs are surfaced as skipped/error provider metadata instead of crashing the request.
+- `GET /api/memory/get` and the `noosphere_get` plugin tool are implemented.
+- The OpenClaw plugin lives inside this repo under `openclaw-noosphere-memory/` and ships compiled `dist/` output for installable package/archive workflows.
 
 ## Release Discipline
 

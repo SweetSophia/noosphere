@@ -2,12 +2,12 @@
 
 ## Overview
 
-The RecallSettings system was designed but never fully wired to persistence. Currently, `getMemoryStatusSnapshot()` returns hardcoded defaults from `normalizeRecallSettings({})`. This plan adds:
+The RecallSettings system is now wired end-to-end. This document records the implemented phases and the current maintenance notes:
 
-1. **Database persistence** for settings
-2. **API endpoints** for CRUD operations
-3. **Web UI** at `/wiki/admin/settings`
-4. **Wiring** to read settings from DB instead of defaults
+1. **Database persistence** for settings ✅
+2. **API endpoints** for CRUD operations ✅
+3. **Web UI** at `/wiki/admin/settings` ✅
+4. **Runtime wiring** for status and OpenClaw auto-recall ✅
 
 ---
 
@@ -54,7 +54,9 @@ The RecallSettings system was designed but never fully wired to persistence. Cur
 
 ---
 
-## Phase 3: Web UI (`/wiki/admin/settings/page.tsx`)
+## Phase 3: Web UI (`/wiki/admin/settings/page.tsx`) ✅ DONE
+
+**Status:** Completed 2026-05-08
 
 ### Page Structure
 
@@ -92,27 +94,29 @@ The RecallSettings system was designed but never fully wired to persistence. Cur
 
 ---
 
-## Phase 4: Wiring Changes ✅ DONE (partial)
+## Phase 4: Wiring Changes ✅ DONE
 
-**Status:** Completed 2026-05-02
+**Status:** Completed 2026-05-08
 
 **Files modified:**
 - `src/app/api/memory/status/route.ts` - Updated to read settings from DB
   - Now calls `getRecallSettingsFromDB()` and passes settings to `getMemoryStatusSnapshot()`
 
-**Remaining wiring (Phase 5):**
-- Auto-recall hook needs to read from DB settings
-- Orchestrator wiring for provider weights
+**Runtime wiring completed:**
+- `src/app/api/memory/status/route.ts` reads DB-backed settings.
+- `openclaw-noosphere-memory/src/auto-recall.ts` fetches DB-backed recall settings at runtime with a short cache/fallback path.
+- Provider weights flow through recall settings and orchestrator normalization.
 
 ---
 
-## Phase 5: Web UI (`/wiki/admin/settings/page.tsx`)
+## Phase 5: Auto-recall Runtime Wiring ✅ DONE
 
-**Status:** Pending
+**Status:** Completed 2026-05-08
 
-**Files to create:**
-- `src/app/wiki/admin/settings/page.tsx` - Admin settings UI page
-- `src/app/wiki/admin/settings/actions.ts` - Server actions for form submission
+**Files modified:**
+- `openclaw-noosphere-memory/src/client.ts` - settings client helper
+- `openclaw-noosphere-memory/src/auto-recall.ts` - runtime settings fetch/merge
+- `src/lib/memory/orchestrator.ts` and settings helpers - provider weights/conflict settings honored
 
 ---
 
@@ -142,15 +146,13 @@ curl -H "Authorization: Bearer $API_KEY" http://localhost:4400/api/memory/status
 
 ## Open Questions / Deferred Items
 
-1. **Cache invalidation**: Settings changes take effect immediately on next request since they're read at request time. No cache invalidation needed.
+1. **Cache invalidation**: API/status requests read settings from DB. The OpenClaw plugin caches DB-backed settings briefly for prompt-build performance, so admin UI changes may take up to the plugin cache TTL to affect auto-recall.
 
 2. **Provider registry**: `enabledProviders` and `providerPriorityWeights` assume a fixed list of providers. Future: dynamic provider discovery.
 
-3. **Provider priority weight UI**: The key-value editor for provider weights is complex. MVP: show as JSON textarea.
+3. **Provider priority weight UI**: The MVP uses a JSON textarea for provider weights. A richer key-value editor can be added later.
 
 4. **Activity logging**: Consider logging settings changes to ActivityLog for audit trail.
-
-5. **Auto-recall wiring**: The `before_prompt_build` hook currently reads from hardcoded defaults. It should read from DB settings.
 
 ---
 
@@ -160,15 +162,13 @@ curl -H "Authorization: Bearer $API_KEY" http://localhost:4400/api/memory/status
 |-------|--------|-------|
 | 1. Database Schema | ✅ Done | `prisma/schema.prisma` |
 | 2. API Endpoints | ✅ Done | `src/lib/memory/api/settings.ts`, `src/app/api/memory/settings/route.ts` |
-| 3. Web UI | ⏳ Pending | `src/app/wiki/admin/settings/page.tsx`, `actions.ts` |
-| 4. Wiring | ✅ Partial | `src/app/api/memory/status/route.ts` updated |
-| 5. Auto-recall wiring | ⏳ Pending | `before_prompt_build` hook update |
+| 3. Web UI | ✅ Done | `src/app/wiki/admin/settings/page.tsx`, `actions.ts` |
+| 4. Status/API wiring | ✅ Done | `src/app/api/memory/status/route.ts` updated |
+| 5. Auto-recall wiring | ✅ Done | `before_prompt_build` hook reads DB-backed settings |
 
 ---
 
-## Effort Estimate (Remaining)
+## Remaining Maintenance Notes
 
-- **Admin UI**: ~3 hours
-- **Auto-recall wiring**: ~1 hour
-- **Testing**: ~1 hour
-- **Total remaining**: ~5 hours
+- Provider discovery is still static in the admin UI; add dynamic provider registry support later if more providers are enabled.
+- Activity logging for settings changes remains a nice-to-have audit enhancement.

@@ -3,7 +3,7 @@
 **Project:** Noosphere ↔ OpenClaw official plugin/productization  
 **Repo:** `SweetSophia/noosphere`  
 **Created:** 2026-05-05  
-**Status:** Planning complete; implementation not started in this plan file
+**Status:** Implemented through Phase 8 release checklist; see `OPENCLAW-PHASE-8-RELEASE-CHECKLIST.md` for verification evidence.
 
 ## 1. Goal
 
@@ -135,7 +135,7 @@ Responsibilities:
 
 ## 5. Development Phases
 
-## Phase 0 — Repo Hygiene and Packaging Baseline
+## Phase 0 — Repo Hygiene and Packaging Baseline ✅ DONE
 
 ### Goal
 
@@ -172,7 +172,7 @@ npm run build
 
 ---
 
-## Phase 1 — Production Docker Compose Design
+## Phase 1 — Production Docker Compose Design ✅ DONE
 
 ### Goal
 
@@ -226,7 +226,7 @@ curl -fsS http://127.0.0.1:6578/wiki
 
 ---
 
-## Phase 2 — Container Image Publishing via GHCR
+## Phase 2 — Container Image Publishing via GHCR ✅ DONE
 
 ### Goal
 
@@ -268,7 +268,7 @@ curl -fsS http://127.0.0.1:6578/api/health
 
 ---
 
-## Phase 3 — Database Migration and Bootstrap Strategy
+## Phase 3 — Database Migration and Bootstrap Strategy ✅ DONE
 
 ### Goal
 
@@ -314,7 +314,7 @@ Then verify:
 
 ---
 
-## Phase 4 — Publishable OpenClaw Plugin Package
+## Phase 4 — Publishable OpenClaw Plugin Package ✅ DONE
 
 ### Goal
 
@@ -352,7 +352,7 @@ openclaw plugins inspect noosphere-memory --runtime --json
 
 ---
 
-## Phase 5 — OpenClaw Setup Automation
+## Phase 5 — OpenClaw Setup Automation ✅ DONE
 
 ### Goal
 
@@ -427,7 +427,7 @@ curl -fsS http://127.0.0.1:6578/api/health
 
 ---
 
-## Phase 6 — Plugin CLI Helpers
+## Phase 6 — Plugin CLI Helpers ✅ DONE
 
 ### Goal
 
@@ -473,7 +473,7 @@ openclaw noosphere status
 
 ---
 
-## Phase 7 — Documentation
+## Phase 7 — Documentation ✅ DONE
 
 ### Goal
 
@@ -517,29 +517,31 @@ Follow docs exactly from a clean environment and fix every mismatch.
 
 ---
 
-## Phase 8 — Release Checklist
+## Phase 8 — Release Checklist ✅ DONE
 
 Before the first official release:
 
-- [ ] Root tests pass.
-- [ ] Root build passes.
-- [ ] Docker image builds locally.
-- [ ] Docker image builds in CI.
-- [ ] Docker image pulls from GHCR.
-- [ ] Production Compose starts app + DB.
-- [ ] Health endpoint works on `127.0.0.1:6578`.
-- [ ] DB bootstrap works on fresh volume.
-- [ ] Admin/API key bootstrap works.
-- [ ] Plugin package builds.
-- [ ] Plugin package archive installs.
-- [ ] Plugin runtime inspect shows tools/hooks.
-- [ ] `noosphere_status` works.
-- [ ] `noosphere_recall` works.
-- [ ] `noosphere_save` works.
-- [ ] Auto-recall injection passes marker test.
-- [ ] Installer is idempotent.
-- [ ] Docs are tested from scratch.
-- [ ] GitHub release notes written.
+- [x] Root tests pass.
+- [x] Root build passes.
+- [x] Docker image builds locally.
+- [x] Docker image builds in CI.
+- [x] Docker image pulls from GHCR.
+- [x] Production Compose starts app + DB.
+- [x] Health endpoint works on `127.0.0.1:6578`.
+- [x] DB bootstrap works on fresh volume.
+- [x] Admin/API key bootstrap works.
+- [x] Plugin package builds.
+- [x] Plugin package archive installs.
+- [x] Plugin runtime inspect shows tools/hooks.
+- [x] `noosphere_status` works.
+- [x] `noosphere_recall` works.
+- [x] `noosphere_save` works.
+- [x] Auto-recall injection passes marker test.
+- [x] Installer is idempotent.
+- [x] Docs are tested from scratch.
+- [ ] GitHub release notes written for the first tagged release.
+
+Detailed evidence is maintained in `docs/OPENCLAW-PHASE-8-RELEASE-CHECKLIST.md`.
 
 ## 6. Risks and Mitigations
 
@@ -554,15 +556,11 @@ Before the first official release:
 | Docker unavailable | Installer should fail early with clear instructions. |
 | Image/package version skew | Pin compatible versions in release notes and installer defaults. |
 
-## 7. Immediate Next Steps
+## 7. Remaining Release Follow-up
 
-1. Start a feature branch.
-2. Clean repo hygiene around plugin artifacts.
-3. Add production Compose template using `127.0.0.1:6578` and GHCR image reference.
-4. Update plugin package metadata for compiled `dist/` packaging.
-5. Add first draft of `install-openclaw.sh` without running destructive config changes.
-6. Run tests/build.
-7. Review diffs before commit.
+1. Open and merge the Phase 8 release-checklist PR.
+2. Write GitHub release notes for the first tagged release.
+3. Cut/push the release tag once Sophie approves the release boundary.
 
 ## 8. Working Branch Proposal
 
