@@ -22,10 +22,15 @@ function cleanupExpired() {
 }
 
 function getClientIdentifier(request: NextRequest): string {
-  // Prefer request.ip (set by the platform/runtime) over x-forwarded-for
-  // to prevent clients from spoofing their rate-limit identity.
-  // Only fall back to x-forwarded-for when request.ip is unavailable.
-  return request.ip ?? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  // NextRequest no longer exposes a typed `ip` property in this Next.js version.
+  // In production, these headers must be set/sanitized by the trusted reverse
+  // proxy/CDN; direct client-supplied forwarding headers are not trustworthy.
+  return (
+    request.headers.get("x-real-ip") ??
+    request.headers.get("cf-connecting-ip") ??
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    "unknown"
+  );
 }
 
 export interface RateLimitOptions {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { rateLimit } from "@/lib/rate-limit";
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
 
   // Rate-limit authentication endpoints
@@ -14,14 +14,22 @@ export function middleware(request: NextRequest) {
     if (!result.allowed) return result.response;
   }
 
-  // Rate-limit write-heavy API endpoints
-  if (
+  // Rate-limit write-heavy API endpoints. Keep this broad enough to cover
+  // article edits plus admin/API write surfaces, while leaving reads unthrottled.
+  const isWriteMethod = ["POST", "PUT", "PATCH", "DELETE"].includes(request.method);
+  const isWriteEndpoint =
     path === "/api/articles" ||
+    path.startsWith("/api/articles/") ||
     path === "/api/ingest" ||
     path === "/api/answer" ||
     path === "/api/import" ||
-    path === "/api/uploads/image"
-  ) {
+    path === "/api/uploads/image" ||
+    path === "/api/lint" ||
+    path === "/api/memory/save" ||
+    path === "/api/memory/settings" ||
+    path === "/api/sync/obsidian";
+
+  if (isWriteMethod && isWriteEndpoint) {
     const result = rateLimit(request, {
       windowMs: 60_000,
       maxRequests: 30,

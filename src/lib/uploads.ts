@@ -209,7 +209,7 @@ const SVG_DANGEROUS_PATTERNS = [
   /\u003ce\s*m\s*b\s*e\s*d\b/i,
   /\u003co\s*b\s*j\s*e\s*c\s*t\b/i,
   // CSS expression (legacy IE)
-  /e\s*x\s*p\r\s*e\s*s\s*s\s*i\s*o\s*n\s*\(/i,
+  /e\s*x\s*p\s*r\s*e\s*s\s*s\s*i\s*o\s*n\s*\(/i,
   // import with script
   /@\s*i\s*m\s*p\s*o\s*r\s*t\b/i,
 ];
@@ -217,16 +217,29 @@ const SVG_DANGEROUS_PATTERNS = [
 /**
  * Decode common HTML entities that attackers use to bypass filters.
  */
+function decodeEntityCodePoint(value: string, radix: number, fallback: string): string {
+  const codePoint = Number.parseInt(value, radix);
+  if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
+    return fallback;
+  }
+
+  try {
+    return String.fromCodePoint(codePoint);
+  } catch {
+    return fallback;
+  }
+}
+
 function decodeHtmlEntities(input: string): string {
   return input
-    .replace(/&#x([0-9a-f]+);?/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
-    .replace(/&#(\d+);?/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#x27;/g, "'")
-    .replace(/&#x2F;/g, "/");
+    .replace(/&#x([0-9a-f]+);?/gi, (match, hex) => decodeEntityCodePoint(hex, 16, match))
+    .replace(/&#(\d+);?/g, (match, dec) => decodeEntityCodePoint(dec, 10, match))
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#x27;/gi, "'")
+    .replace(/&#x2f;/gi, "/");
 }
 
 /**
