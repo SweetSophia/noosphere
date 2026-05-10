@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
-import { Permissions } from "@prisma/client";
+import { apiError } from "@/lib/api/errors";
 
 
 // Security limits
@@ -47,7 +48,9 @@ interface IngestArticle {
 export async function POST(request: NextRequest) {
   // --- Auth ---
   const auth = await requirePermission(request, [Permissions.WRITE]);
-  if (!auth.authorized) return auth.response;
+  if (!auth.success) {
+    return auth.response;
+  }
 
   // --- Parse body ---
   let body: {
@@ -60,7 +63,7 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return apiError("Invalid JSON body", 400);
   }
 
   const { source, articles, tags: globalTags } = body;
@@ -69,8 +72,8 @@ export async function POST(request: NextRequest) {
   const sanitizedAuthorName = rawAuthorName
     .replace(/<[^>]*>/g, "") // strip any HTML tags
     .trim()
-    .slice(0, MAX_AUTHOR_NAME_LENGTH) || session?.user?.name || "Unknown";
-  const userId = session?.user ? session.user.id ?? null : null;
+    .slice(0, MAX_AUTHOR_NAME_LENGTH) || auth.auth.name || "Unknown";
+  const userId = auth.auth.userId ?? null;
 
   // --- Validate ---
   if (!source?.title) {
