@@ -10,6 +10,17 @@ export type ValidStatus = (typeof VALID_STATUSES)[number];
 export const VALID_CONFIDENCES = ["low", "medium", "high"] as const;
 export type ValidConfidence = (typeof VALID_CONFIDENCES)[number];
 
+/**
+ * Shared security limits for article content.
+ * Defined before sanitizeAuthorName so it can be used as a default param.
+ */
+export const ARTICLE_LIMITS = {
+  maxContentSize: 1024 * 1024, // 1 MB
+  maxTitleLength: 200,
+  maxExcerptLength: 500,
+  maxAuthorNameLength: 100,
+} as const;
+
 export function isValidStatus(value: string): value is ValidStatus {
   return (VALID_STATUSES as readonly string[]).includes(value);
 }
@@ -20,14 +31,14 @@ export function isValidConfidence(value: string): value is ValidConfidence {
 
 /**
  * Derive an excerpt from markdown content by stripping formatting characters.
+ * Strips markdown BEFORE truncating so the result respects maxLength of actual text.
  */
 export function deriveExcerpt(content: string, maxLength = 160): string {
   return content
-    .slice(0, maxLength)
-<<<<<<< HEAD
     .replace(/[#*`_>\-\[\]]/g, "")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim()
+    .slice(0, maxLength);
 }
 
 /**
@@ -47,20 +58,13 @@ export function validateSlug(slug: string): { ok: true; slug: string } | { ok: f
 /**
  * Sanitize an author name to prevent HTML injection and spoofing.
  */
-export function sanitizeAuthorName(raw: string | undefined | null, maxLength = 100): string {
+export function sanitizeAuthorName(
+  raw: string | undefined | null,
+  maxLength = ARTICLE_LIMITS.maxAuthorNameLength
+): string {
   if (!raw) return "";
   return raw
     .replace(/<[^>]*>/g, "")
     .trim()
     .slice(0, maxLength);
 }
-
-/**
- * Shared security limits for article content.
- */
-export const ARTICLE_LIMITS = {
-  maxContentSize: 1024 * 1024, // 1 MB
-  maxTitleLength: 200,
-  maxExcerptLength: 500,
-  maxAuthorNameLength: 100,
-} as const;
