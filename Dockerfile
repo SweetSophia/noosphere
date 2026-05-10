@@ -54,6 +54,9 @@ COPY --from=prod-deps /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/docker ./docker
 COPY --from=prod-deps /app/node_modules ./node_modules
 
+# Make migration entrypoint executable (must happen before dropping to noosphere user)
+RUN chmod +x /app/docker/docker-entrypoint.sh
+
 USER noosphere
 
 EXPOSE 3000
@@ -61,4 +64,6 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
+# Run migrations before starting.  "$@" allows docker-compose override.
+ENTRYPOINT ["/app/docker/docker-entrypoint.sh"]
 CMD ["node", "server.js"]
