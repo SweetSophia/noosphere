@@ -92,12 +92,8 @@ export function hasPermission(
   // Check session role with hierarchy
   if (auth.role) {
     const userLevel = ROLE_LEVELS[auth.role] ?? 0;
-    // Map permissions to equivalent role levels
-    const requiredLevels = required.map((p) => {
-      if (p === "ADMIN") return 3;
-      if (p === "WRITE") return 2;
-      return 1;
-    });
+    // Reuse PERMISSION_LEVELS — role and permission hierarchies use the same values
+    const requiredLevels = required.map((p) => PERMISSION_LEVELS[p]);
     return requiredLevels.some((level) => level <= userLevel);
   }
 
