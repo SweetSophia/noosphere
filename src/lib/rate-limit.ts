@@ -7,9 +7,13 @@ interface RateLimitEntry {
 }
 
 const store = new Map<string, RateLimitEntry>();
+let lastCleanup = 0;
 
 function cleanupExpired() {
   const now = Date.now();
+  // Throttle cleanup to once per minute to avoid O(N) scan on every request
+  if (now - lastCleanup < 60_000) return;
+  lastCleanup = now;
   for (const [key, entry] of store) {
     if (entry.resetAt <= now) {
       store.delete(key);
@@ -18,9 +22,10 @@ function cleanupExpired() {
 }
 
 function getClientIdentifier(request: NextRequest): string {
-  const forwarded = request.headers.get("x-forwarded-for");
-  const ip = forwarded?.split(",")[0]?.trim() ?? request.ip ?? "unknown";
-  return ip;
+  // Prefer request.ip (set by the platform/runtime) over x-forwarded-for
+  // to prevent clients from spoofing their rate-limit identity.
+  // Only fall back to x-forwarded-for when request.ip is unavailable.
+  return request.ip ?? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
 }
 
 export interface RateLimitOptions {
@@ -30,16 +35,14 @@ export interface RateLimitOptions {
 }
 
 /**
- * Simple in-memory sliding-window rate limiter.
+ * Simple in-memory fixed-window rate limiter.
  * For production scale, replace with Redis-backed limiter.
  */
 export function rateLimit(
   request: NextRequest,
   options: RateLimitOptions
 ): { allowed: true } | { allowed: false; response: NextResponse } {
-  if (store.size > 10_000) {
-    cleanupExpired();
-  }
+  cleanupExpired();
 
   const clientId = getClientIdentifier(request);
   const key = `${options.keyPrefix ?? "rl"}:${clientId}`;

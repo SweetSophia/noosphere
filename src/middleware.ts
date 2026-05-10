@@ -33,6 +33,10 @@ export function middleware(request: NextRequest) {
   // Add security headers to all responses
   const response = NextResponse.next();
 
+  // NOTE: Using 'unsafe-inline' for scripts is pragmatic for Next.js hydration.
+  // A production-hardened setup should use nonce-based CSP instead:
+  // generate a random nonce per request, add it to script-src, and pass it
+  // through NextScript / inline script tags. That requires a custom _document.tsx.
   const csp = [
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline'", // Next.js needs inline scripts for hydration
@@ -57,6 +61,7 @@ export const config = {
   matcher: [
     "/api/:path*",
     "/wiki/login",
+    "/wiki/:path*", // cover article pages, browse, search, admin
     "/uploads/:path*",
   ],
 };

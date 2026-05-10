@@ -3,7 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeSanitize from "rehype-sanitize";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+
+// Extend default schema to preserve className on code/pre for syntax highlighting
+const sanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    code: [...(defaultSchema.attributes?.code ?? []), "className"],
+    pre: [...(defaultSchema.attributes?.pre ?? []), "className"],
+  },
+};
 
 interface MarkdownPreviewTabsProps {
   targetTextareaId: string;
@@ -47,7 +57,7 @@ export function MarkdownPreviewTabs({ targetTextareaId }: MarkdownPreviewTabsPro
       {activeTab === "preview" && (
         <div className="preview-pane markdown-body">
           {preview ? (
-            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>{preview}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeSanitize, sanitizeSchema]]}>{preview}</ReactMarkdown>
           ) : (
             <p className="text-muted">Nothing to preview yet.</p>
           )}

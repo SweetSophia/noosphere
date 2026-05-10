@@ -189,7 +189,7 @@ export async function readUploadedImage(parts: string[]) {
 
 const SVG_DANGEROUS_PATTERNS = [
   // Script tags (with whitespace variations)
-  /<<s\s*c\s*r\s*i\s*p\s*t\b/i,
+  /\u003cs\s*c\s*r\s*i\s*p\s*t\b/i,
   // Event handlers: onload, onclick, onerror, etc.
   /\s+o\s*n\w+\s*=/i,
   // javascript: URIs
@@ -197,7 +197,7 @@ const SVG_DANGEROUS_PATTERNS = [
   // data: URIs with script mime types
   /d\s*a\s*t\s*a\s*:\s*t\s*e\s*x\s*t\s*\/\s*j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t/i,
   // foreignObject can embed HTML/JS
-  /<<f\s*o\s*r\s*e\s*i\s*g\s*n\s*O\s*b\s*j\s*e\s*c\s*t\b/i,
+  /\u003cf\s*o\s*r\s*e\s*i\s*g\s*n\s*O\s*b\s*j\s*e\s*c\s*t\b/i,
   // XLink with javascript
   /x\s*l\s*i\s*n\s*k\s*:?\s*h\s*r\s*e\s*f\s*=\s*["']?\s*j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t\s*:/i,
   // ECMAScript in SVG
@@ -205,9 +205,9 @@ const SVG_DANGEROUS_PATTERNS = [
   // VBScript
   /v\s*b\s*s\s*c\s*r\s*i\s*p\s*t/i,
   // iframe / embed / object
-  /<<i\s*f\s*r\s*a\s*m\s*e\b/i,
-  /<<e\s*m\s*b\s*e\s*d\b/i,
-  /<<o\s*b\s*j\s*e\s*c\s*t\b/i,
+  /\u003ci\s*f\s*r\s*a\s*m\s*e\b/i,
+  /\u003ce\s*m\s*b\s*e\s*d\b/i,
+  /\u003co\s*b\s*j\s*e\s*c\s*t\b/i,
   // CSS expression (legacy IE)
   /e\s*x\s*p\r\s*e\s*s\s*s\s*i\s*o\s*n\s*\(/i,
   // import with script

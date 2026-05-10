@@ -55,3 +55,6 @@ node_modules/
 # local runtime data
 uploads/
 .noosphere/
+
+# review artifacts
+CODE_REVIEW.md
