@@ -5,6 +5,9 @@ import type { Permissions } from "@prisma/client";
 const ALGORITHM = "sha256";
 const KEY_PREFIX_LENGTH = 8;
 
+/** How long to wait before re-recording a lastUsedAt timestamp (5 minutes). */
+const LAST_USED_DEBOUNCE_MS = 5 * 60 * 1000;
+
 /**
  * Hash an API key for storage.
  * Never store the raw key — only store the hash.
@@ -56,7 +59,7 @@ export async function validateApiKey(
 
   // Update last-used timestamp (debounced: only write if > 5 min since last update)
   const lastUsedAt = record.lastUsedAt;
-  if (!lastUsedAt || Date.now() - lastUsedAt.getTime() > 5 * 60 * 1000) {
+  if (!lastUsedAt || Date.now() - lastUsedAt.getTime() > LAST_USED_DEBOUNCE_MS) {
     await prisma.apiKey.update({
       where: { id: record.id },
       data: { lastUsedAt: new Date() },
