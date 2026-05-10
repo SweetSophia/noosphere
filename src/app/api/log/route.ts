@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireApiKey } from "@/lib/api/keys";
 import { getServerSession } from "next-auth";
@@ -35,8 +36,7 @@ export async function GET(request: NextRequest) {
   const offset = parseInt(searchParams.get("offset") ?? "0", 10);
 
   // Build where clause
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const where: any = {};
+  const where: Prisma.ActivityLogWhereInput = {};
 
   if (type) {
     where.type = type;
@@ -47,13 +47,14 @@ export async function GET(request: NextRequest) {
   }
 
   if (from || to) {
-    where.createdAt = {};
+    const createdAt: Prisma.DateTimeFilter = {};
     if (from) {
-      where.createdAt.gte = new Date(from);
+      createdAt.gte = new Date(from);
     }
     if (to) {
-      where.createdAt.lt = new Date(to);
+      createdAt.lt = new Date(to);
     }
+    where.createdAt = createdAt;
   }
 
   const [entries, total] = await Promise.all([

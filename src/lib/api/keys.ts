@@ -5,6 +5,9 @@ import type { Permissions } from "@prisma/client";
 const ALGORITHM = "sha256";
 const KEY_PREFIX_LENGTH = 8;
 
+/** How long to wait before re-recording a lastUsedAt timestamp (5 minutes). */
+const LAST_USED_DEBOUNCE_MS = 5 * 60 * 1000;
+
 /**
  * Hash an API key for storage.
  * Never store the raw key — only store the hash.
@@ -54,10 +57,15 @@ export async function validateApiKey(
     return { valid: false };
   }
 
-  // Update last-used timestamp
-  await prisma.apiKey.update({
-    where: { id: record.id },
-    data: { lastUsedAt: new Date() },
+  // Update last-used timestamp atomically and at most once per debounce window.
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - LAST_USED_DEBOUNCE_MS);
+  await prisma.apiKey.updateMany({
+    where: {
+      id: record.id,
+      OR: [{ lastUsedAt: null }, { lastUsedAt: { lt: cutoff } }],
+    },
+    data: { lastUsedAt: now },
   });
 
   return { valid: true, permissions: record.permissions, keyId: record.id };
