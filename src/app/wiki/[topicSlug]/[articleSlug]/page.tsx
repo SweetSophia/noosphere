@@ -9,6 +9,7 @@ import { DeleteArticleForm } from "@/components/wiki/DeleteArticleForm";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeSanitize from "rehype-sanitize";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { deleteArticle } from "./edit/actions";
@@ -191,6 +192,7 @@ export default async function ArticlePage({ params }: Props) {
       <article className="markdown-body article-prose">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
+          rehypePlugins={[rehypeSanitize]}
           components={{
             code({ className, children, ...props }) {
               const inline = !className;

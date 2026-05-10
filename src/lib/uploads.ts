@@ -123,9 +123,8 @@ export async function saveUploadedImage(filename: string, bytes: Uint8Array) {
   // SVG XSS prevention: reject files with dangerous SVG features
   if (ext === ".svg") {
     const content = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-    // Block <script tags, javascript: URIs, event handlers (on*=), and foreignObject
-    if (/<script|on\w+\s*=|javascript:|foreignObject/i.test(content)) {
-      throw new Error("Image type mismatch or unrecognized format");
+    if (containsDangerousSvg(content)) {
+      throw new Error("SVG contains disallowed content");
     }
   }
 
@@ -184,4 +183,67 @@ export async function readUploadedImage(parts: string[]) {
     absolutePath,
     mimeType: getMimeType(absolutePath),
   };
+}
+
+// ─── SVG Sanitization ──────────────────────────────────────────────────────
+
+const SVG_DANGEROUS_PATTERNS = [
+  // Script tags (with whitespace variations)
+  /<<s\s*c\s*r\s*i\s*p\s*t\b/i,
+  // Event handlers: onload, onclick, onerror, etc.
+  /\s+o\s*n\w+\s*=/i,
+  // javascript: URIs
+  /j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t\s*:/i,
+  // data: URIs with script mime types
+  /d\s*a\s*t\s*a\s*:\s*t\s*e\s*x\s*t\s*\/\s*j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t/i,
+  // foreignObject can embed HTML/JS
+  /<<f\s*o\s*r\s*e\s*i\s*g\s*n\s*O\s*b\s*j\s*e\s*c\s*t\b/i,
+  // XLink with javascript
+  /x\s*l\s*i\s*n\s*k\s*:?\s*h\s*r\s*e\s*f\s*=\s*["']?\s*j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t\s*:/i,
+  // ECMAScript in SVG
+  /e\s*c\s*m\s*a\s*s\s*c\s*r\s*i\s*p\s*t/i,
+  // VBScript
+  /v\s*b\s*s\s*c\s*r\s*i\s*p\s*t/i,
+  // iframe / embed / object
+  /<<i\s*f\s*r\s*a\s*m\s*e\b/i,
+  /<<e\s*m\s*b\s*e\s*d\b/i,
+  /<<o\s*b\s*j\s*e\s*c\s*t\b/i,
+  // CSS expression (legacy IE)
+  /e\s*x\s*p\r\s*e\s*s\s*s\s*i\s*o\s*n\s*\(/i,
+  // import with script
+  /@\s*i\s*m\s*p\s*o\s*r\s*t\b/i,
+];
+
+/**
+ * Decode common HTML entities that attackers use to bypass filters.
+ */
+function decodeHtmlEntities(input: string): string {
+  return input
+    .replace(/&#x([0-9a-f]+);?/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);?/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&#x2F;/g, "/");
+}
+
+/**
+ * Check if SVG content contains dangerous patterns after decoding entities.
+ * This is a defense-in-depth measure; for stronger guarantees consider
+ * using a dedicated SVG sanitization library (e.g. DOMPurify).
+ */
+function containsDangerousSvg(content: string): boolean {
+  const decoded = decodeHtmlEntities(content);
+  const normalized = decoded
+    .toLowerCase()
+    .replace(/\s+/g, " "); // collapse whitespace for pattern matching
+
+  for (const pattern of SVG_DANGEROUS_PATTERNS) {
+    if (pattern.test(decoded) || pattern.test(normalized)) {
+      return true;
+    }
+  }
+  return false;
 }

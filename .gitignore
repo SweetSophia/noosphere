@@ -42,6 +42,11 @@ next-env.d.ts
 
 /src/generated/prisma
 
+# agent runtime directories
+.lean-ctx/
+.pi/
+.planning/
+
 # nested dependencies and local package artifacts
 node_modules/
 *.tgz

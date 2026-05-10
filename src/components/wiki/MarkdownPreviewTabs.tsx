@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeSanitize from "rehype-sanitize";
 
 interface MarkdownPreviewTabsProps {
   targetTextareaId: string;
@@ -46,7 +47,7 @@ export function MarkdownPreviewTabs({ targetTextareaId }: MarkdownPreviewTabsPro
       {activeTab === "preview" && (
         <div className="preview-pane markdown-body">
           {preview ? (
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{preview}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>{preview}</ReactMarkdown>
           ) : (
             <p className="text-muted">Nothing to preview yet.</p>
           )}
