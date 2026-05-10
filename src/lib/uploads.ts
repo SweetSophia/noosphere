@@ -210,7 +210,8 @@ const SVG_DANGEROUS_PATTERNS = [
   /\u003co\s*b\s*j\s*e\s*c\s*t\b/i,
   // CSS expression (legacy IE)
   /e\s*x\s*p\s*r\s*e\s*s\s*s\s*i\s*o\s*n\s*\(/i,
-  // import with script
+  // Block CSS @import: SVG styles can import attacker-controlled external
+  // resources, and imported CSS can reintroduce script-capable constructs.
   /@\s*i\s*m\s*p\s*o\s*r\s*t\b/i,
 ];
 
