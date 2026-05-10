@@ -252,3 +252,33 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+
+// DELETE /api/articles/[id] — Soft-delete article
+// Auth: API key (ADMIN) or session (ADMIN)
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+
+  const auth = await requirePermission(request, [Permissions.ADMIN]);
+  if (!auth.success) {
+    return auth.response;
+  }
+
+  try {
+    const existing = await prisma.article.findUnique({
+      where: { id },
+    });
+    if (!existing || existing.deletedAt) {
+      return NextResponse.json({ error: "Article not found" }, { status: 404 });
+    }
+
+    await prisma.article.update({
+      where: { id },
+      data: { deletedAt: new Date(), updatedAt: new Date() },
+    });
+
+    return new NextResponse(null, { status: 204 });
+  } catch (error) {
+    console.error("[DELETE /api/articles/[id]]", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
