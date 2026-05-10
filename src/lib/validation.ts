@@ -2,8 +2,6 @@
  * Shared validation helpers used across API routes and server actions.
  */
 
-import { slugify as wikiSlugify } from "@/lib/wiki";
-
 export const SLUG_REGEX = /^[a-z0-9-]+$/;
 
 export const VALID_STATUSES = ["draft", "reviewed", "published"] as const;

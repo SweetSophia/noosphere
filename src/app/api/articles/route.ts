@@ -269,7 +269,7 @@ export async function POST(request: NextRequest) {
       // If a concurrent request creates the same slug between our check and
       // insert, Prisma's unique constraint catches it — we convert that to 409.
       const existing = await tx.article.findUnique({
-        where: { topicId_slug: { topicId, slug } },
+        where: { topicId_slug: { topicId, slug: slugValidation.slug } },
       });
       if (existing) {
         throw new ConflictError("Article with this slug already exists in this topic");
@@ -278,7 +278,7 @@ export async function POST(request: NextRequest) {
       const created = await tx.article.create({
         data: {
           title,
-          slug,
+          slug: slugValidation.slug,
           content,
           excerpt: excerpt || deriveExcerpt(content),
           topicId,

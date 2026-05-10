@@ -92,13 +92,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         where: {
           id: { not: id },
           topicId: targetTopicId,
-          slug,
+          slug: slugValidation.slug,
         },
       });
       if (slugConflict) {
         return NextResponse.json({ error: "Article with this slug already exists in this topic" }, { status: 409 });
       }
-      updateData.slug = slug.trim();
+      updateData.slug = slugValidation.slug;
     }
 
     // content
