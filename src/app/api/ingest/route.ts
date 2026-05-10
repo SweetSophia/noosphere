@@ -82,10 +82,7 @@ export async function POST(request: NextRequest) {
   const { source, articles, tags: globalTags } = body;
   // authorName from body is accepted but sanitized to prevent HTML injection / spoofing
   const rawAuthorName = body.authorName ?? "";
-  const sanitizedAuthorName = rawAuthorName
-    .replace(/<[^>]*>/g, "") // strip any HTML tags
-    .trim()
-    .slice(0, MAX_AUTHOR_NAME_LENGTH) || session?.user?.name || "Unknown";
+  const sanitizedAuthorName = sanitizeAuthorName(rawAuthorName, ARTICLE_LIMITS.maxAuthorNameLength) || session?.user?.name || "Unknown";
   const userId = session?.user ? (session.user as { id?: string }).id ?? null : null;
 
   // --- Validate ---
@@ -135,9 +132,9 @@ export async function POST(request: NextRequest) {
 
   // Validate content sizes before entering transaction — throws are not caught inside $transaction
   for (const article of articles) {
-    if (new TextEncoder().encode(article.content).length > MAX_ARTICLE_CONTENT_SIZE) {
+    if (new TextEncoder().encode(article.content).length > ARTICLE_LIMITS.maxContentSize) {
       return NextResponse.json(
-        { error: `Article [${articles.indexOf(article)}] content exceeds ${MAX_ARTICLE_CONTENT_SIZE} bytes` },
+        { error: `Article [${articles.indexOf(article)}] content exceeds ${ARTICLE_LIMITS.maxContentSize} bytes` },
         { status: 400 }
       );
     }
@@ -183,8 +180,7 @@ export async function POST(request: NextRequest) {
 
       // Build excerpt: use provided, or derive from content
       const excerpt =
-        article.excerpt ||
-        article.content.slice(0, 200).replace(/[#*`_]/g, "").trim();
+        article.excerpt || deriveExcerpt(article.content, 200);
 
       const created = await tx.article.create({
         data: {
@@ -194,10 +190,7 @@ export async function POST(request: NextRequest) {
           excerpt,
           authorId: userId,
           // article.authorName is accepted but sanitized — strip HTML, cap length
-          authorName: (article.authorName ?? "")
-            .replace(/<[^>]*>/g, "")
-            .trim()
-            .slice(0, MAX_AUTHOR_NAME_LENGTH) || sanitizedAuthorName,
+          authorName: sanitizeAuthorName(article.authorName, ARTICLE_LIMITS.maxAuthorNameLength) || sanitizedAuthorName,
           topicId: article.topicId,
           sourceUrl: article.sourceUrl || sourceUrl,
           sourceType: source.type,

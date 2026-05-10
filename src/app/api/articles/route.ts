@@ -4,11 +4,15 @@ import { requireApiKey } from "@/lib/api/keys";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { buildTagConnections, countSearchArticles, searchArticleIds } from "@/lib/wiki";
-
-// Constants for security limits
-const MAX_CONTENT_SIZE = 1024 * 1024; // 1MB max article content
-const MAX_TITLE_LENGTH = 200;
-const MAX_EXCERPT_LENGTH = 500;
+import {
+  ARTICLE_LIMITS,
+  deriveExcerpt,
+  isValidConfidence,
+  isValidStatus,
+  sanitizeAuthorName,
+  validateSlug,
+} from "@/lib/validation";
+import { parsePagination } from "@/lib/pagination";
 
 // GET /api/articles — List articles (with filters)
 // Auth: API key (READ/WRITE/ADMIN) or session (human)
@@ -17,16 +21,15 @@ export async function GET(request: NextRequest) {
   const topicSlug = searchParams.get("topic");
   const tag = searchParams.get("tag");
   const q = searchParams.get("q"); // full-text search
-  const page = parseInt(searchParams.get("page") ?? "1");
-  const limit = Math.min(parseInt(searchParams.get("limit") ?? "20"), 100);
+  const { page, limit, offset } = parsePagination(searchParams);
   const status = searchParams.get("status");
   const confidence = searchParams.get("confidence");
 
   // Validate status/confidence against allow-lists
-  if (status && !["draft", "reviewed", "published"].includes(status)) {
+  if (status && !isValidStatus(status)) {
     return NextResponse.json({ error: "Invalid status filter" }, { status: 400 });
   }
-  if (confidence && !["low", "medium", "high"].includes(confidence)) {
+  if (confidence && !isValidConfidence(confidence)) {
     return NextResponse.json({ error: "Invalid confidence filter" }, { status: 400 });
   }
 
@@ -199,37 +202,37 @@ export async function POST(request: NextRequest) {
     }
 
     // Security: Validate content size using byte length for accurate 1MB limit
-    if (new TextEncoder().encode(content).length > MAX_CONTENT_SIZE) {
+    if (new TextEncoder().encode(content).length > ARTICLE_LIMITS.maxContentSize) {
       return NextResponse.json(
-        { error: `Content exceeds maximum size of ${MAX_CONTENT_SIZE} bytes` },
+        { error: `Content exceeds maximum size of ${ARTICLE_LIMITS.maxContentSize} bytes` },
         { status: 400 }
       );
     }
 
     // Security: Validate title length (character count, not bytes)
-    if (title.length > MAX_TITLE_LENGTH) {
+    if (title.length > ARTICLE_LIMITS.maxTitleLength) {
       return NextResponse.json(
-        { error: `Title exceeds maximum length of ${MAX_TITLE_LENGTH} characters` },
+        { error: `Title exceeds maximum length of ${ARTICLE_LIMITS.maxTitleLength} characters` },
         { status: 400 }
       );
     }
 
     // Security: Validate excerpt length (character count, not bytes)
-    if (excerpt && excerpt.length > MAX_EXCERPT_LENGTH) {
+    if (excerpt && excerpt.length > ARTICLE_LIMITS.maxExcerptLength) {
       return NextResponse.json(
-        { error: `Excerpt exceeds maximum length of ${MAX_EXCERPT_LENGTH} characters` },
+        { error: `Excerpt exceeds maximum length of ${ARTICLE_LIMITS.maxExcerptLength} characters` },
         { status: 400 }
       );
     }
 
-    if (status && !["draft", "reviewed", "published"].includes(status)) {
+    if (status && !isValidStatus(status)) {
       return NextResponse.json(
         { error: "status must be one of: draft, reviewed, published" },
         { status: 400 }
       );
     }
 
-    if (confidence && !["low", "medium", "high"].includes(confidence)) {
+    if (confidence && !isValidConfidence(confidence)) {
       return NextResponse.json(
         { error: "confidence must be one of: low, medium, high" },
         { status: 400 }
@@ -237,11 +240,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate slug format
-    if (!/^[a-z0-9-]+$/.test(slug)) {
-      return NextResponse.json(
-        { error: "Slug must be lowercase alphanumeric with hyphens only" },
-        { status: 400 }
-      );
+    const slugValidation = validateSlug(slug);
+    if (!slugValidation.ok) {
+      return NextResponse.json({ error: slugValidation.error }, { status: 400 });
     }
 
     // Check topic exists
@@ -279,10 +280,10 @@ export async function POST(request: NextRequest) {
           title,
           slug,
           content,
-          excerpt: excerpt || content.slice(0, 160).replace(/[#*`_]/g, ""),
+          excerpt: excerpt || deriveExcerpt(content),
           topicId,
           authorId: session?.user ? (session.user as { id: string }).id : null,
-          authorName: authorName || (session?.user?.name ?? null),
+          authorName: sanitizeAuthorName(authorName) || (session?.user?.name ?? null),
           tags: { create: tagConnections },
           confidence: confidence || null,
           status: status || "published",
