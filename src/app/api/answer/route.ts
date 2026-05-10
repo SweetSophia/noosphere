@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireApiKey } from "@/lib/api/keys";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requirePermission } from "@/lib/api/auth";
 import { apiError } from "@/lib/api/errors";
 import {
   deriveExcerpt,
@@ -33,22 +32,9 @@ import {
 //   { article: {id, title, slug, topic, tags}, answerId }
 
 export async function POST(request: NextRequest) {
-  const apiAuth = await requireApiKey(request);
-  const session = await getServerSession(authOptions);
-
-  if (!apiAuth.authorized && !session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (apiAuth.authorized) {
-    if (apiAuth.permissions !== "WRITE" && apiAuth.permissions !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
-  } else {
-    const role = session?.user?.role;
-    if (role !== "EDITOR" && role !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
+  const auth = await requirePermission(request, [Permissions.WRITE]);
+  if (!auth.success) {
+    return auth.response;
   }
 
   let body: {
@@ -71,9 +57,8 @@ export async function POST(request: NextRequest) {
 
   const { title, content, topicId, excerpt, tags, sourceQuery, confidence, status, authorName: rawAuthorName } = body;
   // Sanitize authorName from body to prevent HTML injection / name spoofing
-  const authorName = sanitizeAuthorName(rawAuthorName) || session?.user?.name || "Unknown";
-  const sessionUser = session?.user as ({ id?: string } | null) | undefined;
-  const userId = sessionUser?.id ?? null;
+  const authorName = sanitizeAuthorName(rawAuthorName) || auth.auth.name || "Unknown";
+  const userId = auth.auth.userId ?? null;
 
   // Validate required fields
   if (!title || !content || !topicId) {
@@ -149,7 +134,7 @@ export async function POST(request: NextRequest) {
         excerpt: derivedExcerpt,
         topicId,
         authorId: userId,
-        authorName: authorName || session?.user?.name || "Unknown",
+        authorName,
         confidence: confidence || null,
         status: status || "published",
         sourceType: sourceQuery ? "query" : "manual",
@@ -174,7 +159,7 @@ export async function POST(request: NextRequest) {
       data: {
         type: "answer_saved",
         title: `Answer saved as "${title}"`,
-        authorName: authorName || session?.user?.name || "Unknown",
+        authorName,
         details: {
           articleId: created.id,
           topic: topic.name,
