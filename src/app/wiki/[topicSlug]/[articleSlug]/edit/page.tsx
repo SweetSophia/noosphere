@@ -136,7 +136,7 @@ export default async function EditArticlePage({ params }: Props) {
           <p className="form-hint">
             Supports GitHub-flavored Markdown. Code blocks with syntax highlighting.
           </p>
-          <MarkdownPreviewTabs targetTextareaId="content" />
+          <MarkdownPreviewTabs targetTextareaId="content" defaultValue={article.content} />
         </div>
 
         <div className="form-actions-row">
