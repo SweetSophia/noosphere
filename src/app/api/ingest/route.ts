@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireApiKey } from "@/lib/api/keys";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-
-
-// Security limits
-const MAX_ARTICLE_CONTENT_SIZE = 1024 * 1024; // 1 MB per article
-const MAX_AUTHOR_NAME_LENGTH = 100;
+import { requirePermission } from "@/lib/api/auth";
+import { apiError } from "@/lib/api/errors";
+import { ARTICLE_LIMITS, deriveExcerpt, sanitizeAuthorName } from "@/lib/validation";
 
 // POST /api/ingest — Process a source into multiple wiki articles
 // Auth: API key (WRITE/ADMIN) or session (EDITOR/ADMIN)
@@ -47,22 +43,9 @@ interface IngestArticle {
 
 export async function POST(request: NextRequest) {
   // --- Auth ---
-  const apiAuth = await requireApiKey(request);
-  const session = await getServerSession(authOptions);
-
-  if (!apiAuth.authorized && !session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (apiAuth.authorized) {
-    if (apiAuth.permissions !== "WRITE" && apiAuth.permissions !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
-  } else {
-    const role = (session?.user as { role?: string }).role;
-    if (role !== "EDITOR" && role !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
+  const auth = await requirePermission(request, [Permissions.WRITE]);
+  if (!auth.success) {
+    return auth.response;
   }
 
   // --- Parse body ---
@@ -76,14 +59,17 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return apiError("Invalid JSON body", 400);
   }
 
   const { source, articles, tags: globalTags } = body;
   // authorName from body is accepted but sanitized to prevent HTML injection / spoofing
   const rawAuthorName = body.authorName ?? "";
-  const sanitizedAuthorName = sanitizeAuthorName(rawAuthorName, ARTICLE_LIMITS.maxAuthorNameLength) || session?.user?.name || "Unknown";
-  const userId = session?.user ? (session.user as { id?: string }).id ?? null : null;
+  const sanitizedAuthorName = sanitizeAuthorName(
+    rawAuthorName,
+    ARTICLE_LIMITS.maxAuthorNameLength
+  ) || auth.auth.name || "Unknown";
+  const userId = auth.auth.userId ?? null;
 
   // --- Validate ---
   if (!source?.title) {
