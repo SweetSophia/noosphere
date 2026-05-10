@@ -4,6 +4,9 @@ import { requireApiKey } from "@/lib/api/keys";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
+const LINT_MAX_ARTICLES_DEFAULT = 500;
+const LINT_MAX_ARTICLES_HARD_LIMIT = 2000;
+
 // POST /api/lint — Wiki health check
 //
 // Scans the wiki for quality issues:
@@ -51,7 +54,7 @@ export async function POST(request: NextRequest) {
   }
 
   // --- Parse options ---
-  let body: { staleDays?: number; tagMin?: number } = {};
+  let body: { staleDays?: number; tagMin?: number; maxArticles?: unknown } = {};
   try {
     body = await request.json();
   } catch {
@@ -60,7 +63,10 @@ export async function POST(request: NextRequest) {
 
   const staleDays = body.staleDays ?? 90;
   const tagMin = body.tagMin ?? 2;
-  const maxArticles = Math.min(Math.max(1, body.maxArticles ?? 500), 2000);
+  const parsedMaxArticles = Number(body.maxArticles);
+  const maxArticles = Number.isNaN(parsedMaxArticles)
+    ? LINT_MAX_ARTICLES_DEFAULT
+    : Math.min(Math.max(1, parsedMaxArticles), LINT_MAX_ARTICLES_HARD_LIMIT);
   const staleThreshold = new Date(Date.now() - staleDays * 24 * 60 * 60 * 1000);
 
   const issues: LintIssue[] = [];
@@ -286,7 +292,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     success: true,
     runAt: new Date().toISOString(),
-    options: { staleDays, tagMin },
+    options: { staleDays, tagMin, maxArticles },
     issues,
     summary,
   });
