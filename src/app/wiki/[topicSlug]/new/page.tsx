@@ -22,7 +22,7 @@ export default async function NewArticlePage({ params }: Props) {
   if (!session?.user) {
     redirect("/wiki/login");
   }
-  const role = (session.user as { role?: string }).role;
+  const role = session.user.role;
   if (role !== "EDITOR" && role !== "ADMIN") {
     redirect("/wiki");
   }

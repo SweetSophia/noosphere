@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireApiKey } from "@/lib/api/keys";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requirePermission } from "@/lib/api/auth";
 import { buildTagConnections, countSearchArticles, searchArticleIds } from "@/lib/wiki";
 
 // Constants for security limits
@@ -144,23 +143,9 @@ export async function GET(request: NextRequest) {
 // POST /api/articles — Create article
 // Auth: API key (WRITE/ADMIN) or session (EDITOR/ADMIN)
 export async function POST(request: NextRequest) {
-  const apiAuth = await requireApiKey(request);
-  const session = await getServerSession(authOptions);
-
-  if (!apiAuth.authorized && !session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // Check permissions
-  if (apiAuth.authorized) {
-    if (apiAuth.permissions !== "WRITE" && apiAuth.permissions !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
-  } else {
-    const role = (session?.user as { role?: string }).role;
-    if (role !== "EDITOR" && role !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
+  const auth = await requirePermission(request, [Permissions.WRITE]);
+  if (!auth.success) {
+    return auth.response;
   }
 
   try {
@@ -281,14 +266,14 @@ export async function POST(request: NextRequest) {
           content,
           excerpt: excerpt || content.slice(0, 160).replace(/[#*`_]/g, ""),
           topicId,
-          authorId: session?.user ? (session.user as { id: string }).id : null,
-          authorName: authorName || (session?.user?.name ?? null),
+          authorId: auth.auth.userId ?? null,
+          authorName: authorName || (auth.auth.name ?? null),
           tags: { create: tagConnections },
           confidence: confidence || null,
           status: status || "published",
           revisions: {
             create: {
-              authorId: session?.user ? (session.user as { id: string }).id : null,
+              authorId: auth.auth.userId ?? null,
               title,
               content,
             },

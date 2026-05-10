@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
   } else {
-    const role = (session?.user as { role?: string }).role;
+    const role = session?.user?.role;
     if (role !== "EDITOR" && role !== "ADMIN") {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     .replace(/<[^>]*>/g, "") // strip any HTML tags
     .trim()
     .slice(0, MAX_AUTHOR_NAME_LENGTH) || session?.user?.name || "Unknown";
-  const userId = session?.user ? (session.user as { id?: string }).id ?? null : null;
+  const userId = session?.user ? session.user.id ?? null : null;
 
   // --- Validate ---
   if (!source?.title) {
