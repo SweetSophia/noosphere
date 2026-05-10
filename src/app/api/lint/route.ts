@@ -210,6 +210,8 @@ export async function POST(request: NextRequest) {
   }
 
   // ── 5. Unlinked mentions ──
+  // NOTE: This check is O(N²) within the maxArticles cap. For very large wikis,
+  // consider batching or offloading to a background job.
   // Detect when an article title (or slug) appears in another article's content
   // but is not linked with [[slug]] or href
   for (const a of articles) {
@@ -285,6 +287,7 @@ export async function POST(request: NextRequest) {
         bySeverity: summary.bySeverity,
         staleDays,
         tagMin,
+        maxArticles,
       },
     },
   });
