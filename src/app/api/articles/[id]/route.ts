@@ -267,13 +267,18 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     const existing = await prisma.article.findUnique({
       where: { id },
     });
-    if (!existing || existing.deletedAt) {
+    if (!existing) {
       return NextResponse.json({ error: "Article not found" }, { status: 404 });
     }
+    if (existing.deletedAt) {
+      // Already deleted — return 204 for idempotency so repeated deletes don't error
+      return new NextResponse(null, { status: 204 });
+    }
 
+    const now = new Date();
     await prisma.article.update({
       where: { id },
-      data: { deletedAt: new Date(), updatedAt: new Date() },
+      data: { deletedAt: now, updatedAt: now },
     });
 
     return new NextResponse(null, { status: 204 });
