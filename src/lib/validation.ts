@@ -24,7 +24,9 @@ export function isValidConfidence(value: string): value is ValidConfidence {
 export function deriveExcerpt(content: string, maxLength = 160): string {
   return content
     .slice(0, maxLength)
-    .replace(/[#*`>_\-\[\]]/g, "")
+<<<<<<< HEAD
+    .replace(/[#*`_>\-\[\]]/g, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
