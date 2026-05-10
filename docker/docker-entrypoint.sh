@@ -17,5 +17,11 @@ fi
 
 echo "[entrypoint] Starting application: $@"
 
+# Fail fast if CMD is empty to avoid cryptic "exec: not found" error
+if [ $# -eq 0 ]; then
+  echo "[entrypoint] No command provided — using default: node server.js" >&2
+  set -- node server.js
+fi
+
 # Pass control to the image's CMD (allows docker-compose override)
 exec "$@"
