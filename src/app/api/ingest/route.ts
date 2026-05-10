@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireApiKey } from "@/lib/api/keys";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requirePermission } from "@/lib/api/auth";
 import { apiError } from "@/lib/api/errors";
 
 
@@ -48,22 +47,9 @@ interface IngestArticle {
 
 export async function POST(request: NextRequest) {
   // --- Auth ---
-  const apiAuth = await requireApiKey(request);
-  const session = await getServerSession(authOptions);
-
-  if (!apiAuth.authorized && !session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (apiAuth.authorized) {
-    if (apiAuth.permissions !== "WRITE" && apiAuth.permissions !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
-  } else {
-    const role = (session?.user as { role?: string }).role;
-    if (role !== "EDITOR" && role !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
+  const auth = await requirePermission(request, [Permissions.WRITE]);
+  if (!auth.success) {
+    return auth.response;
   }
 
   // --- Parse body ---
@@ -86,8 +72,8 @@ export async function POST(request: NextRequest) {
   const sanitizedAuthorName = rawAuthorName
     .replace(/<[^>]*>/g, "") // strip any HTML tags
     .trim()
-    .slice(0, MAX_AUTHOR_NAME_LENGTH) || session?.user?.name || "Unknown";
-  const userId = session?.user ? (session.user as { id?: string }).id ?? null : null;
+    .slice(0, MAX_AUTHOR_NAME_LENGTH) || auth.auth.name || "Unknown";
+  const userId = auth.auth.userId ?? null;
 
   // --- Validate ---
   if (!source?.title) {
