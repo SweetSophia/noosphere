@@ -57,14 +57,16 @@ export async function validateApiKey(
     return { valid: false };
   }
 
-  // Update last-used timestamp (debounced: only write if > 5 min since last update)
-  const lastUsedAt = record.lastUsedAt;
-  if (!lastUsedAt || Date.now() - lastUsedAt.getTime() > LAST_USED_DEBOUNCE_MS) {
-    await prisma.apiKey.update({
-      where: { id: record.id },
-      data: { lastUsedAt: new Date() },
-    });
-  }
+  // Update last-used timestamp atomically and at most once per debounce window.
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - LAST_USED_DEBOUNCE_MS);
+  await prisma.apiKey.updateMany({
+    where: {
+      id: record.id,
+      OR: [{ lastUsedAt: null }, { lastUsedAt: { lt: cutoff } }],
+    },
+    data: { lastUsedAt: now },
+  });
 
   return { valid: true, permissions: record.permissions, keyId: record.id };
 }

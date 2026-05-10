@@ -47,13 +47,14 @@ export async function GET(request: NextRequest) {
   }
 
   if (from || to) {
-    where.createdAt = {};
+    const createdAt: Prisma.DateTimeFilter = {};
     if (from) {
-      where.createdAt.gte = new Date(from);
+      createdAt.gte = new Date(from);
     }
     if (to) {
-      where.createdAt.lt = new Date(to);
+      createdAt.lt = new Date(to);
     }
+    where.createdAt = createdAt;
   }
 
   const [entries, total] = await Promise.all([
