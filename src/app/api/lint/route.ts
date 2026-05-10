@@ -60,13 +60,16 @@ export async function POST(request: NextRequest) {
 
   const staleDays = body.staleDays ?? 90;
   const tagMin = body.tagMin ?? 2;
+  const maxArticles = Math.min(Math.max(1, body.maxArticles ?? 500), 2000);
   const staleThreshold = new Date(Date.now() - staleDays * 24 * 60 * 60 * 1000);
 
   const issues: LintIssue[] = [];
 
-  // ── Fetch all non-deleted articles ──
+  // ── Fetch non-deleted articles (capped for performance) ──
   const articles = await prisma.article.findMany({
     where: { deletedAt: null },
+    take: maxArticles,
+    orderBy: { updatedAt: "desc" },
     select: {
       id: true,
       title: true,
