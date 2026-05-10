@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { slugify } from "@/lib/memory/backfill";
+import { deriveExcerpt } from "@/lib/validation";
 import type { Prisma } from "@prisma/client";
 
 export const MEMORY_SAVE_LIMITS = {
@@ -262,7 +263,7 @@ export async function getDefaultMemorySaveWriter(): Promise<MemorySaveWriter> {
       }
 
       const baseSlug = slugify(input.title).slice(0, 80);
-      const excerpt = input.excerpt ?? createFallbackExcerpt(input.content);
+      const excerpt = input.excerpt ?? deriveExcerpt(input.content, 200);
 
       const article = await prisma.$transaction(async (tx) => {
         const slug = await findAvailableSlug(tx, input.topicId, baseSlug);
@@ -372,16 +373,6 @@ export class MemorySaveError extends Error {
     super(message);
     this.name = "MemorySaveError";
   }
-}
-
-function createFallbackExcerpt(content: string): string {
-  return content
-    .split(/\n+/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join(" ")
-    .slice(0, 200)
-    .trim();
 }
 
 function detectSecretInInputs(
