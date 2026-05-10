@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireApiKey } from "@/lib/api/keys";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requirePermission } from "@/lib/api/auth";
+import { apiError } from "@/lib/api/errors";
+import {
+  deriveExcerpt,
+  isValidConfidence,
+  isValidStatus,
+  sanitizeAuthorName,
+  validateSlug,
+} from "@/lib/validation";
 
 // POST /api/answer — Save a synthesized answer as a new wiki article
 // Auth: API key (WRITE/ADMIN) or session (EDITOR/ADMIN)
@@ -25,22 +32,9 @@ import { authOptions } from "@/lib/auth";
 //   { article: {id, title, slug, topic, tags}, answerId }
 
 export async function POST(request: NextRequest) {
-  const apiAuth = await requireApiKey(request);
-  const session = await getServerSession(authOptions);
-
-  if (!apiAuth.authorized && !session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (apiAuth.authorized) {
-    if (apiAuth.permissions !== "WRITE" && apiAuth.permissions !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
-  } else {
-    const role = (session?.user as { role?: string }).role;
-    if (role !== "EDITOR" && role !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
+  const auth = await requirePermission(request, [Permissions.WRITE]);
+  if (!auth.success) {
+    return auth.response;
   }
 
   let body: {
@@ -58,17 +52,13 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return apiError("Invalid JSON body", 400);
   }
 
   const { title, content, topicId, excerpt, tags, sourceQuery, confidence, status, authorName: rawAuthorName } = body;
   // Sanitize authorName from body to prevent HTML injection / name spoofing
-  const authorName = (rawAuthorName ?? "")
-    .replace(/<[^>]*>/g, "")
-    .trim()
-    .slice(0, 100) || session?.user?.name || "Unknown";
-  const sessionUser = session?.user as ({ id?: string } | null) | undefined;
-  const userId = sessionUser?.id ?? null;
+  const authorName = sanitizeAuthorName(rawAuthorName) || auth.auth.name || "Unknown";
+  const userId = auth.auth.userId ?? null;
 
   // Validate required fields
   if (!title || !content || !topicId) {
@@ -79,10 +69,10 @@ export async function POST(request: NextRequest) {
   }
 
   // Validate enums
-  if (status && !["draft", "reviewed", "published"].includes(status)) {
+  if (status && !isValidStatus(status)) {
     return NextResponse.json({ error: "status must be draft/reviewed/published" }, { status: 400 });
   }
-  if (confidence && !["low", "medium", "high"].includes(confidence)) {
+  if (confidence && !isValidConfidence(confidence)) {
     return NextResponse.json({ error: "confidence must be low/medium/high" }, { status: 400 });
   }
 
@@ -93,25 +83,26 @@ export async function POST(request: NextRequest) {
   }
 
   // Derive slug from title
-  const slug = title
-    .toLowerCase()
-    .replace(/[^a-z0-9 -]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .trim()
-    .slice(0, 80);
-
-  if (!slug) {
-    return NextResponse.json({ error: "Could not derive a valid slug from title" }, { status: 400 });
+  const slug = validateSlug(
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9 -]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .trim()
+      .slice(0, 80)
+  );
+  if (!slug.ok) {
+    return NextResponse.json({ error: slug.error }, { status: 400 });
   }
 
   // Check slug uniqueness
   const existing = await prisma.article.findUnique({
-    where: { topicId_slug: { topicId, slug } },
+    where: { topicId_slug: { topicId, slug: slug.slug } },
   });
   if (existing) {
     return NextResponse.json(
-      { error: `Article with slug "${slug}" already exists in this topic`, existingArticleId: existing.id },
+      { error: `Article with slug "${slug.slug}" already exists in this topic`, existingArticleId: existing.id },
       { status: 409 }
     );
   }
@@ -132,20 +123,18 @@ export async function POST(request: NextRequest) {
     : [];
 
   // Derive excerpt if not provided
-  const derivedExcerpt =
-    excerpt ||
-    content.slice(0, 200).replace(/[#*`_>\-\[\]]/g, "").trim();
+  const derivedExcerpt = excerpt || deriveExcerpt(content, 200);
 
   const article = await prisma.$transaction(async (tx) => {
     const created = await tx.article.create({
       data: {
         title,
-        slug,
+        slug: slug.slug,
         content,
         excerpt: derivedExcerpt,
         topicId,
         authorId: userId,
-        authorName: authorName || session?.user?.name || "Unknown",
+        authorName,
         confidence: confidence || null,
         status: status || "published",
         sourceType: sourceQuery ? "query" : "manual",
@@ -170,7 +159,7 @@ export async function POST(request: NextRequest) {
       data: {
         type: "answer_saved",
         title: `Answer saved as "${title}"`,
-        authorName: authorName || session?.user?.name || "Unknown",
+        authorName,
         details: {
           articleId: created.id,
           topic: topic.name,

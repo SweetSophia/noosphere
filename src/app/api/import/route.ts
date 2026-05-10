@@ -5,21 +5,19 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import JSZip from "jszip";
 import yaml from "js-yaml";
+import { isValidConfidence, isValidStatus } from "@/lib/validation";
 
 // Disable Next.js body parsing for file uploads
 export const dynamic = "force-dynamic";
 
 // ── Validation helpers ───────────────────────────────────────────────────────
 
-const VALID_CONFIDENCE = new Set(["low", "medium", "high"]);
-const VALID_STATUS = new Set(["draft", "reviewed", "published"]);
-
 function validatedConfidence(v: string | undefined): string | null {
-  return v && VALID_CONFIDENCE.has(v) ? v : null;
+  return v && isValidConfidence(v) ? v : null;
 }
 
 function validatedStatus(v: string | undefined, fallback: string): string {
-  return v && VALID_STATUS.has(v) ? v : fallback;
+  return v && isValidStatus(v) ? v : fallback;
 }
 
 interface ImportArticle {
@@ -84,7 +82,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
   } else {
-    const role = (session?.user as { role?: string }).role;
+    const role = session?.user?.role;
     if (role !== "EDITOR" && role !== "ADMIN") {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }

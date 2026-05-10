@@ -1,32 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireApiKey } from "@/lib/api/keys";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requirePermission } from "@/lib/api/auth";
 import { buildTagConnections } from "@/lib/wiki";
+import {
+  ARTICLE_LIMITS,
+  deriveExcerpt,
+  isValidConfidence,
+  isValidStatus,
+  validateSlug,
+} from "@/lib/validation";
 
 // PATCH /api/articles/[id] — Update article
 // Auth: API key (WRITE/ADMIN) or session (EDITOR/ADMIN)
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const apiAuth = await requireApiKey(request);
-  const session = await getServerSession(authOptions);
-
-  if (!apiAuth.authorized && !session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // Check permissions
-  if (apiAuth.authorized) {
-    if (apiAuth.permissions !== "WRITE" && apiAuth.permissions !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
-  } else {
-    const role = (session?.user as { role?: string }).role;
-    if (role !== "EDITOR" && role !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
+  const auth = await requirePermission(request, [Permissions.WRITE]);
+  if (!auth.success) {
+    return auth.response;
   }
 
   try {
@@ -64,8 +56,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (typeof title !== "string" || !title.trim()) {
         return NextResponse.json({ error: "title must be a non-empty string" }, { status: 400 });
       }
-      if (title.length > 200) {
-        return NextResponse.json({ error: "title exceeds maximum length of 200 characters" }, { status: 400 });
+      if (title.length > ARTICLE_LIMITS.maxTitleLength) {
+        return NextResponse.json({ error: `title exceeds maximum length of ${ARTICLE_LIMITS.maxTitleLength} characters` }, { status: 400 });
       }
       updateData.title = title.trim();
     }
@@ -75,8 +67,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (typeof slug !== "string" || !slug.trim()) {
         return NextResponse.json({ error: "slug must be a non-empty string" }, { status: 400 });
       }
-      if (!/^[a-z0-9-]+$/.test(slug)) {
-        return NextResponse.json({ error: "slug must be lowercase alphanumeric with hyphens only" }, { status: 400 });
+      const slugValidation = validateSlug(slug);
+      if (!slugValidation.ok) {
+        return NextResponse.json({ error: slugValidation.error }, { status: 400 });
       }
       // Check slug uniqueness within same topic (if changing topicId too, checked later)
       const targetTopicId = topicId ?? existing.topicId;
@@ -84,13 +77,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         where: {
           id: { not: id },
           topicId: targetTopicId,
-          slug,
+          slug: slugValidation.slug,
         },
       });
       if (slugConflict) {
         return NextResponse.json({ error: "Article with this slug already exists in this topic" }, { status: 409 });
       }
-      updateData.slug = slug.trim();
+      updateData.slug = slugValidation.slug;
     }
 
     // content
@@ -99,14 +92,14 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         return NextResponse.json({ error: "content must be a string" }, { status: 400 });
       }
       const encoded = new TextEncoder().encode(content);
-      if (encoded.length > 1024 * 1024) {
-        return NextResponse.json({ error: "content exceeds maximum size of 1MB" }, { status: 400 });
+      if (encoded.length > ARTICLE_LIMITS.maxContentSize) {
+        return NextResponse.json({ error: `content exceeds maximum size of ${ARTICLE_LIMITS.maxContentSize} bytes` }, { status: 400 });
       }
       updateData.content = content;
 
       // Auto-update excerpt if content changed and no explicit excerpt provided
       if (excerpt === undefined) {
-        updateData.excerpt = content.slice(0, 160).replace(/[#*`_]/g, "");
+        updateData.excerpt = deriveExcerpt(content);
       }
     }
 
@@ -115,8 +108,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (excerpt !== null && typeof excerpt !== "string") {
         return NextResponse.json({ error: "excerpt must be a string or null" }, { status: 400 });
       }
-      if (excerpt && excerpt.length > 500) {
-        return NextResponse.json({ error: "excerpt exceeds maximum length of 500 characters" }, { status: 400 });
+      if (excerpt && excerpt.length > ARTICLE_LIMITS.maxExcerptLength) {
+        return NextResponse.json({ error: `excerpt exceeds maximum length of ${ARTICLE_LIMITS.maxExcerptLength} characters` }, { status: 400 });
       }
       updateData.excerpt = excerpt ?? "";
     }
@@ -135,7 +128,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     // status
     if (status !== undefined) {
-      if (!["draft", "reviewed", "published"].includes(status)) {
+      if (!isValidStatus(status)) {
         return NextResponse.json({ error: "status must be one of: draft, reviewed, published" }, { status: 400 });
       }
       updateData.status = status;
@@ -143,7 +136,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     // confidence
     if (confidence !== undefined) {
-      if (!["low", "medium", "high"].includes(confidence)) {
+      if (!isValidConfidence(confidence)) {
         return NextResponse.json({ error: "confidence must be one of: low, medium, high" }, { status: 400 });
       }
       updateData.confidence = confidence;
@@ -184,7 +177,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (titleChanged || contentChanged) {
       updateData.revisions = {
         create: {
-          authorId: session?.user ? (session.user as { id: string }).id : null,
+          authorId: auth.auth.userId ?? null,
           title: (title ?? existing.title) as string,
           content: (content ?? existing.content) as string,
         },
