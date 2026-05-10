@@ -25,16 +25,23 @@ export function MarkdownPreviewTabs({ targetTextareaId, defaultValue = "" }: Mar
   const [content, setContent] = useState(defaultValue);
 
   const sync = useCallback(() => {
-    const textarea = document.getElementById(targetTextareaId) as HTMLTextAreaElement | null;
-    if (textarea) {
+    const textarea = document.getElementById(targetTextareaId);
+    if (textarea instanceof HTMLTextAreaElement) {
       setContent(textarea.value);
     }
   }, [targetTextareaId]);
 
+  // Sync content when defaultValue prop changes (e.g., switching articles)
   useEffect(() => {
+    setContent(defaultValue);
+  }, [defaultValue]);
+
+  useEffect(() => {
+    const textarea = document.getElementById(targetTextareaId);
+    if (!(textarea instanceof HTMLTextAreaElement)) return;
+
+    // Initial sync — textarea found, content already set from defaultValue or useEffect
     sync();
-    const textarea = document.getElementById(targetTextareaId) as HTMLTextAreaElement | null;
-    if (!textarea) return;
 
     textarea.addEventListener("input", sync, { passive: true });
     return () => {
