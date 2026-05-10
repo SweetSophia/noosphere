@@ -76,6 +76,7 @@ model Article {
   @@index([sourceUrl])
   @@index([status])
   @@index([confidence])
+  @@index([deletedAt])
 }
 
 // ─────────────────────────────────────────────

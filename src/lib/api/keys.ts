@@ -54,11 +54,14 @@ export async function validateApiKey(
     return { valid: false };
   }
 
-  // Update last-used timestamp
-  await prisma.apiKey.update({
-    where: { id: record.id },
-    data: { lastUsedAt: new Date() },
-  });
+  // Update last-used timestamp (debounced: only write if > 5 min since last update)
+  const lastUsedAt = record.lastUsedAt;
+  if (!lastUsedAt || Date.now() - lastUsedAt.getTime() > 5 * 60 * 1000) {
+    await prisma.apiKey.update({
+      where: { id: record.id },
+      data: { lastUsedAt: new Date() },
+    });
+  }
 
   return { valid: true, permissions: record.permissions, keyId: record.id };
 }
