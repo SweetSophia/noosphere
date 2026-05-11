@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
@@ -17,21 +17,37 @@ const sanitizeSchema = {
 
 interface MarkdownPreviewTabsProps {
   targetTextareaId: string;
+  defaultValue?: string;
 }
 
-export function MarkdownPreviewTabs({ targetTextareaId }: MarkdownPreviewTabsProps) {
+export function MarkdownPreviewTabs({ targetTextareaId, defaultValue = "" }: MarkdownPreviewTabsProps) {
   const [activeTab, setActiveTab] = useState<"write" | "preview">("write");
-  const [content, setContent] = useState("");
+  const [content, setContent] = useState(defaultValue);
+
+  const sync = useCallback(() => {
+    const textarea = document.getElementById(targetTextareaId);
+    if (textarea instanceof HTMLTextAreaElement) {
+      setContent(textarea.value);
+    }
+  }, [targetTextareaId]);
+
+  // Sync content when defaultValue prop changes (e.g., switching articles)
+  useEffect(() => {
+    setContent(defaultValue);
+  }, [defaultValue]);
 
   useEffect(() => {
-    const textarea = document.getElementById(targetTextareaId) as HTMLTextAreaElement | null;
-    if (!textarea) return;
+    const textarea = document.getElementById(targetTextareaId);
+    if (!(textarea instanceof HTMLTextAreaElement)) return;
 
-    const sync = () => setContent(textarea.value);
+    // Initial sync — textarea found, content already set from defaultValue or useEffect
     sync();
-    textarea.addEventListener("input", sync);
-    return () => textarea.removeEventListener("input", sync);
-  }, [targetTextareaId]);
+
+    textarea.addEventListener("input", sync, { passive: true });
+    return () => {
+      textarea.removeEventListener("input", sync);
+    };
+  }, [targetTextareaId, sync]);
 
   const preview = useMemo(() => content.trim(), [content]);
 
