@@ -117,6 +117,10 @@ default_choice() {
 
 read -p "How should Noosphere be accessible? [$(default_choice)]: " bind_choice
 bind_choice="${bind_choice:-$(default_choice)}"
+# Strip any whitespace or unexpected characters from the choice
+bind_choice="$(echo "${bind_choice}" | tr -d '[:space:]')"
+# Validate: only accept known choices, otherwise use default
+case "${bind_choice}" in 1|2|3|4|5) ;; *) bind_choice="$(default_choice)" ;; esac
 
 BIND=""
 ACCESS_URL=""
