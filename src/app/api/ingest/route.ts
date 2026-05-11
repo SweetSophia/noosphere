@@ -64,7 +64,6 @@ export async function POST(request: NextRequest) {
 
   const { source, articles, tags: globalTags } = body;
   // authorName from body is accepted but sanitized to prevent HTML injection / spoofing
-  const userName = auth.auth.name ?? "Unknown";
   const rawAuthorName = body.authorName ?? "";
   const sanitizedAuthorName = sanitizeAuthorName(
     rawAuthorName,

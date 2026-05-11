@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireApiKey } from "@/lib/api/keys";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requirePermission } from "@/lib/api/auth";
 
 // GET /api/graph — Wiki knowledge graph
 //
@@ -21,36 +19,36 @@ import { authOptions } from "@/lib/auth";
 //   }
 
 export async function GET(request: NextRequest) {
-  // Auth: API key (any permission) or session
-  const apiAuth = await requireApiKey(request);
-  const session = await getServerSession(authOptions);
-  if (!apiAuth.authorized && !session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Auth: API key (any permission) or session — empty array = any authenticated caller
+  const auth = await requirePermission(request, []);
+  if (!auth.success) {
+    return auth.response;
   }
 
-  const { searchParams } = new URL(request.url);
-  const topicSlug = searchParams.get("topic");
-  const limit = Math.min(parseInt(searchParams.get("limit") ?? "100", 10), 500);
+  try {
+    const { searchParams } = new URL(request.url);
+    const topicSlug = searchParams.get("topic");
+    const limit = Math.min(parseInt(searchParams.get("limit") ?? "100", 10), 500);
 
-  // Fetch all non-deleted articles with their tags and topic
-  const articles = await prisma.article.findMany({
-    where: {
-      deletedAt: null,
-      ...(topicSlug ? { topic: { slug: topicSlug } } : {}),
-    },
-    select: {
-      id: true,
-      title: true,
-      slug: true,
-      excerpt: true,
-      content: true,
-      createdAt: true,
-      topic: { select: { slug: true } },
-      tags: { select: { tag: { select: { id: true, name: true, slug: true } } } },
-    },
-    take: limit,
-    orderBy: { updatedAt: "desc" },
-  });
+    // Fetch all non-deleted articles with their tags and topic
+    const articles = await prisma.article.findMany({
+      where: {
+        deletedAt: null,
+        ...(topicSlug ? { topic: { slug: topicSlug } } : {}),
+      },
+      select: {
+        id: true,
+        title: true,
+        slug: true,
+        excerpt: true,
+        content: true,
+        createdAt: true,
+        topic: { select: { slug: true } },
+        tags: { select: { tag: { select: { id: true, name: true, slug: true } } } },
+      },
+      take: limit,
+      orderBy: { updatedAt: "desc" },
+    });
 
   // Build nodes
   const nodes = articles.map((a) => ({
@@ -145,14 +143,18 @@ export async function GET(request: NextRequest) {
     prisma.topic.count(),
   ]);
 
-  return NextResponse.json({
-    nodes,
-    edges,
-    stats: {
-      articleCount,
-      tagCount,
-      topicCount,
-      edgeCount: edges.length,
-    },
-  });
+    return NextResponse.json({
+      nodes,
+      edges,
+      stats: {
+        articleCount,
+        tagCount,
+        topicCount,
+        edgeCount: edges.length,
+      },
+    });
+  } catch (error) {
+    console.error("[GET /api/graph]", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
 }
