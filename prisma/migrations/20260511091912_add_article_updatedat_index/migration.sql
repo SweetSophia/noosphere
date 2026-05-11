@@ -1,4 +1,5 @@
--- Create index on Article.updatedAt to improve lint query performance
--- The /api/lint endpoint orders by updatedAt desc and is now capped at 2000 rows,
--- but without an index this ORDER BY causes a full table scan + sort on large wikis.
-CREATE INDEX "Article_updatedAt_idx" ON "Article"("updatedAt");
+-- Composite index on Article(updatedAt DESC, id ASC) to support the lint query's
+-- ORDER BY [{ updatedAt: 'desc' }, { id: 'asc' }] without a sort step.
+-- The IF NOT EXISTS guard handles environments where the index was applied manually
+-- (e.g. hotfix) but the migration hadn't been recorded in _prisma_migrations yet.
+CREATE INDEX IF NOT EXISTS "Article_updatedAt_idx" ON "Article"("updatedAt" DESC, "id" ASC);

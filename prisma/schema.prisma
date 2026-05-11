@@ -77,7 +77,7 @@ model Article {
   @@index([status])
   @@index([confidence])
   @@index([deletedAt])
-  @@index([updatedAt])
+  @@index([updatedAt(sort: Desc), id(sort: Asc)])
 }
 
 // ─────────────────────────────────────────────
