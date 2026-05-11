@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
   const articles = await prisma.article.findMany({
     where: { deletedAt: null },
     take: maxArticles,
-    orderBy: { updatedAt: "desc" },
+    orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
     select: {
       id: true,
       title: true,
