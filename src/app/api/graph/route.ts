@@ -28,7 +28,8 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const topicSlug = searchParams.get("topic");
-    const limit = Math.min(parseInt(searchParams.get("limit") ?? "100", 10), 500);
+    const rawLimit = parseInt(searchParams.get("limit") ?? "100", 10);
+    const limit = Math.max(1, Math.min(rawLimit || 100, 500));
 
     // Fetch all non-deleted articles with their tags and topic
     const articles = await prisma.article.findMany({
