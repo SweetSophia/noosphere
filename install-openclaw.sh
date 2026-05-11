@@ -79,50 +79,52 @@ fi
 # Try to detect the machine's primary IP for Tailscale/LAN access suggestions.
 DETECTED_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[\d.]+' | head -1 || true)"
 if [ -z "$DETECTED_IP" ]; then
-  DETECTED_IP="<your-IP>"
+  DETECTED_IP=""
 fi
 
 # ── Interactive binding choice ─────────────────────────────────────────────────
+NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
+
 echo ""
 echo "Noosphere bind address setup"
 echo "=============================="
 echo "  1) localhost (127.0.0.1) — accessible only on this machine"
 echo "  2) All interfaces (0.0.0.0) — accessible over LAN/Tailscale VPN"
-if [ "$DETECTED_IP" != "<your-IP>" ]; then
-  echo "  3) Use detected IP: $DETECTED_IP"
+if [ -n "$DETECTED_IP" ]; then
+  echo "  3) Use detected IP: $DETECTED_IP (recommended for Tailscale)"
 fi
 echo "  4) Custom IP or domain"
 echo ""
-NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
-read -p "How should Noosphere be accessible? [$DETECTED_IP != "<your-IP>" && echo -n "2"; echo ": " ] " bind_choice
 
-# Resolve default (prompt shows current choice)
-if [ -z "$bind_choice" ]; then
-  if [ "$DETECTED_IP" != "<your-IP>" ]; then
-    bind_choice=3
+default_choice() {
+  if [ -n "$DETECTED_IP" ]; then
+    echo "3"
   else
-    bind_choice=2
+    echo "2"
   fi
-fi
+}
 
-BIND=""
+read -p "How should Noosphere be accessible? [$(default_choice)]: " bind_choice
+bind_choice="${bind_choice:-$(default_choice)}"
+
+BIND=""        # Docker port bind address
+ACCESS_URL=""  # URL that clients use to reach Noosphere
 case "$bind_choice" in
-  1) BIND="127.0.0.1";;
-  2) BIND="0.0.0.0";;
-  3) BIND="$DETECTED_IP";;
+  1) BIND="127.0.0.1"; ACCESS_URL="http://127.0.0.1:${NOOSPHERE_PORT}" ;;
+  2) BIND="0.0.0.0";   ACCESS_URL="http://${DETECTED_IP:-127.0.0.1}:${NOOSPHERE_PORT}" ;;
+  3) BIND="$DETECTED_IP"; ACCESS_URL="http://${DETECTED_IP}:${NOOSPHERE_PORT}" ;;
   4)
     read -p "Enter IP address or domain (include port if not $NOOSPHERE_PORT): " BIND
+    ACCESS_URL="http://${BIND}"
     ;;
-  *) echo "Invalid choice, defaulting to all interfaces (0.0.0.0)"; BIND="0.0.0.0";;
+  *) echo "Invalid choice, defaulting to all interfaces"; BIND="0.0.0.0"; ACCESS_URL="http://${DETECTED_IP:-127.0.0.1}:${NOOSPHERE_PORT}" ;;
 esac
 
-# Normalize APP_URL: strip trailing port if it's the default, otherwise keep custom port
-if [[ "$BIND" == *":"* ]]; then
-  # User gave host:port format
-  APP_URL="http://$BIND"
-else
-  APP_URL="http://${BIND}:${NOOSPHERE_PORT}"
+if [ -z "$ACCESS_URL" ]; then
+  ACCESS_URL="http://${BIND}:${NOOSPHERE_PORT}"
 fi
+
+APP_URL="$ACCESS_URL"
 
 echo ""
 echo "  Noosphere will be accessible at: $APP_URL"
@@ -143,9 +145,9 @@ ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(random_secret 24)}"
 API_KEY="${API_KEY:-noo_$(random_secret 32)}"
 
 # ── Write .env BEFORE running docker compose ───────────────────────────────────
-# This is critical: docker compose run needs these to be in .env, not just shell exports.
-ENV_TMP=$(mktemp)
-cat > "$ENV_TMP" <<ENV
+# Critical: docker compose run does not inherit shell exports reliably.
+# All env vars must be in .env so the init container can authenticate.
+cat > "$NOOSPHERE_HOME/.env" <<ENV
 NOOSPHERE_VERSION=${NOOSPHERE_VERSION}
 NOOSPHERE_PORT=${NOOSPHERE_PORT}
 APP_URL=${APP_URL}
@@ -154,10 +156,9 @@ NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
 NOOSPHERE_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 NOOSPHERE_BOOTSTRAP_API_KEY=${API_KEY}
 ENV
-chmod 600 "$ENV_TMP"
-mv "$ENV_TMP" "$NOOSPHERE_HOME/.env"
+chmod 600 "$NOOSPHERE_HOME/.env"
 
-# Export so `docker compose run` and `docker compose up` both see them
+# Also export so docker compose up (which reads .env automatically) works
 export NOOSPHERE_VERSION NOOSPHERE_PORT APP_URL POSTGRES_PASSWORD NEXTAUTH_SECRET
 export NOOSPHERE_ADMIN_PASSWORD="$ADMIN_PASSWORD"
 export NOOSPHERE_BOOTSTRAP_API_KEY="$API_KEY"
@@ -354,7 +355,7 @@ fi
 # ── Done ─────────────────────────────────────────────────────────────────────
 cat <<DONE
 
-Setup complete! 🎉
+Setup complete! 
 
   Noosphere URL:  ${APP_URL}
   Admin email:    admin@noosphere.local
