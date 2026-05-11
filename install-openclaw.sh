@@ -82,53 +82,64 @@ if [ -z "$DETECTED_IP" ]; then
   DETECTED_IP=""
 fi
 
-# ── Interactive binding choice ─────────────────────────────────────────────────
 NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
 
-echo ""
-echo "Noosphere bind address setup"
-echo "=============================="
-echo "  1) localhost (127.0.0.1) — accessible only on this machine"
-echo "  2) All interfaces (0.0.0.0) — accessible over LAN/Tailscale VPN"
-if [ -n "$DETECTED_IP" ]; then
-  echo "  3) Use detected IP: $DETECTED_IP (recommended for Tailscale)"
-fi
-echo "  4) Custom IP or domain"
-echo ""
-
-default_choice() {
+# ── Binding choice: interactive if stdin is a TTY, otherwise auto-detect ────────
+if [ -t 0 ]; then
+  # Interactive mode — show menu
+  echo ""
+  echo "Noosphere bind address setup"
+  echo "=============================="
+  echo "  1) localhost (127.0.0.1) — accessible only on this machine"
+  echo "  2) All interfaces (0.0.0.0) — accessible over LAN/Tailscale VPN"
   if [ -n "$DETECTED_IP" ]; then
-    echo "3"
-  else
-    echo "2"
+    echo "  3) Use detected IP: $DETECTED_IP (recommended for Tailscale)"
   fi
-}
+  echo "  4) Custom IP or domain"
+  echo ""
 
-read -p "How should Noosphere be accessible? [$(default_choice)]: " bind_choice
-bind_choice="${bind_choice:-$(default_choice)}"
+  default_choice() {
+    if [ -n "$DETECTED_IP" ]; then echo "3"; else echo "2"; fi
+  }
 
-BIND=""        # Docker port bind address
-ACCESS_URL=""  # URL that clients use to reach Noosphere
-case "$bind_choice" in
-  1) BIND="127.0.0.1"; ACCESS_URL="http://127.0.0.1:${NOOSPHERE_PORT}" ;;
-  2) BIND="0.0.0.0";   ACCESS_URL="http://${DETECTED_IP:-127.0.0.1}:${NOOSPHERE_PORT}" ;;
-  3) BIND="$DETECTED_IP"; ACCESS_URL="http://${DETECTED_IP}:${NOOSPHERE_PORT}" ;;
-  4)
-    read -p "Enter IP address or domain (include port if not $NOOSPHERE_PORT): " BIND
-    ACCESS_URL="http://${BIND}"
-    ;;
-  *) echo "Invalid choice, defaulting to all interfaces"; BIND="0.0.0.0"; ACCESS_URL="http://${DETECTED_IP:-127.0.0.1}:${NOOSPHERE_PORT}" ;;
-esac
+  read -p "How should Noosphere be accessible? [$(default_choice)]: " bind_choice
+  bind_choice="${bind_choice:-$(default_choice)}"
 
-if [ -z "$ACCESS_URL" ]; then
-  ACCESS_URL="http://${BIND}:${NOOSPHERE_PORT}"
+  BIND=""        # Docker port bind address
+  ACCESS_URL=""  # URL that clients use to reach Noosphere
+  case "$bind_choice" in
+    1) BIND="127.0.0.1"; ACCESS_URL="http://127.0.0.1:${NOOSPHERE_PORT}" ;;
+    2) BIND="0.0.0.0";   ACCESS_URL="http://${DETECTED_IP:-127.0.0.1}:${NOOSPHERE_PORT}" ;;
+    3) BIND="$DETECTED_IP"; ACCESS_URL="http://${DETECTED_IP}:${NOOSPHERE_PORT}" ;;
+    4)
+      read -p "Enter IP address or domain (include port if not $NOOSPHERE_PORT): " BIND
+      ACCESS_URL="http://${BIND}"
+      ;;
+    *) echo "Invalid choice, defaulting to detected IP"; BIND="${DETECTED_IP:-0.0.0.0}"; ACCESS_URL="http://${DETECTED_IP:-127.0.0.1}:${NOOSPHERE_PORT}" ;;
+  esac
+
+  if [ -z "$ACCESS_URL" ]; then
+    ACCESS_URL="http://${BIND}:${NOOSPHERE_PORT}"
+  fi
+
+  APP_URL="$ACCESS_URL"
+  echo ""
+  echo "  Noosphere will be accessible at: $APP_URL"
+  echo ""
+else
+  # Non-interactive mode (curl | bash): auto-detect and use detected IP
+  if [ -n "$DETECTED_IP" ]; then
+    BIND="$DETECTED_IP"
+    APP_URL="http://${DETECTED_IP}:${NOOSPHERE_PORT}"
+  else
+    BIND="0.0.0.0"
+    APP_URL="http://127.0.0.1:${NOOSPHERE_PORT}"
+  fi
+  echo ""
+  echo "Non-interactive mode — auto-detecting bind address..."
+  echo "  Noosphere will be accessible at: $APP_URL"
+  echo ""
 fi
-
-APP_URL="$ACCESS_URL"
-
-echo ""
-echo "  Noosphere will be accessible at: $APP_URL"
-echo ""
 
 # ── Secrets (reuse existing or generate fresh) ─────────────────────────────────
 mkdir -p "$NOOSPHERE_HOME" "$SECRETS_DIR"
