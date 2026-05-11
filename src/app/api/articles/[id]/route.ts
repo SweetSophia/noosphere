@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
@@ -263,27 +265,39 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     return auth.response;
   }
 
-  try {
-    const existing = await prisma.article.findUnique({
-      where: { id },
-    });
-    if (!existing) {
-      return NextResponse.json({ error: "Article not found" }, { status: 404 });
-    }
-    if (existing.deletedAt) {
-      // Already deleted — return 204 for idempotency so repeated deletes don't error
-      return new NextResponse(null, { status: 204 });
-    }
+  const now = new Date();
 
-    const now = new Date();
-    await prisma.article.update({
-      where: { id },
-      data: { deletedAt: now, updatedAt: now },
-    });
+  // Atomic soft-delete: only succeeds if article exists AND is not already deleted.
+  // This eliminates the read-then-write race condition.
+  const count = await prisma.article.updateMany({
+    where: { id, deletedAt: null },
+    data: { deletedAt: now, updatedAt: now },
+  });
 
-    return new NextResponse(null, { status: 204 });
-  } catch (error) {
-    console.error("[DELETE /api/articles/[id]]", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  if (count.count === 0) {
+    // Either article doesn't exist, or was already deleted.
+    // Fetch to distinguish — for security we don't reveal which.
+    const existing = await prisma.article.findUnique({ where: { id } });
+    if (!existing || existing.deletedAt) {
+      return new NextResponse(null, { status: 204 }); // idempotent
+    }
+    return NextResponse.json({ error: "Article not found" }, { status: 404 });
   }
+
+  // Log the deletion for audit trail
+  const session = await getServerSession(authOptions);
+  const authorName = session?.user?.name ?? auth.auth.name ?? "API";
+  try {
+    await prisma.activityLog.create({
+      data: {
+        type: "delete",
+        title: `Article deleted — ${id}`,
+        authorName,
+      },
+    });
+  } catch {
+    // Log failures are non-fatal; don't fail the delete itself
+  }
+
+  return new NextResponse(null, { status: 204 });
 }
