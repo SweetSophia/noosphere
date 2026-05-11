@@ -75,71 +75,74 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
-# ── Detect defaults ────────────────────────────────────────────────────────────
-# Try to detect the machine's primary IP for Tailscale/LAN access suggestions.
-DETECTED_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[\d.]+' | head -1 || true)"
-if [ -z "$DETECTED_IP" ]; then
-  DETECTED_IP=""
-fi
-
+# ── Detect network addresses ─────────────────────────────────────────────────────
+# Prefer Tailscale IP for VPN access; fall back to default route IP.
 NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
 
-# ── Binding choice: interactive if stdin is a TTY, otherwise auto-detect ────────
-if [ -t 0 ]; then
-  # Interactive mode — show menu
-  echo ""
-  echo "Noosphere bind address setup"
-  echo "=============================="
-  echo "  1) localhost (127.0.0.1) — accessible only on this machine"
-  echo "  2) All interfaces (0.0.0.0) — accessible over LAN/Tailscale VPN"
-  if [ -n "$DETECTED_IP" ]; then
-    echo "  3) Use detected IP: $DETECTED_IP (recommended for Tailscale)"
-  fi
-  echo "  4) Custom IP or domain"
-  echo ""
-
-  default_choice() {
-    if [ -n "$DETECTED_IP" ]; then echo "3"; else echo "2"; fi
-  }
-
-  read -p "How should Noosphere be accessible? [$(default_choice)]: " bind_choice
-  bind_choice="${bind_choice:-$(default_choice)}"
-
-  BIND=""        # Docker port bind address
-  ACCESS_URL=""  # URL that clients use to reach Noosphere
-  case "$bind_choice" in
-    1) BIND="127.0.0.1"; ACCESS_URL="http://127.0.0.1:${NOOSPHERE_PORT}" ;;
-    2) BIND="0.0.0.0";   ACCESS_URL="http://${DETECTED_IP:-127.0.0.1}:${NOOSPHERE_PORT}" ;;
-    3) BIND="$DETECTED_IP"; ACCESS_URL="http://${DETECTED_IP}:${NOOSPHERE_PORT}" ;;
-    4)
-      read -p "Enter IP address or domain (include port if not $NOOSPHERE_PORT): " BIND
-      ACCESS_URL="http://${BIND}"
-      ;;
-    *) echo "Invalid choice, defaulting to detected IP"; BIND="${DETECTED_IP:-0.0.0.0}"; ACCESS_URL="http://${DETECTED_IP:-127.0.0.1}:${NOOSPHERE_PORT}" ;;
-  esac
-
-  if [ -z "$ACCESS_URL" ]; then
-    ACCESS_URL="http://${BIND}:${NOOSPHERE_PORT}"
-  fi
-
-  APP_URL="$ACCESS_URL"
-  echo ""
-  echo "  Noosphere will be accessible at: $APP_URL"
-  echo ""
-else
-  # Non-interactive mode (curl | bash): auto-detect and use detected IP
-  if [ -n "$DETECTED_IP" ]; then
-    BIND="$DETECTED_IP"
-    APP_URL="http://${DETECTED_IP}:${NOOSPHERE_PORT}"
-  else
-    BIND="0.0.0.0"
-    APP_URL="http://127.0.0.1:${NOOSPHERE_PORT}"
-  fi
-  echo ""
-  echo "Non-interactive mode — auto-detecting bind address..."
-  echo "  Noosphere will be accessible at: $APP_URL"
-  echo ""
+TAILSCALE_IP=""
+if [ -f /dev/tailscale ]; then
+  # Use tailscale CLI if available
+  TAILSCALE_IP="$(tailscale status --self --json 2>/dev/null | \
+    python3 -c 'import sys,json; d=json.load(sys.stdin); print(" ".join(d.get("Self",{}).get("TailscaleIPs",[])))' 2>/dev/null | awk '{print $1}')"
 fi
+if [ -z "$TAILSCALE_IP" ]; then
+  # Fall back to tailscale0 interface
+  TAILSCALE_IP="$(ip addr show tailscale0 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -1)"
+fi
+
+# Default route IP (used when Tailscale is not available)
+DEFAULT_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[\d.]+' | head -1 || true)"
+
+# ── Show menu and prompt for bind choice ───────────────────────────────────────
+echo ""
+echo "Noosphere bind address setup"
+echo "=============================="
+echo "  1) localhost (127.0.0.1) — accessible only on this machine"
+if [ -n "$TAILSCALE_IP" ]; then
+  echo "  2) Tailscale (${TAILSCALE_IP}) — recommended for VPN access"
+fi
+echo "  3) All interfaces (0.0.0.0) — accessible over LAN/WAN"
+if [ -n "$DEFAULT_IP" ] && [ "$DEFAULT_IP" != "$TAILSCALE_IP" ]; then
+  echo "  4) Use server IP: ${DEFAULT_IP}"
+fi
+echo "  5) Custom"
+echo ""
+
+default_choice() {
+  if [ -n "$TAILSCALE_IP" ]; then echo "2"
+  elif [ -n "$DEFAULT_IP" ]; then echo "3"
+  else echo "3"
+  fi
+}
+
+read -p "How should Noosphere be accessible? [$(default_choice)]: " bind_choice
+bind_choice="${bind_choice:-$(default_choice)}"
+
+BIND=""
+ACCESS_URL=""
+
+case "$bind_choice" in
+  1) BIND="127.0.0.1"; ACCESS_URL="http://127.0.0.1:${NOOSPHERE_PORT}" ;;
+  2) BIND="0.0.0.0";   ACCESS_URL="http://${TAILSCALE_IP}:${NOOSPHERE_PORT}" ;;
+  3) BIND="0.0.0.0";   ACCESS_URL="http://${DEFAULT_IP:-127.0.0.1}:${NOOSPHERE_PORT}" ;;
+  4) BIND="$DEFAULT_IP"; ACCESS_URL="http://${DEFAULT_IP}:${NOOSPHERE_PORT}" ;;
+  5)
+    read -p "Enter bind address (e.g. 0.0.0.0 or 127.0.0.1): " bind_addr
+    read -p "Enter the URL clients will use to access Noosphere: " ACCESS_URL
+    BIND="${bind_addr:-0.0.0.0}"
+    ;;
+  *) echo "Invalid choice, defaulting to Tailscale IP"; BIND="0.0.0.0"; ACCESS_URL="http://${TAILSCALE_IP:-127.0.0.1}:${NOOSPHERE_PORT}" ;;
+esac
+
+if [ -z "$ACCESS_URL" ]; then
+  ACCESS_URL="http://${BIND}:${NOOSPHERE_PORT}"
+fi
+
+APP_URL="$ACCESS_URL"
+
+echo ""
+echo "  Bind: $BIND  |  Access URL: $APP_URL"
+echo ""
 
 # ── Secrets (reuse existing or generate fresh) ─────────────────────────────────
 mkdir -p "$NOOSPHERE_HOME" "$SECRETS_DIR"
@@ -169,7 +172,7 @@ NOOSPHERE_BOOTSTRAP_API_KEY=${API_KEY}
 ENV
 chmod 600 "$NOOSPHERE_HOME/.env"
 
-# Also export so docker compose up (which reads .env automatically) works
+# Also export for docker compose up (which reads .env automatically)
 export NOOSPHERE_VERSION NOOSPHERE_PORT APP_URL POSTGRES_PASSWORD NEXTAUTH_SECRET
 export NOOSPHERE_ADMIN_PASSWORD="$ADMIN_PASSWORD"
 export NOOSPHERE_BOOTSTRAP_API_KEY="$API_KEY"
@@ -253,7 +256,7 @@ echo "Starting database..."
 docker compose up -d db
 wait_for_container_healthy noosphere-openclaw-db 60
 
-# ── Bootstrap (uses credentials from .env) ─────────────────────────────────────
+# ── Bootstrap ─────────────────────────────────────────────────────────────────
 echo "Applying database schema and bootstrap data..."
 BOOTSTRAP_TMP=$(mktemp)
 docker compose run --rm -T init > "$BOOTSTRAP_TMP" 2>&1
@@ -265,7 +268,6 @@ if [ $BOOTSTRAP_EXIT -ne 0 ]; then
   exit 1
 fi
 
-# Bootstrap writes JSON to stdout. Filter out [bootstrap] log lines and extract last non-empty line.
 BOOTSTRAP_JSON=$(grep -v '^\[bootstrap\]' "$BOOTSTRAP_TMP" | grep -v '^$' | tail -n 1)
 rm -f "$BOOTSTRAP_TMP"
 if [ -z "$BOOTSTRAP_JSON" ]; then
@@ -273,7 +275,6 @@ if [ -z "$BOOTSTRAP_JSON" ]; then
   exit 1
 fi
 
-# Validate JSON
 if ! printf '%s' "$BOOTSTRAP_JSON" | node -e '
   let s=""; process.stdin.on("data", d => s += d);
   process.stdin.on("end", () => {
@@ -306,7 +307,7 @@ JSON
 
 wait_for_http_health "$APP_URL" 60
 
-# ── OpenClaw plugin ───────────────────────────────────────────────────────────
+# ── OpenClaw plugin ──────────────────────────────────────────────────────────
 echo "Installing OpenClaw plugin: ${PLUGIN_SPEC}"
 if openclaw plugins inspect "$PLUGIN_ID" >/dev/null 2>&1; then
   openclaw plugins update "$PLUGIN_ID" || openclaw plugins install "$PLUGIN_SPEC" --force
@@ -314,7 +315,7 @@ else
   openclaw plugins install "$PLUGIN_SPEC"
 fi
 
-# ── Patch OpenClaw config ─────────────────────────────────────────────────────
+# ── Patch OpenClaw config ────────────────────────────────────────────────────
 PATCH_FILE="$(mktemp)"
 cat > "$PATCH_FILE" <<JSON5
 {
@@ -366,7 +367,7 @@ fi
 # ── Done ─────────────────────────────────────────────────────────────────────
 cat <<DONE
 
-Setup complete! 
+Setup complete!
 
   Noosphere URL:  ${APP_URL}
   Admin email:    admin@noosphere.local
