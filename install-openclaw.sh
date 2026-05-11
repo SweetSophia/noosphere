@@ -20,7 +20,7 @@ need() {
 }
 
 random_secret() {
-  node -e "console.log(require('crypto').randomBytes(Number(process.argv[2])).toString('base64url'))" "$1"
+  node -e "console.log(require('crypto').randomBytes(Number(process.argv[1])).toString('base64url'))" "$1"
 }
 
 json_get() {
