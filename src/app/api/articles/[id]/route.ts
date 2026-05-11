@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
@@ -251,4 +253,51 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     console.error("[PATCH /api/articles/[id]]", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
+}
+
+// DELETE /api/articles/[id] — Soft-delete article
+// Auth: API key (ADMIN) or session (ADMIN)
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+
+  const auth = await requirePermission(request, [Permissions.ADMIN]);
+  if (!auth.success) {
+    return auth.response;
+  }
+
+  const now = new Date();
+
+  // Atomic soft-delete: only succeeds if article exists AND is not already deleted.
+  // This eliminates the read-then-write race condition.
+  const count = await prisma.article.updateMany({
+    where: { id, deletedAt: null },
+    data: { deletedAt: now, updatedAt: now },
+  });
+
+  if (count.count === 0) {
+    // Either article doesn't exist, or was already deleted.
+    // Fetch to distinguish — for security we don't reveal which.
+    const existing = await prisma.article.findUnique({ where: { id } });
+    if (!existing || existing.deletedAt) {
+      return new NextResponse(null, { status: 204 }); // idempotent
+    }
+    return NextResponse.json({ error: "Article not found" }, { status: 404 });
+  }
+
+  // Log the deletion for audit trail
+  const session = await getServerSession(authOptions);
+  const authorName = session?.user?.name ?? auth.auth.name ?? "API";
+  try {
+    await prisma.activityLog.create({
+      data: {
+        type: "delete",
+        title: `Article deleted — ${id}`,
+        authorName,
+      },
+    });
+  } catch {
+    // Log failures are non-fatal; don't fail the delete itself
+  }
+
+  return new NextResponse(null, { status: 204 });
 }
