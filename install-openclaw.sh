@@ -375,8 +375,10 @@ Setup complete!
 
   Noosphere URL:  ${APP_URL}
   Admin email:    admin@noosphere.local
-  Admin password: saved in ${SECRETS_FILE}
-  API key:        saved in ${SECRETS_FILE}
+  Admin password: ${ADMIN_PASSWORD}
+
+  Credentials are also saved in: ${SECRETS_FILE}
+  (your API key, admin password, and DB credentials are stored there)
 
 Verify:
   curl -fsS ${APP_URL}/api/health
