@@ -29,6 +29,37 @@ json_get() {
   JSON_GET_FILE="$file" JSON_GET_KEY="$key" node -e 'const fs=require("fs"); const p=process.env.JSON_GET_FILE; const k=process.env.JSON_GET_KEY; if (!p || !k || !fs.existsSync(p)) process.exit(0); const data=JSON.parse(fs.readFileSync(p,"utf8")); if (typeof data[k] === "string") process.stdout.write(data[k]);'
 }
 
+env_get() {
+  local file="$1"
+  local key="$2"
+  if [ ! -f "$file" ]; then
+    return 0
+  fi
+  awk -v key="$key" '
+    index($0, key "=") == 1 {
+      print substr($0, length(key) + 2)
+      exit
+    }
+  ' "$file"
+}
+
+write_runtime_env() {
+  local env_tmp
+  env_tmp="$(mktemp)"
+  cat > "$env_tmp" <<ENV
+NOOSPHERE_VERSION=${NOOSPHERE_VERSION}
+NOOSPHERE_PORT=${NOOSPHERE_PORT}
+APP_URL=${APP_URL}
+BIND_ADDRESS=${BIND_ADDRESS}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+NOOSPHERE_ADMIN_PASSWORD=${ADMIN_PASSWORD}
+NOOSPHERE_BOOTSTRAP_API_KEY=${API_KEY}
+ENV
+  chmod 600 "$env_tmp"
+  mv "$env_tmp" "$NOOSPHERE_HOME/.env"
+}
+
 has_controlling_tty() {
   { : < /dev/tty; } 2>/dev/null
 }
@@ -302,20 +333,31 @@ NEXTAUTH_SECRET="$(json_get "$SECRETS_FILE" nextAuthSecret)"
 ADMIN_PASSWORD="$(json_get "$SECRETS_FILE" adminPassword)"
 API_KEY="$(json_get "$SECRETS_FILE" apiKey)"
 
+# If a previous install started PostgreSQL but exited before writing the OpenClaw
+# secret file, recover from the runtime .env so reruns use the original DB
+# password and bootstrap credentials instead of generating incompatible ones.
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(env_get "$NOOSPHERE_HOME/.env" POSTGRES_PASSWORD)}"
+NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(env_get "$NOOSPHERE_HOME/.env" NEXTAUTH_SECRET)}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(env_get "$NOOSPHERE_HOME/.env" NOOSPHERE_ADMIN_PASSWORD)}"
+API_KEY="${API_KEY:-$(env_get "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_API_KEY)}"
+
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(random_secret 32)}"
 NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(random_secret 32)}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(random_secret 24)}"
 API_KEY="${API_KEY:-noo_$(random_secret 32)}"
 
-# Export compose variables instead of writing .env before bootstrap.
-# The persistent .env is written atomically only after bootstrap succeeds, so a
-# failed install does not leave generated secrets behind on disk.
-# Bootstrap credentials are exported too because docker compose up may run the
-# init service again through app.depends_on; the second run must see the same
-# admin/API credentials as the explicit bootstrap run below.
+# Export Compose variables. Bootstrap credentials are exported too because
+# docker compose up may run the init service again through app.depends_on; the
+# second run must see the same admin/API credentials as the explicit bootstrap
+# run below.
 export NOOSPHERE_VERSION NOOSPHERE_PORT NOOSPHERE_IMAGE APP_URL BIND_ADDRESS POSTGRES_PASSWORD NEXTAUTH_SECRET
 export NOOSPHERE_ADMIN_PASSWORD="$ADMIN_PASSWORD"
 export NOOSPHERE_BOOTSTRAP_API_KEY="$API_KEY"
+
+# Persist runtime secrets before starting persistent containers. If bootstrap or
+# plugin setup fails, a rerun can recover the original PostgreSQL password and
+# finish the install instead of leaving an orphaned DB volume with unknown creds.
+write_runtime_env
 
 cat > "$NOOSPHERE_HOME/docker-compose.yml" <<YAML
 services:
@@ -394,14 +436,15 @@ wait_for_container_healthy noosphere-openclaw-db 60
 
 echo "Applying database schema and bootstrap data..."
 # Run bootstrap to a temp file so we can check exit status separately.
-# Admin/API credentials are passed through exported Compose variables; they are
-# not written to .env until bootstrap succeeds.
+# Admin/API credentials are passed through exported Compose variables.
 BOOTSTRAP_TMP=$(mktemp)
-docker compose run --rm -T init > "$BOOTSTRAP_TMP" 2>&1
-BOOTSTRAP_EXIT=$?
-if [ $BOOTSTRAP_EXIT -ne 0 ]; then
+BOOTSTRAP_EXIT=0
+docker compose run --rm -T init > "$BOOTSTRAP_TMP" 2>&1 || BOOTSTRAP_EXIT=$?
+if [ "$BOOTSTRAP_EXIT" -ne 0 ]; then
   echo "Bootstrap failed with exit code $BOOTSTRAP_EXIT:" >&2
   cat "$BOOTSTRAP_TMP" >&2
+  echo "" >&2
+  echo "Runtime config was preserved at $NOOSPHERE_HOME/.env; fix the error and rerun the installer to continue." >&2
   rm -f "$BOOTSTRAP_TMP"
   exit 1
 fi
@@ -419,20 +462,8 @@ if ! printf '%s' "$BOOTSTRAP_JSON" | node -e 'let s=""; process.stdin.on("data",
   exit 1
 fi
 
-# Write the full .env atomically only after bootstrap succeeded.
-ENV_TMP=$(mktemp)
-cat > "$ENV_TMP" <<ENV
-NOOSPHERE_VERSION=${NOOSPHERE_VERSION}
-NOOSPHERE_PORT=${NOOSPHERE_PORT}
-APP_URL=${APP_URL}
-BIND_ADDRESS=${BIND_ADDRESS}
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
-NOOSPHERE_ADMIN_PASSWORD=${ADMIN_PASSWORD}
-NOOSPHERE_BOOTSTRAP_API_KEY=${API_KEY}
-ENV
-chmod 600 "$ENV_TMP"
-mv "$ENV_TMP" "$NOOSPHERE_HOME/.env"
+# Refresh the runtime .env after successful bootstrap to keep it authoritative.
+write_runtime_env
 
 docker compose up -d app
 wait_for_container_healthy noosphere-openclaw-app 30
