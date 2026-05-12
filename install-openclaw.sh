@@ -37,7 +37,7 @@ is_valid_ipv4() {
   read -ra octets <<< "$ip"
   [[ ${#octets[@]} -eq 4 ]] || return 1
   for octet in "${octets[@]}"; do
-    [[ "$octet" =~ ^[0-9]+$ ]] && (( octet >= 0 && octet <= 255 )) || return 1
+    [[ "$octet" =~ ^[0-9]+$ ]] && (( 10#$octet >= 0 && 10#$octet <= 255 )) || return 1
   done
 }
 
