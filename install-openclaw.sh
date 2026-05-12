@@ -2,14 +2,11 @@
 # Noosphere OpenClaw Installer
 # Interactive (recommended):  bash install-openclaw.sh
 # Non-interactive:          curl -fsSL https://.../install-openclaw.sh | bash
-#                          or:  NOOSPHERE_BIND=2 bash install-openclaw.sh
 #
-# Environment options:
-#   NOOSPHERE_BIND=1|2|3|4|5   Skip menu, use this bind choice
+# Options:
+#   NOOSPHERE_BIND=1|2|3|4|5   Force bind choice (skips detection)
 #   NOOSPHERE_PORT=6578           Override port
-#   NOOSPHERE_HOME=~/.noosphere  Override install directory
-
-set -euo pipefail
+#   NOOSPHERE_HOME=~/.noosphere   Override install directory
 
 NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
 NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-latest}"
@@ -60,12 +57,7 @@ fi
 TAILSCALE_IP="$(ip addr show tailscale0 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -1 || true)"
 DEFAULT_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[\d.]+' | head -1 || true)"
 
-# ── Bind choice ─────────────────────────────────────────────────────────────────
-# Set NOOSPHERE_BIND=1-5 to skip the menu entirely.
-# When stdin is a TTY, read waits for real user input.
-# When stdin is NOT a TTY (curl|bash), read times out after 5 seconds and
-# uses the default — the menu is still shown so the user sees what's happening.
-
+# ── Show menu if stdin is a TTY, otherwise auto-select ──────────────────────────
 show_menu() {
   echo ""
   echo "Noosphere bind address setup"
@@ -78,50 +70,55 @@ show_menu() {
   if [ -n "$DEFAULT_IP" ] && [ "$DEFAULT_IP" != "$TAILSCALE_IP" ]; then
     echo "  4) Server IP: ${DEFAULT_IP}"
   fi
-  echo "  5) Custom (enter your own bind + URL)"
-  echo ""
-  if [ -n "$TAILSCALE_IP" ]; then
-    echo "  Default: option 2 (Tailscale)"
-  else
-    echo "  Default: option 3 (all interfaces)"
-  fi
+  echo "  5) Custom"
   echo ""
 }
 
-default_choice() {
-  if [ -n "$TAILSCALE_IP" ]; then echo "2"
-  elif [ -n "$DEFAULT_IP" ]; then echo "3"
-  else echo "3"
-  fi
-}
-
-# Skip menu if NOOSPHERE_BIND is set
 if [ -n "${NOOSPHERE_BIND:-}" ]; then
+  # Env var override — use it directly
   BIND_CHOICE="$NOOSPHERE_BIND"
   echo ""
   echo "Using NOOSPHERE_BIND=$BIND_CHOICE (from environment)"
-else
+elif [ -t 0 ]; then
+  # Real TTY — interactive menu
   show_menu
-
-  if [ -t 0 ]; then
-    # Real TTY — wait for user input
-    read -p "Bind choice [$(default_choice)]: " BIND_CHOICE
-    BIND_CHOICE="${BIND_CHOICE:-$(default_choice)}"
+  default_choice() {
+    if [ -n "$TAILSCALE_IP" ]; then echo "2"
+    elif [ -n "$DEFAULT_IP" ]; then echo "3"
+    else echo "3"; fi
+  }
+  read -p "Bind choice [$(default_choice)]: " BIND_CHOICE
+  BIND_CHOICE="${BIND_CHOICE:-$(default_choice)}"
+  BIND_CHOICE="$(echo "$BIND_CHOICE" | tr -cd '0-9')"
+  case "$BIND_CHOICE" in 1|2|3|4|5) ;; *) BIND_CHOICE="$(default_choice)" ;; esac
+else
+  # Non-interactive (pipe) — auto-select, show what was chosen
+  if [ -n "$TAILSCALE_IP" ]; then
+    BIND_CHOICE="2"
+    echo ""
+    echo "Non-interactive mode detected."
+    echo "Auto-selecting Tailscale IP (option 2) for VPN access."
+    echo "Override with: NOOSPHERE_BIND=3 bash install-openclaw.sh"
+    echo ""
+  elif [ -n "$DEFAULT_IP" ]; then
+    BIND_CHOICE="3"
+    echo ""
+    echo "Non-interactive mode detected."
+    echo "Auto-selecting all interfaces (option 3)."
+    echo "Override with: NOOSPHERE_BIND=1 bash install-openclaw.sh"
+    echo ""
   else
-    # Pipe / non-TTY — show menu, auto-advance after 5 seconds
-    echo -n "Bind choice [$(default_choice)]: "
-    read -t 5 -r BIND_CHOICE 2>/dev/null || true
-    BIND_CHOICE="${BIND_CHOICE:-$(default_choice)}"
-    echo "auto-selected: $BIND_CHOICE"
+    BIND_CHOICE="1"
+    echo ""
+    echo "Non-interactive mode — no network detected, using localhost."
+    echo ""
   fi
 fi
 
-BIND_CHOICE="$(echo "$BIND_CHOICE" | tr -cd '0-9')"
-case "$BIND_CHOICE" in 1|2|3|4|5) ;; *) BIND_CHOICE="$(default_choice)" ;; esac
-
+# ── Resolve bind choice ─────────────────────────────────────────────────────────
 BIND=""
 ACCESS_URL=""
-case "$BIND_CHOICE" in
+case "${BIND_CHOICE:-2}" in
   1) BIND="127.0.0.1"; ACCESS_URL="http://127.0.0.1:${NOOSPHERE_PORT}" ;;
   2) BIND="0.0.0.0";   ACCESS_URL="http://${TAILSCALE_IP}:${NOOSPHERE_PORT}" ;;
   3) BIND="0.0.0.0";   ACCESS_URL="http://${DEFAULT_IP:-127.0.0.1}:${NOOSPHERE_PORT}" ;;
@@ -133,16 +130,14 @@ case "$BIND_CHOICE" in
     BIND="${BIND_ADDR:-0.0.0.0}"
     ACCESS_URL="${ACCESS_URL:-http://100.x.x.x:${NOOSPHERE_PORT}}"
     ;;
-  *) echo "Unknown choice, defaulting"; BIND="0.0.0.0"; ACCESS_URL="http://${TAILSCALE_IP:-127.0.0.1}:${NOOSPHERE_PORT}" ;;
+  *) echo "Invalid choice '$BIND_CHOICE', using Tailscale"; BIND="0.0.0.0"; ACCESS_URL="http://${TAILSCALE_IP:-127.0.0.1}:${NOOSPHERE_PORT}" ;;
 esac
 
 APP_URL="${ACCESS_URL:-http://${BIND}:${NOOSPHERE_PORT}}"
-
-echo ""
 echo "  Bind: $BIND  →  Access URL: $APP_URL"
 echo ""
 
-# ── Secrets (reuse or generate) ─────────────────────────────────────────────────
+# ── Secrets ─────────────────────────────────────────────────────────────────────
 mkdir -p "$NOOSPHERE_HOME" "$SECRETS_DIR"
 chmod 700 "$SECRETS_DIR"
 
@@ -156,8 +151,7 @@ NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(random_secret 32)}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(random_secret 24)}"
 API_KEY="${API_KEY:-noo_$(random_secret 32)}"
 
-# ── Write .env ─────────────────────────────────────────────────────────────────
-# docker compose run does NOT inherit shell exports — must use .env file.
+# ── .env file ──────────────────────────────────────────────────────────────────
 cat > "$NOOSPHERE_HOME/.env" <<ENV
 NOOSPHERE_VERSION=${NOOSPHERE_VERSION}
 NOOSPHERE_PORT=${NOOSPHERE_PORT}
@@ -169,13 +163,15 @@ NOOSPHERE_BOOTSTRAP_API_KEY=${API_KEY}
 ENV
 chmod 600 "$NOOSPHERE_HOME/.env"
 
-# ── Docker Compose template ───────────────────────────────────────────────────
+# ── Docker Compose ───────────────────────────────────────────────────────────────
 cat > "$NOOSPHERE_HOME/docker-compose.yml" <<YAML
 services:
   init:
     image: ${NOOSPHERE_IMAGE}
     container_name: noosphere-openclaw-init
     restart: "no"
+    env_file:
+      - "${NOOSPHERE_HOME}/.env"
     environment:
       DATABASE_URL: postgresql://noosphere:\${POSTGRES_PASSWORD}@db:5432/noosphere
       NOOSPHERE_ADMIN_PASSWORD: \${NOOSPHERE_ADMIN_PASSWORD}
@@ -183,7 +179,6 @@ services:
       NEXTAUTH_SECRET: \${NEXTAUTH_SECRET}
       NEXTAUTH_URL: \${APP_URL}
       APP_URL: \${APP_URL}
-      UPLOAD_DIR: /app/uploads
     command: ["sh", "-c", "node docker/migrate-or-baseline.mjs && node docker/bootstrap.mjs"]
     volumes:
       - noosphere_uploads:/app/uploads:rw
@@ -197,12 +192,13 @@ services:
     restart: unless-stopped
     ports:
       - "${BIND}:\${NOOSPHERE_PORT:-6578}:3000"
+    env_file:
+      - "${NOOSPHERE_HOME}/.env"
     environment:
       DATABASE_URL: postgresql://noosphere:\${POSTGRES_PASSWORD}@db:5432/noosphere
       NEXTAUTH_SECRET: \${NEXTAUTH_SECRET}
       NEXTAUTH_URL: \${APP_URL}
       APP_URL: \${APP_URL}
-      UPLOAD_DIR: /app/uploads
     volumes:
       - noosphere_uploads:/app/uploads:rw
     depends_on:
@@ -219,6 +215,8 @@ services:
     image: postgres:16-alpine
     container_name: noosphere-openclaw-db
     restart: unless-stopped
+    env_file:
+      - "${NOOSPHERE_HOME}/.env"
     environment:
       POSTGRES_USER: noosphere
       POSTGRES_PASSWORD: \${POSTGRES_PASSWORD}
@@ -239,53 +237,42 @@ volumes:
     driver: local
 YAML
 
-# ── Start infrastructure ──────────────────────────────────────────────────────
+# ── Docker startup ──────────────────────────────────────────────────────────────
 cd "$NOOSPHERE_HOME"
 
 echo "==> Pulling images..."
-docker compose pull
+if ! docker compose pull 2>&1; then
+  echo "Image pull failed. Check Docker access and try again." >&2
+  exit 1
+fi
 
 echo "==> Starting PostgreSQL..."
 docker compose up -d db
-
-echo "  Waiting for PostgreSQL to be healthy..."
+echo "  Waiting for PostgreSQL..."
 for i in $(seq 1 30); do
-  status="$(docker inspect --format='{{.State.Health.Status}}' noosphere-openclaw-db 2>/dev/null || echo "not found")"
-  if [ "$status" = "healthy" ]; then
-    echo "  PostgreSQL is healthy."
-    break
-  fi
-  if [ $i -eq 30 ]; then
-    echo "  PostgreSQL failed to become healthy." >&2
-    exit 1
-  fi
+  s=$(docker inspect --format='{{.State.Health.Status}}' noosphere-openclaw-db 2>/dev/null || echo "gone")
+  [ "$s" = "healthy" ] && { echo "  PostgreSQL healthy."; break; }
+  [ $i -eq 30 ] && { echo "PostgreSQL failed to start." >&2; exit 1; }
   sleep 2
 done
 
-# ── Bootstrap ─────────────────────────────────────────────────────────────────
 echo "==> Running migrations and bootstrap..."
 BOOTSTRAP_TMP=$(mktemp)
+# Capture both stdout and stderr so entrypoint logs are visible
 docker compose run --rm init > "$BOOTSTRAP_TMP" 2>&1
 BOOTSTRAP_EXIT=$?
 
-if [ $BOOTSTRAP_EXIT -ne 0 ]; then
-  echo "Bootstrap failed with exit code $BOOTSTRAP_EXIT:" >&2
-  cat "$BOOTSTRAP_TMP" >&2
-  rm -f "$BOOTSTRAP_TMP"
-  exit 1
-fi
-
-BOOTSTRAP_JSON=$(grep -v '^\[bootstrap\]' "$BOOTSTRAP_TMP" | grep -v '^$' | tail -n 1)
+# Show what happened
+grep -v '^\[bootstrap\]' "$BOOTSTRAP_TMP" | grep -v '^$' | tail -3
 rm -f "$BOOTSTRAP_TMP"
 
-if [ -z "$BOOTSTRAP_JSON" ]; then
-  echo "Bootstrap produced no output." >&2
+if [ $BOOTSTRAP_EXIT -ne 0 ]; then
+  echo "Bootstrap failed (exit $BOOTSTRAP_EXIT)." >&2
   exit 1
 fi
 
-echo "  Bootstrap OK."
-
-# ── Credentials — written HERE before anything that could fail ─────────────────
+# ── Credentials — written immediately so they survive any crash ─────────────────
+echo ""
 echo "==> Saving credentials..."
 install -m 600 /dev/null "$SECRETS_FILE"
 cat > "$SECRETS_FILE" <<JSON
@@ -299,41 +286,31 @@ cat > "$SECRETS_FILE" <<JSON
 }
 JSON
 
-# ── Start app ─────────────────────────────────────────────────────────────────
+# ── App startup ────────────────────────────────────────────────────────────────
 echo "==> Starting Noosphere app..."
 docker compose up -d app
-
-echo "  Waiting for Noosphere to be healthy..."
+echo "  Waiting for Noosphere..."
 for i in $(seq 1 40); do
-  status="$(docker inspect --format='{{.State.Health.Status}}' noosphere-openclaw-app 2>/dev/null || echo "not found")"
-  if [ "$status" = "healthy" ]; then
-    echo "  Noosphere is healthy."
-    break
-  fi
-  if [ $i -eq 40 ]; then
-    echo "  Noosphere failed to become healthy." >&2
-    exit 1
-  fi
+  s=$(docker inspect --format='{{.State.Health.Status}}' noosphere-openclaw-app 2>/dev/null || echo "gone")
+  [ "$s" = "healthy" ] && { echo "  Noosphere healthy."; break; }
+  [ $i -eq 40 ] && { echo "Noosphere failed to start." >&2; exit 1; }
   sleep 2
 done
 
-# Verify HTTP health
-if ! curl -fsS --max-time 10 "$APP_URL/api/health" >/dev/null 2>&1; then
-  echo "  Warning: Noosphere HTTP health check failed." >&2
-fi
-
-# ── OpenClaw plugin ──────────────────────────────────────────────────────────
+# ── OpenClaw plugin ───────────────────────────────────────────────────────────
 echo "==> Installing OpenClaw plugin..."
 if openclaw plugins inspect "$PLUGIN_ID" >/dev/null 2>&1; then
   echo "  Updating existing plugin..."
-  openclaw plugins update "$PLUGIN_ID" || openclaw plugins install "$PLUGIN_SPEC" --force
+  openclaw plugins update "$PLUGIN_ID" 2>&1 || {
+    echo "  Update failed, installing fresh..."
+    openclaw plugins install "$PLUGIN_SPEC" --force 2>&1 || true
+  }
 else
-  openclaw plugins install "$PLUGIN_SPEC"
+  openclaw plugins install "$PLUGIN_SPEC" 2>&1 || true
 fi
 
-# ── Patch OpenClaw config ────────────────────────────────────────────────────
-echo "==> Patching OpenClaw config..."
-PATCH_FILE="$(mktemp)"
+# ── OpenClaw config patch ────────────────────────────────────────────────────
+PATCH_FILE=$(mktemp)
 cat > "$PATCH_FILE" <<JSON5
 {
   secrets: {
@@ -368,22 +345,23 @@ cat > "$PATCH_FILE" <<JSON5
 }
 JSON5
 
-if openclaw config patch --file "$PATCH_FILE"; then
-  echo "  Config patched."
+echo "==> Patching OpenClaw config..."
+if openclaw config patch --file "$PATCH_FILE" 2>&1; then
+  echo "  Config patched successfully."
 else
   echo "  Config patch failed — check OpenClaw config manually." >&2
 fi
 rm -f "$PATCH_FILE"
 
-# ── Restart gateway ──────────────────────────────────────────────────────────
+# ── Restart gateway ────────────────────────────────────────────────────────────
 echo "==> Restarting OpenClaw Gateway..."
 if openclaw gateway status >/dev/null 2>&1; then
-  openclaw gateway restart
+  openclaw gateway restart 2>&1 || echo "  Gateway restart returned non-zero."
 else
-  echo "  Gateway not running. Start it manually to load the plugin."
+  echo "  Gateway not running. Start it manually: openclaw gateway start"
 fi
 
-# ── Summary ─────────────────────────────────────────────────────────────────
+# ── Done ─────────────────────────────────────────────────────────────────────
 cat <<DONE
 
 ====================================================================
@@ -393,8 +371,9 @@ Setup complete!
   URL:      ${APP_URL}
   Admin:    admin@noosphere.local
   Password: ${ADMIN_PASSWORD}
+  API Key:  ${API_KEY}
 
-  Credentials saved in: ${SECRETS_FILE}
+  Credentials also saved in: ${SECRETS_FILE}
 
 ====================================================================
 Verify:
