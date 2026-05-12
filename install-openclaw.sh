@@ -140,6 +140,9 @@ prompt_ip_selection() {
       if [ "$selection" != "1" ]; then
         explicit_choice=true
       fi
+      if [ "$selection" != "1" ]; then
+        explicit_choice=true
+      fi
       break
     else
       echo "Invalid selection. Please try again."
