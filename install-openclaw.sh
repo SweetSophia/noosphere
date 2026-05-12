@@ -5,9 +5,9 @@ NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
 NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
 NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-latest}"
 NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION}}"
-# APP_URL can be set via environment, or defaults to Tailscale IP (if detected), else localhost
+# Auto-detect Tailscale IP for APP_URL default
+TAILSCALE_IP="$(ip addr show tailscale0 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -1 || true)"
 if [ -z "${APP_URL:-}" ]; then
-  TAILSCALE_IP="$(ip addr show tailscale0 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -1 || true)"
   if [ -n "$TAILSCALE_IP" ]; then
     APP_URL="http://${TAILSCALE_IP}:${NOOSPHERE_PORT}"
   else
@@ -111,8 +111,8 @@ services:
     environment:
       DATABASE_URL: postgresql://noosphere:\${POSTGRES_PASSWORD}@db:5432/noosphere
       NEXTAUTH_SECRET: \${NEXTAUTH_SECRET}
-      NEXTAUTH_URL: \${APP_URL}
-      APP_URL: \${APP_URL}
+      NEXTAUTH_URL: \${APP_URL:-http://127.0.0.1:6578}
+      APP_URL: \${APP_URL:-http://127.0.0.1:6578}
       UPLOAD_DIR: /app/uploads
     command: ["sh", "-c", "node docker/migrate-or-baseline.mjs && node docker/bootstrap.mjs"]
     volumes:
@@ -126,12 +126,12 @@ services:
     container_name: noosphere-openclaw-app
     restart: unless-stopped
     ports:
-      - "0.0.0.0:\${NOOSPHERE_PORT:-6578}:3000"
+      - "127.0.0.1:\${NOOSPHERE_PORT:-6578}:3000"
     environment:
       DATABASE_URL: postgresql://noosphere:\${POSTGRES_PASSWORD}@db:5432/noosphere
       NEXTAUTH_SECRET: \${NEXTAUTH_SECRET}
-      NEXTAUTH_URL: \${APP_URL}
-      APP_URL: \${APP_URL}
+      NEXTAUTH_URL: \${APP_URL:-http://127.0.0.1:6578}
+      APP_URL: \${APP_URL:-http://127.0.0.1:6578}
       UPLOAD_DIR: /app/uploads
     volumes:
       - noosphere_uploads:/app/uploads:rw
@@ -214,15 +214,21 @@ ENV
 docker compose up -d app
 wait_for_container_healthy noosphere-openclaw-app 30
 
+# Read real credentials from .env (written before bootstrap with actual values)
+# The bootstrap JSON only contains prefixes; real values are in .env
 install -m 600 /dev/null "$SECRETS_FILE"
+REAL_ADMIN_PASSWORD="$(grep NOOSPHERE_ADMIN_PASSWORD "$NOOSPHERE_HOME/.env" | cut -d= -f2)"
+REAL_API_KEY="$(grep NOOSPHERE_BOOTSTRAP_API_KEY "$NOOSPHERE_HOME/.env" | cut -d= -f2)"
+REAL_PG_PASSWORD="$(grep POSTGRES_PASSWORD "$NOOSPHERE_HOME/.env" | cut -d= -f2)"
+REAL_NX_SECRET="$(grep NEXTAUTH_SECRET "$NOOSPHERE_HOME/.env" | cut -d= -f2)"
 cat > "$SECRETS_FILE" <<JSON
 {
   "baseUrl": "${APP_URL}",
-  "apiKey": "${API_KEY}",
+  "apiKey": "${REAL_API_KEY}",
   "adminEmail": "admin@noosphere.local",
-  "adminPassword": "${ADMIN_PASSWORD}",
-  "postgresPassword": "${POSTGRES_PASSWORD}",
-  "nextAuthSecret": "${NEXTAUTH_SECRET}"
+  "adminPassword": "${REAL_ADMIN_PASSWORD}",
+  "postgresPassword": "${REAL_PG_PASSWORD}",
+  "nextAuthSecret": "${REAL_NX_SECRET}"
 }
 JSON
 
@@ -286,8 +292,9 @@ Noosphere OpenClaw setup complete.
 
 Noosphere URL: ${APP_URL}
 Admin email: admin@noosphere.local
-Admin password: ${ADMIN_PASSWORD}  (also saved in ${SECRETS_FILE}
-API key: ${API_KEY}  (also saved in ${SECRETS_FILE})
+Admin password: ${REAL_ADMIN_PASSWORD}
+API key: ${REAL_API_KEY}
+Credentials also saved in: ${SECRETS_FILE}
 
 Verify:
   curl -fsS ${APP_URL}/api/health
