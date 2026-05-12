@@ -35,8 +35,8 @@ env_get() {
   if [ ! -f "$file" ]; then
     return 0
   fi
-  awk -v key="$key" '
-    index($0, key "=") == 1 {
+  awk -F= -v key="$key" '
+    $1 == key {
       print substr($0, length(key) + 2)
       exit
     }
@@ -45,7 +45,10 @@ env_get() {
 
 write_runtime_env() {
   local env_tmp
-  env_tmp="$(mktemp)"
+  env_tmp="$(mktemp)" || {
+    echo "Failed to create temporary file for runtime .env" >&2
+    exit 1
+  }
   cat > "$env_tmp" <<ENV
 NOOSPHERE_VERSION=${NOOSPHERE_VERSION}
 NOOSPHERE_PORT=${NOOSPHERE_PORT}
