@@ -5,19 +5,11 @@ NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
 NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
 NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-latest}"
 NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION}}"
-# Auto-detect Tailscale IP for APP_URL default
-TAILSCALE_IP="$(ip addr show tailscale0 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -1 || true)"
-if [ -z "${APP_URL:-}" ]; then
-  if [ -n "$TAILSCALE_IP" ]; then
-    APP_URL="http://${TAILSCALE_IP}:${NOOSPHERE_PORT}"
-  else
-    APP_URL="http://127.0.0.1:${NOOSPHERE_PORT}"
-  fi
-fi
+APP_URL="${APP_URL:-http://127.0.0.1:${NOOSPHERE_PORT}}"
 PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory}"
 SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$HOME/.openclaw/secrets}"
 SECRETS_FILE="${NOOSPHERE_SECRETS_FILE:-$SECRETS_DIR/noosphere-memory.json}"
-SECRET_PROVIDER_ID="${NOOSPHERE_SECRET_PROVIDER_ID:-noosphere-memory}"
+SECRET_PROVIDER_ID="${NOOSPHERE_SECRET_PROVIDER_ID:-noosphereMemory}"
 PLUGIN_ID="noosphere-memory"
 
 need() {
@@ -78,7 +70,7 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 mkdir -p "$NOOSPHERE_HOME" "$SECRETS_DIR"
-chmod 700 "$SECRETS_DIR" || true
+chmod 700 "$SECRETS_DIR"
 
 POSTGRES_PASSWORD="$(json_get "$SECRETS_FILE" postgresPassword)"
 NEXTAUTH_SECRET="$(json_get "$SECRETS_FILE" nextAuthSecret)"
@@ -90,17 +82,15 @@ NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(random_secret 32)}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(random_secret 24)}"
 API_KEY="${API_KEY:-noo_$(random_secret 32)}"
 
-install -m 600 /dev/null "$NOOSPHERE_HOME/.env"
-# Write a minimal .env before bootstrap. Bootstrap-only secrets
-# (NOOSPHERE_ADMIN_PASSWORD, NOOSPHERE_BOOTSTRAP_API_KEY) are passed via -e flags
-# to docker compose run. The full .env with all secrets is written after bootstrap succeeds.
-cat > "$NOOSPHERE_HOME/.env" <<ENV
-NOOSPHERE_VERSION=${NOOSPHERE_VERSION}
-NOOSPHERE_PORT=${NOOSPHERE_PORT}
-APP_URL=${APP_URL}
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
-ENV
+# Export compose variables instead of writing .env before bootstrap.
+# The persistent .env is written atomically only after bootstrap succeeds, so a
+# failed install does not leave generated secrets behind on disk.
+# Bootstrap credentials are exported too because docker compose up may run the
+# init service again through app.depends_on; the second run must see the same
+# admin/API credentials as the explicit bootstrap run below.
+export NOOSPHERE_VERSION NOOSPHERE_PORT NOOSPHERE_IMAGE APP_URL POSTGRES_PASSWORD NEXTAUTH_SECRET
+export NOOSPHERE_ADMIN_PASSWORD="$ADMIN_PASSWORD"
+export NOOSPHERE_BOOTSTRAP_API_KEY="$API_KEY"
 
 cat > "$NOOSPHERE_HOME/docker-compose.yml" <<YAML
 services:
@@ -110,6 +100,8 @@ services:
     restart: "no"
     environment:
       DATABASE_URL: postgresql://noosphere:\${POSTGRES_PASSWORD}@db:5432/noosphere
+      NOOSPHERE_ADMIN_PASSWORD: \${NOOSPHERE_ADMIN_PASSWORD}
+      NOOSPHERE_BOOTSTRAP_API_KEY: \${NOOSPHERE_BOOTSTRAP_API_KEY}
       NEXTAUTH_SECRET: \${NEXTAUTH_SECRET}
       NEXTAUTH_URL: \${APP_URL:-http://127.0.0.1:6578}
       APP_URL: \${APP_URL:-http://127.0.0.1:6578}
@@ -177,12 +169,10 @@ wait_for_container_healthy noosphere-openclaw-db 60
 
 echo "Applying database schema and bootstrap data..."
 # Run bootstrap to a temp file so we can check exit status separately.
-# Admin/API credentials passed via -e flags -- never written to .env before bootstrap succeeds.
+# Admin/API credentials are passed through exported Compose variables; they are
+# not written to .env until bootstrap succeeds.
 BOOTSTRAP_TMP=$(mktemp)
-docker compose run --rm -T \
-  -e NOOSPHERE_ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
-  -e NOOSPHERE_BOOTSTRAP_API_KEY="${API_KEY}" \
-  init > "$BOOTSTRAP_TMP" 2>&1
+docker compose run --rm -T init > "$BOOTSTRAP_TMP" 2>&1
 BOOTSTRAP_EXIT=$?
 if [ $BOOTSTRAP_EXIT -ne 0 ]; then
   echo "Bootstrap failed with exit code $BOOTSTRAP_EXIT:" >&2
@@ -204,31 +194,32 @@ if ! printf '%s' "$BOOTSTRAP_JSON" | node -e 'let s=""; process.stdin.on("data",
   exit 1
 fi
 
-# Write the full .env (including bootstrap-only secrets) only after bootstrap succeeded.
-# These are not needed by the app at runtime but are kept for documentation/manual runs.
-cat >> "$NOOSPHERE_HOME/.env" <<ENV
+# Write the full .env atomically only after bootstrap succeeded.
+ENV_TMP=$(mktemp)
+cat > "$ENV_TMP" <<ENV
+NOOSPHERE_VERSION=${NOOSPHERE_VERSION}
+NOOSPHERE_PORT=${NOOSPHERE_PORT}
+APP_URL=${APP_URL}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
 NOOSPHERE_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 NOOSPHERE_BOOTSTRAP_API_KEY=${API_KEY}
 ENV
+chmod 600 "$ENV_TMP"
+mv "$ENV_TMP" "$NOOSPHERE_HOME/.env"
 
 docker compose up -d app
 wait_for_container_healthy noosphere-openclaw-app 30
 
-# Read real credentials from .env (written before bootstrap with actual values)
-# The bootstrap JSON only contains prefixes; real values are in .env
 install -m 600 /dev/null "$SECRETS_FILE"
-REAL_ADMIN_PASSWORD="$(grep NOOSPHERE_ADMIN_PASSWORD "$NOOSPHERE_HOME/.env" | cut -d= -f2)"
-REAL_API_KEY="$(grep NOOSPHERE_BOOTSTRAP_API_KEY "$NOOSPHERE_HOME/.env" | cut -d= -f2)"
-REAL_PG_PASSWORD="$(grep POSTGRES_PASSWORD "$NOOSPHERE_HOME/.env" | cut -d= -f2)"
-REAL_NX_SECRET="$(grep NEXTAUTH_SECRET "$NOOSPHERE_HOME/.env" | cut -d= -f2)"
 cat > "$SECRETS_FILE" <<JSON
 {
   "baseUrl": "${APP_URL}",
-  "apiKey": "${REAL_API_KEY}",
+  "apiKey": "${API_KEY}",
   "adminEmail": "admin@noosphere.local",
-  "adminPassword": "${REAL_ADMIN_PASSWORD}",
-  "postgresPassword": "${REAL_PG_PASSWORD}",
-  "nextAuthSecret": "${REAL_NX_SECRET}"
+  "adminPassword": "${ADMIN_PASSWORD}",
+  "postgresPassword": "${POSTGRES_PASSWORD}",
+  "nextAuthSecret": "${NEXTAUTH_SECRET}"
 }
 JSON
 
@@ -292,9 +283,8 @@ Noosphere OpenClaw setup complete.
 
 Noosphere URL: ${APP_URL}
 Admin email: admin@noosphere.local
-Admin password: ${REAL_ADMIN_PASSWORD}
-API key: ${REAL_API_KEY}
-Credentials also saved in: ${SECRETS_FILE}
+Admin password: saved in ${SECRETS_FILE}
+API key: saved in ${SECRETS_FILE}
 
 Verify:
   curl -fsS ${APP_URL}/api/health
