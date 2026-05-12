@@ -5,11 +5,11 @@ NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
 NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
 NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-latest}"
 NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION}}"
-APP_URL="${APP_URL:-http://127.0.0.1:${NOOSPHERE_PORT}}"
 PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory}"
 SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$HOME/.openclaw/secrets}"
 SECRETS_FILE="${NOOSPHERE_SECRETS_FILE:-$SECRETS_DIR/noosphere-memory.json}"
-SECRET_PROVIDER_ID="${NOOSPHERE_SECRET_PROVIDER_ID:-noosphereMemory}"
+SECRET_PROVIDER_ID="${NOOSPHERE_SECRET_PROVIDER_ID:-noosphere-memory}"
+BIND_ADDRESS="${BIND_ADDRESS:-}"
 PLUGIN_ID="noosphere-memory"
 
 need() {
@@ -27,6 +27,161 @@ json_get() {
   local file="$1"
   local key="$2"
   JSON_GET_FILE="$file" JSON_GET_KEY="$key" node -e 'const fs=require("fs"); const p=process.env.JSON_GET_FILE; const k=process.env.JSON_GET_KEY; if (!p || !k || !fs.existsSync(p)) process.exit(0); const data=JSON.parse(fs.readFileSync(p,"utf8")); if (typeof data[k] === "string") process.stdout.write(data[k]);'
+}
+
+# Validate an IPv4 address with proper octet range checking (0-255)
+is_valid_ipv4() {
+  local ip="$1"
+  local IFS='.'
+  local -a octets
+  read -ra octets <<< "$ip"
+  [[ ${#octets[@]} -eq 4 ]] || return 1
+  for octet in "${octets[@]}"; do
+    [[ "$octet" =~ ^[0-9]+$ ]] && (( 10#$octet >= 0 && 10#$octet <= 255 )) || return 1
+  done
+}
+
+# Detect available IP addresses for the user to choose from
+detect_ips() {
+  local ips=()
+
+  # Always include localhost
+  ips+=("127.0.0.1")
+
+  # Tailscale IP if available
+  local tailscale_ip
+  tailscale_ip="$(ip addr show tailscale0 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -1 || true)"
+  if [ -n "$tailscale_ip" ]; then
+    ips+=("$tailscale_ip")
+  fi
+
+  # Other local network IPs (exclude loopback and docker)
+  local network_ips
+  network_ips="$(ip -4 addr show 2>/dev/null | awk '/inet / && !/127\.0\.0\.1/ && !/docker/ && !/br-/ {print $2}' | cut -d/ -f1 | sort -u || true)"
+  if [ -n "$network_ips" ]; then
+    while IFS= read -r ip; do
+      [ -n "$ip" ] && ips+=("$ip")
+    done <<< "$network_ips"
+  fi
+
+  # Deduplicate while preserving order
+  local uniq_ips=()
+  local seen=""
+  for ip in "${ips[@]}"; do
+    if [[ "$seen" != *"|$ip|"* ]]; then
+      uniq_ips+=("$ip")
+      seen="${seen}|${ip}|"
+    fi
+  done
+
+  printf '%s\n' "${uniq_ips[@]}"
+}
+
+# Prompt user to select an IP address
+prompt_ip_selection() {
+  local ips
+  ips="$(detect_ips)"
+  local ip_array=()
+  local idx=1
+
+  echo ""
+  echo "==================================="
+  echo "  Noosphere Network Configuration"
+  echo "==================================="
+  echo ""
+  echo "Available network interfaces:"
+  echo ""
+
+  while IFS= read -r ip; do
+    [ -z "$ip" ] && continue
+    ip_array+=("$ip")
+    echo "  [$idx] $ip"
+    ((idx++))
+  done <<< "$ips"
+
+  echo "  [0] 0.0.0.0 (all interfaces)"
+  echo "  [C] Custom IP address"
+  echo ""
+
+  local selection
+  local selected_ip=""
+  local bind_addr=""
+  local explicit_choice=false
+
+  while true; do
+    read -rp "Select an IP address for Noosphere [1]: " selection
+    selection="${selection:-1}"
+
+    if [[ "$selection" =~ ^[Cc]$ ]]; then
+      read -rp "Enter custom IP address: " selected_ip
+      if [ -z "$selected_ip" ]; then
+        echo "IP address cannot be empty."
+        continue
+      fi
+      # Normalize localhost to 127.0.0.1 for reliable Docker binding
+      if [ "$selected_ip" = "localhost" ]; then
+        selected_ip="127.0.0.1"
+      fi
+      # Basic IPv4 validation (reject obvious garbage before Docker does)
+      if ! is_valid_ipv4 "$selected_ip"; then
+        echo "Invalid IP address format. Please enter a valid IPv4 address."
+        continue
+      fi
+      bind_addr="$selected_ip"
+      explicit_choice=true
+      break
+    elif [[ "$selection" == "0" ]]; then
+      bind_addr="0.0.0.0"
+      explicit_choice=true
+      break
+    elif [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le "${#ip_array[@]}" ]; then
+      selected_ip="${ip_array[$((selection - 1))]}"
+      bind_addr="$selected_ip"
+      if [ "$selection" != "1" ]; then
+        explicit_choice=true
+      fi
+      break
+    else
+      echo "Invalid selection. Please try again."
+    fi
+  done
+
+  # When binding to all interfaces, APP_URL needs a concrete reachable address
+  if [ "$bind_addr" = "0.0.0.0" ]; then
+    if [ "${#ip_array[@]}" -ge 2 ]; then
+      # Use first non-localhost IP from the list
+      selected_ip="${ip_array[1]}"
+    elif [ "${#ip_array[@]}" -ge 1 ]; then
+      selected_ip="${ip_array[0]}"
+    else
+      selected_ip="127.0.0.1"
+    fi
+  fi
+
+  # Format APP_URL: IPv6 addresses need brackets
+  if [[ "$selected_ip" == *":"* ]]; then
+    APP_URL="http://[${selected_ip}]:${NOOSPHERE_PORT}"
+  else
+    APP_URL="http://${selected_ip}:${NOOSPHERE_PORT}"
+  fi
+  # Only override BIND_ADDRESS if not already set by user
+  if [ -z "${BIND_ADDRESS}" ]; then
+    BIND_ADDRESS="$bind_addr"
+  fi
+
+  echo ""
+  echo "Noosphere will be accessible at: ${APP_URL}"
+  if [ "$bind_addr" = "0.0.0.0" ]; then
+    echo "WARNING: Binding to all interfaces (0.0.0.0) exposes Noosphere on all network interfaces."
+  elif [ "$selected_ip" != "127.0.0.1" ]; then
+    echo "Note: Binding to ${bind_addr} - ensure your firewall allows access to port ${NOOSPHERE_PORT}."
+  fi
+  echo ""
+
+  if [ "$explicit_choice" = true ]; then
+    read -rp "Press Enter to continue or Ctrl+C to abort..."
+    echo ""
+  fi
 }
 
 wait_for_container_healthy() {
@@ -70,7 +225,54 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 mkdir -p "$NOOSPHERE_HOME" "$SECRETS_DIR"
-chmod 700 "$SECRETS_DIR"
+chmod 700 "$SECRETS_DIR" || true
+
+# Detect if running interactively (stdin is a terminal)
+IS_TTY=false
+if [ -t 0 ]; then
+  IS_TTY=true
+fi
+
+# Auto-detect the best IP for non-interactive mode
+auto_detect_ip() {
+  local ts_ip
+  ts_ip="$(ip addr show tailscale0 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -1 || true)"
+  if [ -n "$ts_ip" ]; then
+    APP_URL="http://${ts_ip}:${NOOSPHERE_PORT}"
+    if [ -z "${BIND_ADDRESS}" ]; then
+      BIND_ADDRESS="$ts_ip"
+    fi
+  else
+    APP_URL="http://127.0.0.1:${NOOSPHERE_PORT}"
+    if [ -z "${BIND_ADDRESS}" ]; then
+      BIND_ADDRESS="127.0.0.1"
+    fi
+  fi
+}
+
+# IP selection happens BEFORE any container operations
+if [ -z "${APP_URL:-}" ]; then
+  if [ "$IS_TTY" = true ]; then
+    prompt_ip_selection
+  else
+    auto_detect_ip
+    echo "Non-interactive mode detected. Auto-selected: ${APP_URL}"
+  fi
+else
+  # APP_URL was provided via environment variable
+  if [ -z "${BIND_ADDRESS}" ]; then
+    BIND_ADDRESS="127.0.0.1"
+    # Extract host from APP_URL for binding using bash parameter expansion
+    url_host="${APP_URL#*://}"
+    url_host="${url_host%%:*}"
+    url_host="${url_host%%/*}"
+    # Only use the extracted host for binding if it's a valid IP literal.
+    # Docker port bindings require an IP, not a hostname.
+    if [ -n "$url_host" ] && is_valid_ipv4 "$url_host"; then
+      BIND_ADDRESS="$url_host"
+    fi
+  fi
+fi
 
 POSTGRES_PASSWORD="$(json_get "$SECRETS_FILE" postgresPassword)"
 NEXTAUTH_SECRET="$(json_get "$SECRETS_FILE" nextAuthSecret)"
@@ -88,7 +290,7 @@ API_KEY="${API_KEY:-noo_$(random_secret 32)}"
 # Bootstrap credentials are exported too because docker compose up may run the
 # init service again through app.depends_on; the second run must see the same
 # admin/API credentials as the explicit bootstrap run below.
-export NOOSPHERE_VERSION NOOSPHERE_PORT NOOSPHERE_IMAGE APP_URL POSTGRES_PASSWORD NEXTAUTH_SECRET
+export NOOSPHERE_VERSION NOOSPHERE_PORT NOOSPHERE_IMAGE APP_URL BIND_ADDRESS POSTGRES_PASSWORD NEXTAUTH_SECRET
 export NOOSPHERE_ADMIN_PASSWORD="$ADMIN_PASSWORD"
 export NOOSPHERE_BOOTSTRAP_API_KEY="$API_KEY"
 
@@ -118,7 +320,7 @@ services:
     container_name: noosphere-openclaw-app
     restart: unless-stopped
     ports:
-      - "127.0.0.1:\${NOOSPHERE_PORT:-6578}:3000"
+      - "\${BIND_ADDRESS:-127.0.0.1}:\${NOOSPHERE_PORT:-6578}:3000"
     environment:
       DATABASE_URL: postgresql://noosphere:\${POSTGRES_PASSWORD}@db:5432/noosphere
       NEXTAUTH_SECRET: \${NEXTAUTH_SECRET}
@@ -200,6 +402,7 @@ cat > "$ENV_TMP" <<ENV
 NOOSPHERE_VERSION=${NOOSPHERE_VERSION}
 NOOSPHERE_PORT=${NOOSPHERE_PORT}
 APP_URL=${APP_URL}
+BIND_ADDRESS=${BIND_ADDRESS}
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
 NOOSPHERE_ADMIN_PASSWORD=${ADMIN_PASSWORD}
@@ -279,12 +482,22 @@ fi
 
 cat <<DONE
 
-Noosphere OpenClaw setup complete.
-
-Noosphere URL: ${APP_URL}
-Admin email: admin@noosphere.local
-Admin password: saved in ${SECRETS_FILE}
-API key: saved in ${SECRETS_FILE}
+╔══════════════════════════════════════════════════════════════════════╗
+║              Noosphere OpenClaw Setup Complete                       ║
+╠══════════════════════════════════════════════════════════════════════╣
+║                                                                      ║
+║  Noosphere URL:    ${APP_URL}
+║  Admin email:      admin@noosphere.local
+║  Admin password:   ${ADMIN_PASSWORD}
+║                                                                      ║
+║  ────────────────────────────────────────────────────────────────   ║
+║  🔑 API KEY (save this - it will not be shown again):               ║
+║     ${API_KEY}
+║  ────────────────────────────────────────────────────────────────   ║
+║                                                                      ║
+║  Credentials also saved in: ${SECRETS_FILE}
+║                                                                      ║
+╚══════════════════════════════════════════════════════════════════════╝
 
 Verify:
   curl -fsS ${APP_URL}/api/health
