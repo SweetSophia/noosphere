@@ -40,16 +40,19 @@ curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/master/instal
 
 The installer:
 
-1. Creates `~/.noosphere/`.
-2. Generates local secrets.
-3. Writes a production `docker-compose.yml` using `ghcr.io/sweetsophia/noosphere`.
-4. Starts PostgreSQL and Noosphere.
-5. Runs Prisma migrations through `docker/migrate-or-baseline.mjs`.
-6. Runs repeatable bootstrap through `docker/bootstrap.mjs` using the same generated admin/API credentials that are later written to `.env` and OpenClaw secrets.
-7. Writes `~/.openclaw/secrets/noosphere-memory.json`.
-8. Installs or updates `noosphere-memory` in OpenClaw.
-9. Patches OpenClaw config with the Noosphere base URL, API key secret reference, and `hooks.allowPromptInjection: true`.
-10. Restarts OpenClaw Gateway when available.
+1. **Prompts for IP address selection** — detects available network interfaces (localhost, Tailscale, local network IPs) and lets you choose which address Noosphere will bind to. You can also select `0.0.0.0` (all interfaces) or enter a custom IP.
+2. Creates `~/.noosphere/`.
+3. Generates local secrets.
+4. Writes a production `docker-compose.yml` using `ghcr.io/sweetsophia/noosphere`.
+5. Starts PostgreSQL and Noosphere.
+6. Runs Prisma migrations through `docker/migrate-or-baseline.mjs`.
+7. Runs repeatable bootstrap through `docker/bootstrap.mjs` using the same generated admin/API credentials that are later written to `.env` and OpenClaw secrets.
+8. Writes `~/.openclaw/secrets/noosphere-memory.json`.
+9. Installs or updates `noosphere-memory` in OpenClaw.
+10. Patches OpenClaw config with the Noosphere base URL, API key secret reference, and `hooks.allowPromptInjection: true`.
+11. Restarts OpenClaw Gateway when available.
+
+> **Note:** The interactive IP prompt is skipped when `APP_URL` is set as an environment variable. Set `APP_URL` beforehand to use a specific address non-interactively.
 
 Verify after install:
 
@@ -70,7 +73,8 @@ Set these environment variables before running the installer when you need non-d
 | `NOOSPHERE_PORT` | `6578` | Localhost port exposed by the app. |
 | `NOOSPHERE_VERSION` | `latest` | GHCR image tag. |
 | `NOOSPHERE_IMAGE` | `ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION}` | Full image reference override. |
-| `APP_URL` | `http://127.0.0.1:${NOOSPHERE_PORT}` | URL stored in Noosphere/OpenClaw config. |
+| `APP_URL` | `http://127.0.0.1:${NOOSPHERE_PORT}` | URL stored in Noosphere/OpenClaw config. When set, skips the interactive IP selection prompt. |
+| `BIND_ADDRESS` | derived from `APP_URL` or `127.0.0.1` | Docker port binding address. Set to `0.0.0.0` to expose on all interfaces. |
 | `NOOSPHERE_PLUGIN_SPEC` | `npm:@sweetsophia/openclaw-noosphere-memory` | Plugin install spec. Useful for testing local tarballs. |
 | `OPENCLAW_SECRETS_DIR` | `~/.openclaw/secrets` | OpenClaw secret directory. |
 | `NOOSPHERE_SECRETS_FILE` | `${OPENCLAW_SECRETS_DIR}/noosphere-memory.json` | Secret file written by installer. |
