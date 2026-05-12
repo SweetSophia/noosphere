@@ -465,9 +465,6 @@ if ! printf '%s' "$BOOTSTRAP_JSON" | node -e 'let s=""; process.stdin.on("data",
   exit 1
 fi
 
-# Refresh the runtime .env after successful bootstrap to keep it authoritative.
-write_runtime_env
-
 docker compose up -d app
 wait_for_container_healthy noosphere-openclaw-app 30
 
