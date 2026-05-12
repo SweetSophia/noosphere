@@ -52,7 +52,7 @@ The installer:
 10. Patches OpenClaw config with the Noosphere base URL, API key secret reference, and `hooks.allowPromptInjection: true`.
 11. Restarts OpenClaw Gateway when available.
 
-> **Note:** The interactive IP prompt is skipped in two cases: (1) when `APP_URL` is set as an environment variable, or (2) when the script is run non-interactively (e.g., piped via `curl | bash`, where stdin is not a TTY). In non-interactive mode, the script auto-detects the best available IP (Tailscale > localhost). Set `APP_URL` beforehand to force a specific address in either case.
+> **Note:** The installer can still prompt when run through `curl | bash` by reading from `/dev/tty` if a controlling terminal is available. The interactive IP prompt is skipped when `APP_URL` is set, or when no interactive terminal is available (for example CI/cron/background automation). In non-interactive mode, the script auto-detects the best available IP (Tailscale > localhost). Set `APP_URL` beforehand to force a specific address in any mode.
 
 Verify after install:
 

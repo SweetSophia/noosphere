@@ -29,6 +29,27 @@ json_get() {
   JSON_GET_FILE="$file" JSON_GET_KEY="$key" node -e 'const fs=require("fs"); const p=process.env.JSON_GET_FILE; const k=process.env.JSON_GET_KEY; if (!p || !k || !fs.existsSync(p)) process.exit(0); const data=JSON.parse(fs.readFileSync(p,"utf8")); if (typeof data[k] === "string") process.stdout.write(data[k]);'
 }
 
+has_controlling_tty() {
+  { : < /dev/tty; } 2>/dev/null
+}
+
+can_prompt() {
+  [ -t 0 ] || has_controlling_tty
+}
+
+read_prompt() {
+  local prompt="$1"
+  local var_name="$2"
+
+  if [ -t 0 ]; then
+    read -r -p "$prompt" "$var_name"
+  elif has_controlling_tty; then
+    read -r -p "$prompt" "$var_name" < /dev/tty
+  else
+    return 1
+  fi
+}
+
 # Validate an IPv4 address with proper octet range checking (0-255)
 is_valid_ipv4() {
   local ip="$1"
@@ -109,11 +130,11 @@ prompt_ip_selection() {
   local explicit_choice=false
 
   while true; do
-    read -rp "Select an IP address for Noosphere [1]: " selection
+    read_prompt "Select an IP address for Noosphere [1]: " selection
     selection="${selection:-1}"
 
     if [[ "$selection" =~ ^[Cc]$ ]]; then
-      read -rp "Enter custom IP address: " selected_ip
+      read_prompt "Enter custom IP address: " selected_ip
       if [ -z "$selected_ip" ]; then
         echo "IP address cannot be empty."
         continue
@@ -179,7 +200,8 @@ prompt_ip_selection() {
   echo ""
 
   if [ "$explicit_choice" = true ]; then
-    read -rp "Press Enter to continue or Ctrl+C to abort..."
+    local continue_ack=""
+    read_prompt "Press Enter to continue or Ctrl+C to abort..." continue_ack
     echo ""
   fi
 }
@@ -227,10 +249,11 @@ fi
 mkdir -p "$NOOSPHERE_HOME" "$SECRETS_DIR"
 chmod 700 "$SECRETS_DIR" || true
 
-# Detect if running interactively (stdin is a terminal)
-IS_TTY=false
-if [ -t 0 ]; then
-  IS_TTY=true
+# Detect whether prompts can be shown. In `curl | bash`, stdin is the
+# installer pipe, so use /dev/tty when a controlling terminal is available.
+IS_INTERACTIVE=false
+if can_prompt; then
+  IS_INTERACTIVE=true
 fi
 
 # Auto-detect the best IP for non-interactive mode
@@ -252,11 +275,11 @@ auto_detect_ip() {
 
 # IP selection happens BEFORE any container operations
 if [ -z "${APP_URL:-}" ]; then
-  if [ "$IS_TTY" = true ]; then
+  if [ "$IS_INTERACTIVE" = true ]; then
     prompt_ip_selection
   else
     auto_detect_ip
-    echo "Non-interactive mode detected. Auto-selected: ${APP_URL}"
+    echo "No interactive terminal detected. Auto-selected: ${APP_URL}"
   fi
 else
   # APP_URL was provided via environment variable
