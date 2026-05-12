@@ -26,7 +26,7 @@ random_secret() {
 json_get() {
   local file="$1"
   local key="$2"
-  JSON_GET_FILE="$file" JSON_GET_KEY="$key" node -e 'const fs=require("fs"); const p=process.env.JSON_GET_FILE; const k=process.env.JSON_GET_KEY; if (!p || !k || !fs.existsSync(p)) process.exit(0); const data=JSON.parse(fs.readFileSync(p,"utf8")); if (typeof data[k] === "string") process.stdout.write(data[k]);'
+  JSON_GET_FILE="$file" JSON_GET_KEY="$key" node -e 'try { const fs=require("fs"); const p=process.env.JSON_GET_FILE; const k=process.env.JSON_GET_KEY; if (!p || !k || !fs.existsSync(p)) process.exit(0); const data=JSON.parse(fs.readFileSync(p,"utf8")); if (typeof data[k] === "string") process.stdout.write(data[k]); } catch { process.exit(0); }'
 }
 
 env_get() {
@@ -35,17 +35,37 @@ env_get() {
   if [ ! -f "$file" ]; then
     return 0
   fi
-  awk -F= -v key="$key" '
-    $1 == key {
-      print substr($0, length(key) + 2)
-      exit
+  awk -v key="$key" '
+    {
+      sub(/\r$/, "")
+      eq = index($0, "=")
+      if (eq > 1 && substr($0, 1, eq - 1) == key) {
+        print substr($0, eq + 1)
+        exit
+      }
     }
   ' "$file"
 }
 
+is_placeholder_secret() {
+  case "$1" in
+    ""|CHANGE_ME*|replace-with-*|noo_replace_with_*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+env_get_secret() {
+  local value
+  value="$(env_get "$1" "$2")"
+  if is_placeholder_secret "$value"; then
+    return 0
+  fi
+  printf '%s' "$value"
+}
+
 write_runtime_env() {
   local env_tmp
-  env_tmp="$(mktemp)" || {
+  env_tmp="$(mktemp "$NOOSPHERE_HOME/.env.XXXXXX")" || {
     echo "Failed to create temporary file for runtime .env" >&2
     exit 1
   }
@@ -339,10 +359,10 @@ API_KEY="$(json_get "$SECRETS_FILE" apiKey)"
 # If a previous install started PostgreSQL but exited before writing the OpenClaw
 # secret file, recover from the runtime .env so reruns use the original DB
 # password and bootstrap credentials instead of generating incompatible ones.
-POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(env_get "$NOOSPHERE_HOME/.env" POSTGRES_PASSWORD)}"
-NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(env_get "$NOOSPHERE_HOME/.env" NEXTAUTH_SECRET)}"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(env_get "$NOOSPHERE_HOME/.env" NOOSPHERE_ADMIN_PASSWORD)}"
-API_KEY="${API_KEY:-$(env_get "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_API_KEY)}"
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(env_get_secret "$NOOSPHERE_HOME/.env" POSTGRES_PASSWORD)}"
+NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(env_get_secret "$NOOSPHERE_HOME/.env" NEXTAUTH_SECRET)}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_ADMIN_PASSWORD)}"
+API_KEY="${API_KEY:-$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_API_KEY)}"
 
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(random_secret 32)}"
 NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(random_secret 32)}"
