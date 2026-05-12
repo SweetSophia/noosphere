@@ -44,17 +44,17 @@ is_valid_ipv4() {
 # Detect available IP addresses for the user to choose from
 detect_ips() {
   local ips=()
-  
+
   # Always include localhost
   ips+=("127.0.0.1")
-  
+
   # Tailscale IP if available
   local tailscale_ip
   tailscale_ip="$(ip addr show tailscale0 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1 | head -1 || true)"
   if [ -n "$tailscale_ip" ]; then
     ips+=("$tailscale_ip")
   fi
-  
+
   # Other local network IPs (exclude loopback and docker)
   local network_ips
   network_ips="$(ip -4 addr show 2>/dev/null | awk '/inet / && !/127\.0\.0\.1/ && !/docker/ && !/br-/ {print $2}' | cut -d/ -f1 | sort -u || true)"
@@ -63,7 +63,7 @@ detect_ips() {
       [ -n "$ip" ] && ips+=("$ip")
     done <<< "$network_ips"
   fi
-  
+
   # Deduplicate while preserving order
   local uniq_ips=()
   local seen=""
@@ -73,7 +73,7 @@ detect_ips() {
       seen="${seen}|${ip}|"
     fi
   done
-  
+
   printf '%s\n' "${uniq_ips[@]}"
 }
 
@@ -137,9 +137,6 @@ prompt_ip_selection() {
     elif [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le "${#ip_array[@]}" ]; then
       selected_ip="${ip_array[$((selection - 1))]}"
       bind_addr="$selected_ip"
-      if [ "$selection" != "1" ]; then
-        explicit_choice=true
-      fi
       if [ "$selection" != "1" ]; then
         explicit_choice=true
       fi

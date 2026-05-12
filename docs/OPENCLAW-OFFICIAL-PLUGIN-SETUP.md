@@ -52,7 +52,7 @@ The installer:
 10. Patches OpenClaw config with the Noosphere base URL, API key secret reference, and `hooks.allowPromptInjection: true`.
 11. Restarts OpenClaw Gateway when available.
 
-> **Note:** The interactive IP prompt is skipped when `APP_URL` is set as an environment variable. Set `APP_URL` beforehand to use a specific address non-interactively.
+> **Note:** The interactive IP prompt is skipped in two cases: (1) when `APP_URL` is set as an environment variable, or (2) when the script is run non-interactively (e.g., piped via `curl | bash`, where stdin is not a TTY). In non-interactive mode, the script auto-detects the best available IP (Tailscale > localhost). Set `APP_URL` beforehand to force a specific address in either case.
 
 Verify after install:
 
@@ -74,11 +74,11 @@ Set these environment variables before running the installer when you need non-d
 | `NOOSPHERE_VERSION` | `latest` | GHCR image tag. |
 | `NOOSPHERE_IMAGE` | `ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION}` | Full image reference override. |
 | `APP_URL` | `http://127.0.0.1:${NOOSPHERE_PORT}` | URL stored in Noosphere/OpenClaw config. When set, skips the interactive IP selection prompt. |
-| `BIND_ADDRESS` | derived from `APP_URL` or `127.0.0.1` | Docker port binding address. Set to `0.0.0.0` to expose on all interfaces. |
+| `BIND_ADDRESS` | derived from `APP_URL` host (if a valid IP) or `127.0.0.1` | Docker port binding address. Set explicitly to override the derived value (e.g., `0.0.0.0` to bind all interfaces, or `127.0.0.1` to force localhost regardless of `APP_URL`). |
 | `NOOSPHERE_PLUGIN_SPEC` | `npm:@sweetsophia/openclaw-noosphere-memory` | Plugin install spec. Useful for testing local tarballs. |
 | `OPENCLAW_SECRETS_DIR` | `~/.openclaw/secrets` | OpenClaw secret directory. |
 | `NOOSPHERE_SECRETS_FILE` | `${OPENCLAW_SECRETS_DIR}/noosphere-memory.json` | Secret file written by installer. |
-| `NOOSPHERE_SECRET_PROVIDER_ID` | `noosphereMemory` | OpenClaw secret provider ID used in config. |
+| `NOOSPHERE_SECRET_PROVIDER_ID` | `noosphere-memory` | OpenClaw secret provider ID used in config. |
 
 By default the installer enables Noosphere auto-recall for all OpenClaw agents and chat types (`autoRecall: true`, `hooks.allowPromptInjection: true`, no agent/chat allowlist). Restrict or disable this after install if you do not want global prompt injection.
 
