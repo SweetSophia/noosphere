@@ -36,6 +36,44 @@ export interface NoosphereSaveRequest {
     authorName?: string;
     confidence?: "low" | "medium" | "high";
 }
+export interface NoosphereTopicTree {
+    id: string;
+    name: string;
+    slug: string;
+    description: string | null;
+    articleCount: number;
+    children: NoosphereTopicTree[];
+}
+export interface NoosphereTopicsResponse {
+    topics: NoosphereTopicTree[];
+}
+export interface NoosphereArticleCreateRequest {
+    topicId: string;
+    title: string;
+    content: string;
+    slug: string;
+    excerpt?: string;
+    tags?: string[];
+    authorName?: string;
+    confidence?: "low" | "medium" | "high";
+    status?: "draft" | "reviewed" | "published";
+}
+export interface NoosphereArticleCreateResponse {
+    id: string;
+    title: string;
+    slug: string;
+    topic: {
+        id: string;
+        name: string;
+        slug: string;
+    };
+    tags: Array<{
+        id: string;
+        name: string;
+        slug: string;
+    }>;
+    createdAt: string;
+}
 export type NoosphereGetRequest = {
     canonicalRef: string;
     provider?: never;
@@ -89,6 +127,8 @@ export declare class NoosphereMemoryClient {
     settings(): Promise<NoosphereSettingsResponse>;
     get(request: NoosphereGetRequest): Promise<NoosphereGetResponse>;
     save(request: NoosphereSaveRequest): Promise<NoosphereSaveResponse>;
+    topics(): Promise<NoosphereTopicsResponse>;
+    articleCreate(request: NoosphereArticleCreateRequest): Promise<NoosphereArticleCreateResponse>;
     recall(request: NoosphereRecallRequest, options?: {
         timeoutMs?: number;
     }): Promise<NoosphereRecallResponse>;

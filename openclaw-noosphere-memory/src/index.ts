@@ -3,10 +3,12 @@ import { createNoosphereAutoRecallHook } from "./auto-recall.js";
 import { registerNoosphereCli } from "./cli.js";
 import { createNoosphereCorpusSupplement } from "./corpus-supplement.js";
 import { createNoosphereClientContext } from "./shared-init.js";
+import { createNoosphereArticleCreateTool } from "./tools/article-create.js";
 import { createNoosphereGetTool } from "./tools/get.js";
 import { createNoosphereRecallTool } from "./tools/recall.js";
 import { createNoosphereSaveTool } from "./tools/save.js";
 import { createNoosphereStatusTool } from "./tools/status.js";
+import { createNoosphereTopicsTool } from "./tools/topics.js";
 
 export default definePluginEntry({
   id: "noosphere-memory",
@@ -41,6 +43,10 @@ export default definePluginEntry({
     );
     api.registerTool(createNoosphereGetTool(api.pluginConfig, clientContext));
     api.registerTool(createNoosphereSaveTool(api.pluginConfig, clientContext));
+    api.registerTool(createNoosphereTopicsTool(api.pluginConfig, clientContext));
+    api.registerTool(
+      createNoosphereArticleCreateTool(api.pluginConfig, clientContext),
+    );
     if (typeof api.registerMemoryCorpusSupplement === "function") {
       api.registerMemoryCorpusSupplement(
         createNoosphereCorpusSupplement(clientContext, api.logger),
