@@ -36,14 +36,14 @@ export function getObsidianSyncConfig(): ObsidianSyncConfig | null {
     return null;
   }
 
-  const vaultPath = process.env["OBSIDIAN_VAULT_PATH"];
+  const vaultPath = process.env["OBSIDIAN_SYNC_VAULT_PATH"];
   if (!vaultPath) {
-    throw new Error("OBSIDIAN_SYNC_ENABLED is true but OBSIDIAN_VAULT_PATH is not set");
+    throw new Error("OBSIDIAN_SYNC_ENABLED is true but OBSIDIAN_SYNC_VAULT_PATH is not set");
   }
 
   // Ensure absolute path
   if (!vaultPath.startsWith("/")) {
-    throw new Error(`OBSIDIAN_VAULT_PATH must be an absolute path, got: ${vaultPath}`);
+    throw new Error(`OBSIDIAN_SYNC_VAULT_PATH must be an absolute path, got: ${vaultPath}`);
   }
 
   return {
