@@ -59,10 +59,12 @@ A successful installer run prints these progress markers before the final summar
 ```text
 Applying database schema and bootstrap data...
 Bootstrap completed successfully.
-Installing OpenClaw plugin: npm:@sweetsophia/openclaw-noosphere-memory
+Installing OpenClaw plugin: ...
 ```
 
-Verify after install. If you selected a non-localhost IP address, use that address instead of `127.0.0.1` for the health check:
+By default, the plugin line ends with `npm:@sweetsophia/openclaw-noosphere-memory`; it differs only when `NOOSPHERE_PLUGIN_SPEC` is overridden.
+
+Verify after install. Use the exact Noosphere URL printed by the installer, or the `APP_URL` value you supplied, for the health check. For a default localhost install:
 
 ```bash
 curl -fsS http://127.0.0.1:6578/api/health
@@ -436,15 +438,16 @@ First make sure you are using the latest installer from `master`:
 curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/master/install-openclaw.sh | bash
 ```
 
-The current installer protects `curl | bash` runs by redirecting the bootstrap container's stdin from `/dev/null`, so Docker Compose cannot consume the remaining installer script before app/plugin setup. If the issue persists, inspect the partial state and bootstrap log before retrying:
+The current installer protects `curl | bash` runs by redirecting the bootstrap container's stdin from `/dev/null`, so Docker Compose cannot consume the remaining installer script before app/plugin setup. If the issue persists, inspect the partial state before retrying:
 
 ```bash
 docker ps -a --filter 'name=noosphere-openclaw'
 ls -l ~/.noosphere/.env ~/.openclaw/secrets/noosphere-memory.json
-find /tmp -maxdepth 1 -type f -mmin -30 -print | xargs -r grep -l 'bootstrap\|Prisma\|No pending migrations' 2>/dev/null
+cd ~/.noosphere
+docker compose logs --tail 80 db
 ```
 
-A rerun is safe after bootstrap failures because the installer preserves `~/.noosphere/.env` before starting persistent containers.
+The installer prints bootstrap failure output directly before exiting. It also preserves `~/.noosphere/.env` before starting persistent containers, so reruns after bootstrap failures keep the original database password.
 
 ### Plugin installed but CLI commands are missing
 
