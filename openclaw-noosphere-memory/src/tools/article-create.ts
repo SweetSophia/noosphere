@@ -280,12 +280,12 @@ function stripOneInjectedTag(
   content: string,
   tag: string,
 ): { content: string; changed: boolean } {
-  const openPattern = new RegExp(`<${tag}\\b[^>]*>`, "i");
+  const openPattern = new RegExp(`<${tag}(?=[\\s>/])[^>]*>`, "i");
   const openMatch = openPattern.exec(content);
   if (!openMatch) return { content, changed: false };
 
-  const closePattern = new RegExp(`</${tag}>`, "gi");
-  const openSearchPattern = new RegExp(`<${tag}\\b[^>]*>`, "gi");
+  const closePattern = new RegExp(`</${tag}\\s*>`, "gi");
+  const openSearchPattern = new RegExp(`<${tag}(?=[\\s>/])[^>]*>`, "gi");
   closePattern.lastIndex = openMatch.index + openMatch[0].length;
   openSearchPattern.lastIndex = openMatch.index + openMatch[0].length;
   let depth = 1;

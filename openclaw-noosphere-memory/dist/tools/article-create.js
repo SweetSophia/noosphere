@@ -222,12 +222,12 @@ function stripInjectedMemoryBlocks(content) {
     return { content: strippedContent, strippedBlocks };
 }
 function stripOneInjectedTag(content, tag) {
-    const openPattern = new RegExp(`<${tag}\\b[^>]*>`, "i");
+    const openPattern = new RegExp(`<${tag}(?=[\\s>/])[^>]*>`, "i");
     const openMatch = openPattern.exec(content);
     if (!openMatch)
         return { content, changed: false };
-    const closePattern = new RegExp(`</${tag}>`, "gi");
-    const openSearchPattern = new RegExp(`<${tag}\\b[^>]*>`, "gi");
+    const closePattern = new RegExp(`</${tag}\\s*>`, "gi");
+    const openSearchPattern = new RegExp(`<${tag}(?=[\\s>/])[^>]*>`, "gi");
     closePattern.lastIndex = openMatch.index + openMatch[0].length;
     openSearchPattern.lastIndex = openMatch.index + openMatch[0].length;
     let depth = 1;
