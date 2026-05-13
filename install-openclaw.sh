@@ -484,7 +484,7 @@ echo "Applying database schema and bootstrap data..."
 # Admin/API credentials are passed through exported Compose variables.
 BOOTSTRAP_TMP=$(mktemp)
 BOOTSTRAP_EXIT=0
-docker compose run --rm -T init > "$BOOTSTRAP_TMP" 2>&1 || BOOTSTRAP_EXIT=$?
+docker compose run --rm -T init < /dev/null > "$BOOTSTRAP_TMP" 2>&1 || BOOTSTRAP_EXIT=$?
 if [ "$BOOTSTRAP_EXIT" -ne 0 ]; then
   echo "Bootstrap failed with exit code $BOOTSTRAP_EXIT:" >&2
   cat "$BOOTSTRAP_TMP" >&2
