@@ -430,12 +430,22 @@ openclaw noosphere doctor
 openclaw noosphere status
 ```
 
-Defaults are local-only and safe for personal OpenClaw deployments:
+In an interactive terminal, the installer asks which IP address Noosphere should bind to and prints the resulting URL. Choose `127.0.0.1` for a local-only install, or another network address (e.g., from Tailscale or your LAN) when OpenClaw and browsers need to reach Noosphere over that interface. For non-interactive installs, set `APP_URL` and `BIND_ADDRESS` explicitly when you need deterministic network binding.
 
-- Noosphere URL: `http://127.0.0.1:6578`
+A healthy run reaches these markers before the final summary banner:
+
+```text
+Applying database schema and bootstrap data...
+Bootstrap completed successfully.
+Installing OpenClaw plugin: ...
+```
+
+Default runtime locations:
+
 - Runtime directory: `~/.noosphere`
 - OpenClaw secret file: `~/.openclaw/secrets/noosphere-memory.json`
 - Docker image: `ghcr.io/sweetsophia/noosphere:latest`
+- Default port: `6578`
 
 ### Plugin capabilities
 
