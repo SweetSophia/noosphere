@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'echo "Installer failed near line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 
 NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
 NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
@@ -81,6 +82,27 @@ NOOSPHERE_BOOTSTRAP_API_KEY=${API_KEY}
 ENV
   chmod 600 "$env_tmp"
   mv "$env_tmp" "$NOOSPHERE_HOME/.env"
+}
+
+extract_bootstrap_json() {
+  local file="$1"
+  BOOTSTRAP_JSON_FILE="$file" node -e '
+    const fs = require("fs");
+    const path = process.env.BOOTSTRAP_JSON_FILE;
+    const lines = fs.readFileSync(path, "utf8").split(/\r?\n/);
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const line = lines[i].trim();
+      if (!line || line.startsWith("[bootstrap]")) continue;
+      try {
+        JSON.parse(line);
+        process.stdout.write(line);
+        process.exit(0);
+      } catch {
+        // Keep walking upward; Docker/Prisma may emit status lines after JSON.
+      }
+    }
+    process.exit(1);
+  '
 }
 
 has_controlling_tty() {
@@ -471,19 +493,19 @@ if [ "$BOOTSTRAP_EXIT" -ne 0 ]; then
   rm -f "$BOOTSTRAP_TMP"
   exit 1
 fi
-# Bootstrap writes JSON to stdout. Filter out [bootstrap] log lines and extract last non-empty line.
-BOOTSTRAP_JSON=$(grep -v '^\[bootstrap\]' "$BOOTSTRAP_TMP" | grep -v '^$' | tail -n 1)
+# Bootstrap writes JSON to stdout, mixed with Docker/Prisma status output.
+# Extract it in one Node process instead of a grep|tail pipeline so set -euo
+# pipefail cannot silently abort before we can print a useful diagnostic.
+BOOTSTRAP_JSON=""
+if ! BOOTSTRAP_JSON="$(extract_bootstrap_json "$BOOTSTRAP_TMP")"; then
+  echo "Bootstrap produced no parseable JSON output. Full bootstrap log:" >&2
+  cat "$BOOTSTRAP_TMP" >&2
+  rm -f "$BOOTSTRAP_TMP"
+  exit 1
+fi
 rm -f "$BOOTSTRAP_TMP"
-if [ -z "$BOOTSTRAP_JSON" ]; then
-  echo "Bootstrap produced no parseable JSON output" >&2
-  exit 1
-fi
-# Validate JSON is parseable
-if ! printf '%s' "$BOOTSTRAP_JSON" | node -e 'let s=""; process.stdin.on("data", d => s += d); process.stdin.on("end", () => { try { JSON.parse(s); process.exit(0); } catch { console.error(s); process.exit(1); } });' >/dev/null 2>&1; then
-  echo "Bootstrap output was not valid JSON:" >&2
-  echo "$BOOTSTRAP_JSON" >&2
-  exit 1
-fi
+
+echo "Bootstrap completed successfully."
 
 docker compose up -d app
 wait_for_container_healthy noosphere-openclaw-app 30
