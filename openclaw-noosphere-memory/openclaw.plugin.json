@@ -7,7 +7,9 @@
       "noosphere_status",
       "noosphere_recall",
       "noosphere_get",
-      "noosphere_save"
+      "noosphere_save",
+      "noosphere_topics",
+      "noosphere_article_create"
     ],
     "hooks": [
       "before_prompt_build"

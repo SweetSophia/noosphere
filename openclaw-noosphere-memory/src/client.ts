@@ -46,6 +46,40 @@ export interface NoosphereSaveRequest {
   confidence?: "low" | "medium" | "high";
 }
 
+export interface NoosphereTopicTree {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  articleCount: number;
+  children: NoosphereTopicTree[];
+}
+
+export interface NoosphereTopicsResponse {
+  topics: NoosphereTopicTree[];
+}
+
+export interface NoosphereArticleCreateRequest {
+  topicId: string;
+  title: string;
+  content: string;
+  slug: string;
+  excerpt?: string;
+  tags?: string[];
+  authorName?: string;
+  confidence?: "low" | "medium" | "high";
+  status?: "draft" | "reviewed" | "published";
+}
+
+export interface NoosphereArticleCreateResponse {
+  id: string;
+  title: string;
+  slug: string;
+  topic: { id: string; name: string; slug: string };
+  tags: Array<{ id: string; name: string; slug: string }>;
+  createdAt: string;
+}
+
 export type NoosphereGetRequest =
   | { canonicalRef: string; provider?: never; id?: never }
   | { provider: string; id: string; canonicalRef?: never };
@@ -117,6 +151,22 @@ export class NoosphereMemoryClient {
 
   async save(request: NoosphereSaveRequest): Promise<NoosphereSaveResponse> {
     return this.request<NoosphereSaveResponse>("/api/memory/save", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+    });
+  }
+
+  async topics(): Promise<NoosphereTopicsResponse> {
+    return this.request<NoosphereTopicsResponse>("/api/topics", {
+      method: "GET",
+    });
+  }
+
+  async articleCreate(
+    request: NoosphereArticleCreateRequest,
+  ): Promise<NoosphereArticleCreateResponse> {
+    return this.request<NoosphereArticleCreateResponse>("/api/articles", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(request),

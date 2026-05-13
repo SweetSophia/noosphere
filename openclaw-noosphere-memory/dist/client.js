@@ -38,6 +38,18 @@ export class NoosphereMemoryClient {
             body: JSON.stringify(request),
         });
     }
+    async topics() {
+        return this.request("/api/topics", {
+            method: "GET",
+        });
+    }
+    async articleCreate(request) {
+        return this.request("/api/articles", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(request),
+        });
+    }
     async recall(request, options = {}) {
         return this.request("/api/memory/recall", {
             method: "POST",
