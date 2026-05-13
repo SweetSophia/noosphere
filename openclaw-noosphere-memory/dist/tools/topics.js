@@ -11,7 +11,7 @@ export function createNoosphereTopicsTool(rawConfig, context) {
     return {
         name: "noosphere_topics",
         label: "Noosphere Topics",
-        description: "List all Noosphere topics in hierarchical tree form. Returns id, name, slug, description, articleCount, and nested children for each topic. Use this to find the correct topicId before creating a memory candidate with noosphere_save.",
+        description: "List all Noosphere topics in hierarchical tree form. Returns id, name, slug, description, articleCount, and nested children for each topic. Use this to find the correct topicId before calling noosphere_save or noosphere_article_create.",
         parameters: TopicsToolParameters,
         async execute() {
             try {

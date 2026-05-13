@@ -1,7 +1,9 @@
+import crypto from "node:crypto";
 import { errorResult, jsonResult } from "../format.js";
 import { createNoosphereClientContext, } from "../shared-init.js";
 const ARTICLE_TITLE_MAX_LENGTH = 160;
 const ARTICLE_CONTENT_MIN_LENGTH = 40;
+const ARTICLE_CONTENT_MAX_BYTES = 1024 * 1024;
 const ARTICLE_TOPIC_ID_MAX_LENGTH = 128;
 const ARTICLE_SLUG_MAX_LENGTH = 80;
 const ARTICLE_EXCERPT_MAX_LENGTH = 500;
@@ -31,10 +33,13 @@ const ArticleCreateToolParameters = {
             type: "string",
             description: "Article Markdown content.",
             minLength: ARTICLE_CONTENT_MIN_LENGTH,
+            maxLength: ARTICLE_CONTENT_MAX_BYTES,
         },
         slug: {
             type: "string",
             description: "URL-safe slug (auto-generated from title if omitted).",
+            maxLength: ARTICLE_SLUG_MAX_LENGTH,
+            pattern: "^[a-z0-9-]+$",
         },
         excerpt: {
             type: "string",
@@ -49,7 +54,7 @@ const ArticleCreateToolParameters = {
         },
         authorName: {
             type: "string",
-            description: "Display author name (defaults to 'OpenClaw Agent').",
+            description: "Optional display author name. Omit to let Noosphere attribute the article from the authenticated context.",
             maxLength: ARTICLE_AUTHOR_NAME_MAX_LENGTH,
         },
         confidence: {
@@ -59,7 +64,7 @@ const ArticleCreateToolParameters = {
         status: {
             type: "string",
             enum: ["draft", "reviewed", "published"],
-            description: "Article lifecycle status. Defaults to 'reviewed'.",
+            description: "Article lifecycle status. Defaults to 'published'.",
         },
     },
 };
@@ -93,11 +98,13 @@ function normalizeArticleCreateParams(rawParams) {
     const stripped = stripInjectedMemoryBlocks(readRequiredString(params.content, "content"));
     const content = normalizeContent(stripped.content);
     validateMeaningfulContent(content);
+    validateContentByteLength(content);
     const slug = readOptionalString(params.slug, "slug", ARTICLE_SLUG_MAX_LENGTH)
-        ?? slugify(title);
+        ?? deriveSlug(title);
     if (!slug)
         throw new Error("slug could not be generated from title");
     validateSlug(slug);
+    const authorName = readOptionalString(params.authorName, "authorName", ARTICLE_AUTHOR_NAME_MAX_LENGTH);
     return {
         request: {
             topicId,
@@ -107,9 +114,9 @@ function normalizeArticleCreateParams(rawParams) {
             excerpt: readOptionalString(params.excerpt, "excerpt", ARTICLE_EXCERPT_MAX_LENGTH)
                 ?? deriveExcerpt(content),
             tags: readOptionalTags(params.tags),
-            authorName: readOptionalString(params.authorName, "authorName", ARTICLE_AUTHOR_NAME_MAX_LENGTH) ?? "OpenClaw Agent",
+            ...(authorName ? { authorName } : {}),
             confidence: readOptionalConfidence(params.confidence),
-            status: readOptionalStatus(params.status) ?? "reviewed",
+            status: readOptionalStatus(params.status) ?? "published",
         },
         strippedBlocks: stripped.strippedBlocks,
     };
@@ -155,8 +162,9 @@ function readOptionalTags(value) {
             throw new Error("tag is too long");
         }
         const normalizedSlug = slugify(normalized);
-        if (!normalizedSlug)
-            continue;
+        if (!normalizedSlug) {
+            throw new Error("tag must contain at least one ASCII letter or digit because Noosphere tag slugs are ASCII-only");
+        }
         if (!tags.some((existing) => slugify(existing) === normalizedSlug)) {
             tags.push(normalized);
         }
@@ -189,8 +197,15 @@ function validateMeaningfulContent(content) {
     if (content.length < ARTICLE_CONTENT_MIN_LENGTH) {
         throw new Error("content is too short to create a curated article");
     }
-    if (!/[a-zA-Z]{12,}/.test(content.replace(/\s+/g, ""))) {
+    const letterCount = Array.from(content.matchAll(/\p{L}/gu)).length;
+    if (letterCount < 12) {
         throw new Error("content must contain meaningful prose");
+    }
+}
+function validateContentByteLength(content) {
+    const byteLength = new TextEncoder().encode(content).byteLength;
+    if (byteLength > ARTICLE_CONTENT_MAX_BYTES) {
+        throw new Error("content exceeds the 1 MB article size limit");
     }
 }
 function stripInjectedMemoryBlocks(content) {
@@ -223,10 +238,7 @@ function stripOneInjectedTag(content, tag) {
         const nestedOpen = openSearchPattern.exec(content);
         const closeMatch = closePattern.exec(content);
         if (!closeMatch) {
-            return {
-                content: `${content.slice(0, openMatch.index)}\n`,
-                changed: true,
-            };
+            throw new Error(`Unclosed memory block tag: <${tag}>`);
         }
         if (nestedOpen && nestedOpen.index < closeMatch.index) {
             depth += 1;
@@ -242,6 +254,12 @@ function stripOneInjectedTag(content, tag) {
             };
         }
     }
+}
+function deriveSlug(value) {
+    const slug = slugify(value);
+    if (slug)
+        return slug;
+    return `article-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }
 function slugify(value) {
     return value

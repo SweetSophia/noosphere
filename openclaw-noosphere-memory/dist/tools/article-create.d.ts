@@ -21,10 +21,13 @@ export declare function createNoosphereArticleCreateTool(rawConfig: unknown, con
                 readonly type: "string";
                 readonly description: "Article Markdown content.";
                 readonly minLength: 40;
+                readonly maxLength: number;
             };
             readonly slug: {
                 readonly type: "string";
                 readonly description: "URL-safe slug (auto-generated from title if omitted).";
+                readonly maxLength: 80;
+                readonly pattern: "^[a-z0-9-]+$";
             };
             readonly excerpt: {
                 readonly type: "string";
@@ -42,7 +45,7 @@ export declare function createNoosphereArticleCreateTool(rawConfig: unknown, con
             };
             readonly authorName: {
                 readonly type: "string";
-                readonly description: "Display author name (defaults to 'OpenClaw Agent').";
+                readonly description: "Optional display author name. Omit to let Noosphere attribute the article from the authenticated context.";
                 readonly maxLength: 100;
             };
             readonly confidence: {
@@ -52,7 +55,7 @@ export declare function createNoosphereArticleCreateTool(rawConfig: unknown, con
             readonly status: {
                 readonly type: "string";
                 readonly enum: readonly ["draft", "reviewed", "published"];
-                readonly description: "Article lifecycle status. Defaults to 'reviewed'.";
+                readonly description: "Article lifecycle status. Defaults to 'published'.";
             };
         };
     };
