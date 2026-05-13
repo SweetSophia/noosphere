@@ -22,7 +22,7 @@ const SaveToolParameters = {
         },
         topicId: {
             type: "string",
-            description: "Noosphere topic ID where the draft candidate should be filed.",
+            description: 'Actual Noosphere topic ID/UUID where the draft candidate should be filed, e.g. "550e8400-e29b-41d4-a716-446655440000". Do not pass guessed slugs unless slug aliases are explicitly supported.',
             maxLength: SAVE_TOPIC_ID_MAX_LENGTH,
         },
         excerpt: {
