@@ -457,6 +457,8 @@ Default runtime locations:
 | `noosphere_recall` | READ | Multi-provider recall query in `auto` or `inspection` mode |
 | `noosphere_get` | READ | Direct lookup by provider/id or canonical ref |
 | `noosphere_save` | WRITE | Save a draft memory candidate; never auto-publishes |
+| `noosphere_topics` | READ | List all topics in hierarchical tree form; use to find topic IDs before creating articles |
+| `noosphere_article_create` | WRITE | Create a curated wiki article directly (published by default); strips injected memory blocks, validates content bounds, and handles Unicode/non-ASCII titles |
 
 **Auto-injection:**
 
