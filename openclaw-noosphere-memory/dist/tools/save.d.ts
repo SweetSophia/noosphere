@@ -20,7 +20,7 @@ export declare function createNoosphereSaveTool(rawConfig: unknown, context?: No
             };
             readonly topicId: {
                 readonly type: "string";
-                readonly description: "Noosphere topic ID where the draft candidate should be filed.";
+                readonly description: "Actual Noosphere topic ID/UUID where the draft candidate should be filed, e.g. \"550e8400-e29b-41d4-a716-446655440000\". Do not pass guessed slugs unless slug aliases are explicitly supported.";
                 readonly maxLength: 128;
             };
             readonly excerpt: {
