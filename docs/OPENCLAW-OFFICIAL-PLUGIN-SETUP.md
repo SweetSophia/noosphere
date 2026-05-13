@@ -54,7 +54,15 @@ The installer:
 
 > **Note:** The installer can still prompt when run through `curl | bash` by reading from `/dev/tty` if a controlling terminal is available. The interactive IP prompt is skipped when `APP_URL` is set, or when no interactive terminal is available (for example CI/cron/background automation). In non-interactive mode, the script auto-detects the best available IP (Tailscale > localhost). Set `APP_URL` beforehand to force a specific address in any mode.
 
-Verify after install:
+A successful installer run prints these progress markers before the final summary banner:
+
+```text
+Applying database schema and bootstrap data...
+Bootstrap completed successfully.
+Installing OpenClaw plugin: npm:@sweetsophia/openclaw-noosphere-memory
+```
+
+Verify after install. If you selected a non-localhost IP address, use that address instead of `127.0.0.1` for the health check:
 
 ```bash
 curl -fsS http://127.0.0.1:6578/api/health
@@ -411,6 +419,32 @@ node -e 'const fs=require("fs"); const p=process.env.HOME+"/.openclaw/secrets/no
 ```
 
 Do not paste real keys or full secret files into issue comments, chats, terminal transcripts, or commits.
+
+### Installer stops after bootstrap starts
+
+If the installer returns to your shell immediately after this line:
+
+```text
+Applying database schema and bootstrap data...
+```
+
+then the install did not complete. A healthy run must continue with `Bootstrap completed successfully.` and `Installing OpenClaw plugin: ...`.
+
+First make sure you are using the latest installer from `master`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/master/install-openclaw.sh | bash
+```
+
+The current installer protects `curl | bash` runs by redirecting the bootstrap container's stdin from `/dev/null`, so Docker Compose cannot consume the remaining installer script before app/plugin setup. If the issue persists, inspect the partial state and bootstrap log before retrying:
+
+```bash
+docker ps -a --filter 'name=noosphere-openclaw'
+ls -l ~/.noosphere/.env ~/.openclaw/secrets/noosphere-memory.json
+find /tmp -maxdepth 1 -type f -mmin -30 -print | xargs -r grep -l 'bootstrap\|Prisma\|No pending migrations' 2>/dev/null
+```
+
+A rerun is safe after bootstrap failures because the installer preserves `~/.noosphere/.env` before starting persistent containers.
 
 ### Plugin installed but CLI commands are missing
 
