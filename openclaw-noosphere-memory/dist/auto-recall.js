@@ -24,7 +24,7 @@ WHEN TO SAVE:
 
 HOW TO SAVE:
 - Use the noosphere_save tool with these parameters:
-  - topicId: The relevant topic (e.g., "engineering", "projects", "decisions", "workflows")
+  - topicId: The actual Noosphere topic ID/UUID where the draft candidate should be filed. Do not guess a slug such as "engineering" unless the runtime explicitly documents slug aliases; inspect existing recall metadata or ask/check the topic list first.
   - title: A brief descriptive title (max 160 chars)
   - content: The durable information to save (minimum 40 characters, meaningful prose)
   - confidence: "high" for important facts/decisions, "medium" for task completions
