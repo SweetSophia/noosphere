@@ -128,6 +128,7 @@ export async function GET(request: NextRequest) {
       author: a.author ? { id: a.author.id, name: a.author.name } : { name: a.authorName },
       confidence: a.confidence,
       status: a.status,
+      restrictedTags: a.restrictedTags ?? [],
       lastReviewed: a.lastReviewed,
       relatedArticles: a.relatedTo
         .filter((r) => canAccessScopes(r.target.restrictedTags ?? [], auth.auth.allowedScopes))

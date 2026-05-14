@@ -267,6 +267,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       tags: updatedArticle!.tags.map((t) => ({ id: t.tag.id, name: t.tag.name, slug: t.tag.slug })),
       confidence: updatedArticle!.confidence,
       status: updatedArticle!.status,
+      restrictedTags: updatedArticle!.restrictedTags ?? [],
       lastReviewed: updatedArticle!.lastReviewed,
       relatedArticles: updatedArticle!.relatedTo
         .filter((r) => canAccessScopes(r.target.restrictedTags ?? [], auth.auth.allowedScopes))
