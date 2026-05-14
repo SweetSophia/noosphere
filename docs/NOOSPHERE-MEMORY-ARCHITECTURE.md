@@ -35,6 +35,8 @@ Operational constraints:
 
 | Concern | Main entry points | File |
 | --- | --- | --- |
+| Access control | `buildScopeFilter()`, `canAccessScopes()` | `src/lib/api/auth.ts` |
+| Article search (SQL CTE) | `buildArticleSearchFilters()`, `searchArticleIds()`, `countSearchArticles()` | `src/lib/memory/article-search.ts`, `src/lib/wiki.ts` |
 | Normalized schema/scoring | `MemoryResult`, `computeBaseCompositeScore()` | `src/lib/memory/types.ts` |
 | Provider contract | `MemoryProvider`, `MemoryProviderConfig`, `getEffectiveAutoRecall()` | `src/lib/memory/provider.ts` |
 | Hindsight adapter | `HindsightProvider`, `createHindsightProvider()` | `src/lib/memory/hindsight.ts` |
@@ -156,6 +158,27 @@ Built-in provider defaults differ intentionally: `NoosphereProvider` uses
 contains the shared full-text search CTE helpers used by the local article-backed
 provider. That helper module is internal rather than exported through
 `@/lib/memory`.
+
+#### Access control and scope filtering
+
+Noosphere supports per-article access control via `restrictedTags` — an array of
+scope strings stored on each article (e.g. `["financial", "health"]`).
+Unauthenticated callers and API keys with limited scopes can only access articles
+whose `restrictedTags` are either empty or overlap with the caller's allowed scopes.
+
+`NoosphereProvider` applies this filter automatically:
+
+- `allowedScopes = ["*"]` (human sessions) — no filter; all articles accessible.
+- `allowedScopes = undefined or []` (unauthenticated / no-scope key) — only unrestricted
+  articles (`restrictedTags` is empty) are returned.
+- `allowedScopes = ["financial", "...*"]` (scoped key) — unrestricted articles **or**
+  articles tagged with at least one of the caller's scopes.
+
+The filtering is applied in `buildArticleSearchFilters()` (SQL CTE for full-text
+search) and `buildScopeWhere()` (Prisma `where` clause for direct lookups). Both
+use `buildScopeFilter()` in `src/lib/api/auth.ts` as the canonical source of truth.
+See the restricted-tags implementation docs in the codebase for the full access
+control model.
 
 ---
 

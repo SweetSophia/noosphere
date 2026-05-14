@@ -97,10 +97,13 @@ Frontpage | Logging
 - **Review revision history** for changed articles.
 - **Soft-delete and restore** articles from trash.
 - **Use tags** for cross-cutting subjects.
+- **Privacy lock icons** on restricted articles; only users with matching access scopes can view them.
 - **Upload images** for embedded article media.
 - **Search the wiki** by text, topic, tag, status, and confidence.
 - **View activity logs** for create/update/delete/ingest/lint events.
 - **Manage API keys** from the admin interface.
+- **Scoped API keys** — assign per-key allowed scopes (e.g. `financial`, `health`) that control access to restricted articles.
+- **Restricted articles** — tag articles with scopes to restrict access; unauthenticated web users and scoped API keys see only allowed content.
 - **Sync/export** content for Obsidian and Markdown workflows.
 
 ## Memory Architecture
@@ -270,11 +273,11 @@ Authorization: Bearer <api_key>
 ```bash
 # Create article
 POST /api/articles
-# { title, slug, content, topicId, tags?, excerpt?, confidence?, status? }
+# { title, slug, content, topicId, tags?, excerpt?, confidence?, status?, restrictedTags? }
 
 # Update article
 PATCH /api/articles/:id
-# { title?, slug?, content?, topicId?, tags?, excerpt?, confidence?, status?, lastReviewed? }
+# { title?, slug?, content?, topicId?, tags?, excerpt?, confidence?, status?, lastReviewed?, restrictedTags? }
 
 # List/search articles
 GET /api/articles?q=search&topic=slug&tag=tag&status=draft&confidence=high
@@ -409,6 +412,7 @@ curl -s -X POST http://localhost:4400/api/memory/save \
 | `/wiki/{topicSlug}/new` | Create article in topic |
 | `/wiki/search?q=keyword` | Full-text search |
 | `/wiki/admin/keys` | Manage API keys |
+| `/wiki/admin/scopes` | Manage access scopes |
 | `/wiki/admin/log` | Activity timeline |
 | `/wiki/admin/trash` | Soft-deleted articles |
 
@@ -498,6 +502,8 @@ The plugin registers `openclaw noosphere ...` helpers for status, diagnostics, l
 - Default Docker Compose binding is localhost-only: `127.0.0.1:6578`.
 - PostgreSQL stays internal to the production Compose network.
 - API keys are permission-scoped; READ/WRITE/ADMIN are used for different actions.
+- WRITE keys with specific scopes (e.g. `financial`) can only create or move articles into those scopes.
+- Wildcard `*` scope grants full admin access to all content regardless of restrictions.
 - Secrets are stored outside the repo in OpenClaw secret files and `~/.noosphere/.env`.
 - Auto-recall fails open when Noosphere is unreachable.
 - The installer enables broad prompt injection by default (`autoRecall: true`, `allowPromptInjection: true`, no agent/chat allowlist); restrict it with `enabledAgents`/`allowedChatTypes` if needed.
