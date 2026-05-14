@@ -30,6 +30,9 @@ export interface NoosphereProviderSettings {
 
   /** Base provider config consumed by orchestrators. */
   providerConfig?: Partial<MemoryProviderConfig>;
+
+  /** Scopes for restricted-article filtering. */
+  allowedScopes?: string[];
 }
 
 export interface NoosphereSearchOptionsMetadata extends MemoryProviderMetadata {
@@ -66,9 +69,11 @@ export class NoosphereProvider implements MemoryProvider {
   readonly descriptor: MemoryProviderDescriptor;
 
   private readonly prisma: PrismaClient;
+  private readonly allowedScopes?: string[];
 
   constructor(settings: NoosphereProviderSettings = {}) {
     this.prisma = settings.prisma ?? defaultPrisma;
+    this.allowedScopes = settings.allowedScopes;
 
     this.descriptor = {
       ...NOOSPHERE_PROVIDER_DESCRIPTOR,
@@ -107,6 +112,7 @@ export class NoosphereProvider implements MemoryProvider {
       tagSlug: metadata.tagSlug,
       status: metadata.status,
       confidence: metadata.confidence,
+      allowedScopes: this.allowedScopes,
     });
 
     return articles;
@@ -204,6 +210,7 @@ export class NoosphereProvider implements MemoryProvider {
       confidence?: string;
       limit?: number;
       offset: number;
+      allowedScopes?: string[];
     },
   ): Promise<MemoryResult[]> {
     const filters = buildArticleSearchFilters(options);

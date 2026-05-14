@@ -69,6 +69,10 @@ model Article {
 
   deletedAt DateTime?
 
+  // Restricted access scopes — empty array = unrestricted (visible to all keys)
+  // Non-empty = only keys with at least one matching scope can access
+  restrictedTags String[] @default([])
+
   @@unique([topicId, slug])
   @@index([topicId])
   @@index([slug])
@@ -177,6 +181,10 @@ model ApiKey {
 
   permissions Permissions @default(WRITE)
 
+  // Scopes this key is allowed to access. Empty = only unrestricted articles.
+  // "*" = admin access to all restricted articles.
+  allowedScopes String[] @default([])
+
   createdAt   DateTime @default(now())
   lastUsedAt DateTime?
   revokedAt  DateTime?
@@ -188,6 +196,20 @@ enum Permissions {
   READ
   WRITE
   ADMIN
+}
+
+// ─────────────────────────────────────────────
+// Restricted Scopes — registry of valid restricted tag values
+// ─────────────────────────────────────────────
+model RestrictedScope {
+  id          String   @id @default(cuid())
+  tag         String   @unique  // "health", "intimate", "company-x", etc.
+  description String?
+  isSystem    Boolean  @default(false)  // system scopes cannot be deleted
+
+  createdAt   DateTime @default(now())
+
+  @@index([tag])
 }
 
 // ─────────────────────────────────────────────

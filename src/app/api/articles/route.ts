@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requirePermission } from "@/lib/api/auth";
+import { requirePermission, buildScopeFilter } from "@/lib/api/auth";
 import { buildTagConnections, countSearchArticles, searchArticleIds } from "@/lib/wiki";
 import {
   ARTICLE_LIMITS,
@@ -16,6 +16,11 @@ import { parsePagination } from "@/lib/pagination";
 // GET /api/articles — List articles (with filters)
 // Auth: API key (READ/WRITE/ADMIN) or session (human)
 export async function GET(request: NextRequest) {
+  const auth = await requirePermission(request, [Permissions.READ]);
+  if (!auth.success) {
+    return auth.response;
+  }
+
   const { searchParams } = new URL(request.url);
   const topicSlug = searchParams.get("topic");
   const tag = searchParams.get("tag");
@@ -33,7 +38,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const where: Record<string, unknown> = { deletedAt: null };
+    // Build scope-filtered where clause — restricts articles based on key scopes
+    const where = buildScopeFilter(auth.auth.allowedScopes, { deletedAt: null });
 
     if (topicSlug) {
       where.topic = { slug: topicSlug };
@@ -57,6 +63,7 @@ export async function GET(request: NextRequest) {
         tagSlug: tag ?? undefined,
         status: status ?? undefined,
         confidence: confidence ?? undefined,
+        allowedScopes: auth.auth.allowedScopes,
         limit,
         offset,
       })
@@ -151,7 +158,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { title, slug, content, topicId, tags, excerpt, authorName, confidence, status, relatedArticleIds } = body;
+    const { title, slug, content, topicId, tags, excerpt, authorName, confidence, status, relatedArticleIds, restrictedTags } = body;
 
     // Validate relatedArticleIds is an array of valid CUIDs
     if (relatedArticleIds !== undefined) {
@@ -222,6 +229,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate restrictedTags
+    if (restrictedTags !== undefined) {
+      if (!Array.isArray(restrictedTags) || !(restrictedTags as unknown[]).every((t) => typeof t === "string")) {
+        return NextResponse.json({ error: "restrictedTags must be an array of strings" }, { status: 400 });
+      }
+      // Validate each tag exists in RestrictedScope registry
+      if (restrictedTags.length > 0) {
+        const validScopes = await prisma.restrictedScope.findMany({
+          where: { tag: { in: restrictedTags } },
+          select: { tag: true },
+        });
+        const validSet = new Set(validScopes.map((s) => s.tag));
+        const invalid = restrictedTags.filter((t) => !validSet.has(t));
+        if (invalid.length > 0) {
+          return NextResponse.json(
+            { error: `Unknown restricted tag(s): ${invalid.join(", ")}. Valid tags: ${validScopes.map((s) => s.tag).join(", ")}` },
+            { status: 400 }
+          );
+        }
+      }
+    }
+
     // Validate slug format
     const slugValidation = validateSlug(slug);
     if (!slugValidation.ok) {
@@ -270,6 +299,7 @@ export async function POST(request: NextRequest) {
           tags: { create: tagConnections },
           confidence: confidence || null,
           status: status || "published",
+          restrictedTags: restrictedTags ?? [],
           revisions: {
             create: {
               authorId: auth.auth.userId ?? null,
@@ -304,6 +334,7 @@ export async function POST(request: NextRequest) {
         slug: article.slug,
         topic: article.topic,
         tags: article.tags.map((t: { tag: { id: string; name: string; slug: string } }) => t.tag),
+        restrictedTags: article.restrictedTags,
         createdAt: article.createdAt,
       },
       { status: 201 }

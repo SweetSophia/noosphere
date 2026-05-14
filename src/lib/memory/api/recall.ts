@@ -49,6 +49,8 @@ export interface MemoryRecallExecutionOptions {
   providers?: RecallOrchestratorProviderEntry[];
   settings?: Partial<RecallSettings>;
   timeoutMs?: number;
+  /** Scopes for restricted-article filtering in the noosphere provider. */
+  allowedScopes?: string[];
 }
 
 export type MemoryRecallValidationResult =
@@ -65,9 +67,11 @@ export type MemoryRecallValidationResult =
       error: string;
     };
 
-export async function getDefaultMemoryRecallProviders(): Promise<RecallOrchestratorProviderEntry[]> {
+export async function getDefaultMemoryRecallProviders(
+  allowedScopes?: string[],
+): Promise<RecallOrchestratorProviderEntry[]> {
   const { createNoosphereProvider } = await import("@/lib/memory/noosphere");
-  return [{ provider: createNoosphereProvider() }];
+  return [{ provider: createNoosphereProvider({ allowedScopes }) }];
 }
 
 export function validateMemoryRecallRequest(input: unknown): MemoryRecallValidationResult {
@@ -149,7 +153,8 @@ export async function executeMemoryRecallRequest(
   }
 
   const settings = normalizeRecallSettings(options.settings);
-  const providerEntries = options.providers ?? await getDefaultMemoryRecallProviders();
+  const providerEntries =
+    options.providers ?? await getDefaultMemoryRecallProviders(options.allowedScopes);
   const requestedProviders =
     validation.request.providers ??
     (validation.request.mode === "auto"

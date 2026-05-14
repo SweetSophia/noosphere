@@ -21,7 +21,9 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await executeMemoryRecallRequest(body);
+    const result = await executeMemoryRecallRequest(body, {
+      allowedScopes: auth.auth.allowedScopes,
+    });
     return NextResponse.json(result.body, { status: result.status });
   } catch (error) {
     console.error("[POST /api/memory/recall]", error);

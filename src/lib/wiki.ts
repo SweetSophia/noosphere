@@ -50,6 +50,8 @@ export async function buildTagConnections(tagNames: string[]) {
 export interface SearchArticlesOptions extends ArticleSearchFilters {
   limit?: number;
   offset?: number;
+  /** Scopes for restricted-article filtering. */
+  allowedScopes?: string[];
 }
 
 // Use PostgreSQL full-text search so article search ranks meaningful matches
@@ -67,7 +69,13 @@ export async function searchArticleIds(
 
   const limit = options.limit ?? 50;
   const offset = options.offset ?? 0;
-  const filters = buildArticleSearchFilters(options);
+  const filters = buildArticleSearchFilters({
+    topicSlug: options.topicSlug,
+    tagSlug: options.tagSlug,
+    status: options.status,
+    confidence: options.confidence,
+    allowedScopes: options.allowedScopes,
+  });
   const cte = buildSearchableCTE(filters);
   const tsQuery = buildSearchTsQuery(query);
 
@@ -93,7 +101,13 @@ export async function countSearchArticles(
   const query = rawQuery.trim();
   if (!query) return 0;
 
-  const filters = buildArticleSearchFilters(options);
+  const filters = buildArticleSearchFilters({
+    topicSlug: options.topicSlug,
+    tagSlug: options.tagSlug,
+    status: options.status,
+    confidence: options.confidence,
+    allowedScopes: options.allowedScopes,
+  });
   const cte = buildSearchableCTE(filters);
   const tsQuery = buildSearchTsQuery(query);
 

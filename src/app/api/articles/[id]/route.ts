@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requirePermission } from "@/lib/api/auth";
+import { requirePermission, canAccessScopes } from "@/lib/api/auth";
 import { buildTagConnections } from "@/lib/wiki";
 import {
   ARTICLE_LIMITS,
@@ -36,6 +36,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ error: "Article not found" }, { status: 404 });
     }
 
+    // Scope check: article's restrictedTags must have at least one match with key's allowedScopes
+    if (!canAccessScopes(existing.restrictedTags ?? [], auth.auth.allowedScopes)) {
+      return NextResponse.json({ error: "Article not found" }, { status: 404 });
+    }
+
     const body = await request.json();
     const {
       title,
@@ -48,6 +53,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       status,
       relatedArticleIds,
       lastReviewed,
+      restrictedTags,
     } = body;
 
     // Build update data — all fields optional
@@ -159,6 +165,28 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       updateData.lastReviewed = lastReviewed ? new Date(lastReviewed) : null;
     }
 
+    // restrictedTags — validate and apply
+    if (restrictedTags !== undefined) {
+      if (!Array.isArray(restrictedTags) || !(restrictedTags as unknown[]).every((t) => typeof t === "string")) {
+        return NextResponse.json({ error: "restrictedTags must be an array of strings" }, { status: 400 });
+      }
+      if (restrictedTags.length > 0) {
+        const validScopes = await prisma.restrictedScope.findMany({
+          where: { tag: { in: restrictedTags } },
+          select: { tag: true },
+        });
+        const validSet = new Set(validScopes.map((s) => s.tag));
+        const invalid = (restrictedTags as string[]).filter((t) => !validSet.has(t));
+        if (invalid.length > 0) {
+          return NextResponse.json(
+            { error: `Unknown restricted tag(s): ${invalid.join(", ")}. Valid tags: ${validScopes.map((s) => s.tag).join(", ")}` },
+            { status: 400 }
+          );
+        }
+      }
+      updateData.restrictedTags = restrictedTags;
+    }
+
     // tags — validate early if provided
     if (tags !== undefined) {
       if (!Array.isArray(tags) || !(tags as unknown[]).every((t) => typeof t === "string")) {
@@ -265,6 +293,15 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     return auth.response;
   }
 
+  // Fetch to check scope before deleting
+  const existing = await prisma.article.findUnique({ where: { id } });
+  if (!existing || existing.deletedAt) {
+    return NextResponse.json({ error: "Article not found" }, { status: 404 });
+  }
+  if (!canAccessScopes(existing.restrictedTags ?? [], auth.auth.allowedScopes)) {
+    return NextResponse.json({ error: "Article not found" }, { status: 404 });
+  }
+
   const now = new Date();
 
   // Atomic soft-delete: only succeeds if article exists AND is not already deleted.
@@ -275,13 +312,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   });
 
   if (count.count === 0) {
-    // Either article doesn't exist, or was already deleted.
-    // Fetch to distinguish — for security we don't reveal which.
-    const existing = await prisma.article.findUnique({ where: { id } });
-    if (!existing || existing.deletedAt) {
-      return new NextResponse(null, { status: 204 }); // idempotent
-    }
-    return NextResponse.json({ error: "Article not found" }, { status: 404 });
+    // Article was already deleted — safe to return 204 idempotently
+    return new NextResponse(null, { status: 204 });
   }
 
   // Log the deletion for audit trail

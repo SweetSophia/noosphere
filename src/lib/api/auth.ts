@@ -8,6 +8,9 @@ export interface AuthResult {
   authorized: boolean;
   permissions?: Permissions;
   keyId?: string;
+  /** Scopes this key is allowed to access. Empty = only unrestricted articles.
+   *  Sessions always get ["*"] (full access). */
+  allowedScopes?: string[];
   role?: Role;
   userId?: string;
   name?: string;
@@ -26,6 +29,7 @@ export async function checkRouteAuth(
       authorized: true,
       permissions: apiAuth.permissions,
       keyId: apiAuth.keyId,
+      allowedScopes: apiAuth.allowedScopes,
     };
   }
 
@@ -35,11 +39,13 @@ export async function checkRouteAuth(
     if (!session?.user) {
       return { authorized: false };
     }
+    // Sessions (humans) have full access to all content including restricted
     return {
       authorized: true,
       role: session.user.role,
       userId: session.user.id,
       name: session.user.name ?? undefined,
+      allowedScopes: ["*"], // Human sessions bypass all scope restrictions
     };
   } catch (error) {
     console.error(
@@ -130,4 +136,56 @@ export async function requirePermission(
   }
 
   return { success: true, auth };
+}
+
+/**
+ * Build a Prisma WHERE clause that filters articles based on key scopes.
+ * Articles with no restrictedTags are always accessible.
+ * Articles with restrictedTags require at least one matching scope.
+ *
+ * @param allowedScopes - The scopes available to the current key (from AuthResult)
+ * @param extraWhere - Additional Prisma filters to AND with the scope filter
+ */
+export function buildScopeFilter(
+  allowedScopes: string[] | undefined,
+  extraWhere: Record<string, unknown> = {}
+): Record<string, unknown> {
+  // If scopes include "*", grant admin access to all restricted content
+  const hasAdmin = allowedScopes?.includes("*");
+
+  if (hasAdmin || !allowedScopes || allowedScopes.length === 0) {
+    // Admin or no scopes: can only access unrestricted articles
+    return {
+      ...extraWhere,
+      OR: allowedScopes
+        ? [{ restrictedTags: { isEmpty: true } }]
+        : [],
+    };
+  }
+
+  // Non-admin key: can access unrestricted articles OR articles with at least one matching scope
+  return {
+    ...extraWhere,
+    OR: [
+      { restrictedTags: { isEmpty: true } },
+      { restrictedTags: { hasSome: allowedScopes } },
+    ],
+  };
+}
+
+/**
+ * Check whether the current auth context grants access to a given article's restricted scopes.
+ * Returns true if the article is unrestricted OR has at least one matching scope.
+ *
+ * @param articleScopes - restrictedTags from the article
+ * @param allowedScopes - scopes from AuthResult
+ */
+export function canAccessScopes(
+  articleScopes: string[],
+  allowedScopes: string[] | undefined
+): boolean {
+  if (articleScopes.length === 0) return true; // unrestricted
+  if (allowedScopes?.includes("*")) return true; // admin bypass
+  if (!allowedScopes || allowedScopes.length === 0) return false; // no scope access
+  return articleScopes.some((s) => allowedScopes.includes(s));
 }
