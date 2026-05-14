@@ -79,8 +79,8 @@ export async function PATCH(
     }
 
     if (allowedScopes !== undefined) {
-      if (!Array.isArray(allowedScopes) || !(allowedScopes as unknown[]).every((s) => typeof s === "string")) {
-        return NextResponse.json({ error: "allowedScopes must be an array of strings" }, { status: 400 });
+      if (!Array.isArray(allowedScopes) || !(allowedScopes as unknown[]).every((s) => typeof s === "string" && s.length > 0)) {
+        return NextResponse.json({ error: "allowedScopes must be an array of non-empty strings" }, { status: 400 });
       }
       if (allowedScopes.length > 0) {
         const validScopes = await prisma.restrictedScope.findMany({

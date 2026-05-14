@@ -167,8 +167,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     // restrictedTags — validate and apply
     if (restrictedTags !== undefined) {
-      if (!Array.isArray(restrictedTags) || !(restrictedTags as unknown[]).every((t) => typeof t === "string")) {
-        return NextResponse.json({ error: "restrictedTags must be an array of strings" }, { status: 400 });
+      if (!Array.isArray(restrictedTags) || !(restrictedTags as unknown[]).every((t) => typeof t === "string" && t.length > 0)) {
+        return NextResponse.json({ error: "restrictedTags must be an array of non-empty strings" }, { status: 400 });
       }
       if (restrictedTags.length > 0) {
         const validScopes = await prisma.restrictedScope.findMany({

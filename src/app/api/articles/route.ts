@@ -231,8 +231,8 @@ export async function POST(request: NextRequest) {
 
     // Validate restrictedTags
     if (restrictedTags !== undefined) {
-      if (!Array.isArray(restrictedTags) || !(restrictedTags as unknown[]).every((t) => typeof t === "string")) {
-        return NextResponse.json({ error: "restrictedTags must be an array of strings" }, { status: 400 });
+      if (!Array.isArray(restrictedTags) || !(restrictedTags as unknown[]).every((t) => typeof t === "string" && t.length > 0)) {
+        return NextResponse.json({ error: "restrictedTags must be an array of non-empty strings" }, { status: 400 });
       }
       // Validate each tag exists in RestrictedScope registry
       if (restrictedTags.length > 0) {

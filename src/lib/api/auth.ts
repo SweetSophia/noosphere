@@ -150,20 +150,20 @@ export function buildScopeFilter(
   allowedScopes: string[] | undefined,
   extraWhere: Record<string, unknown> = {}
 ): Record<string, unknown> {
-  // If scopes include "*", grant admin access to all restricted content
-  const hasAdmin = allowedScopes?.includes("*");
+  // If scopes include "*", grant admin access — no scope restriction at all
+  if (allowedScopes?.includes("*")) {
+    return extraWhere;
+  }
 
-  if (hasAdmin || !allowedScopes || allowedScopes.length === 0) {
-    // Admin or no scopes: can only access unrestricted articles
+  // No scopes at all (undefined or empty): can only access unrestricted articles
+  if (!allowedScopes || allowedScopes.length === 0) {
     return {
       ...extraWhere,
-      OR: allowedScopes
-        ? [{ restrictedTags: { isEmpty: true } }]
-        : [],
+      restrictedTags: { isEmpty: true },
     };
   }
 
-  // Non-admin key: can access unrestricted articles OR articles with at least one matching scope
+  // Non-admin key with scopes: unrestricted OR at least one matching scope
   return {
     ...extraWhere,
     OR: [
