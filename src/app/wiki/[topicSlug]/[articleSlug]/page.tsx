@@ -1,10 +1,11 @@
 export const dynamic = "force-dynamic";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
+import { canAccessScopes } from "@/lib/api/auth";
 import { DeleteArticleForm } from "@/components/wiki/DeleteArticleForm";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import ReactMarkdown from "react-markdown";
@@ -53,7 +54,7 @@ export default async function ArticlePage({ params }: Props) {
       relatedTo: {
         include: {
           target: {
-            select: { id: true, title: true, slug: true, topic: { select: { slug: true } } },
+            select: { id: true, title: true, slug: true, topic: { select: { slug: true } }, restrictedTags: true },
           },
         },
       },
@@ -61,6 +62,12 @@ export default async function ArticlePage({ params }: Props) {
   });
 
   if (!article) notFound();
+
+  // Unauthenticated users cannot view restricted articles — redirect to login
+  const isRestricted = article.restrictedTags && article.restrictedTags.length > 0;
+  if (isRestricted && !session) {
+    redirect("/wiki/login");
+  }
 
   let safeSourceUrl: string | null = null;
 
@@ -171,21 +178,26 @@ export default async function ArticlePage({ params }: Props) {
 
           <section className="article-detail-card">
             <p className="article-detail-label">Connected pages</p>
-            {article.relatedTo.length > 0 ? (
-              <div className="article-link-list">
-                {article.relatedTo.map((rel) => (
-                  <Link
-                    key={rel.target.id}
-                    href={`/wiki/${rel.target.topic.slug}/${rel.target.slug}`}
-                    className="sub-topic-tag"
-                  >
-                    {rel.target.title}
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <p className="article-inline-meta">No related articles linked yet.</p>
-            )}
+            {(() => {
+              const accessibleRelated = article.relatedTo.filter((rel) =>
+                canAccessScopes(rel.target.restrictedTags ?? [], session ? ["*"] : undefined)
+              );
+              return accessibleRelated.length > 0 ? (
+                <div className="article-link-list">
+                  {accessibleRelated.map((rel) => (
+                    <Link
+                      key={rel.target.id}
+                      href={`/wiki/${rel.target.topic.slug}/${rel.target.slug}`}
+                      className="sub-topic-tag"
+                    >
+                      {rel.target.title}
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <p className="article-inline-meta">No related articles linked yet.</p>
+              );
+            })()}
           </section>
         </div>
 

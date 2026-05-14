@@ -252,6 +252,19 @@ export async function POST(request: NextRequest) {
             { status: 400 }
           );
         }
+
+        // Security: WRITE keys can only assign scopes that are in their allowedScopes.
+        // ADMIN (*) bypasses this check.
+        const callerScopes = auth.auth.allowedScopes;
+        if (!callerScopes?.includes("*")) {
+          const unauthorized = restrictedTags.filter((t) => !(callerScopes ?? []).includes(t));
+          if (unauthorized.length > 0) {
+            return NextResponse.json(
+              { error: `Cannot assign scope(s) you don't have: ${unauthorized.join(", ")}` },
+              { status: 403 }
+            );
+          }
+        }
       }
     }
 

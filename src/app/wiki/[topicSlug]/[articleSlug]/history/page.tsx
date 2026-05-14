@@ -1,10 +1,12 @@
 export const dynamic = "force-dynamic";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
+import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import { EmptyState } from "@/components/wiki/EmptyState";
+import { authOptions } from "@/lib/auth";
 
 interface Props {
   params: Promise<{ topicSlug: string; articleSlug: string }>;
@@ -12,6 +14,8 @@ interface Props {
 
 export default async function ArticleHistoryPage({ params }: Props) {
   const { topicSlug, articleSlug } = await params;
+
+  const session = await getServerSession(authOptions);
 
   const topic = await prisma.topic.findUnique({ where: { slug: topicSlug } });
   if (!topic) notFound();
@@ -29,6 +33,12 @@ export default async function ArticleHistoryPage({ params }: Props) {
   });
 
   if (!article) notFound();
+
+  // Unauthenticated users cannot view restricted articles — redirect to login
+  const isRestricted = article.restrictedTags && article.restrictedTags.length > 0;
+  if (isRestricted && !session) {
+    redirect("/wiki/login");
+  }
 
   return (
     <div className="wiki-content">

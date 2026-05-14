@@ -1,7 +1,10 @@
 import Link from "next/link";
+import { getServerSession } from "next-auth";
 import { EmptyState } from "@/components/wiki/EmptyState";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import { prisma } from "@/lib/prisma";
+import { authOptions } from "@/lib/auth";
+import { buildScopeFilter } from "@/lib/api/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -78,6 +81,12 @@ function TopicTreeNode({ tree }: { tree: TopicRenderNode }) {
 }
 
 export default async function WikiHomePage() {
+  const session = await getServerSession(authOptions);
+  // Unauthenticated users only see unrestricted articles.
+  // Human sessions always have full access — they bypass restrictions.
+  const allowedScopes = session ? ["*"] : undefined;
+  const scopeWhere = buildScopeFilter(allowedScopes, { deletedAt: null });
+
   const [allTopics, topicCounts, recentArticles] = await Promise.all([
     prisma.topic.findMany({ orderBy: { name: "asc" } }),
     prisma.article.groupBy({
@@ -86,7 +95,7 @@ export default async function WikiHomePage() {
       _count: { topicId: true },
     }),
     prisma.article.findMany({
-      where: { deletedAt: null },
+      where: scopeWhere,
       include: {
         topic: true,
         tags: { include: { tag: true } },

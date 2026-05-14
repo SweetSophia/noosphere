@@ -1,9 +1,12 @@
 import Link from "next/link";
+import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { searchArticleIds } from "@/lib/wiki";
 import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import { EmptyState } from "@/components/wiki/EmptyState";
+import { authOptions } from "@/lib/auth";
+import { buildScopeFilter } from "@/lib/api/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +24,13 @@ export default async function SearchPage({ searchParams }: Props) {
   const topic = (params.topic ?? "").trim();
   const tag = (params.tag ?? "").trim();
 
-  const where: Record<string, unknown> = { deletedAt: null };
+  const session = await getServerSession(authOptions);
+  // Unauthenticated users only see unrestricted articles.
+  // Human sessions always have full access.
+  const allowedScopes = session ? ["*"] : undefined;
+  const scopeWhere = buildScopeFilter(allowedScopes, { deletedAt: null });
+
+  const where: Record<string, unknown> = { ...scopeWhere };
 
   if (topic) {
     where.topic = { slug: topic };
@@ -36,6 +45,7 @@ export default async function SearchPage({ searchParams }: Props) {
         topicSlug: topic || undefined,
         tagSlug: tag || undefined,
         limit: 50,
+        allowedScopes,
       })
     : [];
 

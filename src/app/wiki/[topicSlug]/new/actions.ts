@@ -61,6 +61,19 @@ export async function createArticle(
     }
   });
 
+  // Validate: only save scopes that exist in the RestrictedScope registry
+  if (restrictedTags.length > 0) {
+    const validScopes = await prisma.restrictedScope.findMany({
+      where: { tag: { in: restrictedTags } },
+      select: { tag: true },
+    });
+    const validSet = new Set(validScopes.map((s) => s.tag));
+    const invalid = restrictedTags.filter((t) => !validSet.has(t));
+    if (invalid.length > 0) {
+      throw new Error(`Unknown scope(s): ${invalid.join(", ")}`);
+    }
+  }
+
   const article = await prisma.article.create({
     data: {
       title: title.trim(),

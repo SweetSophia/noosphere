@@ -33,6 +33,7 @@ interface ImportArticle {
   status?: string;
   sourceUrl?: string;
   sourceType?: string;
+  restrictedTags?: string[];
   error?: string;
 }
 
@@ -50,12 +51,13 @@ export async function GET() {
     },
     frontmatterFields: {
       required: ["title", "topic", "content"],
-      optional: ["tags", "excerpt", "confidence", "status", "sourceUrl", "sourceType", "lastReviewed"],
+      optional: ["tags", "excerpt", "confidence", "status", "sourceUrl", "sourceType", "lastReviewed", "restrictedTags"],
     },
     exampleFrontmatter: `---
 title: My Article Title
 topic: engineering
 tags: [python, backend]
+restrictedTags: [health, intimate]  # optional — controls access
 createdAt: 2024-01-01T00:00:00Z
 confidence: high
 status: published
@@ -223,6 +225,9 @@ export async function POST(request: NextRequest) {
     }
 
     const tags = Array.isArray(frontmatter.tags) ? (frontmatter.tags as string[]).map(String) : [];
+    const restrictedTags = Array.isArray(frontmatter.restrictedTags)
+      ? (frontmatter.restrictedTags as string[]).filter((t) => typeof t === "string" && t.length > 0)
+      : undefined;
 
     toImport.push({
       filename: entry.name,
@@ -236,6 +241,7 @@ export async function POST(request: NextRequest) {
       status: typeof frontmatter.status === "string" ? frontmatter.status : undefined,
       sourceUrl: typeof frontmatter.sourceUrl === "string" ? frontmatter.sourceUrl : undefined,
       sourceType: typeof frontmatter.sourceType === "string" ? frontmatter.sourceType : undefined,
+      restrictedTags,
     });
   }
 
@@ -284,6 +290,7 @@ export async function POST(request: NextRequest) {
               excerpt: article.excerpt ?? article.content.slice(0, 160).replace(/[#*`_]/g, ""),
               confidence: validatedConfidence(article.confidence),
               status: validatedStatus(article.status, existing.status),
+              restrictedTags: article.restrictedTags ?? [],
               updatedAt: new Date(),
             },
           });
@@ -324,6 +331,7 @@ export async function POST(request: NextRequest) {
           status: validatedStatus(article.status, "published"),
           sourceUrl: article.sourceUrl ?? null,
           sourceType: article.sourceType ?? "import",
+          restrictedTags: article.restrictedTags ?? [],
           tags: { create: tagConnections },
           revisions: {
             create: {

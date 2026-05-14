@@ -50,6 +50,10 @@ export async function GET(request: NextRequest) {
         updatedAt: article.updatedAt.toISOString(),
       };
 
+      if (article.restrictedTags && article.restrictedTags.length > 0) {
+        frontmatter.restrictedTags = article.restrictedTags;
+      }
+
       if (article.confidence) frontmatter.confidence = article.confidence;
       if (article.status) frontmatter.status = article.status;
       if (article.lastReviewed) frontmatter.lastReviewed = article.lastReviewed.toISOString();
@@ -66,7 +70,7 @@ export async function GET(request: NextRequest) {
     // Add a README
     folder.file(
       "README.md",
-      `# Noosphere Export\n\nExported ${articles.length} article(s).\n\n## Format\n\nEach .md file has YAML frontmatter:\n\n\`\`\`yaml\n---\ntitle: Article Title\ntopic: topic-slug\ntags: [tag1, tag2]\ncreatedAt: 2024-01-01T00:00:00Z\n---\n\n# Article Title\n\nContent here...\n\`\`\`\n\n## Topics\n\n${[...new Map(articles.map((a) => [a.topic.slug, a.topic.name])).entries()].map(([slug, name]) => `- ${name} (${slug})`).join("\n")}\n`
+      `# Noosphere Export\n\nExported ${articles.length} article(s).\n\n## Format\n\nEach .md file has YAML frontmatter:\n\n\`\`\`yaml\n---\ntitle: Article Title\ntopic: topic-slug\ntags: [tag1, tag2]\nrestrictedTags: [health, intimate]  # optional — controls access\ncreatedAt: 2024-01-01T00:00:00Z\n---\n\n# Article Title\n\nContent here...\n\`\`\`\n\n## Topics\n\n${[...new Map(articles.map((a) => [a.topic.slug, a.topic.name])).entries()].map(([slug, name]) => `- ${name} (${slug})`).join("\n")}\n`
     );
 
     const buffer = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });

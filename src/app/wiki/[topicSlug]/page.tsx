@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/wiki/EmptyState";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { buildScopeFilter } from "@/lib/api/auth";
 
 interface Props {
   params: Promise<{ topicSlug: string }>;
@@ -35,8 +36,13 @@ export default async function TopicPage({ params }: Props) {
     notFound();
   }
 
+  // Unauthenticated users only see unrestricted articles.
+  // Human sessions (via NextAuth) always have full access — they bypass restrictions.
+  const allowedScopes = session ? ["*"] : undefined;
+  const scopeWhere = buildScopeFilter(allowedScopes, { topicId: topic.id, deletedAt: null });
+
   const articles = await prisma.article.findMany({
-    where: { topicId: topic.id, deletedAt: null },
+    where: scopeWhere,
     include: {
       tags: { include: { tag: true } },
       author: { select: { id: true, name: true } },
