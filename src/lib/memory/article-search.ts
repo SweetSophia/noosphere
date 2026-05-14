@@ -55,19 +55,21 @@ export function buildArticleSearchFilters(
     clauses.push(Prisma.sql`a.confidence = ${options.confidence}`);
   }
 
-  // Apply restricted-tag scope filtering
-  if (options.allowedScopes !== undefined) {
-    if (options.allowedScopes.length === 0) {
-      // No scopes — only unrestricted articles
+  // Apply restricted-tag scope filtering.
+  // undefined and [] both mean "unrestricted only" — only unrestricted articles.
+  // Non-empty non-admin scopes: unrestricted OR hasSome.
+  // "*": no filter (admin bypass).
+  const scopes = options.allowedScopes;
+  if (!scopes?.includes("*")) {
+    if (!scopes || scopes.length === 0) {
       clauses.push(Prisma.sql`coalesce(a."restrictedTags", '{}') = '{}'`);
-    } else if (!options.allowedScopes.includes("*")) {
-      // Non-admin: must have at least one matching scope
+    } else {
       clauses.push(
-        Prisma.sql`(coalesce(a."restrictedTags", '{}') = '{}' OR a."restrictedTags" && ${options.allowedScopes})`,
+        Prisma.sql`(coalesce(a."restrictedTags", '{}') = '{}' OR a."restrictedTags" && ${scopes})`,
       );
     }
-    // If "*" is in allowedScopes, skip scope filter (admin can see all restricted articles)
   }
+  // If "*" is in scopes, skip scope filter entirely.
 
   return clauses;
 }
