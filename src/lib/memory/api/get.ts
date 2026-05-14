@@ -39,6 +39,8 @@ export interface MemoryGetExecutionOptions {
   providers?: MemoryProvider[];
   providerOptions?: MemoryProviderGetOptions;
   timeoutMs?: number;
+  /** Scopes for restricted-article filtering in the noosphere provider. */
+  allowedScopes?: string[];
 }
 
 export type MemoryGetValidationResult =
@@ -56,11 +58,11 @@ export type MemoryGetValidationResult =
       error: string;
     };
 
-export async function getDefaultMemoryGetProviders(): Promise<
-  MemoryProvider[]
-> {
+export async function getDefaultMemoryGetProviders(
+  allowedScopes?: string[],
+): Promise<MemoryProvider[]> {
   const { createNoosphereProvider } = await import("@/lib/memory/noosphere");
-  return [createNoosphereProvider()];
+  return [createNoosphereProvider({ allowedScopes })];
 }
 
 export function validateMemoryGetRequest(
@@ -120,7 +122,8 @@ export async function executeMemoryGetRequest(
     return { status: validation.status, body: { error: validation.error } };
   }
 
-  const providers = options.providers ?? (await getDefaultMemoryGetProviders());
+  const providers =
+    options.providers ?? (await getDefaultMemoryGetProviders(options.allowedScopes));
   const provider = providers.find(
     (entry) => entry.descriptor.id === validation.request.provider,
   );

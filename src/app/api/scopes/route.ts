@@ -5,7 +5,12 @@ import { requirePermission } from "@/lib/api/auth";
 
 // GET /api/scopes — List all available restricted scopes
 // Auth: Any valid API key (READ minimum)
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
+  const auth = await requirePermission(request, [Permissions.READ]);
+  if (!auth.success) {
+    return auth.response;
+  }
+
   const scopes = await prisma.restrictedScope.findMany({
     orderBy: [{ isSystem: "desc" }, { tag: "asc" }],
     select: { tag: true, description: true, isSystem: true, createdAt: true },

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireApiKey } from "@/lib/api/keys";
+import { canAccessScopes } from "@/lib/api/auth";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import JSZip from "jszip";
@@ -87,6 +88,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
   }
+
+  // Determine effective allowedScopes for scope-based article filtering
+  const allowedScopes = apiAuth.authorized
+    ? apiAuth.allowedScopes
+    : ["*"]; // Sessions get admin-level access
 
   // Parse multipart form using Web API
   let formData: FormData;
@@ -263,6 +269,12 @@ export async function POST(request: NextRequest) {
 
       if (existing) {
         if (overwrite && !existing.deletedAt) {
+          // Scope check: can the caller update this article?
+          if (!canAccessScopes(existing.restrictedTags ?? [], allowedScopes)) {
+            // Restricted article — caller has no matching scope, skip
+            results.skipped++;
+            continue;
+          }
           // Update existing article
           await tx.article.update({
             where: { id: existing.id },

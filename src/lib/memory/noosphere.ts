@@ -86,6 +86,25 @@ export class NoosphereProvider implements MemoryProvider {
     };
   }
 
+  /**
+   * Build a Prisma scope-filter fragment for article queries.
+   * Returns undefined if admin (*) — meaning no filter needed.
+   */
+  private buildScopeWhere(): Record<string, unknown> | undefined {
+    if (this.allowedScopes?.includes("*")) {
+      return undefined; // admin: no filter
+    }
+    if (!this.allowedScopes || this.allowedScopes.length === 0) {
+      return { restrictedTags: { isEmpty: true } }; // no scopes: unrestricted only
+    }
+    return {
+      OR: [
+        { restrictedTags: { isEmpty: true } },
+        { restrictedTags: { hasSome: this.allowedScopes } },
+      ],
+    };
+  }
+
   async search(
     query: string,
     options: MemoryProviderSearchOptions = {},
@@ -131,10 +150,12 @@ export class NoosphereProvider implements MemoryProvider {
     }
 
     const articleId = parseNoosphereArticleId(id);
+    const scopeWhere = this.buildScopeWhere();
     const article = await this.prisma.article.findFirst({
       where: {
         id: articleId,
         deletedAt: null,
+        ...(scopeWhere ?? {}),
       },
       include: {
         topic: true,

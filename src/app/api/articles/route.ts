@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requirePermission, buildScopeFilter } from "@/lib/api/auth";
+import { requirePermission, buildScopeFilter, canAccessScopes } from "@/lib/api/auth";
 import { buildTagConnections, countSearchArticles, searchArticleIds } from "@/lib/wiki";
 import {
   ARTICLE_LIMITS,
@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
               author: { select: { id: true, name: true } },
               relatedTo: {
                 include: {
-                  target: { select: { id: true, title: true, slug: true, topic: true } },
+                  target: { select: { id: true, title: true, slug: true, topic: true, restrictedTags: true } },
                 },
               },
             },
@@ -99,7 +99,7 @@ export async function GET(request: NextRequest) {
             author: { select: { id: true, name: true } },
             relatedTo: {
               include: {
-                target: { select: { id: true, title: true, slug: true, topic: true } },
+                target: { select: { id: true, title: true, slug: true, topic: true, restrictedTags: true } },
               },
             },
           },
@@ -113,6 +113,7 @@ export async function GET(request: NextRequest) {
           tagSlug: tag ?? undefined,
           status: status ?? undefined,
           confidence: confidence ?? undefined,
+          allowedScopes: auth.auth.allowedScopes,
         })
         : prisma.article.count({ where }),
     ]);
@@ -128,12 +129,14 @@ export async function GET(request: NextRequest) {
       confidence: a.confidence,
       status: a.status,
       lastReviewed: a.lastReviewed,
-      relatedArticles: a.relatedTo.map((r) => ({
-        id: r.target.id,
-        title: r.target.title,
-        slug: r.target.slug,
-        topicSlug: r.target.topic.slug,
-      })),
+      relatedArticles: a.relatedTo
+        .filter((r) => canAccessScopes(r.target.restrictedTags ?? [], auth.auth.allowedScopes))
+        .map((r) => ({
+          id: r.target.id,
+          title: r.target.title,
+          slug: r.target.slug,
+          topicSlug: r.target.topic.slug,
+        })),
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
     }));

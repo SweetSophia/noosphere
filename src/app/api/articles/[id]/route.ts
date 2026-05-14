@@ -251,7 +251,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           tags: { include: { tag: true } },
           relatedTo: {
             include: {
-              target: { select: { id: true, title: true, slug: true, topic: true } },
+              target: { select: { id: true, title: true, slug: true, topic: true, restrictedTags: true } },
             },
           },
         },
@@ -268,12 +268,14 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       confidence: updatedArticle!.confidence,
       status: updatedArticle!.status,
       lastReviewed: updatedArticle!.lastReviewed,
-      relatedArticles: updatedArticle!.relatedTo.map((r) => ({
-        id: r.target.id,
-        title: r.target.title,
-        slug: r.target.slug,
-        topicSlug: r.target.topic.slug,
-      })),
+      relatedArticles: updatedArticle!.relatedTo
+        .filter((r) => canAccessScopes(r.target.restrictedTags ?? [], auth.auth.allowedScopes))
+        .map((r) => ({
+          id: r.target.id,
+          title: r.target.title,
+          slug: r.target.slug,
+          topicSlug: r.target.topic.slug,
+        })),
       createdAt: updatedArticle!.createdAt,
       updatedAt: updatedArticle!.updatedAt,
     });
