@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireApiKey } from "@/lib/api/keys";
+import { buildScopeFilter } from "@/lib/api/auth";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import JSZip from "jszip";
@@ -16,9 +17,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Determine effective scopes for export filtering
+  const allowedScopes = apiAuth.authorized
+    ? apiAuth.allowedScopes
+    : ["*"]; // Sessions get full access
+
+  const scopeWhere = buildScopeFilter(allowedScopes, { deletedAt: null });
+
   try {
     const articles = await prisma.article.findMany({
-      where: { deletedAt: null },
+      where: scopeWhere,
       include: {
         topic: { select: { slug: true, name: true } },
         tags: { include: { tag: { select: { name: true, slug: true } } } },
