@@ -30,6 +30,9 @@ export interface NoosphereProviderSettings {
 
   /** Base provider config consumed by orchestrators. */
   providerConfig?: Partial<MemoryProviderConfig>;
+
+  /** Scopes for restricted-article filtering. */
+  allowedScopes?: string[];
 }
 
 export interface NoosphereSearchOptionsMetadata extends MemoryProviderMetadata {
@@ -66,9 +69,11 @@ export class NoosphereProvider implements MemoryProvider {
   readonly descriptor: MemoryProviderDescriptor;
 
   private readonly prisma: PrismaClient;
+  private readonly allowedScopes?: string[];
 
   constructor(settings: NoosphereProviderSettings = {}) {
     this.prisma = settings.prisma ?? defaultPrisma;
+    this.allowedScopes = settings.allowedScopes;
 
     this.descriptor = {
       ...NOOSPHERE_PROVIDER_DESCRIPTOR,
@@ -78,6 +83,25 @@ export class NoosphereProvider implements MemoryProvider {
       },
       capabilities: { ...NOOSPHERE_PROVIDER_DESCRIPTOR.capabilities },
       metadata: { ...NOOSPHERE_PROVIDER_DESCRIPTOR.metadata },
+    };
+  }
+
+  /**
+   * Build a Prisma scope-filter fragment for article queries.
+   * Returns undefined if admin (*) — meaning no filter needed.
+   */
+  private buildScopeWhere(): Record<string, unknown> | undefined {
+    if (this.allowedScopes?.includes("*")) {
+      return undefined; // admin: no filter
+    }
+    if (!this.allowedScopes || this.allowedScopes.length === 0) {
+      return { restrictedTags: { isEmpty: true } }; // no scopes: unrestricted only
+    }
+    return {
+      OR: [
+        { restrictedTags: { isEmpty: true } },
+        { restrictedTags: { hasSome: this.allowedScopes } },
+      ],
     };
   }
 
@@ -107,6 +131,7 @@ export class NoosphereProvider implements MemoryProvider {
       tagSlug: metadata.tagSlug,
       status: metadata.status,
       confidence: metadata.confidence,
+      allowedScopes: this.allowedScopes,
     });
 
     return articles;
@@ -125,10 +150,12 @@ export class NoosphereProvider implements MemoryProvider {
     }
 
     const articleId = parseNoosphereArticleId(id);
+    const scopeWhere = this.buildScopeWhere();
     const article = await this.prisma.article.findFirst({
       where: {
         id: articleId,
         deletedAt: null,
+        ...(scopeWhere ?? {}),
       },
       include: {
         topic: true,
@@ -204,6 +231,7 @@ export class NoosphereProvider implements MemoryProvider {
       confidence?: string;
       limit?: number;
       offset: number;
+      allowedScopes?: string[];
     },
   ): Promise<MemoryResult[]> {
     const filters = buildArticleSearchFilters(options);

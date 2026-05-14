@@ -41,7 +41,10 @@ export function generateApiKey(_name: string): {
  */
 export async function validateApiKey(
   rawKey: string
-): Promise<{ valid: true; permissions: Permissions; keyId: string } | { valid: false }> {
+): Promise<
+  | { valid: true; permissions: Permissions; keyId: string; allowedScopes: string[] }
+  | { valid: false }
+> {
   const prefix = rawKey.slice(0, KEY_PREFIX_LENGTH);
   const hash = hashApiKey(rawKey);
 
@@ -68,7 +71,12 @@ export async function validateApiKey(
     data: { lastUsedAt: now },
   });
 
-  return { valid: true, permissions: record.permissions, keyId: record.id };
+  return {
+    valid: true,
+    permissions: record.permissions,
+    keyId: record.id,
+    allowedScopes: record.allowedScopes,
+  };
 }
 
 /**
@@ -80,7 +88,10 @@ export async function validateApiKey(
  */
 export async function requireApiKey(
   request: Request
-): Promise<{ authorized: true; permissions: Permissions; keyId: string } | { authorized: false }> {
+): Promise<
+  | { authorized: true; permissions: Permissions; keyId: string; allowedScopes: string[] }
+  | { authorized: false }
+> {
   const authHeader = request.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return { authorized: false };
@@ -93,5 +104,10 @@ export async function requireApiKey(
 
   const result = await validateApiKey(rawKey);
   if (!result.valid) return { authorized: false };
-  return { authorized: true, permissions: result.permissions, keyId: result.keyId };
+  return {
+    authorized: true,
+    permissions: result.permissions,
+    keyId: result.keyId,
+    allowedScopes: result.allowedScopes,
+  };
 }

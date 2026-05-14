@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireApiKey } from "@/lib/api/keys";
+import { buildScopeFilter } from "@/lib/api/auth";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
@@ -53,6 +54,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Determine effective scopes for lint filtering
+  const allowedScopes = apiAuth.authorized
+    ? apiAuth.allowedScopes
+    : ["*"]; // Sessions get full access
+  const scopeWhere = buildScopeFilter(allowedScopes, { deletedAt: null });
+
   // --- Parse options ---
   let body: { staleDays?: number; tagMin?: number; maxArticles?: unknown } = {};
   try {
@@ -73,7 +80,7 @@ export async function POST(request: NextRequest) {
 
   // ── Fetch non-deleted articles (capped for performance) ──
   const articles = await prisma.article.findMany({
-    where: { deletedAt: null },
+    where: scopeWhere,
     take: maxArticles,
     orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
     select: {

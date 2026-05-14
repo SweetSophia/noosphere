@@ -19,6 +19,8 @@ export interface ArticleSearchFilters {
   tagSlug?: string;
   status?: string;
   confidence?: string;
+  /** Scopes to filter restricted articles. Unrestricted articles are always included. */
+  allowedScopes?: string[];
 }
 
 // ─── Filter builder ──────────────────────────────────────────────────────────
@@ -51,6 +53,20 @@ export function buildArticleSearchFilters(
   }
   if (options.confidence) {
     clauses.push(Prisma.sql`a.confidence = ${options.confidence}`);
+  }
+
+  // Apply restricted-tag scope filtering
+  if (options.allowedScopes !== undefined) {
+    if (options.allowedScopes.length === 0) {
+      // No scopes — only unrestricted articles
+      clauses.push(Prisma.sql`coalesce(a."restrictedTags", '{}') = '{}'`);
+    } else if (!options.allowedScopes.includes("*")) {
+      // Non-admin: must have at least one matching scope
+      clauses.push(
+        Prisma.sql`(coalesce(a."restrictedTags", '{}') = '{}' OR a."restrictedTags" && ${options.allowedScopes})`,
+      );
+    }
+    // If "*" is in allowedScopes, skip scope filter (admin can see all restricted articles)
   }
 
   return clauses;

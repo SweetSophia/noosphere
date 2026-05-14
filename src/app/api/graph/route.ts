@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requirePermission } from "@/lib/api/auth";
+import { requirePermission, buildScopeFilter } from "@/lib/api/auth";
 
 // GET /api/graph — Wiki knowledge graph
 //
@@ -31,10 +31,13 @@ export async function GET(request: NextRequest) {
     const rawLimit = parseInt(searchParams.get("limit") ?? "100", 10);
     const limit = Math.max(1, Math.min(rawLimit || 100, 500));
 
+    // Build scope-filtered where clause — restricts articles based on key scopes
+    const scopeWhere = buildScopeFilter(auth.auth.allowedScopes, { deletedAt: null });
+
     // Fetch all non-deleted articles with their tags and topic
     const articles = await prisma.article.findMany({
       where: {
-        deletedAt: null,
+        ...scopeWhere,
         ...(topicSlug ? { topic: { slug: topicSlug } } : {}),
       },
       select: {
@@ -137,9 +140,9 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Stats
+  // Stats — article count is scope-filtered; tag/topic counts are not restricted
   const [articleCount, tagCount, topicCount] = await Promise.all([
-    prisma.article.count({ where: { deletedAt: null } }),
+    prisma.article.count({ where: scopeWhere }),
     prisma.tag.count(),
     prisma.topic.count(),
   ]);
