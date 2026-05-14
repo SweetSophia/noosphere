@@ -6,6 +6,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildTagConnections, parseTagInput, slugify } from "@/lib/wiki";
+import { isValidConfidence, isValidStatus } from "@/lib/validation";
 
 async function requireEditorSession() {
   const session = await getServerSession(authOptions);
@@ -52,6 +53,14 @@ export async function createArticle(
 
   const tagConnections = await buildTagConnections(tags);
 
+  // Collect restricted tags from form
+  const restrictedTags: string[] = [];
+  formData.forEach((value, key) => {
+    if (key === "restrictedTags" && typeof value === "string" && value.trim()) {
+      restrictedTags.push(value.trim());
+    }
+  });
+
   const article = await prisma.article.create({
     data: {
       title: title.trim(),
@@ -61,6 +70,7 @@ export async function createArticle(
       topicId: topic.id,
       authorId: session.user.id,
       tags: { create: tagConnections },
+      restrictedTags,
       revisions: {
         create: {
           authorId: session.user.id,

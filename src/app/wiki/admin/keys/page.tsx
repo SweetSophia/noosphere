@@ -6,7 +6,7 @@ import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import { EmptyState } from "@/components/wiki/EmptyState";
 import { CopyButton } from "@/components/wiki/CopyButton";
-import { createApiKeyAction, revokeApiKeyAction } from "./actions";
+import { createApiKeyAction, revokeApiKeyAction, updateApiKeyScopesAction } from "./actions";
 import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
@@ -33,9 +33,14 @@ export default async function ApiKeysPage({ searchParams }: Props) {
   const cookieStore = await cookies();
   const flashKey = cookieStore.get("api_key_flash")?.value ?? null;
 
-  const keys = await prisma.apiKey.findMany({
-    orderBy: [{ revokedAt: "asc" }, { createdAt: "desc" }],
-  });
+  const [keys, scopes] = await Promise.all([
+    prisma.apiKey.findMany({
+      orderBy: [{ revokedAt: "asc" }, { createdAt: "desc" }],
+    }),
+    prisma.restrictedScope.findMany({
+      orderBy: [{ isSystem: "desc" }, { tag: "asc" }],
+    }),
+  ]);
 
   const activeKeys = keys.filter((k) => !k.revokedAt);
   const revokedKeys = keys.filter((k) => k.revokedAt);
@@ -52,7 +57,7 @@ export default async function ApiKeysPage({ searchParams }: Props) {
       <PageHeader
         eyebrow="Admin Console"
         title="API Keys"
-        description="Create and revoke agent keys for Noosphere automation. Keys are stored as SHA-256 hashes and can only be shown once at creation time."
+        description="Create and revoke agent keys. Keys control which articles an agent can read and write based on their allowed scopes."
         meta={
           <div className="page-meta-pills">
             <span className="page-meta-pill">
@@ -98,6 +103,15 @@ export default async function ApiKeysPage({ searchParams }: Props) {
               <option value="ADMIN">ADMIN</option>
             </select>
           </div>
+          <div className="form-group form-group-wide">
+            <label className="form-label">
+              Allowed Scopes <span className="text-muted">(optional)</span>
+            </label>
+            <p className="form-hint">
+              Leave all unchecked for unrestricted access. Scopes restrict which articles this key can read.
+            </p>
+            <ScopePicker scopes={scopes} selected={[]} />
+          </div>
           <div className="admin-form-actions">
             <button type="submit" className="btn btn-primary">Create Key</button>
           </div>
@@ -121,6 +135,7 @@ export default async function ApiKeysPage({ searchParams }: Props) {
                   <th>Name</th>
                   <th>Prefix</th>
                   <th>Permissions</th>
+                  <th>Scopes</th>
                   <th>Created</th>
                   <th>Last Used</th>
                   <th>Status</th>
@@ -131,19 +146,35 @@ export default async function ApiKeysPage({ searchParams }: Props) {
                 {keys.map((key) => (
                   <tr key={key.id}>
                     <td>{key.name}</td>
-                    <td><code>{key.keyPrefix}...</code></td>
+                    <td><code>{key.keyPrefix}…</code></td>
                     <td>{key.permissions}</td>
-                    <td>{new Date(key.createdAt).toLocaleString()}</td>
-                    <td>{key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleString() : "Never"}</td>
+                    <td>
+                      <ScopeBadges scopes={key.allowedScopes} />
+                    </td>
+                    <td>{new Date(key.createdAt).toLocaleDateString()}</td>
+                    <td>{key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleDateString() : "Never"}</td>
                     <td>{key.revokedAt ? "Revoked" : "Active"}</td>
                     <td>
                       {key.revokedAt ? (
-                        <span className="text-muted">No actions</span>
+                        <span className="text-muted">—</span>
                       ) : (
-                        <form action={revokeApiKeyAction}>
-                          <input type="hidden" name="id" value={key.id} />
-                          <button type="submit" className="btn btn-secondary btn-sm">Revoke</button>
-                        </form>
+                        <details className="scope-edit-dropdown">
+                          <summary className="btn btn-secondary btn-sm">Edit Scopes</summary>
+                          <div className="scope-edit-panel">
+                            <p className="scope-edit-title">
+                              Edit scopes for <strong>{key.name}</strong>
+                            </p>
+                            <form action={updateApiKeyScopesAction} className="scope-edit-form">
+                              <input type="hidden" name="id" value={key.id} />
+                              <ScopePicker scopes={scopes} selected={key.allowedScopes} />
+                              <div className="scope-edit-actions">
+                                <button type="submit" className="btn btn-primary btn-sm">
+                                  Save
+                                </button>
+                              </div>
+                            </form>
+                          </div>
+                        </details>
                       )}
                     </td>
                   </tr>
@@ -153,6 +184,58 @@ export default async function ApiKeysPage({ searchParams }: Props) {
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function ScopePicker({
+  scopes,
+  selected,
+}: {
+  scopes: { tag: string; description: string | null; isSystem: boolean }[];
+  selected: string[];
+}) {
+  return (
+    <div className="scope-picker">
+      {scopes.length === 0 ? (
+        <p className="text-muted">No scopes defined yet. Create one at /wiki/admin/scopes.</p>
+      ) : (
+        <div className="scope-checkboxes">
+          {scopes.map((scope) => (
+            <label key={scope.tag} className="scope-checkbox-label">
+              <input
+                type="checkbox"
+                name="scopes"
+                value={scope.tag}
+                defaultChecked={selected.includes(scope.tag)}
+                className="scope-checkbox-input"
+              />
+              <span className="scope-checkbox-content">
+                <code className="scope-tag">{scope.tag}</code>
+                {scope.description && (
+                  <span className="scope-checkbox-desc">{scope.description}</span>
+                )}
+                {scope.isSystem && (
+                  <span className="scope-system-badge">system</span>
+                )}
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ScopeBadges({ scopes }: { scopes: string[] }) {
+  if (!scopes || scopes.length === 0) {
+    return <span className="scope-badge scope-badge-none">Unrestricted</span>;
+  }
+  return (
+    <div className="scope-badge-row">
+      {scopes.map((s) => (
+        <code key={s} className="scope-tag">{s}</code>
+      ))}
     </div>
   );
 }

@@ -147,7 +147,17 @@ export default async function TopicPage({ params }: Props) {
                   <span className="article-kicker">{article.author?.name ?? article.authorName ?? "Unknown author"}</span>
                   <span className="article-date">Updated {new Date(article.updatedAt).toLocaleDateString()}</span>
                 </div>
-                <h3>{article.title}</h3>
+                <h3>
+                  {article.restrictedTags && article.restrictedTags.length > 0 && (
+                    <span className="restricted-icon" title={`Restricted: ${article.restrictedTags.join(", ")}`}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                      </svg>
+                    </span>
+                  )}
+                  {article.title}
+                </h3>
                 <p>
                   {article.excerpt ?? "Open the article to read the latest revision, related sources, and linked references."}
                 </p>

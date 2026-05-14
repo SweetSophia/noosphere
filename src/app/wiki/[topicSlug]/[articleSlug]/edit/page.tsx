@@ -12,6 +12,7 @@ import { ImageUploadPanel } from "@/components/wiki/ImageUploadPanel";
 import { MarkdownPreviewTabs } from "@/components/wiki/MarkdownPreviewTabs";
 import { MarkdownToolbar } from "@/components/wiki/MarkdownToolbar";
 import { deleteArticle, saveArticle } from "./actions";
+import { RestrictedTagPicker } from "@/components/wiki/RestrictedTagPicker";
 
 interface Props {
   params: Promise<{ topicSlug: string; articleSlug: string }>;
@@ -40,6 +41,10 @@ export default async function EditArticlePage({ params }: Props) {
   });
 
   if (!article) notFound();
+
+  const scopes = await prisma.restrictedScope.findMany({
+    orderBy: [{ isSystem: "desc" }, { tag: "asc" }],
+  });
 
   return (
     <div className="wiki-content">
@@ -121,6 +126,11 @@ export default async function EditArticlePage({ params }: Props) {
           />
           <p className="form-hint">Comma-separated tags. Existing tags are reused automatically.</p>
         </div>
+
+        <RestrictedTagPicker
+          scopes={scopes}
+          selected={article.restrictedTags ?? []}
+        />
 
         <div className="form-group">
           <label className="form-label" htmlFor="content">Content (Markdown)</label>

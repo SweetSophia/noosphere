@@ -32,6 +32,27 @@ export async function createApiKeyAction(formData: FormData) {
     throw new Error("Invalid permissions.");
   }
 
+  // Collect scopes from checkbox fields
+  const rawScopes: string[] = [];
+  formData.forEach((value, key) => {
+    if (key === "scopes" && typeof value === "string") {
+      rawScopes.push(value);
+    }
+  });
+
+  // Validate scopes exist
+  if (rawScopes.length > 0) {
+    const validScopes = await prisma.restrictedScope.findMany({
+      where: { tag: { in: rawScopes } },
+      select: { tag: true },
+    });
+    const validSet = new Set(validScopes.map((s) => s.tag));
+    const invalid = rawScopes.filter((s) => !validSet.has(s) && s !== "*");
+    if (invalid.length > 0) {
+      throw new Error(`Unknown scope(s): ${invalid.join(", ")}`);
+    }
+  }
+
   const { raw, hash, prefix } = generateApiKey(name);
 
   await prisma.apiKey.create({
@@ -40,6 +61,7 @@ export async function createApiKeyAction(formData: FormData) {
       keyHash: hash,
       keyPrefix: prefix,
       permissions: permissions as "READ" | "WRITE" | "ADMIN",
+      allowedScopes: rawScopes,
     },
   });
 
@@ -55,6 +77,52 @@ export async function createApiKeyAction(formData: FormData) {
 
   revalidatePath("/wiki/admin/keys");
   redirect(`/wiki/admin/keys?flash=1&name=${encodeURIComponent(name)}`);
+}
+
+export async function updateApiKeyScopesAction(formData: FormData) {
+  await requireAdmin();
+
+  const id = String(formData.get("id") ?? "").trim();
+  if (!id) {
+    throw new Error("Key ID missing.");
+  }
+
+  const key = await prisma.apiKey.findUnique({ where: { id } });
+  if (!key) {
+    throw new Error("Key not found.");
+  }
+  if (key.revokedAt) {
+    throw new Error("Cannot update scopes on a revoked key.");
+  }
+
+  // Collect scopes from checkbox fields
+  const rawScopes: string[] = [];
+  formData.forEach((value, key) => {
+    if (key === "scopes" && typeof value === "string") {
+      rawScopes.push(value);
+    }
+  });
+
+  // Validate scopes exist
+  if (rawScopes.length > 0) {
+    const validScopes = await prisma.restrictedScope.findMany({
+      where: { tag: { in: rawScopes } },
+      select: { tag: true },
+    });
+    const validSet = new Set(validScopes.map((s) => s.tag));
+    const invalid = rawScopes.filter((s) => !validSet.has(s) && s !== "*");
+    if (invalid.length > 0) {
+      throw new Error(`Unknown scope(s): ${invalid.join(", ")}`);
+    }
+  }
+
+  await prisma.apiKey.update({
+    where: { id },
+    data: { allowedScopes: rawScopes },
+  });
+
+  revalidatePath("/wiki/admin/keys");
+  redirect("/wiki/admin/keys");
 }
 
 export async function revokeApiKeyAction(formData: FormData) {

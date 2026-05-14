@@ -61,6 +61,14 @@ export async function saveArticle(
   const nextExcerpt = excerpt.trim() || nextContent.slice(0, 160).replace(/[#*`_]/g, "");
   const tagConnections = await buildTagConnections(tags);
 
+  // Collect restricted tags from form
+  const restrictedTags: string[] = [];
+  formData.forEach((value, key) => {
+    if (key === "restrictedTags" && typeof value === "string" && value.trim()) {
+      restrictedTags.push(value.trim());
+    }
+  });
+
   await prisma.$transaction([
     prisma.article.update({
       where: { id: article.id },
@@ -68,6 +76,7 @@ export async function saveArticle(
         content: nextContent,
         title: nextTitle,
         excerpt: nextExcerpt,
+        restrictedTags,
         updatedAt: new Date(),
       },
     }),

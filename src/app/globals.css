@@ -236,3 +236,155 @@ samp {
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+/* Restricted scope tags */
+.scope-tag {
+  background: var(--accent-soft);
+  color: var(--accent-color);
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.875em;
+}
+
+/* Article count badges */
+.count-badge {
+  display: inline-block;
+  min-width: 1.5rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-muted);
+}
+.count-badge-active {
+  background: var(--accent-soft);
+  color: var(--accent-color);
+}
+
+/* Scope picker */
+.scope-picker {}
+.scope-checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.scope-checkbox-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  cursor: pointer;
+  padding: 0.375rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: rgba(255,255,255,0.03);
+  transition: border-color 0.15s, background 0.15s;
+}
+.scope-checkbox-label:hover {
+  border-color: var(--accent-color);
+  background: var(--accent-soft);
+}
+.scope-checkbox-input {
+  margin-top: 0.2rem;
+  accent-color: var(--accent-color);
+  cursor: pointer;
+}
+.scope-checkbox-content {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.scope-checkbox-desc {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+.scope-system-badge {
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: rgba(255,255,255,0.08);
+  color: var(--text-muted);
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-sm);
+}
+.scope-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.scope-badge-none {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 0.875rem;
+}
+
+/* Scope edit dropdown */
+.scope-edit-dropdown {
+  position: relative;
+  display: inline-block;
+}
+.scope-edit-dropdown > summary {
+  list-style: none;
+}
+.scope-edit-dropdown > summary::-webkit-details-marker {
+  display: none;
+}
+.scope-edit-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.25rem);
+  z-index: 50;
+  background: var(--surface-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  min-width: 280px;
+  max-width: 400px;
+  box-shadow: var(--shadow-2);
+}
+.scope-edit-title {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+.scope-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.scope-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Form hint */
+.form-hint {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin: 0.25rem 0 0;
+}
+
+/* Restricted tag picker */
+.restricted-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.text-sm {
+  font-size: 0.875rem;
+}
+
+/* Restricted article indicator */
+.restricted-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0.375rem;
+  color: var(--warning-color, #bf7a14);
+  flex-shrink: 0;
+}
