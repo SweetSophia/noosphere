@@ -34,6 +34,15 @@ class NoosphereClient:
     def status(self) -> Dict[str, Any]:
         return self._request_json("GET", "/api/memory/status")
 
+    def recall(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        return self._request_json("POST", "/api/memory/recall", request)
+
+    def get(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        return self._request_json("POST", "/api/memory/get", request)
+
+    def topics(self) -> Dict[str, Any]:
+        return self._request_json("GET", "/api/topics")
+
     def _request_json(
         self,
         method: str,

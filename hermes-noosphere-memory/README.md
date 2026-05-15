@@ -2,7 +2,7 @@
 
 This package contains the Hermes Agent memory-provider integration for Noosphere.
 
-Current implementation status: Phase 2 client and status tool.
+Current implementation status: Phase 3 recall/get/topics and auto-recall prefetch.
 
 ## Layout
 
@@ -10,6 +10,7 @@ Current implementation status: Phase 2 client and status tool.
 plugins/memory/noosphere/
   __init__.py
   client.py
+  formatting.py
   plugin.yaml
   README.md
   schemas.py
@@ -28,12 +29,12 @@ Implemented:
 - environment-based secret lookup through `NOOSPHERE_API_KEY`
 - safe initialization without network calls
 - standard-library HTTP client with redacted errors
-- `noosphere_status` tool
+- `noosphere_status`, `noosphere_recall`, `noosphere_get`, and `noosphere_topics` tools
+- auto-recall prefetch through Noosphere's prompt-ready recall API
 
 Not implemented yet:
 
-- explicit recall/save/get/topics tools
-- automatic recall
+- explicit save/article tools
 - explicit memory write mirroring
 - installer script
 

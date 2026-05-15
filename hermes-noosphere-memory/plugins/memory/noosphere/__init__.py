@@ -16,7 +16,8 @@ from typing import Any, Dict, List, Optional
 from agent.memory_provider import MemoryProvider
 
 from .client import NoosphereClient, NoosphereClientError
-from .schemas import NOOSPHERE_STATUS_SCHEMA
+from .formatting import strip_context_fences
+from .schemas import TOOL_SCHEMAS
 
 logger = logging.getLogger(__name__)
 
@@ -234,22 +235,53 @@ class NoosphereMemoryProvider(MemoryProvider):
             return ""
         return (
             "# Noosphere\n"
-            "Noosphere memory provider is configured. Explicit memory tools and "
-            "automatic recall are added by later plugin phases. Save only durable, "
-            "reusable knowledge; skip transient task status and trivial turns."
+            "Noosphere memory provider is configured. Use noosphere_recall, "
+            "noosphere_get, noosphere_topics, and noosphere_status for explicit "
+            "memory operations. Save only durable, reusable knowledge; skip "
+            "transient task status and trivial turns."
         )
 
+    def prefetch(self, query: str, *, session_id: str = "") -> str:
+        if not self._active or not self._client or not self._config.get("auto_recall"):
+            return ""
+        if not query or not query.strip():
+            return ""
+        try:
+            result = self._client.recall(
+                {
+                    "query": query.strip()[:1000],
+                    "mode": "auto",
+                    "resultCap": self._config["max_recall_results"],
+                    "tokenBudget": self._config["token_budget"],
+                    "providers": self._config["providers"],
+                }
+            )
+        except NoosphereClientError:
+            logger.debug("Noosphere prefetch failed", exc_info=True)
+            return ""
+        prompt_text = result.get("promptInjectionText")
+        return strip_context_fences(prompt_text) if isinstance(prompt_text, str) else ""
+
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
-        return [NOOSPHERE_STATUS_SCHEMA]
+        return TOOL_SCHEMAS
 
     def handle_tool_call(self, tool_name: str, args: Dict[str, Any], **kwargs: Any) -> str:
-        if tool_name != "noosphere_status":
-            return json.dumps({"error": f"Unknown Noosphere memory tool: {tool_name}"})
         if not self._active or not self._client:
             return json.dumps({"error": "Noosphere is not configured. Set NOOSPHERE_API_KEY."})
+
         try:
-            return json.dumps(self._client.status())
-        except NoosphereClientError as error:
+            if tool_name == "noosphere_status":
+                return json.dumps(self._client.status())
+            if tool_name == "noosphere_topics":
+                return json.dumps(self._client.topics())
+            if tool_name == "noosphere_recall":
+                return json.dumps(self._client.recall(_read_recall_args(args, self._config)))
+            if tool_name == "noosphere_get":
+                return json.dumps(self._client.get(_read_get_args(args)))
+            return json.dumps({"error": f"Unknown Noosphere memory tool: {tool_name}"})
+        except (NoosphereClientError, ValueError) as error:
+            if isinstance(error, ValueError):
+                return json.dumps({"error": str(error)})
             return error.to_json()
 
     def shutdown(self) -> None:
@@ -260,3 +292,43 @@ def register(ctx: Any) -> None:
     """Register the Noosphere memory provider with Hermes."""
 
     ctx.register_memory_provider(NoosphereMemoryProvider())
+
+
+def _read_recall_args(args: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
+    query = _as_string(args.get("query"))
+    if not query:
+        raise ValueError("query is required")
+    request: Dict[str, Any] = {
+        "query": query,
+        "mode": "inspection",
+        "resultCap": _as_int(
+            args.get("resultCap"),
+            int(config["max_recall_results"]),
+            minimum=1,
+            maximum=20,
+        ),
+        "tokenBudget": _as_int(
+            args.get("tokenBudget"),
+            int(config["token_budget"]),
+            minimum=100,
+            maximum=8000,
+        ),
+        "providers": config["providers"],
+    }
+    scope = _as_string(args.get("scope"))
+    if scope:
+        request["scope"] = scope
+    return request
+
+
+def _read_get_args(args: Dict[str, Any]) -> Dict[str, Any]:
+    canonical_ref = _as_string(args.get("canonicalRef"))
+    provider = _as_string(args.get("provider"))
+    memory_id = _as_string(args.get("id"))
+    if canonical_ref:
+        if provider or memory_id:
+            raise ValueError("Use either canonicalRef or provider+id, not both")
+        return {"canonicalRef": canonical_ref}
+    if provider and memory_id:
+        return {"provider": provider, "id": memory_id}
+    raise ValueError("Provide canonicalRef or provider+id")

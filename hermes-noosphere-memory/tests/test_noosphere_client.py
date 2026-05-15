@@ -50,6 +50,7 @@ class _StatusHandler(BaseHTTPRequestHandler):
     response_status = 200
     response_body = {"ok": True, "providers": [], "settings": {}}
     seen_authorization = ""
+    seen_json = {}
 
     def do_GET(self):
         if self.path != "/api/memory/status":
@@ -57,6 +58,22 @@ class _StatusHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         type(self).seen_authorization = self.headers.get("Authorization", "")
+        raw = json.dumps(type(self).response_body).encode("utf-8")
+        self.send_response(type(self).response_status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def do_POST(self):
+        if self.path not in {"/api/memory/recall", "/api/memory/get"}:
+            self.send_response(404)
+            self.end_headers()
+            return
+        type(self).seen_authorization = self.headers.get("Authorization", "")
+        length = int(self.headers.get("Content-Length", "0"))
+        raw_body = self.rfile.read(length)
+        type(self).seen_json = json.loads(raw_body.decode("utf-8")) if raw_body else {}
         raw = json.dumps(type(self).response_body).encode("utf-8")
         self.send_response(type(self).response_status)
         self.send_header("Content-Type", "application/json")
@@ -73,6 +90,7 @@ class NoosphereClientTest(unittest.TestCase):
         _StatusHandler.response_status = 200
         _StatusHandler.response_body = {"ok": True, "providers": [], "settings": {}}
         _StatusHandler.seen_authorization = ""
+        _StatusHandler.seen_json = {}
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), _StatusHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -95,6 +113,21 @@ class NoosphereClientTest(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(_StatusHandler.seen_authorization, "Bearer noo_test")
+
+    def test_recall_posts_json_body(self):
+        module = load_plugin_package()
+        _StatusHandler.response_body = {"results": [], "mode": "inspection"}
+        client = module.NoosphereClient(
+            base_url=self.base_url,
+            api_key="noo_test",
+            timeout=2.0,
+        )
+
+        result = client.recall({"query": "deploy", "mode": "inspection"})
+
+        self.assertEqual(result["mode"], "inspection")
+        self.assertEqual(_StatusHandler.seen_authorization, "Bearer noo_test")
+        self.assertEqual(_StatusHandler.seen_json["query"], "deploy")
 
     def test_http_error_is_redacted_json(self):
         module = load_plugin_package()

@@ -135,7 +135,10 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
 
         schemas = provider.get_tool_schemas()
 
-        self.assertEqual([schema["name"] for schema in schemas], ["noosphere_status"])
+        self.assertEqual(
+            [schema["name"] for schema in schemas],
+            ["noosphere_status", "noosphere_recall", "noosphere_get", "noosphere_topics"],
+        )
 
 
 if __name__ == "__main__":
