@@ -61,7 +61,10 @@ export function resolveNoosphereMemoryConfig(
 
 /**
  * Resolve the API key for a specific agent.
- * Priority: apiKeys[agentId] > default apiKey > env.NOOSPHERE_API_KEY
+ * Priority:
+ *   1. NOOSPHERE_API_KEY_<AGENT_ID> env var (e.g. NOOSPHERE_API_KEY_SHODAN)
+ *   2. apiKeys[agentId] from plugin config (plain text, for multi-agent setups)
+ *   3. Default apiKey (resolved from string, secret ref, or env.NOOSPHERE_API_KEY)
  */
 export function resolveApiKeyForAgent(
   rawConfig: unknown,
@@ -71,7 +74,14 @@ export function resolveApiKeyForAgent(
 ): string | undefined {
   const config = isRecord(rawConfig) ? rawConfig as Partial<NoosphereMemoryConfig> : {};
 
-  // 1. Per-agent key from config.apiKeys (direct map, no secret resolution)
+  // 1. Per-agent env var (highest priority, keeps keys secret)
+  if (agentId) {
+    const envKey = `NOOSPHERE_API_KEY_${agentId.toUpperCase().replace(/-/g, "_")}`;
+    const envValue = readString(env[envKey]);
+    if (envValue) return envValue;
+  }
+
+  // 2. Per-agent key from config.apiKeys (direct map, no secret resolution)
   if (agentId && config.apiKeys && typeof config.apiKeys === "object") {
     const perAgentKey = config.apiKeys[agentId];
     if (typeof perAgentKey === "string" && perAgentKey.trim()) {
@@ -79,7 +89,7 @@ export function resolveApiKeyForAgent(
     }
   }
 
-  // 2. Default key (resolved from string, secret ref, or env)
+  // 3. Default key (resolved from string, secret ref, or env.NOOSPHERE_API_KEY)
   return (
     readSecret(config.apiKey, rootConfig) || readString(env.NOOSPHERE_API_KEY)
   );
