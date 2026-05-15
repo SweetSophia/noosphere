@@ -2,12 +2,13 @@
 
 Noosphere gives Hermes Agent access to durable, scoped, human-readable memory.
 
-This provider is currently in Phase 1:
+This provider is currently in Phase 2:
 
 - it registers with Hermes as a memory provider
 - it exposes setup fields for the Noosphere API key and base URL
 - it stores non-secret configuration in `$HERMES_HOME/noosphere.json`
 - it reads the secret API key from `NOOSPHERE_API_KEY`
+- it exposes `noosphere_status` for Noosphere memory status checks
 
 Recall and save tools are intentionally added in later phases.
 
@@ -72,3 +73,9 @@ Secrets:
 `is_available()` checks only local environment. It does not make network calls during Hermes startup.
 
 Writes are disabled during `cron`, `flush`, and `subagent` contexts.
+
+## Tools
+
+| Tool | Description |
+| --- | --- |
+| `noosphere_status` | Calls `GET /api/memory/status` and returns Noosphere memory status JSON. |

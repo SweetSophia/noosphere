@@ -36,11 +36,16 @@ def load_plugin():
             "agent.memory_provider": memory_provider_module,
         },
     ):
-        spec = importlib.util.spec_from_file_location("noosphere_memory_plugin", PLUGIN_PATH)
+        spec = importlib.util.spec_from_file_location(
+            "noosphere_memory_plugin",
+            PLUGIN_PATH,
+            submodule_search_locations=[str(PLUGIN_PATH.parent)],
+        )
         module = importlib.util.module_from_spec(spec)
         assert spec and spec.loader
-        spec.loader.exec_module(module)
-        return module
+        with mock.patch.dict(sys.modules, {"noosphere_memory_plugin": module}):
+            spec.loader.exec_module(module)
+            return module
 
 
 class NoosphereProviderPhase1Test(unittest.TestCase):
@@ -123,6 +128,14 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
 
         self.assertEqual(len(registered), 1)
         self.assertEqual(registered[0].name, "noosphere")
+
+    def test_status_tool_schema_is_registered(self):
+        module = load_plugin()
+        provider = module.NoosphereMemoryProvider()
+
+        schemas = provider.get_tool_schemas()
+
+        self.assertEqual([schema["name"] for schema in schemas], ["noosphere_status"])
 
 
 if __name__ == "__main__":

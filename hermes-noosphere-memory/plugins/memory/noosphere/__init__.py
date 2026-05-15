@@ -11,9 +11,12 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from agent.memory_provider import MemoryProvider
+
+from .client import NoosphereClient, NoosphereClientError
+from .schemas import NOOSPHERE_STATUS_SCHEMA
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +176,7 @@ class NoosphereMemoryProvider(MemoryProvider):
         self._agent_context = ""
         self._write_enabled = True
         self._active = False
+        self._client: Optional[NoosphereClient] = None
 
     @property
     def name(self) -> str:
@@ -217,6 +221,13 @@ class NoosphereMemoryProvider(MemoryProvider):
         self._api_key = os.environ.get("NOOSPHERE_API_KEY", "").strip()
         self._write_enabled = self._agent_context not in _NON_WRITING_CONTEXTS
         self._active = bool(self._api_key)
+        self._client = None
+        if self._active:
+            self._client = NoosphereClient(
+                base_url=str(self._config["base_url"]),
+                api_key=self._api_key,
+                timeout=float(self._config["api_timeout"]),
+            )
 
     def system_prompt_block(self) -> str:
         if not self._active:
@@ -229,15 +240,17 @@ class NoosphereMemoryProvider(MemoryProvider):
         )
 
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
-        return []
+        return [NOOSPHERE_STATUS_SCHEMA]
 
     def handle_tool_call(self, tool_name: str, args: Dict[str, Any], **kwargs: Any) -> str:
-        return json.dumps(
-            {
-                "error": "Noosphere memory tools are not implemented in Phase 1.",
-                "tool": tool_name,
-            }
-        )
+        if tool_name != "noosphere_status":
+            return json.dumps({"error": f"Unknown Noosphere memory tool: {tool_name}"})
+        if not self._active or not self._client:
+            return json.dumps({"error": "Noosphere is not configured. Set NOOSPHERE_API_KEY."})
+        try:
+            return json.dumps(self._client.status())
+        except NoosphereClientError as error:
+            return error.to_json()
 
     def shutdown(self) -> None:
         return None
