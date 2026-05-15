@@ -246,7 +246,8 @@ value used by the plugin when no config is supplied. "Installer value" is what
 | Field | Plugin default | Installer value | Notes |
 | --- | --- | --- | --- |
 | `baseUrl` | `http://localhost:3000` | `http://127.0.0.1:6578` | Noosphere server base URL. |
-| `apiKey` | unset | file secret reference | String, `{ value }`, or OpenClaw file secret reference. Required for memory APIs. |
+| `apiKey` | unset | file secret reference | Default API key. Used when no per-agent key matches. String, `{ value }`, or OpenClaw file secret reference. Required for memory APIs. |
+| `apiKeys` | unset | unset | Per-agent API key map `{ [agentId]: keyString }`. Takes precedence over `apiKey` for matching agents. Use env vars for secret keys (see below). |
 | `timeoutMs` | `5000` | default | Explicit HTTP request timeout. Max `30000`. |
 | `autoRecall` | `false` | `true` | Enables `before_prompt_build` recall injection. |
 | `autoProviders` | `["noosphere"]` | `["noosphere"]` | Providers requested from Noosphere auto recall. |
@@ -325,6 +326,51 @@ Example:
 - **Coordinated mode**: disable Hindsight auto-recall and configure Noosphere to orchestrate both providers with `autoProviders: ["noosphere", "hindsight"]`. Use this only when the Noosphere server has a configured Hindsight provider and you want a single unified recall block.
 
 Avoid enabling two independent broad prompt-injection systems without understanding the resulting token and duplication behavior.
+
+## Per-Agent API Keys
+
+When multiple agents share the same OpenClaw plugin, each agent should use its own API key to avoid overwriting one another's credentials. The plugin routes keys automatically by agent ID.
+
+### Key routing priority (highest to lowest)
+
+1. **`NOOSPHERE_API_KEY_<AGENT_ID>`** — Environment variable. Recommended. Key stays secret (not in any config file).
+2. **`apiKeys[agentId]`** — Config map. Plain text, visible in `openclaw.json`.
+3. **`apiKey` / `NOOSPHERE_API_KEY`** — Default fallback.
+
+### Adding a new agent key (recommended method)
+
+1. **Create a key** for the new agent in the Noosphere admin UI: `https://<host>/wiki/admin/keys`.
+2. **Add an env var** to the OpenClaw gateway systemd service:
+
+```bash
+mkdir -p ~/.config/systemd/user/openclaw-gateway.service.d/
+cat >> ~/.config/systemd/user/openclaw-gateway.service.d/override.conf <<'EOF'
+[Service]
+Environment="NOOSPHERE_API_KEY_<AGENT_ID>=noo_newagentkey"
+EOF
+systemctl --user daemon-reload
+systemctl --user restart openclaw-gateway
+```
+
+Replace `<AGENT_ID>` with the agent's OpenClaw ID in **UPPERCASE**, hyphens → underscores (e.g., `cyberlogis` → `NOOSPHERE_API_KEY_CYBERLOGIS`).
+
+### Verifying which key an agent is using
+
+```bash
+# Find the gateway PID
+grep NOOSPHERE_API_KEY /proc/$(pgrep -f openclaw.*gateway | head -1)/environ
+
+# Test a specific key
+curl -s https://<host>/api/memory/status \
+  -H "Authorization: Bearer noo_testkey"
+```
+
+### Upgrading from shared key to per-agent keys
+
+1. Create individual keys for each agent via the admin UI.
+2. Add each key as an env var in the systemd override (see above).
+3. Remove the shared `apiKey` from `openclaw.json` plugin config (or keep it as the fallback).
+4. Restart the gateway — agents immediately begin using their own keys.
 
 ## Upgrade
 

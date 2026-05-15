@@ -600,3 +600,38 @@ Verify:
   openclaw plugins inspect ${PLUGIN_ID} --runtime --json
 
 DONE
+
+# ── Per-Agent API Keys ──────────────────────────────────────────────────────────
+#
+# Each OpenClaw agent can have its own API key. The plugin auto-routes to the
+# correct key based on the agent's ID. This avoids the shared-secrets-file problem
+# where one agent overwrites another's key.
+#
+# HOW TO ADD A NEW AGENT KEY:
+#
+# 1. Create a key for the new agent via the Noosphere admin UI:
+#    ${APP_URL}/wiki/admin/keys
+#    (Admin login: admin@noosphere.local / ${ADMIN_PASSWORD})
+#
+# 2. Add the key as an environment variable in the OpenClaw gateway systemd unit.
+#    The gateway must be restarted after each change:
+#
+#    mkdir -p ~/.config/systemd/user/openclaw-gateway.service.d/
+#    cat >> ~/.config/systemd/user/openclaw-gateway.service.d/override.conf <<'EOF'
+#    [Service]
+#    Environment="NOOSPHERE_API_KEY_<AGENT_ID>=noo_newagentkey"
+#    EOF
+#    systemctl --user daemon-reload
+#    systemctl --user restart openclaw-gateway
+#
+#    Replace <AGENT_ID> with the agent's OpenClaw ID in UPPERCASE,
+#    hyphens replaced by underscores (e.g., agent "cyberlogis" → NOOSPHERE_API_KEY_CYBERLOGIS).
+#
+# KEY ROUTING PRIORITY (highest to lowest):
+#   1. NOOSPHERE_API_KEY_<AGENT_ID>  (env var, per-agent, recommended)
+#   2. apiKeys[agentId]              (config map, plain text)
+#   3. apiKey / NOOSPHERE_API_KEY    (default fallback)
+#
+# CURRENT KEYS ON THIS HOST:
+  Run: grep NOOSPHERE_API_KEY /proc/$(pgrep -f openclaw.*gateway | head -1)/environ
+  Or:  openclaw noosphere status
