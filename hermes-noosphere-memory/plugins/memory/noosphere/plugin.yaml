@@ -1,0 +1,3 @@
+name: noosphere
+version: 0.1.0
+description: "Noosphere durable memory provider with scoped recall and draft memory capture."
