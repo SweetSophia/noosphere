@@ -24,8 +24,6 @@ const TOPICS = [
     description: "Project-specific documentation",
     children: [
       { name: "Noosphere", slug: "noosphere", description: "This wiki system" },
-      { name: "PK-PRO", slug: "pk-pro", description: "Product knowledge database" },
-      { name: "IHK Study Trainer", slug: "ihk-study-trainer", description: "Study and practice platform" },
     ],
   },
   {
