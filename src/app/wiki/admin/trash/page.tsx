@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/wiki/PageHeader";
 import { EmptyState } from "@/components/wiki/EmptyState";
 import { RestoreArticleForm } from "@/components/wiki/RestoreArticleForm";
 import { restoreArticleAction } from "./actions";
+import { AdminNav } from "@/components/wiki/AdminNav";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +52,8 @@ export default async function TrashPage() {
           </div>
         }
       />
+
+      <AdminNav current="trash" />
 
       <section className="admin-card">
         {articles.length === 0 ? (

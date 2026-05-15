@@ -908,6 +908,57 @@
   text-transform: uppercase;
 }
 
+/* ── Admin nav ─────────────────────────────────────────────────────────────── */
+.admin-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.admin-nav-item {
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+}
+
+.admin-nav-item:hover {
+  background: var(--surface-inset);
+  color: var(--text);
+}
+
+.admin-nav-item-active {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── Topic / tag row actions ──────────────────────────────────────────────── */
+.topic-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.inline-form {
+  display: inline;
+}
+
+.btn-danger {
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  color: var(--error);
+  border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
+}
+
+.btn-danger:hover {
+  background: color-mix(in srgb, var(--error) 20%, transparent);
+}
+
 .secret-box {
   margin-top: 0.5rem;
   padding: 0.85rem 1rem;

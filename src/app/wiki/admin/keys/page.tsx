@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/wiki/PageHeader";
 import { EmptyState } from "@/components/wiki/EmptyState";
 import { CopyButton } from "@/components/wiki/CopyButton";
 import { createApiKeyAction, revokeApiKeyAction, updateApiKeyScopesAction } from "./actions";
+import { AdminNav } from "@/components/wiki/AdminNav";
 import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
@@ -71,6 +72,8 @@ export default async function ApiKeysPage({ searchParams }: Props) {
           </div>
         }
       />
+
+      <AdminNav current="keys" />
 
       {params.flash && flashKey && (
         <div className="alert alert-success">

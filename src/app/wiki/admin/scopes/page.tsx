@@ -6,6 +6,7 @@ import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import { EmptyState } from "@/components/wiki/EmptyState";
 import { createScopeAction, deleteScopeAction } from "./actions";
+import { AdminNav } from "@/components/wiki/AdminNav";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,8 @@ export default async function ScopesPage() {
         title="Restricted Scopes"
         description="Restricted scopes control which articles an API key can access. Articles tagged with a scope are only visible to keys that include that scope in their allowedScopes."
       />
+
+      <AdminNav current="scopes" />
 
       <section className="admin-card">
         <div className="section-header">

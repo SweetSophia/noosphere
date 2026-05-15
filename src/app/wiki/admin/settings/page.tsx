@@ -5,6 +5,7 @@ import { getRecallSettingsFromDB } from "@/lib/memory/api/settings";
 import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import { updateSettingsAction } from "./actions";
+import { AdminNav } from "@/components/wiki/AdminNav";
 import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +44,8 @@ export default async function SettingsPage() {
         title="Recall Settings"
         description="Configure how the memory system retrieves, deduplicates, and resolves conflicts across providers."
       />
+
+      <AdminNav current="settings" />
 
       {flash && (
         <div className="alert alert-success" role="status">

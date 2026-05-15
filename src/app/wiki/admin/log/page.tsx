@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { AdminNav } from "@/components/wiki/AdminNav";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -80,6 +81,8 @@ export default async function ActivityLogPage({
           </Link>
         </div>
       </div>
+
+      <AdminNav current="log" />
 
       <div className="activity-filter-bar" aria-label="Filter activity by type">
         <Link
