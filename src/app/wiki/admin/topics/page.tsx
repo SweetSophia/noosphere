@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import { AdminNav } from "@/components/wiki/AdminNav";
+import { DeleteTopicButton } from "@/components/wiki/DeleteTopicButton";
 import { createTopicAction, updateTopicAction, deleteTopicAction } from "./actions";
 import { cookies } from "next/headers";
 
@@ -264,20 +265,11 @@ function TopicRow({
                 </form>
               </div>
             </details>
-            <form action={deleteTopicAction} className="inline-form">
-              <input type="hidden" name="id" value={topic.id} />
-              <button
-                type="submit"
-                className="btn btn-danger btn-sm"
-                onClick={(e) => {
-                  if (!confirm(`Delete topic "${topic.name}"? This cannot be undone.`)) {
-                    e.preventDefault();
-                  }
-                }}
-              >
-                Delete
-              </button>
-            </form>
+            <DeleteTopicButton
+              topicId={topic.id}
+              topicName={topic.name}
+              deleteAction={deleteTopicAction}
+            />
           </div>
         </td>
       </tr>

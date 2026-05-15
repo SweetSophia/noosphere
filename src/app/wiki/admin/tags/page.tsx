@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import { AdminNav } from "@/components/wiki/AdminNav";
+import { DeleteTagButton } from "@/components/wiki/DeleteTagButton";
 import { createTagAction, renameTagAction, deleteTagAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -126,27 +127,12 @@ export default async function TagsPage() {
                           </form>
                         </div>
                       </details>
-                      <form action={deleteTagAction} className="inline-form">
-                        <input type="hidden" name="id" value={tag.id} />
-                        <button
-                          type="submit"
-                          className="btn btn-danger btn-sm"
-                          disabled={tag._count.articles > 0}
-                          title={tag._count.articles > 0 ? `In use by ${tag._count.articles} article(s)` : "Delete tag"}
-                          onClick={(e) => {
-                            if (tag._count.articles > 0) {
-                              e.preventDefault();
-                              alert(`Tag "${tag.name}" is used by ${tag._count.articles} article(s). Remove it from articles first.`);
-                              return;
-                            }
-                            if (!confirm(`Delete tag "${tag.name}"? This cannot be undone.`)) {
-                              e.preventDefault();
-                            }
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </form>
+                      <DeleteTagButton
+                        tagId={tag.id}
+                        tagName={tag.name}
+                        articleCount={tag._count.articles}
+                        deleteAction={deleteTagAction}
+                      />
                     </div>
                   </td>
                 </tr>
