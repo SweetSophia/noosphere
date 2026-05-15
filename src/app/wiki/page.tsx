@@ -82,6 +82,7 @@ function TopicTreeNode({ tree }: { tree: TopicRenderNode }) {
 
 export default async function WikiHomePage() {
   const session = await getServerSession(authOptions);
+  const isAdmin = session?.user?.role === "ADMIN";
   // Unauthenticated users only see unrestricted articles.
   // Human sessions always have full access — they bypass restrictions.
   const allowedScopes = session ? ["*"] : undefined;
@@ -147,6 +148,18 @@ export default async function WikiHomePage() {
               <span>recent updates surfaced</span>
             </span>
           </div>
+        }
+        actions={
+          isAdmin ? (
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <Link href="/wiki/admin/topics" className="btn btn-secondary btn-sm">
+                New Topic
+              </Link>
+              <Link href="/wiki/admin/keys" className="btn btn-secondary btn-sm">
+                API Keys
+              </Link>
+            </div>
+          ) : null
         }
       />
 

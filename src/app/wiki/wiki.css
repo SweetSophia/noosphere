@@ -618,6 +618,7 @@
 }
 
 .topic-tree-card {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 1rem;
@@ -643,7 +644,18 @@
 }
 
 .topic-tree-title a {
+  position: relative;
+  z-index: 1;
+  display: block;
   color: inherit;
+}
+
+/* Stretched link: title link covers entire card so clicking anywhere on the card navigates */
+.topic-tree-title a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
 }
 
 .topic-tree-description {
@@ -698,6 +710,8 @@
   gap: 1rem;
   align-items: start;
   color: inherit;
+  text-decoration: none;
+  position: relative;
 }
 
 .topic-subtopic-card h3 {
