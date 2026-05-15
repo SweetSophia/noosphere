@@ -141,3 +141,77 @@ export async function revokeApiKeyAction(formData: FormData) {
   revalidatePath("/wiki/admin/keys");
   redirect("/wiki/admin/keys");
 }
+
+export async function rotateApiKeyAction(formData: FormData) {
+  await requireAdmin();
+
+  const id = String(formData.get("id") ?? "").trim();
+  if (!id) {
+    throw new Error("Key ID missing.");
+  }
+
+  const oldKey = await prisma.apiKey.findUnique({ where: { id } });
+  if (!oldKey) {
+    throw new Error("Key not found.");
+  }
+  if (oldKey.revokedAt) {
+    throw new Error("Cannot rotate an already revoked key.");
+  }
+
+  // Create new key with same name + rotated suffix
+  const rotatedName = oldKey.name.includes(" (rotated)")
+    ? oldKey.name
+    : `${oldKey.name} (rotated)`;
+  const { raw, hash, prefix } = generateApiKey(rotatedName);
+
+  // Atomically: create new key + revoke old
+  await prisma.$transaction([
+    prisma.apiKey.create({
+      data: {
+        name: rotatedName,
+        keyHash: hash,
+        keyPrefix: prefix,
+        permissions: oldKey.permissions,
+        allowedScopes: oldKey.allowedScopes,
+      },
+    }),
+    prisma.apiKey.update({
+      where: { id: oldKey.id },
+      data: { revokedAt: new Date() },
+    }),
+  ]);
+
+  // Flash the new raw key so it can be shown to the user
+  (await cookies()).set("api_key_flash", raw, {
+    httpOnly: true,
+    secure: true,
+    maxAge: 60,
+    path: "/wiki/admin/keys",
+    sameSite: "lax",
+  });
+
+  revalidatePath("/wiki/admin/keys");
+  redirect(`/wiki/admin/keys?flash=1&name=${encodeURIComponent(rotatedName)}`);
+}
+
+export async function deleteApiKeyAction(formData: FormData) {
+  await requireAdmin();
+
+  const id = String(formData.get("id") ?? "").trim();
+  if (!id) {
+    throw new Error("Key ID missing.");
+  }
+
+  const key = await prisma.apiKey.findUnique({ where: { id } });
+  if (!key) {
+    throw new Error("Key not found.");
+  }
+  if (!key.revokedAt) {
+    throw new Error("Only revoked keys can be permanently deleted.");
+  }
+
+  await prisma.apiKey.delete({ where: { id } });
+
+  revalidatePath("/wiki/admin/keys");
+  redirect("/wiki/admin/keys");
+}

@@ -6,8 +6,9 @@ import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import { EmptyState } from "@/components/wiki/EmptyState";
 import { CopyButton } from "@/components/wiki/CopyButton";
-import { createApiKeyAction, revokeApiKeyAction, updateApiKeyScopesAction } from "./actions";
+import { createApiKeyAction, revokeApiKeyAction, rotateApiKeyAction, deleteApiKeyAction, updateApiKeyScopesAction } from "./actions";
 import { AdminNav } from "@/components/wiki/AdminNav";
+import { KeyActionButtons } from "@/components/wiki/KeyActionButtons";
 import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
@@ -158,9 +159,7 @@ export default async function ApiKeysPage({ searchParams }: Props) {
                     <td>{key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleDateString() : "Never"}</td>
                     <td>{key.revokedAt ? "Revoked" : "Active"}</td>
                     <td>
-                      {key.revokedAt ? (
-                        <span className="text-muted">—</span>
-                      ) : (
+                      {!key.revokedAt && (
                         <details className="scope-edit-dropdown">
                           <summary className="btn btn-secondary btn-sm">Edit Scopes</summary>
                           <div className="scope-edit-panel">
@@ -179,6 +178,14 @@ export default async function ApiKeysPage({ searchParams }: Props) {
                           </div>
                         </details>
                       )}
+                      <KeyActionButtons
+                        keyId={key.id}
+                        keyName={key.name}
+                        isRevoked={!!key.revokedAt}
+                        revokeAction={revokeApiKeyAction}
+                        rotateAction={rotateApiKeyAction}
+                        deleteAction={deleteApiKeyAction}
+                      />
                     </td>
                   </tr>
                 ))}
