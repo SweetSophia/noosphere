@@ -74,9 +74,43 @@ NOOSPHERE_TOPICS_SCHEMA = {
     },
 }
 
+NOOSPHERE_SAVE_SCHEMA = {
+    "name": "noosphere_save",
+    "description": (
+        "Save durable, reusable knowledge to Noosphere as a draft memory candidate. "
+        "Use only for information likely to matter in future sessions."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "Short title for the memory candidate."},
+            "content": {"type": "string", "description": "Durable memory content to save."},
+            "topicId": {
+                "type": "string",
+                "description": "Noosphere topic id. Uses configured default topic_id if omitted.",
+            },
+            "excerpt": {"type": "string", "description": "Optional short summary."},
+            "tags": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional tags.",
+            },
+            "source": {"type": "string", "description": "Optional source pointer."},
+            "confidence": {
+                "type": "string",
+                "enum": ["low", "medium", "high"],
+                "description": "Initial confidence for the draft candidate.",
+            },
+        },
+        "required": ["title", "content"],
+        "additionalProperties": False,
+    },
+}
+
 TOOL_SCHEMAS = [
     NOOSPHERE_STATUS_SCHEMA,
     NOOSPHERE_RECALL_SCHEMA,
     NOOSPHERE_GET_SCHEMA,
     NOOSPHERE_TOPICS_SCHEMA,
+    NOOSPHERE_SAVE_SCHEMA,
 ]

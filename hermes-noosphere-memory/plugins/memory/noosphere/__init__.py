@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -35,6 +37,11 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     "api_timeout": 5.0,
 }
 _NON_WRITING_CONTEXTS = {"cron", "flush", "subagent"}
+_MIN_CAPTURE_LENGTH = 10
+_TRIVIAL_RE = re.compile(
+    r"^(ok|okay|thanks|thank you|got it|sure|yes|no|yep|nope|k|ty|thx|np)\.?$",
+    re.IGNORECASE,
+)
 
 
 def _config_path(hermes_home: str) -> Path:
@@ -178,6 +185,7 @@ class NoosphereMemoryProvider(MemoryProvider):
         self._write_enabled = True
         self._active = False
         self._client: Optional[NoosphereClient] = None
+        self._write_thread: Optional[threading.Thread] = None
 
     @property
     def name(self) -> str:
@@ -278,13 +286,85 @@ class NoosphereMemoryProvider(MemoryProvider):
                 return json.dumps(self._client.recall(_read_recall_args(args, self._config)))
             if tool_name == "noosphere_get":
                 return json.dumps(self._client.get(_read_get_args(args)))
+            if tool_name == "noosphere_save":
+                return json.dumps(
+                    self._client.save(_read_save_args(args, self._config, self._agent_identity))
+                )
             return json.dumps({"error": f"Unknown Noosphere memory tool: {tool_name}"})
         except (NoosphereClientError, ValueError) as error:
             if isinstance(error, ValueError):
                 return json.dumps({"error": str(error)})
             return error.to_json()
 
+    def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
+        if not self._active or not self._client or not self._write_enabled:
+            return
+        if not self._config.get("auto_capture") or not self._config.get("topic_id"):
+            return
+        clean_user = _clean_capture_text(user_content)
+        clean_assistant = _clean_capture_text(assistant_content)
+        if not _should_capture(clean_user) or not _should_capture(clean_assistant):
+            return
+        title = _truncate_title(f"Hermes turn: {clean_user}", 120)
+        content = (
+            f"[role: user]\n{clean_user}\n[user:end]\n\n"
+            f"[role: assistant]\n{clean_assistant}\n[assistant:end]"
+        )
+        self._save_async(
+            {
+                "title": title,
+                "content": content,
+                "topicId": self._config["topic_id"],
+                "source": f"hermes:session:{session_id or self._session_id}",
+                "authorName": _resolve_author_name(self._config, self._agent_identity),
+                "confidence": "medium",
+                "tags": ["hermes", "conversation-turn"],
+            }
+        )
+
+    def on_memory_write(
+        self,
+        action: str,
+        target: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if action != "add" or not self._active or not self._client or not self._write_enabled:
+            return
+        clean = _clean_capture_text(content)
+        if not _should_capture(clean) or not self._config.get("topic_id"):
+            return
+        self._save_async(
+            {
+                "title": _truncate_title(f"Hermes memory: {target}", 120),
+                "content": clean,
+                "topicId": self._config["topic_id"],
+                "source": str((metadata or {}).get("source") or f"hermes:memory:{target}"),
+                "authorName": _resolve_author_name(self._config, self._agent_identity),
+                "confidence": "medium",
+                "tags": ["hermes", "explicit-memory", target],
+            }
+        )
+
+    def _save_async(self, request: Dict[str, Any]) -> None:
+        if not self._client:
+            return
+
+        def _run() -> None:
+            try:
+                assert self._client is not None
+                self._client.save(request)
+            except Exception:
+                logger.debug("Noosphere async save failed", exc_info=True)
+
+        if self._write_thread and self._write_thread.is_alive():
+            self._write_thread.join(timeout=2.0)
+        self._write_thread = threading.Thread(target=_run, daemon=True, name="noosphere-save")
+        self._write_thread.start()
+
     def shutdown(self) -> None:
+        if self._write_thread and self._write_thread.is_alive():
+            self._write_thread.join(timeout=5.0)
         return None
 
 
@@ -332,3 +412,57 @@ def _read_get_args(args: Dict[str, Any]) -> Dict[str, Any]:
     if provider and memory_id:
         return {"provider": provider, "id": memory_id}
     raise ValueError("Provide canonicalRef or provider+id")
+
+
+def _read_save_args(
+    args: Dict[str, Any],
+    config: Dict[str, Any],
+    agent_identity: str,
+) -> Dict[str, Any]:
+    title = _as_string(args.get("title"))
+    content = _clean_capture_text(args.get("content", ""))
+    topic_id = _as_string(args.get("topicId")) or _as_string(config.get("topic_id"))
+    if not title:
+        raise ValueError("title is required")
+    if not content:
+        raise ValueError("content is required")
+    if not topic_id:
+        raise ValueError("topicId is required unless noosphere.json defines topic_id")
+
+    request: Dict[str, Any] = {
+        "title": _truncate_title(title, 160),
+        "content": content,
+        "topicId": topic_id,
+        "authorName": _resolve_author_name(config, agent_identity),
+    }
+    for key in ("excerpt", "source", "confidence"):
+        value = _as_string(args.get(key))
+        if value:
+            request[key] = value
+    tags = args.get("tags")
+    if isinstance(tags, list):
+        clean_tags = [_as_string(tag) for tag in tags]
+        clean_tags = [tag for tag in clean_tags if tag]
+        if clean_tags:
+            request["tags"] = clean_tags[:20]
+    return request
+
+
+def _clean_capture_text(text: Any) -> str:
+    return strip_context_fences(str(text or "")).strip()
+
+
+def _should_capture(text: str) -> bool:
+    return len(text) >= _MIN_CAPTURE_LENGTH and not _TRIVIAL_RE.match(text)
+
+
+def _truncate_title(text: str, limit: int) -> str:
+    clean = " ".join((text or "").split())
+    if len(clean) <= limit:
+        return clean
+    return clean[: limit - 1].rstrip() + "..."
+
+
+def _resolve_author_name(config: Dict[str, Any], agent_identity: str) -> str:
+    template = _as_string(config.get("author_name_template"), "Hermes:{identity}")
+    return template.replace("{identity}", agent_identity or "default")

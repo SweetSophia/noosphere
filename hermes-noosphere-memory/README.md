@@ -2,7 +2,7 @@
 
 This package contains the Hermes Agent memory-provider integration for Noosphere.
 
-Current implementation status: Phase 3 recall/get/topics and auto-recall prefetch.
+Current implementation status: Phase 4 draft save and explicit memory mirroring.
 
 ## Layout
 
@@ -29,13 +29,14 @@ Implemented:
 - environment-based secret lookup through `NOOSPHERE_API_KEY`
 - safe initialization without network calls
 - standard-library HTTP client with redacted errors
-- `noosphere_status`, `noosphere_recall`, `noosphere_get`, and `noosphere_topics` tools
+- `noosphere_status`, `noosphere_recall`, `noosphere_get`, `noosphere_topics`, and `noosphere_save` tools
 - auto-recall prefetch through Noosphere's prompt-ready recall API
+- explicit Hermes memory-write mirroring through draft memory candidates
+- optional `sync_turn` capture when `auto_capture=true` and `topic_id` is configured
 
 Not implemented yet:
 
-- explicit save/article tools
-- explicit memory write mirroring
+- direct article publication tools
 - installer script
 
 Those are intentionally left for later PRs so each step stays reviewable.

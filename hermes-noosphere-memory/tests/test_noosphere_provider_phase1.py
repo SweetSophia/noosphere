@@ -137,7 +137,13 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
 
         self.assertEqual(
             [schema["name"] for schema in schemas],
-            ["noosphere_status", "noosphere_recall", "noosphere_get", "noosphere_topics"],
+            [
+                "noosphere_status",
+                "noosphere_recall",
+                "noosphere_get",
+                "noosphere_topics",
+                "noosphere_save",
+            ],
         )
 
 

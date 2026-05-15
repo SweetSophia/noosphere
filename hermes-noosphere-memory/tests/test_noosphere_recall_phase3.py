@@ -72,6 +72,10 @@ class _FakeClient:
         self.calls.append(("get", request))
         return {"result": {"id": request.get("canonicalRef") or request.get("id")}}
 
+    def save(self, request):
+        self.calls.append(("save", request))
+        return {"success": True, "candidate": {"title": request["title"]}}
+
 
 class NoosphereRecallPhase3Test(unittest.TestCase):
     def initialized_provider(self):
