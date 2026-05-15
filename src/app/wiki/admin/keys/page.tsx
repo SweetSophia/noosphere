@@ -131,7 +131,7 @@ export default async function ApiKeysPage({ searchParams }: Props) {
         {keys.length === 0 ? (
           <EmptyState title="No API keys yet" description="Create one above for agents or external automation." />
         ) : (
-          <div className="table-wrap">
+          <div className="admin-table-wrap">
             <table className="admin-table">
               <thead>
                 <tr>

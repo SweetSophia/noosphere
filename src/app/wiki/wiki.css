@@ -882,6 +882,11 @@
   background: var(--surface-color);
 }
 
+/* Allow absolutely-positioned edit panels inside admin tables to overflow without clipping */
+.admin-table-wrap {
+  overflow: visible;
+}
+
 .admin-table {
   width: 100%;
   border-collapse: collapse;
