@@ -45,10 +45,15 @@
       "placeholder": "http://127.0.0.1:6578"
     },
     "apiKey": {
-      "label": "Noosphere API Key",
-      "help": "API key used as Authorization: Bearer <key>. Recall/get require READ permission; save requires WRITE; status requires ADMIN. Fallback: NOOSPHERE_API_KEY.",
+      "label": "Noosphere API Key (default)",
+      "help": "Default API key used when no per-agent key matches. Accepts a raw key string or a secret-file reference. Per-agent keys are set in apiKeys instead.",
       "sensitive": true,
       "placeholder": "noo_..."
+    },
+    "apiKeys": {
+      "label": "Per-Agent API Keys",
+      "help": "Map of agentId to API key. Each agent gets their own key automatically. Example: { \"shodan\": \"noo_abc\", \"cylena\": \"noo_xyz\" }",
+      "sensitive": true
     },
     "timeoutMs": {
       "label": "HTTP Timeout (ms)",
@@ -102,7 +107,13 @@
         "type": [
           "string",
           "object"
-        ]
+        ],
+        "description": "Default API key used when no per-agent key matches. Accepts a raw key string or a secret-file reference object."
+      },
+      "apiKeys": {
+        "type": "object",
+        "additionalProperties": { "type": "string" },
+        "description": "Per-agent API key map. Agent IDs are keys, API key strings are values. Takes precedence over apiKey for matching agents. Example: { \"shodan\": \"noo_abc...\", \"cylena\": \"noo_xyz...\" }"
       },
       "timeoutMs": {
         "type": "number",

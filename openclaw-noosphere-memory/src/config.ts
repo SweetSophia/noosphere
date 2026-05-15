@@ -3,7 +3,14 @@ import { homedir } from "node:os";
 
 export interface NoosphereMemoryConfig {
   baseUrl?: string;
+  /** Single API key (string or secret ref) used as default for all agents. */
   apiKey?: string | { value?: string } | SecretRefInput;
+  /**
+   * Per-agent API key map. Agent IDs are keys, API keys are values.
+   * Takes precedence over `apiKey` for matching agents.
+   * Example: { "shodan": "noo_abc...", "cylena": "noo_xyz..." }
+   */
+  apiKeys?: Record<string, string>;
   timeoutMs?: number;
 }
 
@@ -15,7 +22,10 @@ interface SecretRefInput {
 
 export interface ResolvedNoosphereMemoryConfig {
   baseUrl: string;
+  /** Resolved default API key (fallback when no per-agent key matches). */
   apiKey?: string;
+  /** Per-agent API key map (from config.apiKeys, not resolved from secrets). */
+  apiKeys?: Record<string, string>;
   timeoutMs: number;
 }
 
@@ -31,11 +41,48 @@ export function resolveNoosphereMemoryConfig(
   rootConfig?: unknown,
 ): ResolvedNoosphereMemoryConfig {
   const config = isRecord(rawConfig) ? rawConfig as Partial<NoosphereMemoryConfig> : {};
-  const baseUrl = normalizeBaseUrl(readString(config.baseUrl) || env.NOOSPHERE_BASE_URL || DEFAULT_NOOSPHERE_BASE_URL);
-  const apiKey = readSecret(config.apiKey, rootConfig) || readString(env.NOOSPHERE_API_KEY);
-  const timeoutMs = clampTimeout(config.timeoutMs ?? readNumber(env.NOOSPHERE_TIMEOUT_MS), DEFAULT_NOOSPHERE_TIMEOUT_MS);
+  const baseUrl = normalizeBaseUrl(
+    readString(config.baseUrl) || env.NOOSPHERE_BASE_URL || DEFAULT_NOOSPHERE_BASE_URL,
+  );
+  const defaultApiKey =
+    readSecret(config.apiKey, rootConfig) || readString(env.NOOSPHERE_API_KEY);
+  const timeoutMs = clampTimeout(
+    config.timeoutMs ?? readNumber(env.NOOSPHERE_TIMEOUT_MS),
+    DEFAULT_NOOSPHERE_TIMEOUT_MS,
+  );
 
-  return { baseUrl, apiKey, timeoutMs };
+  return {
+    baseUrl,
+    apiKey: defaultApiKey,
+    apiKeys: isRecord(config.apiKeys) ? config.apiKeys : undefined,
+    timeoutMs,
+  };
+}
+
+/**
+ * Resolve the API key for a specific agent.
+ * Priority: apiKeys[agentId] > default apiKey > env.NOOSPHERE_API_KEY
+ */
+export function resolveApiKeyForAgent(
+  rawConfig: unknown,
+  env: NodeJS.ProcessEnv = process.env,
+  rootConfig?: unknown,
+  agentId?: string,
+): string | undefined {
+  const config = isRecord(rawConfig) ? rawConfig as Partial<NoosphereMemoryConfig> : {};
+
+  // 1. Per-agent key from config.apiKeys (direct map, no secret resolution)
+  if (agentId && config.apiKeys && typeof config.apiKeys === "object") {
+    const perAgentKey = config.apiKeys[agentId];
+    if (typeof perAgentKey === "string" && perAgentKey.trim()) {
+      return perAgentKey.trim();
+    }
+  }
+
+  // 2. Default key (resolved from string, secret ref, or env)
+  return (
+    readSecret(config.apiKey, rootConfig) || readString(env.NOOSPHERE_API_KEY)
+  );
 }
 
 export function redactSecret(value: string | undefined): string | undefined {
@@ -57,7 +104,10 @@ function readSecret(value: unknown, rootConfig?: unknown): string | undefined {
   return readFileSecretRef(value, rootConfig);
 }
 
-function readFileSecretRef(value: Record<string, unknown>, rootConfig?: unknown): string | undefined {
+function readFileSecretRef(
+  value: Record<string, unknown>,
+  rootConfig?: unknown,
+): string | undefined {
   if (value.source !== "file") return undefined;
   const providerId = readString(value.provider);
   const secretId = readString(value.id);
@@ -75,14 +125,19 @@ function readFileSecretRef(value: Record<string, unknown>, rootConfig?: unknown)
   if (provider.mode === "json") {
     const parsed = JSON.parse(fileContent) as unknown;
     const resolved = readJsonPointer(parsed, secretId);
-    return typeof resolved === "string" && resolved.trim() ? resolved.trim() : undefined;
+    return typeof resolved === "string" && resolved.trim()
+      ? resolved.trim()
+      : undefined;
   }
 
   const trimmed = fileContent.trim();
   return trimmed || undefined;
 }
 
-function getRecord(value: unknown, ...path: string[]): Record<string, unknown> | undefined {
+function getRecord(
+  value: unknown,
+  ...path: string[]
+): Record<string, unknown> | undefined {
   let current: unknown = value;
   for (const segment of path) {
     if (!isRecord(current)) return undefined;
@@ -99,8 +154,11 @@ function expandHome(input: string): string {
 
 function readJsonPointer(value: unknown, pointer: string): unknown {
   if (!pointer || pointer === "/") return value;
-  const parts = pointer.split("/").slice(1).map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
-  let current = value;
+  const parts = pointer
+    .split("/")
+    .slice(1)
+    .map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
+  let current: unknown = value;
   for (const part of parts) {
     if (!isRecord(current)) return undefined;
     current = current[part];
@@ -119,7 +177,11 @@ export function readNumber(value: unknown): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-export function clampTimeout(value: unknown, fallback: number, max: number = MAX_NOOSPHERE_TIMEOUT_MS): number {
+export function clampTimeout(
+  value: unknown,
+  fallback: number,
+  max: number = MAX_NOOSPHERE_TIMEOUT_MS,
+): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     return fallback;
   }
