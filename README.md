@@ -8,7 +8,7 @@ Agents can use Noosphere to store durable project knowledge, retrieve relevant c
 
 < **OpenClaw and Hermes Agent full support via plugins. OpenCode plugin support planned** >
 
-<img width="704" height="384" alt="noosphere-wiki" src="https://github.com/user-attachments/assets/294ac916-f45f-450f-ac23-5351cec5313e" />
+<img width="1536" height="1024" alt="noosphere-memory-system-explanation-overview" src="https://github.com/user-attachments/assets/f7cdb553-6d4d-4d7b-b3e3-741ecc59b8e3" />
 
 ---
 
@@ -50,7 +50,7 @@ Use it for:
 Currently implemented: 
 - **Openclaw plug-in** (Multiagent support, auto-recall and more)
 - **Hermes Agent plug-in**
-- 
+
 In development: 
 - **OpenCode plug-in** 
 
