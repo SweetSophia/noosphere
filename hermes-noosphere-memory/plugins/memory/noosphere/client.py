@@ -71,9 +71,12 @@ class NoosphereClient:
             message = _message_from_error_details(details) or f"Noosphere HTTP {error.code}"
             raise NoosphereClientError(message, status=error.code, details=details) from None
         except urllib.error.URLError as error:
-            raise NoosphereClientError(f"Noosphere request failed: {error.reason}") from None
-        except TimeoutError:
-            raise NoosphereClientError("Noosphere request timed out") from None
+            reason = getattr(error, "reason", None)
+            if isinstance(reason, TimeoutError) or (
+                isinstance(reason, str) and "timed out" in reason
+            ):
+                raise NoosphereClientError("Noosphere request timed out") from None
+            raise NoosphereClientError(f"Noosphere request failed: {reason}") from None
 
 
 def _parse_json_response(raw: bytes) -> Dict[str, Any]:
