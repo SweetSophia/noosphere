@@ -534,10 +534,30 @@ cd hermes-noosphere-memory
 Manual setup:
 
 ```bash
-mkdir -p "$HERMES_HOME/plugins/memory"
-cp -R plugins/memory/noosphere "$HERMES_HOME/plugins/memory/noosphere"
+mkdir -p "$HERMES_HOME/plugins"
+cp -R plugins/memory/noosphere "$HERMES_HOME/plugins/noosphere"
 hermes config set memory.provider noosphere
-printf '%s\n' 'NOOSPHERE_API_KEY=noo_...' >> "$HERMES_HOME/.env"
+python3 - <<'PY'
+import os
+from pathlib import Path
+
+hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+env_path = hermes_home / ".env"
+env_path.parent.mkdir(parents=True, exist_ok=True)
+lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+key = "NOOSPHERE_API_KEY"
+value = "noo_..."
+updated = False
+for index, line in enumerate(lines):
+    if line.split("=", 1)[0].strip() == key:
+        lines[index] = f"{key}={value}"
+        updated = True
+        break
+if not updated:
+    lines.append(f"{key}={value}")
+env_path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+env_path.chmod(0o600)
+PY
 ```
 
 Then create or edit `$HERMES_HOME/noosphere.json`:
@@ -550,10 +570,9 @@ Then create or edit `$HERMES_HOME/noosphere.json`:
   "capture_mode": "explicit",
   "max_recall_results": 5,
   "token_budget": 1200,
-  "providers": ["noosphere"],
   "topic_id": "",
   "author_name_template": "Hermes:{identity}",
-  "api_timeout": 5.0
+  "api_timeout": 15.0
 }
 ```
 
@@ -561,7 +580,7 @@ Then create or edit `$HERMES_HOME/noosphere.json`:
 
 | Capability | Status | Description |
 | --- | --- | --- |
-| `noosphere_status` | Implemented | Checks `GET /api/memory/status`. |
+| `noosphere_status` | Implemented | Checks `GET /api/memory/status`, with `/api/health` fallback for scoped non-admin keys. |
 | `noosphere_recall` | Implemented | Calls Noosphere recall in inspection mode. |
 | `noosphere_get` | Implemented | Fetches one memory by canonical ref or provider/id. |
 | `noosphere_topics` | Implemented | Lists topics for save target selection. |

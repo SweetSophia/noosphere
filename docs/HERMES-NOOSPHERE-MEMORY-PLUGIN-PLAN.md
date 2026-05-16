@@ -81,9 +81,9 @@ hermes-noosphere-memory/
 
 Rationale:
 
-- The `plugins/memory/noosphere/` shape matches Hermes' provider discovery model.
+- The source `plugins/memory/noosphere/` shape matches Hermes' bundled provider layout.
 - Keeping it under `hermes-noosphere-memory/` avoids mixing Python Hermes code with the TypeScript OpenClaw plugin.
-- The install script can copy or sync `plugins/memory/noosphere` into `$HERMES_HOME/plugins/memory/noosphere`.
+- Hermes 0.14 discovers user-installed providers at `$HERMES_HOME/plugins/<name>`, so the install script copies `plugins/memory/noosphere` into `$HERMES_HOME/plugins/noosphere`.
 
 ## Configuration Design
 
@@ -128,7 +128,7 @@ Suggested defaults:
   "token_budget": 1200,
   "topic_id": "",
   "author_name_template": "Hermes:{identity}",
-  "api_timeout": 5.0
+  "api_timeout": 15.0
 }
 ```
 
@@ -250,21 +250,44 @@ Add `hermes-noosphere-memory/install-hermes.sh`.
 Installer responsibilities:
 
 1. detect `HERMES_HOME`, defaulting to `$HOME/.hermes`
-2. copy `plugins/memory/noosphere` to `$HERMES_HOME/plugins/memory/noosphere`
+2. copy `plugins/memory/noosphere` to `$HERMES_HOME/plugins/noosphere`
 3. offer to run `hermes memory setup`
 4. print exact manual fallback commands:
 
 ```bash
 hermes config set memory.provider noosphere
-echo 'NOOSPHERE_API_KEY=noo_...' >> "$HERMES_HOME/.env"
-cat > "$HERMES_HOME/noosphere.json" <<'JSON'
+python3 - <<'PY'
+import os
+from pathlib import Path
+
+hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+env_path = hermes_home / ".env"
+env_path.parent.mkdir(parents=True, exist_ok=True)
+lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+key = "NOOSPHERE_API_KEY"
+value = "noo_..."
+updated = False
+for index, line in enumerate(lines):
+    if line.split("=", 1)[0].strip() == key:
+        lines[index] = f"{key}={value}"
+        updated = True
+        break
+if not updated:
+    lines.append(f"{key}={value}")
+env_path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+env_path.chmod(0o600)
+PY
+[ ! -f "$HERMES_HOME/noosphere.json" ] && cat > "$HERMES_HOME/noosphere.json" <<'JSON'
 {
   "base_url": "http://127.0.0.1:6578",
   "auto_recall": true,
   "auto_capture": false,
   "capture_mode": "explicit",
   "max_recall_results": 5,
-  "token_budget": 1200
+  "token_budget": 1200,
+  "topic_id": "",
+  "author_name_template": "Hermes:{identity}",
+  "api_timeout": 15.0
 }
 JSON
 ```

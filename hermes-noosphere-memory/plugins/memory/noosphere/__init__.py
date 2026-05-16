@@ -36,7 +36,7 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     "token_budget": 1200,
     "topic_id": "",
     "author_name_template": "Hermes:{identity}",
-    "api_timeout": 5.0,
+    "api_timeout": 15.0,
 }
 _NON_WRITING_CONTEXTS = {"cron", "flush", "subagent"}
 _SECRET_CONFIG_KEYS = {"api_key"}
