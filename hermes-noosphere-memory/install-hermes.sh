@@ -85,7 +85,6 @@ Manual setup:
   "capture_mode": "explicit",
   "max_recall_results": 5,
   "token_budget": 1200,
-  "providers": ["noosphere"],
   "topic_id": "",
   "author_name_template": "Hermes:{identity}",
   "api_timeout": 5.0

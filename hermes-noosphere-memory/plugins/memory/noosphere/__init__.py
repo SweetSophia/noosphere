@@ -32,7 +32,6 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     "capture_mode": "explicit",
     "max_recall_results": 5,
     "token_budget": 1200,
-    "providers": ["noosphere"],
     "topic_id": "",
     "author_name_template": "Hermes:{identity}",
     "api_timeout": 5.0,
@@ -90,17 +89,6 @@ def _as_string(value: Any, default: str = "") -> str:
     return str(value).strip()
 
 
-def _as_provider_list(value: Any) -> List[str]:
-    if not isinstance(value, list):
-        return list(_DEFAULT_CONFIG["providers"])
-    providers = []
-    for item in value:
-        provider = _as_string(item)
-        if provider and provider not in providers:
-            providers.append(provider)
-    return providers or list(_DEFAULT_CONFIG["providers"])
-
-
 def _sanitize_config(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize config loaded from Hermes setup or noosphere.json."""
 
@@ -127,7 +115,6 @@ def _sanitize_config(raw: Dict[str, Any]) -> Dict[str, Any]:
         minimum=100,
         maximum=8000,
     )
-    config["providers"] = _as_provider_list(config.get("providers"))
     config["topic_id"] = _as_string(config.get("topic_id"))
     config["author_name_template"] = _as_string(
         config.get("author_name_template"),
@@ -297,7 +284,6 @@ class NoosphereMemoryProvider(MemoryProvider):
                     "mode": "auto",
                     "resultCap": self._config["max_recall_results"],
                     "tokenBudget": self._config["token_budget"],
-                    "providers": self._config["providers"],
                 }
             )
         except NoosphereClientError:
@@ -429,7 +415,6 @@ def _read_recall_args(args: Dict[str, Any], config: Dict[str, Any]) -> Dict[str,
             minimum=100,
             maximum=8000,
         ),
-        "providers": config["providers"],
     }
     scope = _as_string(args.get("scope"))
     if scope:

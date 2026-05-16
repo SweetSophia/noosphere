@@ -82,7 +82,6 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
                     "base_url": "http://example.test:6578/",
                     "auto_capture": "true",
                     "max_recall_results": 99,
-                    "providers": ["noosphere", "noosphere", "hindsight"],
                 },
                 hermes_home,
             )
@@ -94,7 +93,7 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
         self.assertEqual(data["base_url"], "http://example.test:6578")
         self.assertTrue(data["auto_capture"])
         self.assertEqual(data["max_recall_results"], 20)
-        self.assertEqual(data["providers"], ["noosphere", "hindsight"])
+        self.assertNotIn("providers", data)
 
     def test_save_config_removes_legacy_secret_from_existing_file(self):
         module = load_plugin()

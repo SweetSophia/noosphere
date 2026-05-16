@@ -39,7 +39,6 @@ cat > "$HERMES_HOME/noosphere.json" <<'JSON'
   "capture_mode": "explicit",
   "max_recall_results": 5,
   "token_budget": 1200,
-  "providers": ["noosphere"],
   "topic_id": "",
   "author_name_template": "Hermes:{identity}",
   "api_timeout": 5.0
@@ -59,7 +58,6 @@ Config file: `$HERMES_HOME/noosphere.json`
 | `capture_mode` | `explicit` | Capture policy. Phase 1 stores only config. |
 | `max_recall_results` | `5` | Future recall result cap. |
 | `token_budget` | `1200` | Future recall token budget. |
-| `providers` | `["noosphere"]` | Noosphere recall providers to query. |
 | `topic_id` | `""` | Default save topic for later write phases. |
 | `author_name_template` | `Hermes:{identity}` | Future author name template. |
 | `api_timeout` | `5.0` | Future HTTP timeout in seconds. |
