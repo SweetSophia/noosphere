@@ -15,6 +15,7 @@ plugins/memory/noosphere/
   README.md
   schemas.py
   skills/noosphere/SKILL.md
+skills/noosphere-memory-hermes/SKILL.md
 tests/
   test_noosphere_client.py
   test_noosphere_provider_phase1.py
@@ -36,6 +37,7 @@ Implemented:
 - auto-recall prefetch through Noosphere's prompt-ready recall API
 - explicit Hermes memory-write mirroring through draft memory candidates
 - optional `sync_turn` capture when `auto_capture=true` and `topic_id` is configured
+- Hermes setup skill installed to `$HERMES_HOME/skills/noosphere-memory-hermes`
 
 Not implemented yet:
 

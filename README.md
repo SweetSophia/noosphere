@@ -531,6 +531,8 @@ cd hermes-noosphere-memory
 ./install-hermes.sh
 ```
 
+The installer copies the provider to `$HERMES_HOME/plugins/noosphere` and installs a Hermes setup skill at `$HERMES_HOME/skills/noosphere-memory-hermes`. With that skill available, a user can give Hermes a Noosphere API key and ask it to connect Noosphere memory; the skill guides Hermes through writing `.env`, updating `noosphere.json`, activating the provider, and verifying the setup.
+
 Manual setup:
 
 ```bash
