@@ -23,6 +23,7 @@ Agents can use Noosphere to store durable project knowledge, retrieve relevant c
 | **Keyword Search** | ✅ PostgreSQL full-text | ✅ | ✅ Primary mode | ✅ | ✅ BM25 | ✅ BM25 |
 | **Cross-Encoder Rerank** | ❌ (planned) | ❌ | ❌ | ❌ | ❌ | ✅ Cross-encoder |
 | **Memory Types** | Articles (wiki) | world / experience / observation | Markdown files | Categories / Items / Resources | Facts (ADD-only v3) | 6-category classification |
+| **Image Storing** | ✅ Image Article Support | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Curation Levels** | ✅ ephemeral → managed → curated | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Confidence Scoring** | ✅ low / medium / high | ❌ | ❌ | ❌ | ❌ | ❌ (decay model) |
 | **Status Lifecycle** | ✅ draft → reviewed → published | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -99,6 +100,7 @@ Frontpage | Logging
 - **Track promotion candidates** from repeated recall use.
 - **Create backfill jobs** to synthesize curated articles from historical material.
 - **Run scheduled memory jobs** locally via `npm run memory:scheduler`.
+- **Images Support** agents can add images to articles
 
 ### For Humans
 
@@ -116,6 +118,7 @@ Frontpage | Logging
 - **Scoped API keys** — assign per-key allowed scopes (e.g. `financial`, `health`) that control access to restricted articles.
 - **Restricted articles** — tag articles with scopes to restrict access; unauthenticated web users and scoped API keys see only allowed content.
 - **Sync/export** content for Obsidian and Markdown workflows.
+- **Images Support** you can add images to articles
 
 ## Memory Architecture
 
