@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -37,6 +38,7 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     "api_timeout": 5.0,
 }
 _NON_WRITING_CONTEXTS = {"cron", "flush", "subagent"}
+_SECRET_CONFIG_KEYS = {"api_key"}
 _MIN_CAPTURE_LENGTH = 10
 _TRIVIAL_RE = re.compile(
     r"^(ok|okay|thanks|thank you|got it|sure|yes|no|yep|nope|k|ty|thx|np)\.?$",
@@ -46,6 +48,12 @@ _TRIVIAL_RE = re.compile(
 
 def _config_path(hermes_home: str) -> Path:
     return Path(hermes_home).expanduser() / _CONFIG_FILENAME
+
+
+def _setup_key_url() -> str:
+    base_url = os.environ.get("NOOSPHERE_BASE_URL", _DEFAULT_CONFIG["base_url"])
+    base_url = _as_string(base_url, _DEFAULT_CONFIG["base_url"]).rstrip("/")
+    return f"{base_url}/wiki/admin/keys"
 
 
 def _as_bool(value: Any, default: bool) -> bool:
@@ -158,15 +166,39 @@ def _save_noosphere_config(values: Dict[str, Any], hermes_home: str) -> None:
             if isinstance(raw, dict):
                 existing = raw
         except Exception:
+            logger.warning(
+                "Failed to parse existing Noosphere config at %s; ignoring",
+                path,
+                exc_info=True,
+            )
             existing = {}
 
     sanitized_values = dict(values or {})
-    sanitized_values.pop("api_key", None)
+    for key in _SECRET_CONFIG_KEYS:
+        existing.pop(key, None)
+        sanitized_values.pop(key, None)
     existing.update(sanitized_values)
     config = _sanitize_config(existing)
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp:
+            json.dump(config, tmp, indent=2, sort_keys=True)
+            tmp.write("\n")
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        try:
+            os.chmod(tmp_name, 0o600)
+        except OSError:
+            logger.debug("Could not chmod temporary config %s", tmp_name, exc_info=True)
+        os.replace(tmp_name, path)
+    finally:
+        try:
+            if os.path.exists(tmp_name):
+                os.unlink(tmp_name)
+        except OSError:
+            logger.debug("Could not remove temporary config %s", tmp_name, exc_info=True)
     try:
         path.chmod(0o600)
     except OSError:
@@ -202,7 +234,7 @@ class NoosphereMemoryProvider(MemoryProvider):
                 "secret": True,
                 "required": True,
                 "env_var": "NOOSPHERE_API_KEY",
-                "url": "http://127.0.0.1:6578/wiki/admin/keys",
+                "url": _setup_key_url(),
             },
             {
                 "key": "base_url",
@@ -217,7 +249,11 @@ class NoosphereMemoryProvider(MemoryProvider):
 
     def initialize(self, session_id: str, **kwargs: Any) -> None:
         self._session_id = session_id
-        self._hermes_home = kwargs.get("hermes_home") or str(Path.home() / ".hermes")
+        self._hermes_home = (
+            kwargs.get("hermes_home")
+            or os.environ.get("HERMES_HOME")
+            or str(Path.home() / ".hermes")
+        )
         self._platform = _as_string(kwargs.get("platform"))
         self._agent_identity = _as_string(kwargs.get("agent_identity"), "default") or "default"
         self._agent_context = _as_string(kwargs.get("agent_context"))
