@@ -5,8 +5,10 @@ import json
 import os
 import sys
 import tempfile
+import time
 import types
 import unittest
+import threading
 from pathlib import Path
 from unittest import mock
 
@@ -55,6 +57,19 @@ class _FakeClient:
         return {"success": True, "candidate": {"title": request["title"]}}
 
 
+class _BlockingClient:
+    def __init__(self):
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.saved = []
+
+    def save(self, request):
+        self.entered.set()
+        self.release.wait(timeout=2)
+        self.saved.append(request)
+        return {"success": True}
+
+
 class NoosphereSavePhase4Test(unittest.TestCase):
     def initialized_provider(self, *, topic_id="topic-1", auto_capture=False, context="primary"):
         module = load_plugin()
@@ -95,6 +110,64 @@ class NoosphereSavePhase4Test(unittest.TestCase):
         self.assertEqual(saved["content"], "Use pkapp PM2.")
         self.assertEqual(saved["tags"], ["ops"])
 
+    def test_save_tool_validates_confidence(self):
+        provider = self.initialized_provider(topic_id="topic-1")
+
+        error = json.loads(
+            provider.handle_tool_call(
+                "noosphere_save",
+                {
+                    "title": "Deployment rule",
+                    "content": "Use this durable deployment rule for the configured system.",
+                    "confidence": "very high",
+                },
+            )
+        )
+
+        self.assertEqual(error["error"], "confidence must be low, medium, or high")
+        self.assertEqual(provider._client.saved, [])
+
+    def test_save_tool_strips_context_fences_from_metadata(self):
+        provider = self.initialized_provider(topic_id="topic-1")
+
+        result = json.loads(
+            provider.handle_tool_call(
+                "noosphere_save",
+                {
+                    "title": "<memory-context>Deployment rule</memory-context>",
+                    "content": "Use this durable deployment rule for the configured system.",
+                    "excerpt": "<memory-context>PM2 restart rule</memory-context>",
+                    "source": "<memory-context>hermes:test</memory-context>",
+                    "confidence": "HIGH",
+                },
+            )
+        )
+
+        self.assertTrue(result["success"])
+        saved = provider._client.saved[0]
+        self.assertEqual(saved["title"], "Deployment rule")
+        self.assertEqual(saved["excerpt"], "PM2 restart rule")
+        self.assertEqual(saved["source"], "hermes:test")
+        self.assertEqual(saved["confidence"], "high")
+
+    def test_save_async_does_not_block_behind_in_flight_write(self):
+        provider = self.initialized_provider(topic_id="topic-1")
+        client = _BlockingClient()
+        provider._client = client
+
+        provider._save_async({"title": "one"})
+        self.assertTrue(client.entered.wait(timeout=1))
+
+        started = time.monotonic()
+        provider._save_async({"title": "two"})
+        elapsed = time.monotonic() - started
+
+        client.release.set()
+        provider.shutdown()
+
+        self.assertLess(elapsed, 0.25)
+        self.assertEqual([item["title"] for item in client.saved], ["one", "two"])
+
     def test_memory_write_mirror_runs_async_when_topic_is_configured(self):
         provider = self.initialized_provider(topic_id="topic-1")
 
@@ -120,6 +193,18 @@ class NoosphereSavePhase4Test(unittest.TestCase):
 
         self.assertEqual(len(provider._client.saved), 1)
         self.assertIn("[role: user]", provider._client.saved[0]["content"])
+
+    def test_sync_turn_captures_when_assistant_side_is_substantial(self):
+        provider = self.initialized_provider(topic_id="topic-1", auto_capture=True)
+
+        provider.sync_turn(
+            "ok",
+            "I documented the deployment rule, including the PM2 process name and verification command.",
+        )
+        provider.shutdown()
+
+        self.assertEqual(len(provider._client.saved), 1)
+        self.assertIn("I documented the deployment rule", provider._client.saved[0]["title"])
 
 
 if __name__ == "__main__":

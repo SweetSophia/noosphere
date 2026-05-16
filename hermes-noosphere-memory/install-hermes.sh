@@ -44,6 +44,12 @@ need tar
 mkdir -p "$TARGET_DIR"
 tar -C "$SOURCE_DIR" -cf - . | tar -C "$TARGET_DIR" -xf -
 
+if command -v python3 >/dev/null 2>&1; then
+  if ! python3 -m compileall -q "$TARGET_DIR"; then
+    echo "Warning: installed plugin has Python syntax errors. Check $TARGET_DIR." >&2
+  fi
+fi
+
 echo ""
 echo "Noosphere Hermes memory provider installed."
 echo ""
