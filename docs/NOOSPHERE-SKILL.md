@@ -47,57 +47,6 @@ Each agent should use its **own API key**, not a shared one. The plugin automati
 
 ---
 
-## Hermes Agent Provider Setup
-
-Hermes uses a first-class memory provider, shipped in this repository at `hermes-noosphere-memory/`.
-
-Install from a cloned Noosphere repository:
-
-```bash
-cd hermes-noosphere-memory
-./install-hermes.sh
-```
-
-Manual setup:
-
-```bash
-mkdir -p "$HERMES_HOME/plugins/memory"
-cp -R plugins/memory/noosphere "$HERMES_HOME/plugins/memory/noosphere"
-hermes config set memory.provider noosphere
-printf '%s\n' 'NOOSPHERE_API_KEY=noo_...' >> "$HERMES_HOME/.env"
-```
-
-Create `$HERMES_HOME/noosphere.json`:
-
-```json
-{
-  "base_url": "<APP_URL>",
-  "auto_recall": true,
-  "auto_capture": false,
-  "capture_mode": "explicit",
-  "max_recall_results": 5,
-  "token_budget": 1200,
-  "providers": ["noosphere"],
-  "topic_id": "",
-  "author_name_template": "Hermes:{identity}",
-  "api_timeout": 5.0
-}
-```
-
-Hermes tool surface:
-
-- `noosphere_status` — check Noosphere memory status
-- `noosphere_recall` — search durable memory
-- `noosphere_get` — fetch one canonical memory result
-- `noosphere_topics` — list topics before saving
-- `noosphere_save` — save a draft memory candidate
-
-Hermes auto recall uses the provider's `prefetch()` hook. Broad turn capture is disabled by default; set `auto_capture: true` and `topic_id` only if you want completed turns saved as draft candidates. Explicit Hermes memory writes are mirrored when `topic_id` is configured.
-
-Use one scoped Noosphere API key per Hermes profile. Do not share an unrestricted wildcard key unless that profile is intentionally allowed to access all restricted content.
-
----
-
 ## Core Endpoints
 
 ### Query & Search
