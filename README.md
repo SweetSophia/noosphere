@@ -42,6 +42,15 @@ Use it for:
 - **Local automation** — run memory maintenance jobs with the built-in scheduler.
 - **Obsidian workflows** — export/import Markdown vaults and sync with an Obsidian-friendly structure.
 
+## Harness / Agent System integration and plugins
+
+Currently implemented: 
+- **Openclaw plug-in** (Multiagent support, auto-recall and more)
+
+In development: 
+- **Hermes Agent plug-in**
+- **OpenCode plug-in** 
+
 ## Current Status
 
 The universal memory MVP is feature-complete in the core Noosphere codebase.
