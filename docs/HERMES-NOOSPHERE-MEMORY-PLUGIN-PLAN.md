@@ -59,7 +59,9 @@ hermes-noosphere-memory/
   README.md
   install-hermes.sh
   plugins/
+    __init__.py
     memory/
+      __init__.py
       noosphere/
         __init__.py
         plugin.yaml
@@ -71,11 +73,10 @@ hermes-noosphere-memory/
           noosphere/
             SKILL.md
   tests/
-    test_noosphere_memory_provider.py
     test_noosphere_client.py
-    fixtures/
-      recall.json
-      topics.json
+    test_noosphere_provider_phase1.py
+    test_noosphere_recall_phase3.py
+    test_noosphere_save_phase4.py
 ```
 
 Rationale:

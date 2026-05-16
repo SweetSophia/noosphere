@@ -77,6 +77,14 @@ class _FakeClient:
         return {"success": True, "candidate": {"title": request["title"]}}
 
 
+class _ExplodingClient:
+    def recall(self, request):
+        raise RuntimeError("boom")
+
+    def topics(self):
+        raise RuntimeError("boom")
+
+
 class NoosphereRecallPhase3Test(unittest.TestCase):
     def initialized_provider(self):
         module = load_plugin()
@@ -95,6 +103,19 @@ class NoosphereRecallPhase3Test(unittest.TestCase):
         self.assertEqual(result, "Remember the Serianis deploy path.")
         self.assertEqual(provider._client.calls[0][0], "recall")
         self.assertEqual(provider._client.calls[0][1]["mode"], "auto")
+
+    def test_prefetch_suppresses_unexpected_client_errors(self):
+        provider = self.initialized_provider()
+        provider._client = _ExplodingClient()
+
+        self.assertEqual(provider.prefetch("Serianis deploy?"), "")
+
+    def test_prefetch_respects_auto_recall_false(self):
+        provider = self.initialized_provider()
+        provider._config["auto_recall"] = False
+
+        self.assertEqual(provider.prefetch("Serianis deploy?"), "")
+        self.assertEqual(provider._client.calls, [])
 
     def test_recall_tool_uses_inspection_mode(self):
         provider = self.initialized_provider()
@@ -122,6 +143,16 @@ class NoosphereRecallPhase3Test(unittest.TestCase):
 
         self.assertIn("not both", error["error"])
         self.assertEqual(success["result"]["id"], "noosphere:article:1")
+
+    def test_tool_call_returns_generic_error_for_unexpected_exception(self):
+        provider = self.initialized_provider()
+        provider._client = _ExplodingClient()
+
+        logger = provider.__class__.handle_tool_call.__globals__["logger"]
+        with mock.patch.object(logger, "warning"):
+            payload = json.loads(provider.handle_tool_call("noosphere_topics", {}))
+
+        self.assertEqual(payload["error"], "Noosphere noosphere_topics failed")
 
 
 if __name__ == "__main__":

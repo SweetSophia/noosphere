@@ -10,9 +10,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
 import re
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -39,6 +41,8 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
 _NON_WRITING_CONTEXTS = {"cron", "flush", "subagent"}
 _SECRET_CONFIG_KEYS = {"api_key"}
 _MIN_CAPTURE_LENGTH = 40  # Noosphere API durable content minimum
+_SAVE_QUEUE_MAXSIZE = 100
+_VALID_CONFIDENCE = {"low", "medium", "high"}
 _TRIVIAL_RE = re.compile(
     r"^(ok|okay|thanks|thank you|got it|sure|yes|no|yep|nope|k|ty|thx|np)\.?$",
     re.IGNORECASE,
@@ -131,11 +135,11 @@ def _sanitize_config(raw: Dict[str, Any]) -> Dict[str, Any]:
 
 def _load_noosphere_config(hermes_home: str) -> Dict[str, Any]:
     path = _config_path(hermes_home)
-    if not path.exists():
-        return dict(_DEFAULT_CONFIG)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except FileNotFoundError:
+        return dict(_DEFAULT_CONFIG)
+    except (json.JSONDecodeError, OSError):
         logger.warning("Failed to parse %s; using defaults", path, exc_info=True)
         return dict(_DEFAULT_CONFIG)
     if not isinstance(raw, dict):
@@ -147,18 +151,19 @@ def _load_noosphere_config(hermes_home: str) -> Dict[str, Any]:
 def _save_noosphere_config(values: Dict[str, Any], hermes_home: str) -> None:
     path = _config_path(hermes_home)
     existing: Dict[str, Any] = {}
-    if path.exists():
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(raw, dict):
-                existing = raw
-        except Exception:
-            logger.warning(
-                "Failed to parse existing Noosphere config at %s; ignoring",
-                path,
-                exc_info=True,
-            )
-            existing = {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            existing = raw
+    except FileNotFoundError:
+        existing = {}
+    except (json.JSONDecodeError, OSError):
+        logger.warning(
+            "Failed to parse existing Noosphere config at %s; ignoring",
+            path,
+            exc_info=True,
+        )
+        existing = {}
 
     sanitized_values = dict(values or {})
     for key in _SECRET_CONFIG_KEYS:
@@ -204,7 +209,9 @@ class NoosphereMemoryProvider(MemoryProvider):
         self._write_enabled = True
         self._active = False
         self._client: Optional[NoosphereClient] = None
-        self._write_thread: Optional[threading.Thread] = None
+        self._save_queue: queue.Queue[Dict[str, Any]] = queue.Queue(maxsize=_SAVE_QUEUE_MAXSIZE)
+        self._save_worker: Optional[threading.Thread] = None
+        self._save_worker_lock = threading.Lock()
 
     @property
     def name(self) -> str:
@@ -286,7 +293,7 @@ class NoosphereMemoryProvider(MemoryProvider):
                     "tokenBudget": self._config["token_budget"],
                 }
             )
-        except NoosphereClientError:
+        except Exception:
             logger.debug("Noosphere prefetch failed", exc_info=True)
             return ""
         prompt_text = result.get("promptInjectionText")
@@ -319,6 +326,9 @@ class NoosphereMemoryProvider(MemoryProvider):
             if isinstance(error, ValueError):
                 return json.dumps({"error": str(error)})
             return error.to_json()
+        except Exception:
+            logger.warning("Noosphere tool call failed: %s", tool_name, exc_info=True)
+            return json.dumps({"error": f"Noosphere {tool_name} failed"})
 
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
         if not self._active or not self._client or not self._write_enabled:
@@ -327,9 +337,11 @@ class NoosphereMemoryProvider(MemoryProvider):
             return
         clean_user = _clean_capture_text(user_content)
         clean_assistant = _clean_capture_text(assistant_content)
-        if not _should_capture(clean_user) or not _should_capture(clean_assistant):
+        combined = f"{clean_user}\n{clean_assistant}".strip()
+        if not _should_capture(combined):
             return
-        title = _truncate_title(f"Hermes turn: {clean_user}", 120)
+        title_seed = clean_user if _should_capture(clean_user) else clean_assistant
+        title = _truncate_title(f"Hermes turn: {title_seed}", 120)
         content = (
             f"[role: user]\n{clean_user}\n[user:end]\n\n"
             f"[role: assistant]\n{clean_assistant}\n[assistant:end]"
@@ -373,22 +385,51 @@ class NoosphereMemoryProvider(MemoryProvider):
     def _save_async(self, request: Dict[str, Any]) -> None:
         if not self._client:
             return
+        try:
+            self._save_queue.put_nowait(request)
+        except queue.Full:
+            logger.warning("Noosphere save queue full; dropping write")
+            return
+        self._ensure_save_worker()
 
-        def _run() -> None:
+    def _ensure_save_worker(self) -> None:
+        with self._save_worker_lock:
+            if self._save_worker and self._save_worker.is_alive():
+                return
+            self._save_worker = threading.Thread(
+                target=self._save_worker_loop,
+                daemon=True,
+                name="noosphere-save-worker",
+            )
+            self._save_worker.start()
+
+    def _save_worker_loop(self) -> None:
+        while True:
             try:
-                assert self._client is not None
-                self._client.save(request)
+                request = self._save_queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            try:
+                client = self._client
+                if client:
+                    client.save(request)
             except Exception:
                 logger.debug("Noosphere async save failed", exc_info=True)
-
-        if self._write_thread and self._write_thread.is_alive():
-            self._write_thread.join(timeout=2.0)
-        self._write_thread = threading.Thread(target=_run, daemon=True, name="noosphere-save")
-        self._write_thread.start()
+            finally:
+                self._save_queue.task_done()
 
     def shutdown(self) -> None:
-        if self._write_thread and self._write_thread.is_alive():
-            self._write_thread.join(timeout=5.0)
+        deadline = time.monotonic() + 5.0
+        with self._save_queue.all_tasks_done:
+            while self._save_queue.unfinished_tasks:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    logger.warning(
+                        "Noosphere shutdown timed out with %s pending save(s)",
+                        self._save_queue.unfinished_tasks,
+                    )
+                    break
+                self._save_queue.all_tasks_done.wait(timeout=remaining)
         return None
 
 
@@ -442,7 +483,7 @@ def _read_save_args(
     config: Dict[str, Any],
     agent_identity: str,
 ) -> Dict[str, Any]:
-    title = _as_string(args.get("title"))
+    title = _clean_capture_text(args.get("title"))
     content = _clean_capture_text(args.get("content", ""))
     topic_id = _as_string(args.get("topicId")) or _as_string(config.get("topic_id"))
     if not title:
@@ -458,10 +499,15 @@ def _read_save_args(
         "topicId": topic_id,
         "authorName": _resolve_author_name(config, agent_identity),
     }
-    for key in ("excerpt", "source", "confidence"):
-        value = _as_string(args.get(key))
+    for key in ("excerpt", "source"):
+        value = _clean_capture_text(args.get(key))
         if value:
             request[key] = value
+    confidence = _as_string(args.get("confidence")).lower()
+    if confidence:
+        if confidence not in _VALID_CONFIDENCE:
+            raise ValueError("confidence must be low, medium, or high")
+        request["confidence"] = confidence
     tags = args.get("tags")
     if isinstance(tags, list):
         clean_tags = [_as_string(tag) for tag in tags]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import http.client
 import json
 import sys
 import threading
@@ -150,6 +151,42 @@ class NoosphereClientTest(unittest.TestCase):
         self.assertEqual(payload["status"], 401)
         self.assertEqual(payload["details"]["apiKey"], "[redacted]")
         self.assertEqual(payload["details"]["nested"]["authorization"], "[redacted]")
+
+    def test_http_exception_is_wrapped(self):
+        module = load_plugin_package()
+        client = module.NoosphereClient(
+            base_url=self.base_url,
+            api_key="noo_test",
+            timeout=2.0,
+        )
+
+        client_globals = module.NoosphereClient._request_json.__globals__
+        with mock.patch.object(
+            client_globals["urllib"].request,
+            "urlopen",
+            side_effect=http.client.HTTPException("bad status line"),
+        ):
+            with self.assertRaises(module.NoosphereClientError) as caught:
+                client.status()
+
+        self.assertEqual(str(caught.exception), "Noosphere request failed")
+
+    def test_redact_preserves_non_secret_key_substrings(self):
+        module = load_plugin_package()
+
+        redacted = module.NoosphereClient._request_json.__globals__["_redact"](
+            {
+                "monkey": "visible",
+                "keywords": ["search", "terms"],
+                "access_token": "tok_1234567890abcdef",
+                "message": "Bearer secretbearertoken",
+            }
+        )
+
+        self.assertEqual(redacted["monkey"], "visible")
+        self.assertEqual(redacted["keywords"], ["search", "terms"])
+        self.assertEqual(redacted["access_token"], "[redacted]")
+        self.assertEqual(redacted["message"], "[redacted]")
 
 
 if __name__ == "__main__":

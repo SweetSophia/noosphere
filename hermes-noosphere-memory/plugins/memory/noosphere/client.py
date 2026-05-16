@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+import http.client
 import json
+import re
 import urllib.error
 import urllib.request
 from typing import Any, Dict, Optional
 
 _MAX_RESPONSE_BYTES = 1_000_000
+_SENSITIVE_FIELD_NAMES = {
+    "api_key",
+    "apikey",
+    "key",
+    "token",
+    "authorization",
+    "access_token",
+    "refresh_token",
+}
+_SENSITIVE_VALUE_RE = re.compile(
+    r"(?:noo_[A-Za-z0-9_-]+|Bearer\s+[A-Za-z0-9._~+/=-]{8,}|(?:sk|pk|tok|key)_[A-Za-z0-9_-]{16,})"
+)
 
 
 class NoosphereClientError(Exception):
@@ -78,6 +92,10 @@ class NoosphereClient:
             ):
                 raise NoosphereClientError("Noosphere request timed out") from None
             raise NoosphereClientError(f"Noosphere request failed: {reason}") from None
+        except TimeoutError:
+            raise NoosphereClientError("Noosphere request timed out") from None
+        except (http.client.HTTPException, OSError):
+            raise NoosphereClientError("Noosphere request failed") from None
 
 
 def _parse_json_response(raw: bytes) -> Dict[str, Any]:
@@ -119,13 +137,17 @@ def _redact(value: Any) -> Any:
         redacted: Dict[str, Any] = {}
         for key, item in value.items():
             lowered = str(key).lower()
-            if "key" in lowered or "token" in lowered or "authorization" in lowered:
+            if (
+                lowered in _SENSITIVE_FIELD_NAMES
+                or lowered.endswith("_key")
+                or lowered.endswith("_token")
+            ):
                 redacted[key] = "[redacted]"
             else:
                 redacted[key] = _redact(item)
         return redacted
     if isinstance(value, list):
         return [_redact(item) for item in value]
-    if isinstance(value, str) and value.startswith("noo_"):
+    if isinstance(value, str) and _SENSITIVE_VALUE_RE.search(value):
         return "[redacted]"
     return value

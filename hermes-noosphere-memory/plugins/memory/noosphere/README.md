@@ -53,14 +53,14 @@ Config file: `$HERMES_HOME/noosphere.json`
 | Key | Default | Description |
 | --- | --- | --- |
 | `base_url` | `http://127.0.0.1:6578` | Noosphere deployment URL. |
-| `auto_recall` | `true` | Enable prompt-time recall once Phase 3 lands. |
+| `auto_recall` | `true` | Enable prompt-time recall through Noosphere's prompt-ready recall API. |
 | `auto_capture` | `false` | Keep broad turn capture disabled by default. |
-| `capture_mode` | `explicit` | Capture policy. Phase 1 stores only config. |
-| `max_recall_results` | `5` | Future recall result cap. |
-| `token_budget` | `1200` | Future recall token budget. |
-| `topic_id` | `""` | Default save topic for later write phases. |
-| `author_name_template` | `Hermes:{identity}` | Future author name template. |
-| `api_timeout` | `5.0` | Future HTTP timeout in seconds. |
+| `capture_mode` | `explicit` | Capture policy; broad turn capture only runs when set up explicitly. |
+| `max_recall_results` | `5` | Maximum results requested during prefetch and recall. |
+| `token_budget` | `1200` | Prompt-ready recall token budget. |
+| `topic_id` | `""` | Default topic for draft saves and optional turn capture. |
+| `author_name_template` | `Hermes:{identity}` | Author name template for draft memory candidates. |
+| `api_timeout` | `5.0` | HTTP timeout in seconds. |
 
 Secrets:
 

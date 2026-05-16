@@ -14,12 +14,15 @@ plugins/memory/noosphere/
   plugin.yaml
   README.md
   schemas.py
+  skills/noosphere/SKILL.md
 tests/
   test_noosphere_client.py
   test_noosphere_provider_phase1.py
+  test_noosphere_recall_phase3.py
+  test_noosphere_save_phase4.py
 ```
 
-## Phase 1 Scope
+## Phase 4 Scope
 
 Implemented:
 
@@ -37,7 +40,6 @@ Implemented:
 Not implemented yet:
 
 - direct article publication tools
-- installer script
 
 Those are intentionally left for later PRs so each step stays reviewable.
 
