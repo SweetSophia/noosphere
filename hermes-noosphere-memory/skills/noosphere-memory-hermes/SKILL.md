@@ -29,7 +29,10 @@ export HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 2. Verify the provider is installed:
 
 ```bash
-test -f "$HERMES_HOME/plugins/noosphere/__init__.py" || echo "Noosphere provider missing"
+test -f "$HERMES_HOME/plugins/noosphere/__init__.py" || {
+  echo "Noosphere provider missing. Install it before continuing." >&2
+  exit 1
+}
 ```
 
 If missing and the Noosphere repo is available, run:
@@ -45,20 +48,21 @@ HERMES_HOME="$HERMES_HOME" ./install-hermes.sh
 HERMES_HOME="$HERMES_HOME" hermes config set memory.provider noosphere
 ```
 
-4. Store or update the API key without duplicating `.env` entries. Set `NOOSPHERE_API_KEY_INPUT` in the shell environment before running this snippet:
+4. Store or update the API key without duplicating `.env` entries. In an interactive shell, prompt for the key at runtime so the secret is not placed in shell history or exposed through process environment inspection:
 
 ```bash
 python3 - <<'PY'
+import getpass
 import os
 from pathlib import Path
 
-api_key = os.environ.get("NOOSPHERE_API_KEY_INPUT", "").strip()
+api_key = getpass.getpass("Noosphere API key: ").strip()
 if not api_key:
-    raise SystemExit("Set NOOSPHERE_API_KEY_INPUT before running this snippet")
+    raise SystemExit("Noosphere API key is required")
 if not api_key.startswith("noo_"):
     raise SystemExit("Noosphere API keys should start with noo_")
 
-hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+hermes_home = Path(os.environ.get("HERMES_HOME") or str(Path.home() / ".hermes")).expanduser()
 env_path = hermes_home / ".env"
 env_path.parent.mkdir(parents=True, exist_ok=True)
 lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
@@ -75,6 +79,8 @@ env_path.chmod(0o600)
 PY
 ```
 
+If no interactive TTY is available and the user already gave the agent the key, do not pass it through an environment variable or command argument. Update `$HERMES_HOME/.env` through the agent's file-edit/write capability and keep the key out of logs and user-visible output.
+
 5. Create or update `$HERMES_HOME/noosphere.json`:
 
 ```bash
@@ -83,7 +89,32 @@ import json
 import os
 from pathlib import Path
 
-hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+def as_bool(value, default):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "y", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "n", "off"}:
+            return False
+    return default
+
+def as_int(value, default, minimum, maximum):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, parsed))
+
+def as_float(value, default, minimum, maximum):
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, parsed))
+
+hermes_home = Path(os.environ.get("HERMES_HOME") or str(Path.home() / ".hermes")).expanduser()
 path = hermes_home / "noosphere.json"
 config = {}
 if path.exists():
@@ -95,14 +126,14 @@ if path.exists():
         config = {}
 
 config.update({
-    "base_url": os.environ.get("NOOSPHERE_BASE_URL", config.get("base_url", "http://127.0.0.1:6578")).rstrip("/"),
-    "auto_recall": True,
-    "auto_capture": False,
-    "max_recall_results": int(config.get("max_recall_results", 5)),
-    "token_budget": int(config.get("token_budget", 1200)),
-    "topic_id": os.environ.get("NOOSPHERE_TOPIC_ID", config.get("topic_id", "")),
-    "author_name_template": config.get("author_name_template", "Hermes:{identity}"),
-    "api_timeout": float(config.get("api_timeout", 15.0)),
+    "base_url": (os.environ.get("NOOSPHERE_BASE_URL") or config.get("base_url") or "http://127.0.0.1:6578").rstrip("/"),
+    "auto_recall": as_bool(config.get("auto_recall"), True),
+    "auto_capture": as_bool(config.get("auto_capture"), False),
+    "max_recall_results": as_int(config.get("max_recall_results"), 5, 1, 20),
+    "token_budget": as_int(config.get("token_budget"), 1200, 100, 8000),
+    "topic_id": os.environ.get("NOOSPHERE_TOPIC_ID") or config.get("topic_id") or "",
+    "author_name_template": config.get("author_name_template") or "Hermes:{identity}",
+    "api_timeout": as_float(config.get("api_timeout"), 15.0, 0.5, 30.0),
 })
 
 path.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
