@@ -518,6 +518,60 @@ The plugin registers `openclaw noosphere ...` helpers for status, diagnostics, l
 - The installer enables broad prompt injection by default (`autoRecall: true`, `allowPromptInjection: true`, no agent/chat allowlist); restrict it with `enabledAgents`/`allowedChatTypes` if needed.
 - `noosphere_save` creates draft candidates only.
 
+## Hermes Agent Integration
+
+Noosphere ships a Hermes Agent memory provider at `hermes-noosphere-memory/`. It is a first-class Hermes `MemoryProvider`, not a generic tool plugin.
+
+### Quick install
+
+From a cloned Noosphere repository:
+
+```bash
+cd hermes-noosphere-memory
+./install-hermes.sh
+```
+
+Manual setup:
+
+```bash
+mkdir -p "$HERMES_HOME/plugins/memory"
+cp -R plugins/memory/noosphere "$HERMES_HOME/plugins/memory/noosphere"
+hermes config set memory.provider noosphere
+printf '%s\n' 'NOOSPHERE_API_KEY=noo_...' >> "$HERMES_HOME/.env"
+```
+
+Then create or edit `$HERMES_HOME/noosphere.json`:
+
+```json
+{
+  "base_url": "http://127.0.0.1:6578",
+  "auto_recall": true,
+  "auto_capture": false,
+  "capture_mode": "explicit",
+  "max_recall_results": 5,
+  "token_budget": 1200,
+  "providers": ["noosphere"],
+  "topic_id": "",
+  "author_name_template": "Hermes:{identity}",
+  "api_timeout": 5.0
+}
+```
+
+### Hermes capabilities
+
+| Capability | Status | Description |
+| --- | --- | --- |
+| `noosphere_status` | Implemented | Checks `GET /api/memory/status`. |
+| `noosphere_recall` | Implemented | Calls Noosphere recall in inspection mode. |
+| `noosphere_get` | Implemented | Fetches one memory by canonical ref or provider/id. |
+| `noosphere_topics` | Implemented | Lists topics for save target selection. |
+| `noosphere_save` | Implemented | Saves draft memory candidates; never auto-publishes. |
+| Auto recall | Implemented | Uses Hermes `prefetch()` and Noosphere's prompt-ready recall text. |
+| Explicit memory mirroring | Implemented | Mirrors Hermes `on_memory_write(add, ...)` when `topic_id` is configured. |
+| Broad turn capture | Opt-in | Requires `auto_capture: true` and `topic_id`; default is disabled. |
+
+Use a scoped Noosphere API key for each Hermes profile. Scoped keys control which restricted articles the provider can read and where it can write.
+
 ## Environment Variables
 
 | Variable | Description |
