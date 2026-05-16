@@ -18,7 +18,7 @@ This is a memory provider plugin, not a generic Hermes tool plugin. Hermes' own 
 
 Hermes memory providers implement `agent.memory_provider.MemoryProvider`.
 
-> **Target interface version:** this plan targets the Hermes `MemoryProvider` ABC as documented at `https://hermes-agent.nousresearch.com/docs/developer-guide/memory-provider-plugin` (verified 2026-05-15). The ABC interface is stable within minor versions;Hermes does not yet ship a formal versioned release tag. Implement against the documented interface and test against the Hermes commit that is current at install time.
+> **Target interface version:** this plan targets the Hermes `MemoryProvider` ABC as documented at `https://hermes-agent.nousresearch.com/docs/developer-guide/memory-provider-plugin` (verified 2026-05-15). The ABC interface is stable within minor versions; Hermes does not yet ship a formal versioned release tag. Implement against the documented interface and test against the Hermes commit that is current at install time.
 
 Required methods:
 
@@ -125,7 +125,6 @@ Suggested defaults:
   "capture_mode": "explicit",
   "max_recall_results": 5,
   "token_budget": 1200,
-  "providers": ["noosphere"],
   "topic_id": "",
   "author_name_template": "Hermes:{identity}",
   "api_timeout": 5.0
@@ -207,7 +206,7 @@ If `auto_recall` is enabled:
 
 1. call `POST /api/memory/recall`
 2. use `mode: "auto"`
-3. pass `resultCap`, `tokenBudget`, and configured providers
+3. pass `resultCap` and `tokenBudget`
 4. return Noosphere's `promptInjectionText` when present
 5. strip any nested memory-context tags before returning
 
