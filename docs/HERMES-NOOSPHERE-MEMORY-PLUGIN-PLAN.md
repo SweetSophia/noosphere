@@ -58,6 +58,9 @@ Add a self-contained Hermes integration to this repo:
 hermes-noosphere-memory/
   README.md
   install-hermes.sh
+  skills/
+    noosphere-memory-hermes/
+      SKILL.md
   plugins/
     __init__.py
     memory/
@@ -84,6 +87,7 @@ Rationale:
 - The source `plugins/memory/noosphere/` shape matches Hermes' bundled provider layout.
 - Keeping it under `hermes-noosphere-memory/` avoids mixing Python Hermes code with the TypeScript OpenClaw plugin.
 - Hermes 0.14 discovers user-installed providers at `$HERMES_HOME/plugins/<name>`, so the install script copies `plugins/memory/noosphere` into `$HERMES_HOME/plugins/noosphere`.
+- The install script also copies the setup skill to `$HERMES_HOME/skills/noosphere-memory-hermes`.
 
 ## Configuration Design
 
@@ -302,6 +306,7 @@ Update these docs after the first implementation:
 - `docs/NOOSPHERE-SKILL.md`: add a Hermes-specific install/use section
 - `hermes-noosphere-memory/README.md`: full setup, config, tool, and troubleshooting reference
 - `hermes-noosphere-memory/plugins/memory/noosphere/README.md`: Hermes plugin-local reference
+- `hermes-noosphere-memory/skills/noosphere-memory-hermes/SKILL.md`: setup automation runbook for connecting Hermes to Noosphere from an API key
 
 The Hermes bundled skill should be short and operational:
 

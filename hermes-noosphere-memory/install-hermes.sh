@@ -4,8 +4,10 @@ trap 'echo "Installer failed near line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="${SCRIPT_DIR}/plugins/memory/noosphere"
+SKILL_SOURCE_DIR="${SCRIPT_DIR}/skills/noosphere-memory-hermes"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 TARGET_DIR="${HERMES_HOME}/plugins/noosphere"
+SKILL_TARGET_DIR="${HERMES_HOME}/skills/noosphere-memory-hermes"
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -44,6 +46,11 @@ need tar
 mkdir -p "$TARGET_DIR"
 tar -C "$SOURCE_DIR" -cf - . | tar -C "$TARGET_DIR" -xf -
 
+if [ -d "$SKILL_SOURCE_DIR" ]; then
+  mkdir -p "$SKILL_TARGET_DIR"
+  tar -C "$SKILL_SOURCE_DIR" -cf - . | tar -C "$SKILL_TARGET_DIR" -xf -
+fi
+
 if command -v python3 >/dev/null 2>&1; then
   if ! python3 -m compileall -q "$TARGET_DIR"; then
     echo "Warning: installed plugin has Python syntax errors. Check $TARGET_DIR." >&2
@@ -55,6 +62,10 @@ echo "Noosphere Hermes memory provider installed."
 echo ""
 echo "Plugin path:"
 echo "  $TARGET_DIR"
+if [ -d "$SKILL_TARGET_DIR" ]; then
+  echo "Skill path:"
+  echo "  $SKILL_TARGET_DIR"
+fi
 echo ""
 
 if command -v hermes >/dev/null 2>&1; then
