@@ -15,7 +15,8 @@ const SETTINGS_MAX_BODY_BYTES = 64 * 1024; // 64 KiB
  * Merges with defaults for any missing fields.
  */
 export async function GET(request: NextRequest) {
-  const auth = await requirePermission(request, [Permissions.ADMIN]);
+  // Read-only endpoint — READ is sufficient.
+  const auth = await requirePermission(request, [Permissions.READ]);
   if (!auth.success) {
     return auth.response;
   }
