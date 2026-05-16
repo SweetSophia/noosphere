@@ -46,7 +46,18 @@ class NoosphereClient:
         self._timeout = timeout
 
     def status(self) -> Dict[str, Any]:
-        return self._request_json("GET", "/api/memory/status")
+        try:
+            return self._request_json("GET", "/api/memory/status")
+        except NoosphereClientError as error:
+            if error.status not in {401, 403}:
+                raise
+            health = self._request_json("GET", "/api/health")
+            health["memoryStatusAvailable"] = False
+            health["memoryStatusError"] = {
+                "status": error.status,
+                "error": str(error),
+            }
+            return health
 
     def recall(self, request: Dict[str, Any]) -> Dict[str, Any]:
         return self._request_json("POST", "/api/memory/recall", request)

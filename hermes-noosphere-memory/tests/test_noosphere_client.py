@@ -50,10 +50,19 @@ def load_plugin_package():
 class _StatusHandler(BaseHTTPRequestHandler):
     response_status = 200
     response_body = {"ok": True, "providers": [], "settings": {}}
+    health_body = {"status": "ok"}
     seen_authorization = ""
     seen_json = {}
 
     def do_GET(self):
+        if self.path == "/api/health":
+            raw = json.dumps(type(self).health_body).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
         if self.path != "/api/memory/status":
             self.send_response(404)
             self.end_headers()
@@ -90,6 +99,7 @@ class NoosphereClientTest(unittest.TestCase):
     def setUp(self):
         _StatusHandler.response_status = 200
         _StatusHandler.response_body = {"ok": True, "providers": [], "settings": {}}
+        _StatusHandler.health_body = {"status": "ok"}
         _StatusHandler.seen_authorization = ""
         _StatusHandler.seen_json = {}
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), _StatusHandler)
@@ -114,6 +124,23 @@ class NoosphereClientTest(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(_StatusHandler.seen_authorization, "Bearer noo_test")
+
+    def test_status_falls_back_to_health_for_scoped_key(self):
+        module = load_plugin_package()
+        _StatusHandler.response_status = 403
+        _StatusHandler.response_body = {"error": "Insufficient permissions"}
+        _StatusHandler.health_body = {"status": "ok", "timestamp": "test"}
+        client = module.NoosphereClient(
+            base_url=self.base_url,
+            api_key="noo_test",
+            timeout=2.0,
+        )
+
+        result = client.status()
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["memoryStatusAvailable"])
+        self.assertEqual(result["memoryStatusError"]["status"], 403)
 
     def test_recall_posts_json_body(self):
         module = load_plugin_package()
@@ -145,7 +172,7 @@ class NoosphereClientTest(unittest.TestCase):
         )
 
         with self.assertRaises(module.NoosphereClientError) as caught:
-            client.status()
+            client.recall({"query": "deploy", "mode": "inspection"})
 
         payload = json.loads(caught.exception.to_json())
         self.assertEqual(payload["status"], 401)

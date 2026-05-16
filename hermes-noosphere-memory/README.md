@@ -46,8 +46,8 @@ Those are intentionally left for later PRs so each step stays reviewable.
 ## Manual Install During Development
 
 ```bash
-mkdir -p "$HERMES_HOME/plugins/memory"
-cp -R hermes-noosphere-memory/plugins/memory/noosphere "$HERMES_HOME/plugins/memory/noosphere"
+mkdir -p "$HERMES_HOME/plugins"
+cp -R hermes-noosphere-memory/plugins/memory/noosphere "$HERMES_HOME/plugins/noosphere"
 hermes memory setup
 ```
 
@@ -55,8 +55,28 @@ Manual fallback:
 
 ```bash
 hermes config set memory.provider noosphere
-printf '%s\n' 'NOOSPHERE_API_KEY=noo_...' >> "$HERMES_HOME/.env"
-cat > "$HERMES_HOME/noosphere.json" <<'JSON'
+python3 - <<'PY'
+import os
+from pathlib import Path
+
+hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+env_path = hermes_home / ".env"
+env_path.parent.mkdir(parents=True, exist_ok=True)
+lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+key = "NOOSPHERE_API_KEY"
+value = "noo_..."
+updated = False
+for index, line in enumerate(lines):
+    if line.split("=", 1)[0].strip() == key:
+        lines[index] = f"{key}={value}"
+        updated = True
+        break
+if not updated:
+    lines.append(f"{key}={value}")
+env_path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+env_path.chmod(0o600)
+PY
+[ ! -f "$HERMES_HOME/noosphere.json" ] && cat > "$HERMES_HOME/noosphere.json" <<'JSON'
 {
   "base_url": "http://127.0.0.1:6578",
   "auto_recall": true,
@@ -66,7 +86,7 @@ cat > "$HERMES_HOME/noosphere.json" <<'JSON'
   "token_budget": 1200,
   "topic_id": "",
   "author_name_template": "Hermes:{identity}",
-  "api_timeout": 5.0
+  "api_timeout": 15.0
 }
 JSON
 ```
