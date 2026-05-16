@@ -69,6 +69,7 @@ class NoosphereClient:
         except urllib.error.HTTPError as error:
             details = _safe_error_body(error)
             message = _message_from_error_details(details) or f"Noosphere HTTP {error.code}"
+            error.close()
             raise NoosphereClientError(message, status=error.code, details=details) from None
         except urllib.error.URLError as error:
             reason = getattr(error, "reason", None)

@@ -38,7 +38,7 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
 }
 _NON_WRITING_CONTEXTS = {"cron", "flush", "subagent"}
 _SECRET_CONFIG_KEYS = {"api_key"}
-_MIN_CAPTURE_LENGTH = 10
+_MIN_CAPTURE_LENGTH = 40  # Noosphere API durable content minimum
 _TRIVIAL_RE = re.compile(
     r"^(ok|okay|thanks|thank you|got it|sure|yes|no|yep|nope|k|ty|thx|np)\.?$",
     re.IGNORECASE,
@@ -309,6 +309,8 @@ class NoosphereMemoryProvider(MemoryProvider):
             if tool_name == "noosphere_get":
                 return json.dumps(self._client.get(_read_get_args(args)))
             if tool_name == "noosphere_save":
+                if not self._write_enabled:
+                    return json.dumps({"error": "Write operations are disabled in the current context (cron/flush/subagent)."})
                 return json.dumps(
                     self._client.save(_read_save_args(args, self._config, self._agent_identity))
                 )
@@ -401,7 +403,7 @@ def _read_recall_args(args: Dict[str, Any], config: Dict[str, Any]) -> Dict[str,
     if not query:
         raise ValueError("query is required")
     request: Dict[str, Any] = {
-        "query": query,
+        "query": query[:1000],  # Noosphere API limits query to 1000 chars
         "mode": "inspection",
         "resultCap": _as_int(
             args.get("resultCap"),
@@ -481,7 +483,7 @@ def _truncate_title(text: str, limit: int) -> str:
     clean = " ".join((text or "").split())
     if len(clean) <= limit:
         return clean
-    return clean[: limit - 1].rstrip() + "..."
+    return clean[: limit - 3].rstrip() + "..."
 
 
 def _resolve_author_name(config: Dict[str, Any], agent_identity: str) -> str:

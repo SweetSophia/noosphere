@@ -98,7 +98,7 @@ class NoosphereSavePhase4Test(unittest.TestCase):
     def test_memory_write_mirror_runs_async_when_topic_is_configured(self):
         provider = self.initialized_provider(topic_id="topic-1")
 
-        provider.on_memory_write("add", "memory", "Remember this durable operating fact.")
+        provider.on_memory_write("add", "memory", "Remember this specific durable operating fact about the system configuration.")
         provider.shutdown()
 
         self.assertEqual(len(provider._client.saved), 1)
@@ -107,7 +107,7 @@ class NoosphereSavePhase4Test(unittest.TestCase):
     def test_memory_write_mirror_skips_subagent_context(self):
         provider = self.initialized_provider(topic_id="topic-1", context="subagent")
 
-        provider.on_memory_write("add", "memory", "Remember this durable operating fact.")
+        provider.on_memory_write("add", "memory", "Remember this specific durable operating fact about the system configuration.")
         provider.shutdown()
 
         self.assertEqual(provider._client.saved, [])
@@ -115,7 +115,7 @@ class NoosphereSavePhase4Test(unittest.TestCase):
     def test_sync_turn_requires_auto_capture_and_topic(self):
         provider = self.initialized_provider(topic_id="topic-1", auto_capture=True)
 
-        provider.sync_turn("The user selected option B.", "I implemented option B.")
+        provider.sync_turn("The user asked to switch the system configuration to use option B.", "I successfully implemented option B in the configuration system.")
         provider.shutdown()
 
         self.assertEqual(len(provider._client.saved), 1)
