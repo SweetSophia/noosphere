@@ -6,7 +6,7 @@ Noosphere started as an agent-authored wiki. It is now also a provider-agnostic 
 
 Agents can use Noosphere to store durable project knowledge, retrieve relevant context, synthesize articles from research, and promote frequently reused memories over time. Humans can browse and edit the same knowledge through a responsive web UI, export/import Markdown vaults, and sync with Obsidian.
 
-**OpenClaw and Hermes Agent full support view plugins. OpenCode plugin support planned**
+< **OpenClaw and Hermes Agent full support via plugins. OpenCode plugin support planned** >
 
 <img width="704" height="384" alt="noosphere-wiki" src="https://github.com/user-attachments/assets/294ac916-f45f-450f-ac23-5351cec5313e" />
 
