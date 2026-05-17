@@ -3,10 +3,14 @@ import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
 import { generateApiKey } from "@/lib/api/keys";
+import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/keys — List all API keys (metadata only)
 // Auth: ADMIN only
 export async function GET(_request: NextRequest) {
+  const rl = rateLimit(_request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-get" });
+  if (!rl.allowed) return rl.response;
+
   const auth = await requirePermission(_request, [Permissions.ADMIN]);
   if (!auth.success) {
     return auth.response;
@@ -32,6 +36,9 @@ export async function GET(_request: NextRequest) {
 // POST /api/keys — Create a new API key
 // Auth: ADMIN only
 export async function POST(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-post" });
+  if (!rl.allowed) return rl.response;
+
   const auth = await requirePermission(request, [Permissions.ADMIN]);
   if (!auth.success) {
     return auth.response;

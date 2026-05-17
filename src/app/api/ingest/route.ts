@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
 import { apiError } from "@/lib/api/errors";
 import { ARTICLE_LIMITS, deriveExcerpt, sanitizeAuthorName } from "@/lib/validation";
+import { rateLimit } from "@/lib/rate-limit";
 
 // POST /api/ingest — Process a source into multiple wiki articles
 // Auth: API key (WRITE/ADMIN) or session (EDITOR/ADMIN)
@@ -42,6 +43,9 @@ interface IngestArticle {
 }
 
 export async function POST(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "ingest" });
+  if (!rl.allowed) return rl.response;
+
   // --- Auth ---
   const auth = await requirePermission(request, [Permissions.WRITE]);
   if (!auth.success) {

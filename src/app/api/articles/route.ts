@@ -12,10 +12,14 @@ import {
   validateSlug,
 } from "@/lib/validation";
 import { parsePagination } from "@/lib/pagination";
+import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/articles — List articles (with filters)
 // Auth: API key (READ/WRITE/ADMIN) or session (human)
 export async function GET(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "articles-get" });
+  if (!rl.allowed) return rl.response;
+
   const auth = await requirePermission(request, [Permissions.READ]);
   if (!auth.success) {
     return auth.response;
@@ -155,6 +159,9 @@ export async function GET(request: NextRequest) {
 // POST /api/articles — Create article
 // Auth: API key (WRITE/ADMIN) or session (EDITOR/ADMIN)
 export async function POST(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "articles-post" });
+  if (!rl.allowed) return rl.response;
+
   const auth = await requirePermission(request, [Permissions.WRITE]);
   if (!auth.success) {
     return auth.response;

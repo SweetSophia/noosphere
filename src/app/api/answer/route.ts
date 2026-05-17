@@ -10,6 +10,7 @@ import {
   sanitizeAuthorName,
   validateSlug,
 } from "@/lib/validation";
+import { rateLimit } from "@/lib/rate-limit";
 
 // POST /api/answer — Save a synthesized answer as a new wiki article
 // Auth: API key (WRITE/ADMIN) or session (EDITOR/ADMIN)
@@ -32,6 +33,9 @@ import {
 //   { article: {id, title, slug, topic, tags}, answerId }
 
 export async function POST(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "answer" });
+  if (!rl.allowed) return rl.response;
+
   const auth = await requirePermission(request, [Permissions.WRITE]);
   if (!auth.success) {
     return auth.response;

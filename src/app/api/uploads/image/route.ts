@@ -4,10 +4,14 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { requireApiKey } from "@/lib/api/keys";
 import { saveUploadedImage } from "@/lib/uploads";
+import { rateLimit } from "@/lib/rate-limit";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "upload" });
+  if (!rl.allowed) return rl.response;
+
   const apiAuth = await requireApiKey(request);
   const session = await getServerSession(authOptions);
 

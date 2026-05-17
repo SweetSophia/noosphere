@@ -12,10 +12,14 @@ import {
   isValidStatus,
   validateSlug,
 } from "@/lib/validation";
+import { rateLimit } from "@/lib/rate-limit";
 
 // PATCH /api/articles/[id] — Update article
 // Auth: API key (WRITE/ADMIN) or session (EDITOR/ADMIN)
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "articles-patch" });
+  if (!rl.allowed) return rl.response;
+
   const { id } = await params;
 
   const auth = await requirePermission(request, [Permissions.WRITE]);
@@ -302,6 +306,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 // DELETE /api/articles/[id] — Soft-delete article
 // Auth: API key (ADMIN) or session (ADMIN)
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "articles-delete" });
+  if (!rl.allowed) return rl.response;
+
   const { id } = await params;
 
   const auth = await requirePermission(request, [Permissions.ADMIN]);

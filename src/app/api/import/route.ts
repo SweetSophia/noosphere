@@ -7,6 +7,7 @@ import { authOptions } from "@/lib/auth";
 import JSZip from "jszip";
 import yaml from "js-yaml";
 import { isValidConfidence, isValidStatus } from "@/lib/validation";
+import { rateLimit } from "@/lib/rate-limit";
 
 // Disable Next.js body parsing for file uploads
 export const dynamic = "force-dynamic";
@@ -38,7 +39,10 @@ interface ImportArticle {
 }
 
 // GET /api/import — Return import format documentation
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "import-get" });
+  if (!rl.allowed) return rl.response;
+
   return NextResponse.json({
     endpoint: "POST /api/import",
     description: "Import articles from a markdown zip export",
@@ -73,6 +77,9 @@ status: published
 
 // POST /api/import — Import articles from a markdown zip
 export async function POST(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "import" });
+  if (!rl.allowed) return rl.response;
+
   const apiAuth = await requireApiKey(request);
   const session = await getServerSession(authOptions);
 
