@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, buildScopeFilter } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/rate-limit";
+import {
+  buildArticleLookupMaps,
+  isContentWithinByteLimit,
+  parseGraphQueryParams,
+} from "@/lib/graph";
 
 // GET /api/graph — Wiki knowledge graph
 //
@@ -14,7 +20,7 @@ import { rateLimit } from "@/lib/rate-limit";
 //   contentLimit — max articles to parse for cross-references (default 100)
 //                    Articles beyond this get topic/tag edges only.
 //   contentMaxBytes — skip cross-ref parsing for articles larger than this
-//                       (default 50KB) to prevent CPU exhaustion.
+//                       (default 50KB, max 50KB) to prevent CPU exhaustion.
 //
 // Response:
 //   {
@@ -36,15 +42,15 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const topicSlug = searchParams.get("topic");
-    const rawLimit = parseInt(searchParams.get("limit") ?? "100", 10);
-    const limit = Math.max(1, Math.min(rawLimit || 100, 500));
-    const contentLimit = Math.max(0, Math.min(parseInt(searchParams.get("contentLimit") ?? "100", 10) || 100, limit));
-    const contentMaxBytes = Math.max(0, parseInt(searchParams.get("contentMaxBytes") ?? "51200", 10) || 51200);
+    const { limit, contentLimit, contentMaxBytes } =
+      parseGraphQueryParams(searchParams);
 
     // Build scope-filtered where clause — restricts articles based on key scopes
     const scopeWhere = buildScopeFilter(auth.auth.allowedScopes, { deletedAt: null });
 
-    // Fetch all non-deleted articles with their tags and topic
+    // Fetch graph metadata first. Article content is loaded separately for the
+    // small cross-reference candidate set so large bodies are not returned just
+    // to build topic/tag edges.
     const articles = await prisma.article.findMany({
       where: {
         ...scopeWhere,
@@ -55,7 +61,6 @@ export async function GET(request: NextRequest) {
         title: true,
         slug: true,
         excerpt: true,
-        content: true,
         createdAt: true,
         topic: { select: { slug: true } },
         tags: { select: { tag: { select: { id: true, name: true, slug: true } } } },
@@ -64,11 +69,36 @@ export async function GET(request: NextRequest) {
       orderBy: { updatedAt: "desc" },
     });
 
-    // Determine which articles are eligible for cross-reference parsing.
-    // Parsing large content with regex is O(n) and can exhaust CPU/memory.
-    const articlesToParse = articles.filter((a, i) =>
-      i < contentLimit && new TextEncoder().encode(a.content).length <= contentMaxBytes
+    // Load content only for candidate articles. PostgreSQL enforces the byte
+    // ceiling before returning content, so oversized bodies become NULL instead
+    // of being transferred to Node just to be skipped.
+    const candidateArticleIds = articles.slice(0, contentLimit).map((a) => a.id);
+    const articleContents =
+      candidateArticleIds.length > 0 && contentMaxBytes > 0
+        ? await prisma.$queryRaw<Array<{ id: string; content: string | null }>>`
+            SELECT id,
+                   CASE
+                     WHEN octet_length(content) <= ${contentMaxBytes} THEN content
+                     ELSE NULL
+                   END AS content
+            FROM "Article"
+            WHERE id IN (${Prisma.join(candidateArticleIds)})
+          `
+        : [];
+    const contentByArticleId = new Map(
+      articleContents
+        .filter((row): row is { id: string; content: string } => row.content !== null)
+        .map((row) => [row.id, row.content])
     );
+    const articlesToParse = articles.slice(0, contentLimit).flatMap((article) => {
+      const content = contentByArticleId.get(article.id);
+      if (!content || !isContentWithinByteLimit(content, contentMaxBytes)) {
+        return [];
+      }
+
+      return [{ ...article, content }];
+    });
+    const { articleBySlug, articleByTopicSlug } = buildArticleLookupMaps(articles);
 
   // Build nodes
   const nodes = articles.map((a) => ({
@@ -131,15 +161,16 @@ export async function GET(request: NextRequest) {
   // Cross-reference edges: articles that explicitly link to other articles in the wiki
   // Detect wikilink-style references: [[slug]] or [text](/wiki/topic/slug)
   // Only parsed for articles within contentLimit and contentMaxBytes to prevent
-  // CPU exhaustion on large wikis. For full accuracy, cross-references should be
-  // pre-computed at write time and stored in the ArticleRelation table.
+  // CPU exhaustion on large wikis. contentMaxBytes is capped server-side even
+  // when the query string asks for more. For full accuracy, cross-references
+  // should be pre-computed at write time and stored in the ArticleRelation table.
   for (const article of articlesToParse) {
     // Match [[slug]] patterns (wikilinks to other wiki pages)
     const wikiLinkRegex = /\[\[([a-z0-9-]+)\]\]/gi;
     let match;
     while ((match = wikiLinkRegex.exec(article.content)) !== null) {
       const targetSlug = match[1].toLowerCase();
-      const target = articles.find((a) => a.slug === targetSlug);
+      const target = articleBySlug.get(targetSlug);
       if (target) {
         addEdge(article.id, target.id, "cross_ref");
       }
@@ -150,9 +181,7 @@ export async function GET(request: NextRequest) {
     while ((match = hrefRegex.exec(article.content)) !== null) {
       const refTopic = match[1].toLowerCase();
       const refSlug = match[2].toLowerCase();
-      const target = articles.find(
-        (a) => a.topic.slug === refTopic && a.slug === refSlug
-      );
+      const target = articleByTopicSlug.get(`${refTopic}:${refSlug}`);
       if (target) {
         addEdge(article.id, target.id, "cross_ref");
       }
