@@ -81,7 +81,7 @@ export const DEFAULT_RECALL_SETTINGS: RecallSettings = {
   maxInjectedTokens: 2000,
   recallVerbosity: "standard",
   deduplicationStrategy: "best-score",
-  enabledProviders: [],
+  enabledProviders: ["noosphere"],
   providerPriorityWeights: {},
   summaryFirst: true,
   conflictStrategy: "surface",
