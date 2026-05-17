@@ -53,7 +53,43 @@ cp -R hermes-noosphere-memory/plugins/memory/noosphere "$HERMES_HOME/plugins/noo
 hermes memory setup
 ```
 
-Manual fallback:
+### Manual installation - step by step
+
+Manual setup looks like this:
+
+    mkdir -p "$HERMES_HOME/plugins"
+    cp -R plugins/memory/noosphere "$HERMES_HOME/plugins/noosphere"
+    hermes config set memory.provider noosphere
+
+Store your key in:
+
+    $HERMES_HOME/.env
+
+For example:
+
+    NOOSPHERE_API_KEY=noo_...
+
+Then create or edit:
+
+    $HERMES_HOME/noosphere.json
+
+Example:
+
+    {
+      "base_url": "http://127.0.0.1:6578",
+      "auto_recall": true,
+      "auto_capture": false,
+      "capture_mode": "explicit",
+      "max_recall_results": 5,
+      "token_budget": 1200,
+      "topic_id": "",
+      "author_name_template": "Hermes:{identity}",
+      "api_timeout": 15.0
+    }
+
+Use scoped Noosphere API keys for each Hermes profile when you want different agents to see or write different knowledge areas.
+
+#### Manual fallback condensed version instructions:
 
 ```bash
 hermes config set memory.provider noosphere
