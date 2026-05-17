@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
@@ -30,21 +31,54 @@ export function parseTagInput(raw: string | null | undefined): string[] {
   );
 }
 
+export interface NormalizedTagInput {
+  name: string;
+  slug: string;
+}
+
+export function normalizeTagInputs(tagNames: string[]): NormalizedTagInput[] {
+  const bySlug = new Map<string, NormalizedTagInput>();
+
+  for (const name of tagNames) {
+    const trimmed = name.trim();
+    const slug = slugify(trimmed);
+    if (!slug || bySlug.has(slug)) continue;
+
+    bySlug.set(slug, { name: trimmed, slug });
+  }
+
+  return Array.from(bySlug.values());
+}
+
 export async function buildTagConnections(tagNames: string[]) {
   if (!tagNames.length) return [];
 
-  return Promise.all(
-    tagNames.map(async (tagName) => {
-      const tagSlug = slugify(tagName);
-      const tag = await prisma.tag.upsert({
-        where: { slug: tagSlug },
-        create: { name: tagName, slug: tagSlug },
-        update: { name: tagName },
-      });
+  const tags = normalizeTagInputs(tagNames);
+  if (!tags.length) return [];
 
-      return { tagId: tag.id };
+  // Preserve the previous upsert behavior while avoiding per-tag round-trips.
+  await prisma.$executeRaw(Prisma.sql`
+    INSERT INTO "Tag" ("id", "name", "slug")
+    VALUES ${Prisma.join(
+      tags.map((tag) => Prisma.sql`(${randomUUID()}, ${tag.name}, ${tag.slug})`)
+    )}
+    ON CONFLICT ("slug") DO UPDATE SET "name" = EXCLUDED."name"
+  `);
+
+  const slugs = tags.map((tag) => tag.slug);
+  const found = await prisma.tag.findMany({
+    where: { slug: { in: slugs } },
+    select: { id: true, slug: true },
+  });
+
+  const bySlug = new Map(found.map((t) => [t.slug, t.id]));
+
+  return tags
+    .map((tag) => {
+      const id = bySlug.get(tag.slug);
+      return id ? { tagId: id } : null;
     })
-  );
+    .filter((c): c is { tagId: string } => c !== null);
 }
 
 export interface SearchArticlesOptions extends ArticleSearchFilters {
