@@ -10,7 +10,11 @@ import { rateLimit } from "@/lib/rate-limit";
 //
 // Query params:
 //   topic    — filter to a specific topic slug
-//   limit    — max articles to include per topic (default 100)
+//   limit    — max articles to include per topic (default 100, max 500)
+//   contentLimit — max articles to parse for cross-references (default 100)
+//                    Articles beyond this get topic/tag edges only.
+//   contentMaxBytes — skip cross-ref parsing for articles larger than this
+//                       (default 50KB) to prevent CPU exhaustion.
 //
 // Response:
 //   {
@@ -34,6 +38,8 @@ export async function GET(request: NextRequest) {
     const topicSlug = searchParams.get("topic");
     const rawLimit = parseInt(searchParams.get("limit") ?? "100", 10);
     const limit = Math.max(1, Math.min(rawLimit || 100, 500));
+    const contentLimit = Math.max(0, Math.min(parseInt(searchParams.get("contentLimit") ?? "100", 10) || 100, limit));
+    const contentMaxBytes = Math.max(0, parseInt(searchParams.get("contentMaxBytes") ?? "51200", 10) || 51200);
 
     // Build scope-filtered where clause — restricts articles based on key scopes
     const scopeWhere = buildScopeFilter(auth.auth.allowedScopes, { deletedAt: null });
@@ -57,6 +63,12 @@ export async function GET(request: NextRequest) {
       take: limit,
       orderBy: { updatedAt: "desc" },
     });
+
+    // Determine which articles are eligible for cross-reference parsing.
+    // Parsing large content with regex is O(n) and can exhaust CPU/memory.
+    const articlesToParse = articles.filter((a, i) =>
+      i < contentLimit && new TextEncoder().encode(a.content).length <= contentMaxBytes
+    );
 
   // Build nodes
   const nodes = articles.map((a) => ({
@@ -118,7 +130,10 @@ export async function GET(request: NextRequest) {
 
   // Cross-reference edges: articles that explicitly link to other articles in the wiki
   // Detect wikilink-style references: [[slug]] or [text](/wiki/topic/slug)
-  for (const article of articles) {
+  // Only parsed for articles within contentLimit and contentMaxBytes to prevent
+  // CPU exhaustion on large wikis. For full accuracy, cross-references should be
+  // pre-computed at write time and stored in the ArticleRelation table.
+  for (const article of articlesToParse) {
     // Match [[slug]] patterns (wikilinks to other wiki pages)
     const wikiLinkRegex = /\[\[([a-z0-9-]+)\]\]/gi;
     let match;
