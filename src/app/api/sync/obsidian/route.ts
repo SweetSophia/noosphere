@@ -14,9 +14,13 @@ import { authOptions } from "@/lib/auth";
 import { getObsidianSyncConfig } from "@/lib/obsidian-sync/config";
 import { runObsidianSync, SyncConflictError } from "@/lib/obsidian-sync";
 import type { SyncOptions } from "@/lib/obsidian-sync";
+import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/sync/obsidian — return status / config visibility
 export async function GET(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "obsidian-get" });
+  if (!rl.allowed) return rl.response;
+
   const apiAuth = await requireApiKey(request);
   const session = await getServerSession(authOptions);
 
@@ -61,6 +65,9 @@ export async function GET(request: NextRequest) {
 
 // POST /api/sync/obsidian — trigger a sync run
 export async function POST(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 5, keyPrefix: "obsidian-post" });
+  if (!rl.allowed) return rl.response;
+
   const apiAuth = await requireApiKey(request);
   const session = await getServerSession(authOptions);
 

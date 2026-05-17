@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/wiki";
 import { checkRouteAuth } from "@/lib/api/auth";
+import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/topics — List all topics (existing)
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "topics-get" });
+  if (!rl.allowed) return rl.response;
   try {
     const allTopics = await prisma.topic.findMany({
       include: {
@@ -61,6 +64,9 @@ export async function GET() {
 
 // POST /api/topics — Create a topic or subtopic
 export async function POST(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "topics-post" });
+  if (!rl.allowed) return rl.response;
+
   const auth = await checkRouteAuth(request);
   if (!auth.authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

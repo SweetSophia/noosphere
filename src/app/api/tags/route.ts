@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/wiki";
 import { checkRouteAuth } from "@/lib/api/auth";
+import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/tags — List all tags with article counts
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "tags-get" });
+  if (!rl.allowed) return rl.response;
+
   try {
     const tags = await prisma.tag.findMany({
       include: {
@@ -30,6 +34,9 @@ export async function GET() {
 
 // POST /api/tags — Create a tag
 export async function POST(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "tags-post" });
+  if (!rl.allowed) return rl.response;
+
   const auth = await checkRouteAuth(request);
   if (!auth.authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

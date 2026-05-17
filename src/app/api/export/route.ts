@@ -6,10 +6,14 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import JSZip from "jszip";
 import yaml from "js-yaml";
+import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/export — Export all articles as a zip of markdown files
 // Auth: API key (READ/WRITE/ADMIN) or session (human)
 export async function GET(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "export" });
+  if (!rl.allowed) return rl.response;
+
   const apiAuth = await requireApiKey(request);
   const session = await getServerSession(authOptions);
 

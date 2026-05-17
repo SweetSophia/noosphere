@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireApiKey } from "@/lib/api/keys";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/log — Query the activity log
 //
@@ -19,6 +20,9 @@ import { authOptions } from "@/lib/auth";
 //   { entries: [{id, type, title, details, sourceUrl, authorName, createdAt}], total, limit, offset }
 
 export async function GET(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "log-get" });
+  if (!rl.allowed) return rl.response;
+
   // Auth: API key (any permission) or session
   const apiAuth = await requireApiKey(request);
   const session = await getServerSession(authOptions);

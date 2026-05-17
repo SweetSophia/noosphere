@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
+import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/keys/[id] — Get a single key's metadata
 // Auth: ADMIN only
@@ -9,6 +10,9 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const rl = rateLimit(_request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-get-id" });
+  if (!rl.allowed) return rl.response;
+
   const { id } = await params;
   const auth = await requirePermission(_request, [Permissions.ADMIN]);
   if (!auth.success) {
@@ -41,6 +45,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-patch" });
+  if (!rl.allowed) return rl.response;
+
   const { id } = await params;
   const auth = await requirePermission(request, [Permissions.ADMIN]);
   if (!auth.success) {
@@ -130,6 +137,9 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const rl = rateLimit(_request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-delete" });
+  if (!rl.allowed) return rl.response;
+
   const { id } = await params;
   const auth = await requirePermission(_request, [Permissions.ADMIN]);
   if (!auth.success) {

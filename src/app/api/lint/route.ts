@@ -4,6 +4,7 @@ import { requireApiKey } from "@/lib/api/keys";
 import { buildScopeFilter } from "@/lib/api/auth";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { rateLimit } from "@/lib/rate-limit";
 
 const LINT_MAX_ARTICLES_DEFAULT = 500;
 const LINT_MAX_ARTICLES_HARD_LIMIT = 2000;
@@ -35,6 +36,9 @@ interface LintIssue {
 }
 
 export async function POST(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "lint" });
+  if (!rl.allowed) return rl.response;
+
   // --- Auth ---
   const apiAuth = await requireApiKey(request);
   const session = await getServerSession(authOptions);

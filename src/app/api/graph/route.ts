@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, buildScopeFilter } from "@/lib/api/auth";
+import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/graph — Wiki knowledge graph
 //
@@ -19,6 +20,9 @@ import { requirePermission, buildScopeFilter } from "@/lib/api/auth";
 //   }
 
 export async function GET(request: NextRequest) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "graph" });
+  if (!rl.allowed) return rl.response;
+
   // Auth: API key (any permission) or session — empty array = any authenticated caller
   const auth = await requirePermission(request, []);
   if (!auth.success) {

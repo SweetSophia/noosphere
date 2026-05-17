@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/wiki";
 import { checkRouteAuth } from "@/lib/api/auth";
+import { rateLimit } from "@/lib/rate-limit";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -9,6 +10,9 @@ interface Props {
 
 // PATCH /api/tags/[id] — Rename a tag
 export async function PATCH(request: NextRequest, { params }: Props) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "tags-patch" });
+  if (!rl.allowed) return rl.response;
+
   const auth = await checkRouteAuth(request);
   if (!auth.authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -59,6 +63,9 @@ export async function PATCH(request: NextRequest, { params }: Props) {
 
 // DELETE /api/tags/[id] — Delete a tag
 export async function DELETE(request: NextRequest, { params }: Props) {
+  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "tags-delete" });
+  if (!rl.allowed) return rl.response;
+
   const auth = await checkRouteAuth(request);
   if (!auth.authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
