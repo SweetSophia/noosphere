@@ -46,15 +46,6 @@ Not implemented yet:
 Those are intentionally left for later PRs so each step stays reviewable.
 
 ## Manual Install During Development
-
-```bash
-mkdir -p "$HERMES_HOME/plugins"
-cp -R hermes-noosphere-memory/plugins/memory/noosphere "$HERMES_HOME/plugins/noosphere"
-hermes memory setup
-```
-
-### Manual installation - step by step
-
 Manual setup looks like this:
 
     mkdir -p "$HERMES_HOME/plugins"
