@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireApiKey } from "@/lib/api/keys";
-import { buildScopeFilter } from "@/lib/api/auth";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requirePermission, buildScopeFilter } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/rate-limit";
 
 const LINT_MAX_ARTICLES_DEFAULT = 500;
@@ -39,30 +37,12 @@ export async function POST(request: NextRequest) {
   const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "lint" });
   if (!rl.allowed) return rl.response;
 
-  // --- Auth ---
-  const apiAuth = await requireApiKey(request);
-  const session = await getServerSession(authOptions);
-
-  if (!apiAuth.authorized && !session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requirePermission(request, [Permissions.WRITE]);
+  if (!auth.success) {
+    return auth.response;
   }
 
-  if (apiAuth.authorized) {
-    if (apiAuth.permissions !== "WRITE" && apiAuth.permissions !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
-  } else {
-    const role = session?.user?.role;
-    if (role !== "EDITOR" && role !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
-  }
-
-  // Determine effective scopes for lint filtering
-  const allowedScopes = apiAuth.authorized
-    ? apiAuth.allowedScopes
-    : ["*"]; // Sessions get full access
-  const scopeWhere = buildScopeFilter(allowedScopes, { deletedAt: null });
+  const scopeWhere = buildScopeFilter(auth.auth.allowedScopes, { deletedAt: null });
 
   // --- Parse options ---
   let body: { staleDays?: number; tagMin?: number; maxArticles?: unknown } = {};
@@ -285,7 +265,7 @@ export async function POST(request: NextRequest) {
   };
 
   // ── Log the lint run ──
-  const authorName = session?.user?.name || "API";
+  const authorName = auth.auth.name || "API";
 
   await prisma.activityLog.create({
     data: {

@@ -1,8 +1,7 @@
 import path from "path";
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { requireApiKey } from "@/lib/api/keys";
+import { Permissions } from "@prisma/client";
+import { requirePermission } from "@/lib/api/auth";
 import { saveUploadedImage } from "@/lib/uploads";
 import { rateLimit } from "@/lib/rate-limit";
 
@@ -12,19 +11,9 @@ export async function POST(request: NextRequest) {
   const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "upload" });
   if (!rl.allowed) return rl.response;
 
-  const apiAuth = await requireApiKey(request);
-  const session = await getServerSession(authOptions);
-
-  if (!apiAuth.authorized && !session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (apiAuth.authorized && !["WRITE", "ADMIN"].includes(apiAuth.permissions)) {
-    return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-  }
-
-  if (session?.user && !["EDITOR", "ADMIN"].includes(session.user.role)) {
-    return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+  const auth = await requirePermission(request, [Permissions.WRITE]);
+  if (!auth.success) {
+    return auth.response;
   }
 
   try {

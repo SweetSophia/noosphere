@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireApiKey } from "@/lib/api/keys";
-import { canAccessScopes } from "@/lib/api/auth";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requirePermission, canAccessScopes } from "@/lib/api/auth";
 import JSZip from "jszip";
 import yaml from "js-yaml";
 import { isValidConfidence, isValidStatus } from "@/lib/validation";
@@ -80,28 +78,12 @@ export async function POST(request: NextRequest) {
   const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "import" });
   if (!rl.allowed) return rl.response;
 
-  const apiAuth = await requireApiKey(request);
-  const session = await getServerSession(authOptions);
-
-  if (!apiAuth.authorized && !session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requirePermission(request, [Permissions.WRITE]);
+  if (!auth.success) {
+    return auth.response;
   }
 
-  if (apiAuth.authorized) {
-    if (apiAuth.permissions !== "WRITE" && apiAuth.permissions !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
-  } else {
-    const role = session?.user?.role;
-    if (role !== "EDITOR" && role !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
-  }
-
-  // Determine effective allowedScopes for scope-based article filtering
-  const allowedScopes = apiAuth.authorized
-    ? apiAuth.allowedScopes
-    : ["*"]; // Sessions get admin-level access
+  const allowedScopes = auth.auth.allowedScopes;
 
   // Parse multipart form using Web API
   let formData: FormData;
@@ -260,9 +242,8 @@ export async function POST(request: NextRequest) {
   }
 
   // Process imports
-  const sessionUser = session?.user as ({ id?: string } | null) | undefined;
-  const userId = sessionUser?.id ?? null;
-  const userName = session?.user?.name ?? "Importer";
+  const userId = auth.auth.userId ?? null;
+  const userName = auth.auth.name ?? "Importer";
 
   const results = { imported: 0, skipped: 0, errors: 0 };
 

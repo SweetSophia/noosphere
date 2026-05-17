@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireApiKey } from "@/lib/api/keys";
-import { buildScopeFilter } from "@/lib/api/auth";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requirePermission, buildScopeFilter } from "@/lib/api/auth";
 import JSZip from "jszip";
 import yaml from "js-yaml";
 import { rateLimit } from "@/lib/rate-limit";
@@ -14,19 +12,12 @@ export async function GET(request: NextRequest) {
   const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "export" });
   if (!rl.allowed) return rl.response;
 
-  const apiAuth = await requireApiKey(request);
-  const session = await getServerSession(authOptions);
-
-  if (!apiAuth.authorized && !session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requirePermission(request, [Permissions.READ]);
+  if (!auth.success) {
+    return auth.response;
   }
 
-  // Determine effective scopes for export filtering
-  const allowedScopes = apiAuth.authorized
-    ? apiAuth.allowedScopes
-    : ["*"]; // Sessions get full access
-
-  const scopeWhere = buildScopeFilter(allowedScopes, { deletedAt: null });
+  const scopeWhere = buildScopeFilter(auth.auth.allowedScopes, { deletedAt: null });
 
   try {
     const articles = await prisma.article.findMany({
