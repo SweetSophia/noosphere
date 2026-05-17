@@ -42,6 +42,30 @@ const nextConfig: NextConfig = {
 
   // Security headers including Content Security Policy
   async headers() {
+    const isProd = process.env.NODE_ENV === "production";
+    const localHttpOrigins = [
+      "http://localhost:4400",
+      "http://127.0.0.1:4400",
+      "http://localhost:6578",
+      "http://127.0.0.1:6578",
+    ];
+    const localWsOrigins = [
+      "ws://localhost:4400",
+      "ws://127.0.0.1:4400",
+      "ws://localhost:6578",
+      "ws://127.0.0.1:6578",
+    ];
+
+    const scriptSrc = ["script-src", "'self'", "'unsafe-inline'"];
+    const imgSrc = ["img-src", "'self'", "data:", "blob:"];
+    const connectSrc = ["connect-src", "'self'"];
+
+    if (!isProd) {
+      scriptSrc.push("'unsafe-eval'");
+      imgSrc.push(...localHttpOrigins);
+      connectSrc.push(...localWsOrigins);
+    }
+
     return [
       {
         source: "/:path*",
@@ -50,11 +74,11 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-eval'",
+              scriptSrc.join(" "),
               "style-src 'self' 'unsafe-inline'",
-              "img-src 'self' data: blob:",
+              imgSrc.join(" "),
               "font-src 'self'",
-              "connect-src 'self'",
+              connectSrc.join(" "),
               "media-src 'self'",
               "object-src 'none'",
               "frame-ancestors 'none'",
