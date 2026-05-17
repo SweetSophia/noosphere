@@ -1,7 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getToken } from "next-auth/jwt";
 import { rateLimit } from "@/lib/rate-limit";
 
-export function proxy(request: NextRequest) {
+function isAdminPath(path: string) {
+  return path === "/wiki/admin" || path.startsWith("/wiki/admin/");
+}
+
+function addSecurityHeaders(response: NextResponse) {
+  // NOTE: Using 'unsafe-inline' for scripts is pragmatic for Next.js hydration.
+  // A production-hardened setup should use nonce-based CSP instead:
+  // generate a random nonce per request, add it to script-src, and pass it
+  // through NextScript / inline script tags. That requires a custom _document.tsx.
+  const csp = [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'", // Next.js needs inline scripts for hydration
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self'",
+    "connect-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join("; ");
+
+  response.headers.set("Content-Security-Policy", csp);
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  response.headers.set("X-Frame-Options", "DENY");
+  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+
+  return response;
+}
+
+export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
 
   // Rate-limit authentication endpoints
@@ -11,7 +41,7 @@ export function proxy(request: NextRequest) {
       maxRequests: 10,
       keyPrefix: "auth",
     });
-    if (!result.allowed) return result.response;
+    if (!result.allowed) return addSecurityHeaders(result.response);
   }
 
   // Rate-limit write-heavy API endpoints. Keep this broad enough to cover
@@ -35,34 +65,27 @@ export function proxy(request: NextRequest) {
       maxRequests: 30,
       keyPrefix: "api-write",
     });
-    if (!result.allowed) return result.response;
+    if (!result.allowed) return addSecurityHeaders(result.response);
   }
 
-  // Add security headers to all responses
-  const response = NextResponse.next();
+  if (isAdminPath(path)) {
+    const token = await getToken({
+      req: request,
+      secret: process.env.NEXTAUTH_SECRET,
+    });
 
-  // NOTE: Using 'unsafe-inline' for scripts is pragmatic for Next.js hydration.
-  // A production-hardened setup should use nonce-based CSP instead:
-  // generate a random nonce per request, add it to script-src, and pass it
-  // through NextScript / inline script tags. That requires a custom _document.tsx.
-  const csp = [
-    "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'", // Next.js needs inline scripts for hydration
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
-    "font-src 'self'",
-    "connect-src 'self'",
-    "frame-ancestors 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-  ].join("; ");
+    if (!token) {
+      const loginUrl = new URL("/wiki/login", request.url);
+      loginUrl.searchParams.set("callbackUrl", `${path}${request.nextUrl.search}`);
+      return addSecurityHeaders(NextResponse.redirect(loginUrl));
+    }
 
-  response.headers.set("Content-Security-Policy", csp);
-  response.headers.set("X-Content-Type-Options", "nosniff");
-  response.headers.set("X-Frame-Options", "DENY");
-  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+    if (token.role !== "ADMIN") {
+      return addSecurityHeaders(NextResponse.redirect(new URL("/wiki", request.url)));
+    }
+  }
 
-  return response;
+  return addSecurityHeaders(NextResponse.next());
 }
 
 export const config = {

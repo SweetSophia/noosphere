@@ -4,6 +4,26 @@ import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
+function getSafeCallbackUrl(rawCallbackUrl: string | null) {
+  if (!rawCallbackUrl) return "/wiki";
+
+  try {
+    const callbackUrl = new URL(rawCallbackUrl, window.location.origin);
+    const isWikiPath =
+      callbackUrl.pathname === "/wiki" || callbackUrl.pathname.startsWith("/wiki/");
+    const isLoginPath = callbackUrl.pathname === "/wiki/login";
+
+    // Only redirect after login to local wiki pages to avoid open redirects.
+    if (callbackUrl.origin !== window.location.origin || !isWikiPath || isLoginPath) {
+      return "/wiki";
+    }
+
+    return `${callbackUrl.pathname}${callbackUrl.search}${callbackUrl.hash}`;
+  } catch {
+    return "/wiki";
+  }
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -27,7 +47,10 @@ export default function LoginPage() {
     if (result?.error) {
       setError("Invalid email or password.");
     } else {
-      router.push("/wiki");
+      const callbackUrl = getSafeCallbackUrl(
+        new URLSearchParams(window.location.search).get("callbackUrl")
+      );
+      router.push(callbackUrl);
       router.refresh();
     }
   }
