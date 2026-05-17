@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireApiKey } from "@/lib/api/keys";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { requirePermission } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/log — Query the activity log
@@ -24,10 +22,9 @@ export async function GET(request: NextRequest) {
   if (!rl.allowed) return rl.response;
 
   // Auth: API key (any permission) or session
-  const apiAuth = await requireApiKey(request);
-  const session = await getServerSession(authOptions);
-  if (!apiAuth.authorized && !session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requirePermission(request, []);
+  if (!auth.success) {
+    return auth.response;
   }
 
   const { searchParams } = new URL(request.url);

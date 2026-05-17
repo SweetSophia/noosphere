@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, canAccessScopes } from "@/lib/api/auth";
@@ -340,8 +338,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   }
 
   // Log the deletion for audit trail
-  const session = await getServerSession(authOptions);
-  const authorName = session?.user?.name ?? auth.auth.name ?? "API";
+  const authorName = auth.auth.name ?? "API";
   try {
     await prisma.activityLog.create({
       data: {

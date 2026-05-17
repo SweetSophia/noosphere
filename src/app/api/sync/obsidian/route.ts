@@ -8,9 +8,8 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireApiKey } from "@/lib/api/keys";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { Permissions } from "@prisma/client";
+import { requirePermission } from "@/lib/api/auth";
 import { getObsidianSyncConfig } from "@/lib/obsidian-sync/config";
 import { runObsidianSync, SyncConflictError } from "@/lib/obsidian-sync";
 import type { SyncOptions } from "@/lib/obsidian-sync";
@@ -21,23 +20,9 @@ export async function GET(request: NextRequest) {
   const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "obsidian-get" });
   if (!rl.allowed) return rl.response;
 
-  const apiAuth = await requireApiKey(request);
-  const session = await getServerSession(authOptions);
-
-  if (!apiAuth.authorized && !session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // Require ADMIN for config visibility (vaultPath is server filesystem info)
-  if (apiAuth.authorized) {
-    if (apiAuth.permissions !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
-  } else {
-    const role = session?.user?.role;
-    if (role !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
+  const auth = await requirePermission(request, [Permissions.ADMIN]);
+  if (!auth.success) {
+    return auth.response;
   }
 
   try {
@@ -68,23 +53,9 @@ export async function POST(request: NextRequest) {
   const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 5, keyPrefix: "obsidian-post" });
   if (!rl.allowed) return rl.response;
 
-  const apiAuth = await requireApiKey(request);
-  const session = await getServerSession(authOptions);
-
-  if (!apiAuth.authorized && !session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // Require ADMIN for production use; allow WRITE for development
-  if (apiAuth.authorized) {
-    if (apiAuth.permissions !== "ADMIN" && apiAuth.permissions !== "WRITE") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
-  } else {
-    const role = session?.user?.role;
-    if (role !== "ADMIN") {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
+  const auth = await requirePermission(request, [Permissions.ADMIN]);
+  if (!auth.success) {
+    return auth.response;
   }
 
   // Check feature flag
@@ -133,7 +104,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const callerName = session?.user?.name ?? (apiAuth.authorized ? "API Key" : undefined);
+  const callerName = auth.auth.name ?? (auth.auth.keyId ? "API Key" : "Session User");
 
   const options: SyncOptions = {
     mode,
