@@ -520,3 +520,43 @@ NOOSPHERE_PORT=6678 APP_URL=http://127.0.0.1:6678 bash install-openclaw.sh
 ```
 
 Or edit `~/.noosphere/.env`, then restart Compose.
+
+
+### App crashes with SASL authentication error after redeploy
+
+Symptom: container logs show `SASL: SCRAM-SERVER-FIRST-MESSAGE: client password must be a string` or `password authentication failed`.
+
+Cause: `DATABASE_URL` has an empty password because the `.env` file was not passed to `docker compose`.
+
+Fix: Always use `--env-file ~/.noosphere/.env` when building or starting the app:
+
+```bash
+docker compose -f docker-compose.yml --env-file ~/.noosphere/.env build app
+docker compose -f docker-compose.yml --env-file ~/.noosphere/.env up -d --no-deps --force-recreate app
+```
+
+### NEXTAUTH_SECRET lost or sessions broken
+
+If sessions are invalid and users cannot log in, recover or regenerate the secret:
+
+```bash
+# Option 1: Re-run installer (preserves .env if it exists)
+cd ~/github/noosphere && ./install-openclaw.sh --no-setup
+
+# Option 2: Generate new secret (invalidates all active sessions)
+openssl rand -base64 32
+# Edit ~/.noosphere/.env → NEXTAUTH_SECRET=<new-value> → redeploy
+```
+
+To get the current PostgreSQL password (still works even if app is down):
+```bash
+docker exec noosphere-db printenv POSTGRES_PASSWORD
+```
+
+### Docker build fails with ENOSPC (no space left)
+
+```bash
+docker system df
+docker builder prune -a
+docker image prune -a
+```

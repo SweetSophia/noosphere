@@ -611,11 +611,20 @@ Use a scoped Noosphere API key for each Hermes profile. Scoped keys control whic
 ## Deployment
 
 ```bash
-# Build and start
-docker compose up -d --build
+# 1. Sync latest code
+git pull origin master
+
+# 2. Build (pass ~/.noosphere/.env to ensure correct secrets are baked in)
+docker compose -f docker-compose.yml --env-file ~/.noosphere/.env build app
+
+# 3. Recreate app container with fresh image and env
+docker compose -f docker-compose.yml --env-file ~/.noosphere/.env up -d --no-deps --force-recreate app
+
+# 4. Verify
+curl http://127.0.0.1:6578/api/health
 
 # Run production migrations after first deploy or schema changes
-docker compose exec app node node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma
+docker compose -f docker-compose.yml --env-file ~/.noosphere/.env exec app node node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma
 
 # View logs
 docker compose logs -f app

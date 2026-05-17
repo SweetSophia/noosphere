@@ -8,19 +8,19 @@ services:
     container_name: noosphere-app
     restart: unless-stopped
     ports:
-      - "4400:3000"
+      - "6578:3000"
     environment:
       DATABASE_URL: postgresql://noosphere:${POSTGRES_PASSWORD}@db:5432/noosphere
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
-      NEXTAUTH_URL: ${APP_URL}
-      APP_URL: ${APP_URL:-http://localhost:4400}
+      NEXTAUTH_URL: ${APP_URL:-http://100.111.85.48:6578}
+      APP_URL: ${APP_URL:-http://100.111.85.48:6578}
       UPLOAD_DIR: /app/uploads
+      OBSIDIAN_SYNC_ENABLED: ${OBSIDIAN_SYNC_ENABLED:-true}
+      OBSIDIAN_SYNC_VAULT_PATH: ${OBSIDIAN_SYNC_VAULT_PATH:-/app/obsidian-vault}
     volumes:
       - ./uploads:/app/uploads:rw
       - ./uploads/images:/app/uploads/images:rw
-      # Obsidian Publish vault (absolute path — set in .env or replace below)
-      # On VPS: mount /home/descartes/obsidian-vault as /app/obsidian-vault
-      - /home/descartes/obsidian-vault:/app/obsidian-vault:rw
+      - /home/niya/obsidian-vault/noosphere:/app/obsidian-vault:rw
     depends_on:
       db:
         condition: service_healthy
@@ -59,3 +59,8 @@ services:
 volumes:
   postgres_data:
     driver: local
+
+networks:
+  default:
+    external: true
+    name: noosphere-net
