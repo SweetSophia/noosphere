@@ -22,7 +22,6 @@
     "@prisma/client": "^7.7.0",
     "@types/pg": "^8.20.0",
     "bcryptjs": "^3.0.3",
-    "formidable": "^3.5.4",
     "js-yaml": "^4.1.1",
     "jszip": "^3.10.1",
     "next": "16.2.6",
@@ -40,7 +39,6 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
-    "@types/formidable": "^3.5.1",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20",
     "@types/react": "^19",
