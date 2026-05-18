@@ -74,6 +74,7 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
+              "upgrade-insecure-requests",
               scriptSrc.join(" "),
               "style-src 'self' 'unsafe-inline'",
               imgSrc.join(" "),
@@ -97,6 +98,14 @@ const nextConfig: NextConfig = {
           {
             key: "Referrer-Policy",
             value: "strict-origin-when-cross-origin",
+          },
+          {
+            key: "Strict-Transport-Security",
+            value: "max-age=31536000; includeSubDomains; preload",
+          },
+          {
+            key: "Permissions-Policy",
+            value: "camera=(), microphone=(), geolocation=(), interest-cohort=()",
           },
         ],
       },
