@@ -17,6 +17,9 @@ services:
       UPLOAD_DIR: /app/uploads
       OBSIDIAN_SYNC_ENABLED: ${OBSIDIAN_SYNC_ENABLED:-true}
       OBSIDIAN_SYNC_VAULT_PATH: ${OBSIDIAN_SYNC_VAULT_PATH:-/app/obsidian-vault}
+      PG_POOL_MAX: ${PG_POOL_MAX:-20}
+      PG_IDLE_TIMEOUT_MS: ${PG_IDLE_TIMEOUT_MS:-30000}
+      PG_CONN_TIMEOUT_MS: ${PG_CONN_TIMEOUT_MS:-5000}
     volumes:
       - ./uploads:/app/uploads:rw
       - ./uploads/images:/app/uploads/images:rw
