@@ -9,13 +9,15 @@ import {
 } from "@/lib/memory/article-search";
 
 export function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9 -]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .trim();
+  return (
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9 -]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .trim() || "untitled"
+  );
 }
 
 export function parseTagInput(raw: string | null | undefined): string[] {
