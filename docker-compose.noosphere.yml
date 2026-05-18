@@ -13,6 +13,9 @@ services:
       NEXTAUTH_URL: ${APP_URL:-http://127.0.0.1:6578}
       APP_URL: ${APP_URL:-http://127.0.0.1:6578}
       UPLOAD_DIR: /app/uploads
+      PG_POOL_MAX: ${PG_POOL_MAX:-20}
+      PG_IDLE_TIMEOUT_MS: ${PG_IDLE_TIMEOUT_MS:-30000}
+      PG_CONN_TIMEOUT_MS: ${PG_CONN_TIMEOUT_MS:-5000}
     command: ["sh", "-c", "node docker/migrate-or-baseline.mjs && node docker/bootstrap.mjs"]
     volumes:
       - noosphere_uploads:/app/uploads:rw
@@ -32,6 +35,9 @@ services:
       NEXTAUTH_URL: ${APP_URL:-http://127.0.0.1:6578}
       APP_URL: ${APP_URL:-http://127.0.0.1:6578}
       UPLOAD_DIR: /app/uploads
+      PG_POOL_MAX: ${PG_POOL_MAX:-20}
+      PG_IDLE_TIMEOUT_MS: ${PG_IDLE_TIMEOUT_MS:-30000}
+      PG_CONN_TIMEOUT_MS: ${PG_CONN_TIMEOUT_MS:-5000}
     volumes:
       - noosphere_uploads:/app/uploads:rw
     depends_on:
