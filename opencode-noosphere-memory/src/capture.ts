@@ -8,7 +8,9 @@ const capturedMessageIdsBySession = new Map<string, Set<string>>();
 const MAX_PROMPTS_PER_SESSION = 100;
 const MIN_CAPTURE_LENGTH = 80;
 const TRIVIAL_PROMPT_RE =
-  /^(ok|okay|thanks?|thank you|done|yes|no|sure|nice|cool|great|got it)[.!?\s]*$/i;
+  /^(thank you|thanks?|okay|ok|done|yes|no|sure|nice|cool|great|got it)[.!?\s]*$/i;
+// Alternatives ordered longest-first to prevent prefix-conflict exponential
+// backtracking on adversarial input (CodeQL js/polynomial-redos fix).
 
 export function savePrompt(sessionId: string, messageId: string, content: string): void {
   const prompts = promptsBySession.get(sessionId) ?? [];
@@ -113,8 +115,8 @@ function shouldSkipPrompt(prompt: string): boolean {
   const trimmed = prompt.trim();
   // Skip very short prompts (below minimum capture length)
   if (trimmed.length < MIN_CAPTURE_LENGTH) return true;
-  // CodeQL js/polynomial-redos: skip regex on very long inputs to avoid
-  // catastrophic backtracking on adversarial content with many repeated chars
+  // CodeQL js/polynomial-redos: skip regex on inputs > 200 chars to bound
+  // backtracking on pathological strings (the regex runs on inputs 80-200 chars)
   if (trimmed.length > 200) return false;
   return TRIVIAL_PROMPT_RE.test(trimmed);
 }
