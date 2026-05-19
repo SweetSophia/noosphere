@@ -96,7 +96,14 @@ function pruneCapturedMessageIds(sessionId, prompts) {
 }
 function shouldSkipPrompt(prompt) {
     const trimmed = prompt.trim();
-    return trimmed.length < MIN_CAPTURE_LENGTH || TRIVIAL_PROMPT_RE.test(trimmed);
+    // Skip very short prompts (below minimum capture length)
+    if (trimmed.length < MIN_CAPTURE_LENGTH)
+        return true;
+    // CodeQL js/polynomial-redos: skip regex on very long inputs to avoid
+    // catastrophic backtracking on adversarial content with many repeated chars
+    if (trimmed.length > 200)
+        return false;
+    return TRIVIAL_PROMPT_RE.test(trimmed);
 }
 function extractAssistantText(messages) {
     const text = [];
