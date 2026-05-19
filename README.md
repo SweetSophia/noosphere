@@ -6,7 +6,7 @@ Noosphere started as an agent-authored wiki. It is now also a provider-agnostic 
 
 Agents can use Noosphere to store durable project knowledge, retrieve relevant context, synthesize articles from research, and promote frequently reused memories over time. Humans can browse and edit the same knowledge through a responsive web UI, export/import Markdown vaults, and sync with Obsidian.
 
-< **OpenClaw and Hermes Agent full support via plugins. OpenCode plugin support planned** >
+< **OpenClaw, Hermes Agent, and Opencode support via plugins** >
 
 <img width="1536" height="1024" alt="noosphere-memory-system-explanation-overview" src="https://github.com/user-attachments/assets/f7cdb553-6d4d-4d7b-b3e3-741ecc59b8e3" />
 
@@ -50,9 +50,7 @@ Use it for:
 Currently implemented: 
 - **Openclaw plug-in** (Multiagent support, auto-recall and more)
 - **Hermes Agent plug-in**
-
-In development: 
-- **OpenCode plug-in** 
+- **Opencode plug-in**
 
 ## Current Status
 
@@ -75,6 +73,8 @@ Implemented memory modules:
 - Architecture documentation in [`docs/NOOSPHERE-MEMORY-ARCHITECTURE.md`](docs/NOOSPHERE-MEMORY-ARCHITECTURE.md).
 
 The OpenClaw plugin/skill bridge is implemented and ships in this repository at `openclaw-noosphere-memory/`. It provides explicit tools, optional auto-recall prompt injection, and memory corpus supplement wiring.
+
+The Opencode plugin ships in this repository at `opencode-noosphere-memory/`. It provides prompt-time auto-recall through Opencode's `chat.message` hook, optional idle auto-save through `session.idle`, and explicit tools for status, recall, topic lookup, and draft memory saving.
 
 Frontpage | Logging
 :---:|:---:
@@ -597,6 +597,40 @@ Then create or edit `$HERMES_HOME/noosphere.json`:
 | Broad turn capture | Opt-in | Requires `auto_capture: true` and `topic_id`; default is disabled. |
 
 Use a scoped Noosphere API key for each Hermes profile. Scoped keys control which restricted articles the provider can read and where it can write.
+
+## Opencode Integration
+
+Noosphere ships an Opencode plugin at `opencode-noosphere-memory/`.
+
+### Quick install
+
+```bash
+npm install -g @sweetsophia/opencode-noosphere-memory
+export NOOSPHERE_API_KEY="noo_..."
+```
+
+Add the package to `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "plugin": [
+    "@sweetsophia/opencode-noosphere-memory"
+  ]
+}
+```
+
+### Opencode capabilities
+
+| Capability | Status | Description |
+| --- | --- | --- |
+| `noosphere_status` | Implemented | Checks memory status and reports plugin config with redacted secrets. |
+| `noosphere_recall` | Implemented | Manual Noosphere durable-memory search. |
+| `noosphere_topics` | Implemented | Lists topic IDs for draft save targets. |
+| `noosphere_save` | Implemented | Saves durable content as a draft memory candidate. |
+| Auto recall | Implemented | Uses Opencode's `chat.message` hook and Noosphere prompt-ready recall text. |
+| Idle auto-save | Opt-in | Uses `session.idle`; requires `NOOSPHERE_AUTO_SAVE=true` and `NOOSPHERE_AUTO_SAVE_TOPIC_ID`. |
+
+Do not commit real API keys into Opencode config. Use environment variables or host-level secret management.
 
 ## Environment Variables
 
