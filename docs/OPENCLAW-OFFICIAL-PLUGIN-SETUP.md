@@ -262,7 +262,7 @@ value used by the plugin when no config is supplied. "Installer value" is what
 | `recentTurnLimit` | `4` | default | Recent turn cap. Max `10`. |
 | `memoryCaptureInstructionsEnabled` | `true` | default | Adds guidance for when/how to call `noosphere_save` only when auto-recall succeeds and returns non-empty prompt text. |
 | `memoryCaptureInstructions` | built-in text | default | Optional custom guidance override. |
-| `allowDefaultCorpusSupplement` | `false` | unset | Registers the shared memory corpus supplement using the default API key. Keep false unless a default corpus key is intentionally scoped for all agents. |
+| `allowDefaultCorpusSupplement` | `false` | unset | Registers the shared memory corpus supplement using the default API key. Keep false unless a default corpus key is intentionally scoped for all agents. Use a READ-only key with the narrowest shared `allowedScopes` when corpus search does not need writes. |
 | `ignoreSessionPatterns` | `[]` | unset | Glob patterns for sessions to skip. |
 | `statelessSessionPatterns` | `[]` | unset | Glob patterns for stateless sessions. |
 | `skipStatelessSessions` | `true` | default | Skip sessions matching stateless patterns. |
@@ -295,6 +295,7 @@ memory capture instructions are not injected into prompts.
 - **Secrets live outside the repo**. The installer writes OpenClaw secrets to `~/.openclaw/secrets/noosphere-memory.json` and runtime values to `~/.noosphere/.env`.
 - **Auto-recall fails open**. If Noosphere is unavailable, OpenClaw continues without injected memory.
 - **`noosphere_save` creates draft candidates only**. It never auto-publishes curated knowledge.
+- **Release tags are package-specific**. Use `v-openclaw-*` for `@sweetsophia/openclaw-noosphere-memory` and `v-opencode-*` for `@sweetsophia/opencode-noosphere-memory`; add a new `v-{package}-*` CI prefix before introducing another package.
 - **Prompt injection is explicit but broad by default in the installer**. OpenClaw requires `hooks.allowPromptInjection: true` before plugin hook text can enter the prompt; the installer enables it with no `enabledAgents` or `allowedChatTypes` allowlist.
 
 ## Restricting auto-recall scope

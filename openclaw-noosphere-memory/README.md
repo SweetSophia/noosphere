@@ -74,6 +74,10 @@ Scoped API keys can only assign scopes they already have. When a scoped key save
 without `restrictedTags`, Noosphere defaults the saved content to that key's
 allowed scopes.
 
+A narrow key is a READ or WRITE key whose `allowedScopes` contain only the agent,
+project, or corpus segment that should be visible to that caller. Avoid using an
+ADMIN key or a key with `*` scope for routine agent recall/save operations.
+
 ## Auto-Recall
 
 Set `autoRecall: true` and `hooks.allowPromptInjection: true` to enable
@@ -98,4 +102,17 @@ default API key for shared corpus access, set:
 }
 ```
 
-Use a narrow default key if you enable this.
+Use a narrow default key if you enable this. The default corpus key should be
+READ-only when the shared corpus is used for search only, and its scopes should
+exclude private agent/project memory that other agents must not see.
+
+## Release Tags
+
+Package releases use package-specific tag prefixes so independent packages do
+not trigger each other's publish jobs:
+
+- `v-openclaw-1.5.7` publishes `@sweetsophia/openclaw-noosphere-memory`
+- `v-opencode-0.1.0` publishes `@sweetsophia/opencode-noosphere-memory`
+
+New plugin packages should add their own `v-{package}-*` tag prefix in CI before
+they are published.

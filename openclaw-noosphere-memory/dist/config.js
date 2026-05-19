@@ -67,6 +67,9 @@ function normalizeBaseUrl(value) {
     if (url.username || url.password) {
         return DEFAULT_NOOSPHERE_BASE_URL;
     }
+    if (isBlockedInternalHost(url.hostname)) {
+        return DEFAULT_NOOSPHERE_BASE_URL;
+    }
     if (url.protocol === "http:" && !isLoopbackHost(url.hostname)) {
         return DEFAULT_NOOSPHERE_BASE_URL;
     }
@@ -79,11 +82,67 @@ function normalizeBaseUrl(value) {
     return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
 }
 function isLoopbackHost(hostname) {
-    const normalized = hostname.toLowerCase();
+    const normalized = stripIpv6Brackets(hostname.toLowerCase());
     return (normalized === "localhost" ||
         normalized === "::1" ||
-        normalized === "[::1]" ||
         normalized.startsWith("127."));
+}
+function isBlockedInternalHost(hostname) {
+    const normalized = stripIpv6Brackets(hostname.toLowerCase());
+    if (isLoopbackHost(normalized))
+        return false;
+    const ipv4 = parseIpv4(normalized);
+    if (ipv4)
+        return isPrivateOrReservedIpv4(ipv4);
+    if (normalized.startsWith("::ffff:")) {
+        const mappedIpv4 = parseIpv4(normalized.slice("::ffff:".length));
+        if (mappedIpv4)
+            return isPrivateOrReservedIpv4(mappedIpv4);
+    }
+    return isPrivateOrReservedIpv6(normalized);
+}
+function stripIpv6Brackets(hostname) {
+    return hostname.startsWith("[") && hostname.endsWith("]")
+        ? hostname.slice(1, -1)
+        : hostname;
+}
+function parseIpv4(hostname) {
+    const parts = hostname.split(".");
+    if (parts.length !== 4)
+        return undefined;
+    const octets = parts.map((part) => {
+        if (!/^\d{1,3}$/.test(part))
+            return Number.NaN;
+        const parsed = Number(part);
+        return parsed >= 0 && parsed <= 255 ? parsed : Number.NaN;
+    });
+    return octets.every((part) => Number.isInteger(part))
+        ? octets
+        : undefined;
+}
+function isPrivateOrReservedIpv4([a, b, c]) {
+    return (a === 0 ||
+        a === 10 ||
+        (a === 100 && b >= 64 && b <= 127) ||
+        (a === 169 && b === 254) ||
+        (a === 172 && b >= 16 && b <= 31) ||
+        (a === 192 && b === 168) ||
+        (a === 192 && b === 0 && c === 0) ||
+        (a === 192 && b === 0 && c === 2) ||
+        (a === 198 && (b === 18 || b === 19)) ||
+        (a === 198 && b === 51 && c === 100) ||
+        (a === 203 && b === 0 && c === 113) ||
+        a >= 224);
+}
+function isPrivateOrReservedIpv6(hostname) {
+    if (!hostname.includes(":"))
+        return false;
+    return (hostname === "::" ||
+        hostname.startsWith("fc") ||
+        hostname.startsWith("fd") ||
+        /^fe[89ab][0-9a-f]:/.test(hostname) ||
+        hostname.startsWith("ff") ||
+        hostname.startsWith("2001:db8:"));
 }
 function readSecret(value, rootConfig) {
     if (typeof value === "string" && value.trim())

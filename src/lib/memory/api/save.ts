@@ -23,9 +23,19 @@ const SECRET_PATTERNS: Array<{ name: string; pattern: RegExp }> = [
   { name: "OpenAI-style API key", pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/ },
   { name: "Noosphere API key", pattern: /\bnoo_[A-Za-z0-9_-]{16,}\b/ },
   { name: "GitHub token", pattern: /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/ },
+  { name: "AWS access key", pattern: /\bAKIA[0-9A-Z]{16}\b/ },
+  {
+    name: "JWT token",
+    pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
+  },
   {
     name: "generic bearer token",
     pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/i,
+  },
+  {
+    name: "credential assignment",
+    pattern:
+      /\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|passwd|secret)\b\s*[:=]\s*["']?[A-Za-z0-9._~+/=-]{16,}["']?/i,
   },
   { name: "private key block", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
 ];

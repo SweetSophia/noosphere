@@ -19,6 +19,10 @@ import {
   type NoosphereSaveRequest,
   type NoosphereSaveResponse,
 } from "../../../openclaw-noosphere-memory/src/client.js";
+import {
+  DEFAULT_NOOSPHERE_BASE_URL,
+  resolveNoosphereMemoryConfig,
+} from "../../../openclaw-noosphere-memory/src/config.js";
 import type {
   NoosphereRecallRequest,
   NoosphereRecallResponse,
@@ -109,6 +113,36 @@ describe("resolveAutoRecallConfig", () => {
 });
 
 describe("OpenClaw Noosphere plugin auto-recall", () => {
+  it("rejects literal internal baseUrl targets, including HTTPS", () => {
+    for (const baseUrl of [
+      "https://10.0.0.5:6578",
+      "https://172.16.0.9",
+      "https://192.168.1.50",
+      "https://169.254.10.20",
+      "https://[fc00::1]",
+      "https://[fd12:3456::1]",
+      "https://[fe80::1]",
+    ]) {
+      assert.equal(
+        resolveNoosphereMemoryConfig({ baseUrl }, {}).baseUrl,
+        DEFAULT_NOOSPHERE_BASE_URL,
+      );
+    }
+  });
+
+  it("keeps localhost baseUrl targets usable for local installs", () => {
+    assert.equal(
+      resolveNoosphereMemoryConfig({ baseUrl: "http://127.0.0.1:6578/" }, {})
+        .baseUrl,
+      "http://127.0.0.1:6578",
+    );
+    assert.equal(
+      resolveNoosphereMemoryConfig({ baseUrl: "https://[::1]:6578/" }, {})
+        .baseUrl,
+      "https://[::1]:6578",
+    );
+  });
+
   it("injects promptInjectionText from Noosphere auto recall when enabled", async () => {
     const { context, calls } = makeContext();
     const hook = createNoosphereAutoRecallHook({ autoRecall: true }, context);

@@ -146,6 +146,25 @@ test("memory save rejects likely secrets", () => {
   });
 });
 
+test("memory save rejects common credential formats", () => {
+  for (const [content, name] of [
+    [`${durableContent}\nAWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP`, "AWS access key"],
+    [`${durableContent}\npassword: supersecretvalue12345`, "credential assignment"],
+    [
+      `${durableContent}\nBearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payloadpayload.signaturesig`,
+      "JWT token",
+    ],
+  ] as const) {
+    const result = validateMemorySaveRequest(validRequest({ content }));
+
+    assert.deepEqual(result, {
+      ok: false,
+      status: 400,
+      error: `content appears to contain a secret (${name})`,
+    });
+  }
+});
+
 test("memory save rejects secrets in optional fields with field-aware errors", () => {
   const result = validateMemorySaveRequest(
     validRequest({
