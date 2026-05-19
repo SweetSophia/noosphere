@@ -28,7 +28,9 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await executeMemorySaveRequest(body);
+    const result = await executeMemorySaveRequest(body, {
+      allowedScopes: auth.auth.allowedScopes,
+    });
     return NextResponse.json(result.body, { status: result.status });
   } catch (error) {
     if (error instanceof MemorySaveError) {

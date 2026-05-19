@@ -9,6 +9,7 @@ import { createNoosphereRecallTool } from "./tools/recall.js";
 import { createNoosphereSaveTool } from "./tools/save.js";
 import { createNoosphereStatusTool } from "./tools/status.js";
 import { createNoosphereTopicsTool } from "./tools/topics.js";
+import { isRecord, readBoolean } from "./config.js";
 
 // Minimal type for the agent context we need from the OpenClaw plugin SDK.
 // Full type is OpenClawPluginToolContext from openclaw/plugin-sdk/core.
@@ -108,15 +109,28 @@ export default definePluginEntry({
     // Status tool uses default context (no agent routing needed for health checks)
     api.registerTool(createNoosphereStatusTool(api.pluginConfig, defaultContext));
 
-    if (typeof api.registerMemoryCorpusSupplement === "function") {
+    if (
+      typeof api.registerMemoryCorpusSupplement === "function" &&
+      shouldRegisterDefaultCorpusSupplement(api.pluginConfig) &&
+      defaultContext.config.apiKey
+    ) {
       api.registerMemoryCorpusSupplement(
         createNoosphereCorpusSupplement(defaultContext, api.logger),
+      );
+    } else if (typeof api.registerMemoryCorpusSupplement === "function") {
+      api.logger?.warn?.(
+        "noosphere-memory: corpus supplement not registered; set allowDefaultCorpusSupplement=true to use the default API key for shared corpus access",
       );
     }
 
     const hook = createNoosphereAutoRecallHook(
       api.pluginConfig,
-      defaultContext,
+      (ctx) =>
+        createNoosphereClientContextForAgent(
+          api.pluginConfig,
+          ctx.agentId ?? "default",
+          api.config,
+        ),
       api.logger,
     );
     if (typeof api.on === "function") {
@@ -126,3 +140,8 @@ export default definePluginEntry({
     }
   },
 });
+
+function shouldRegisterDefaultCorpusSupplement(rawConfig: unknown): boolean {
+  if (!isRecord(rawConfig)) return false;
+  return readBoolean(rawConfig.allowDefaultCorpusSupplement) ?? false;
+}

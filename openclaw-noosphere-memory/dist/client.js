@@ -19,10 +19,10 @@ export class NoosphereMemoryClient {
             method: "GET",
         });
     }
-    async settings() {
+    async settings(options = {}) {
         return this.request("/api/memory/settings", {
             method: "GET",
-        });
+        }, options);
     }
     async get(request) {
         return this.request("/api/memory/get", {

@@ -43,7 +43,7 @@ function makeContext(
 
   const context = {
     config: {
-      baseUrl: "http://noosphere.local",
+      baseUrl: "https://noosphere.local",
       apiKey: "noo_test",
       timeoutMs: 5000,
       ...overrides,
@@ -137,7 +137,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     const calls: NoosphereRecallRequest[] = [];
     const context = {
       config: {
-        baseUrl: "http://noosphere.local",
+        baseUrl: "https://noosphere.local",
         apiKey: "noo_test",
         timeoutMs: 5000,
       },
@@ -171,7 +171,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     const warnings: string[] = [];
     const context = {
       config: {
-        baseUrl: "http://noosphere.local",
+        baseUrl: "https://noosphere.local",
         apiKey: "noo_test",
         timeoutMs: 5000,
       },
@@ -228,6 +228,79 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
       true,
     );
     assert.equal(calls.length, 1);
+  });
+
+  it("does not let DB settings enable auto-recall when plugin config disables it", async () => {
+    const settingsCalls: Array<{ timeoutMs?: number } | undefined> = [];
+    const context = {
+      config: {
+        baseUrl: "https://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
+      client: {
+        async settings(options?: { timeoutMs?: number }) {
+          settingsCalls.push(options);
+          return {
+            autoRecallEnabled: true,
+            maxInjectedMemories: 10,
+            maxInjectedTokens: 1000,
+            recallVerbosity: "standard",
+            deduplicationStrategy: "hybrid",
+            enabledProviders: ["noosphere"],
+            providerPriorityWeights: {},
+            summaryFirst: true,
+            conflictStrategy: "newest",
+            conflictThreshold: 0.85,
+          };
+        },
+        async recall(): Promise<NoosphereRecallResponse> {
+          throw new Error("recall should not be called");
+        },
+      },
+    } as unknown as NoosphereClientContext;
+    const hook = createNoosphereAutoRecallHook({ autoRecall: false }, context);
+
+    const result = await hook({ prompt: "Noosphere memory", messages: [] }, {});
+
+    assert.equal(result, undefined);
+    assert.equal(settingsCalls.length, 0);
+  });
+
+  it("resolves the auto-recall client per agent invocation", async () => {
+    const callsByAgent = new Map<string, NoosphereRecallRequest[]>();
+    const makeAgentContext = (agentId: string): NoosphereClientContext => ({
+      config: {
+        baseUrl: "https://noosphere.local",
+        apiKey: `noo_${agentId}`,
+        timeoutMs: 5000,
+      },
+      client: {
+        async recall(request: NoosphereRecallRequest): Promise<NoosphereRecallResponse> {
+          const calls = callsByAgent.get(agentId) ?? [];
+          calls.push(request);
+          callsByAgent.set(agentId, calls);
+          return {
+            results: [],
+            totalBeforeCap: 1,
+            mode: "auto",
+            tokenBudgetUsed: 12,
+            providerMeta: [],
+            promptInjectionText: `<recall>${agentId}</recall>`,
+          };
+        },
+      },
+    } as unknown as NoosphereClientContext);
+    const hook = createNoosphereAutoRecallHook(
+      { autoRecall: true },
+      (ctx) => makeAgentContext(ctx.agentId ?? "default"),
+    );
+
+    await hook({ prompt: "Noosphere memory A", messages: [] }, { agentId: "cylena" });
+    await hook({ prompt: "Noosphere memory B", messages: [] }, { agentId: "shodan" });
+
+    assert.equal(callsByAgent.get("cylena")?.length, 1);
+    assert.equal(callsByAgent.get("shodan")?.length, 1);
   });
 
   it("strips OpenClaw timestamp and marker-test reply instructions from recall queries", () => {
@@ -295,7 +368,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     const calls: NoosphereRecallRequest[] = [];
     const context = {
       config: {
-        baseUrl: "http://noosphere.local",
+        baseUrl: "https://noosphere.local",
         apiKey: "noo_test",
         timeoutMs: 5000,
       },
@@ -325,7 +398,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     const calls: NoosphereRecallRequest[] = [];
     const context = {
       config: {
-        baseUrl: "http://noosphere.local",
+        baseUrl: "https://noosphere.local",
         apiKey: "noo_test",
         timeoutMs: 5000,
       },
@@ -358,7 +431,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     const timeouts: Array<number | undefined> = [];
     const context = {
       config: {
-        baseUrl: "http://noosphere.local",
+        baseUrl: "https://noosphere.local",
         apiKey: "noo_test",
         timeoutMs: 5000,
       },
@@ -459,7 +532,7 @@ describe("OpenClaw Noosphere corpus supplement", () => {
     const getCalls: NoosphereGetRequest[] = [];
     const context = {
       config: {
-        baseUrl: "http://noosphere.local",
+        baseUrl: "https://noosphere.local",
         apiKey: "noo_test",
         timeoutMs: 5000,
       },
@@ -604,7 +677,7 @@ describe("OpenClaw Noosphere corpus supplement", () => {
     const getCalls: NoosphereGetRequest[] = [];
     const context = {
       config: {
-        baseUrl: "http://noosphere.local",
+        baseUrl: "https://noosphere.local",
         apiKey: "noo_test",
         timeoutMs: 5000,
       },
@@ -637,7 +710,7 @@ describe("OpenClaw Noosphere corpus supplement", () => {
     const longContent = Array.from({ length: 600 }, (_, index) => `Line ${index + 1}`).join("\n");
     const context = {
       config: {
-        baseUrl: "http://noosphere.local",
+        baseUrl: "https://noosphere.local",
         apiKey: "noo_test",
         timeoutMs: 5000,
       },
@@ -675,7 +748,7 @@ describe("OpenClaw Noosphere corpus supplement", () => {
     const longContent = `   This   is   text \n\n with  irregular   whitespace ${"and more text ".repeat(40)}`;
     const context = {
       config: {
-        baseUrl: "http://noosphere.local",
+        baseUrl: "https://noosphere.local",
         apiKey: "noo_test",
         timeoutMs: 5000,
       },
@@ -741,7 +814,7 @@ describe("OpenClaw Noosphere corpus supplement", () => {
     const warnings: string[] = [];
     const context = {
       config: {
-        baseUrl: "http://noosphere.local",
+        baseUrl: "https://noosphere.local",
         apiKey: "noo_test",
         timeoutMs: 5000,
       },
@@ -780,7 +853,7 @@ describe("OpenClaw Noosphere client", () => {
 
     try {
       const client = new NoosphereMemoryClient({
-        baseUrl: "http://noosphere.local",
+        baseUrl: "https://noosphere.local",
         apiKey: "noo_test",
         timeoutMs: 5000,
       });
@@ -812,7 +885,7 @@ describe("OpenClaw Noosphere get tool", () => {
 
     const context = {
       config: {
-        baseUrl: "http://noosphere.local",
+        baseUrl: "https://noosphere.local",
         apiKey: "noo_test",
         timeoutMs: 5000,
       },
@@ -879,7 +952,7 @@ describe("OpenClaw Noosphere get tool", () => {
   it("formats get client errors as tool errors", async () => {
     const context = {
       config: {
-        baseUrl: "http://noosphere.local",
+        baseUrl: "https://noosphere.local",
         apiKey: "noo_test",
         timeoutMs: 5000,
       },
@@ -925,7 +998,7 @@ describe("OpenClaw Noosphere save tool", () => {
 
     const context = {
       config: {
-        baseUrl: "http://noosphere.local",
+        baseUrl: "https://noosphere.local",
         apiKey: "noo_test",
         timeoutMs: 5000,
       },
@@ -1002,7 +1075,7 @@ describe("OpenClaw Noosphere CLI helpers", () => {
   };
 
   const rawConfig = {
-    baseUrl: "http://noosphere.local",
+    baseUrl: "https://noosphere.local",
     apiKey: { value: "noo_test" },
     autoRecall: true,
     enabledAgents: ["cylena"],
@@ -1040,7 +1113,7 @@ describe("OpenClaw Noosphere CLI helpers", () => {
     });
 
     assert.equal(report.ok, true);
-    assert.equal(report.baseUrl, "http://noosphere.local");
+    assert.equal(report.baseUrl, "https://noosphere.local");
     assert.equal(report.apiKeyConfigured, true);
     assert.equal(report.apiKeyRedacted, "[redacted]");
     assert.equal(report.checks.find((check) => check.id === "hooks.allowPromptInjection")?.status, "pass");
@@ -1095,7 +1168,7 @@ describe("OpenClaw Noosphere CLI helpers", () => {
 
   it("fails status when the API key is missing", async () => {
     const report = await buildNoosphereStatusReport(
-      { baseUrl: "http://noosphere.local" },
+      { baseUrl: "https://noosphere.local" },
       rootConfig,
       { fetchImpl },
     );
@@ -1107,7 +1180,7 @@ describe("OpenClaw Noosphere CLI helpers", () => {
 
   it("omits apiKeyRedacted when the API key is missing", async () => {
     const report = await buildNoosphereDoctorReport(
-      { baseUrl: "http://noosphere.local", autoRecall: true },
+      { baseUrl: "https://noosphere.local", autoRecall: true },
       rootConfig,
       { fetchImpl },
     );

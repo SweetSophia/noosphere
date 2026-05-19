@@ -31,6 +31,31 @@ test("memory save validation accepts durable draft candidates", () => {
   assert.equal(result.input.status, "draft");
   assert.deepEqual(result.input.tags, ["Memory", "bridge"]);
   assert.equal(result.input.confidence, "medium");
+  assert.deepEqual(result.input.restrictedTags, []);
+});
+
+test("memory save defaults scoped key writes to caller scopes", () => {
+  const result = validateMemorySaveRequest(validRequest(), {
+    allowedScopes: ["cylena", "serianis"],
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.input.restrictedTags, ["cylena", "serianis"]);
+});
+
+test("memory save rejects scopes outside caller scopes", () => {
+  assert.deepEqual(
+    validateMemorySaveRequest(
+      validRequest({ restrictedTags: ["serianis", "other-agent"] }),
+      { allowedScopes: ["serianis"] },
+    ),
+    {
+      ok: false,
+      status: 403,
+      error: "Cannot assign scope(s) you don't have: other-agent",
+    },
+  );
 });
 
 test("memory save strips injected memory blocks before validation", () => {
@@ -179,6 +204,7 @@ test("memory save executes through injected writer", async () => {
   assert.equal(response.body.candidate.status, "draft");
   assert.equal(seen.length, 1);
   assert.equal(seen[0].status, "draft");
+  assert.deepEqual(seen[0].restrictedTags, []);
 });
 
 test("memory save propagates writer MemorySaveError", async () => {

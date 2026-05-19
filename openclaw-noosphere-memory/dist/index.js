@@ -9,6 +9,7 @@ import { createNoosphereRecallTool } from "./tools/recall.js";
 import { createNoosphereSaveTool } from "./tools/save.js";
 import { createNoosphereStatusTool } from "./tools/status.js";
 import { createNoosphereTopicsTool } from "./tools/topics.js";
+import { isRecord, readBoolean } from "./config.js";
 export default definePluginEntry({
     id: "noosphere-memory",
     name: "Noosphere Memory Bridge",
@@ -60,10 +61,15 @@ export default definePluginEntry({
         });
         // Status tool uses default context (no agent routing needed for health checks)
         api.registerTool(createNoosphereStatusTool(api.pluginConfig, defaultContext));
-        if (typeof api.registerMemoryCorpusSupplement === "function") {
+        if (typeof api.registerMemoryCorpusSupplement === "function" &&
+            shouldRegisterDefaultCorpusSupplement(api.pluginConfig) &&
+            defaultContext.config.apiKey) {
             api.registerMemoryCorpusSupplement(createNoosphereCorpusSupplement(defaultContext, api.logger));
         }
-        const hook = createNoosphereAutoRecallHook(api.pluginConfig, defaultContext, api.logger);
+        else if (typeof api.registerMemoryCorpusSupplement === "function") {
+            api.logger?.warn?.("noosphere-memory: corpus supplement not registered; set allowDefaultCorpusSupplement=true to use the default API key for shared corpus access");
+        }
+        const hook = createNoosphereAutoRecallHook(api.pluginConfig, (ctx) => createNoosphereClientContextForAgent(api.pluginConfig, ctx.agentId ?? "default", api.config), api.logger);
         if (typeof api.on === "function") {
             api.on("before_prompt_build", hook);
         }
@@ -72,4 +78,9 @@ export default definePluginEntry({
         }
     },
 });
+function shouldRegisterDefaultCorpusSupplement(rawConfig) {
+    if (!isRecord(rawConfig))
+        return false;
+    return readBoolean(rawConfig.allowDefaultCorpusSupplement) ?? false;
+}
 //# sourceMappingURL=index.js.map

@@ -1,5 +1,6 @@
 # Noosphere production Compose template for OpenClaw users.
-# Defaults are intentionally localhost-only. Override NOOSPHERE_PORT or APP_URL in .env if needed.
+# Defaults are intentionally localhost-only. Override BIND_ADDRESS,
+# NOOSPHERE_PORT, or APP_URL in .env if needed.
 services:
   init:
     image: ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION:-latest}
@@ -28,7 +29,7 @@ services:
     container_name: noosphere-openclaw-app
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${NOOSPHERE_PORT:-6578}:3000"
+      - "${BIND_ADDRESS:-127.0.0.1}:${NOOSPHERE_PORT:-6578}:3000"
     environment:
       DATABASE_URL: postgresql://noosphere:${POSTGRES_PASSWORD}@db:5432/noosphere
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}

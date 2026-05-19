@@ -11,6 +11,11 @@ export interface NoosphereMemoryConfig {
    * Example: { "shodan": "noo_abc...", "cylena": "noo_xyz..." }
    */
   apiKeys?: Record<string, string>;
+  /**
+   * Registers shared memory corpus access with the default key. Off by default
+   * because some OpenClaw hosts do not pass agent identity to corpus lookups.
+   */
+  allowDefaultCorpusSupplement?: boolean;
   timeoutMs?: number;
 }
 
@@ -102,7 +107,43 @@ export function redactSecret(value: string | undefined): string | undefined {
 }
 
 function normalizeBaseUrl(value: string): string {
-  return value.trim().replace(/\/+$/, "") || DEFAULT_NOOSPHERE_BASE_URL;
+  const trimmed = value.trim();
+  if (!trimmed) return DEFAULT_NOOSPHERE_BASE_URL;
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return DEFAULT_NOOSPHERE_BASE_URL;
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return DEFAULT_NOOSPHERE_BASE_URL;
+  }
+  if (url.username || url.password) {
+    return DEFAULT_NOOSPHERE_BASE_URL;
+  }
+  if (url.protocol === "http:" && !isLoopbackHost(url.hostname)) {
+    return DEFAULT_NOOSPHERE_BASE_URL;
+  }
+
+  while (url.pathname.length > 1 && url.pathname.endsWith("/")) {
+    url.pathname = url.pathname.slice(0, -1);
+  }
+  url.search = "";
+  url.hash = "";
+  const normalized = url.toString();
+  return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return (
+    normalized === "localhost" ||
+    normalized === "::1" ||
+    normalized === "[::1]" ||
+    normalized.startsWith("127.")
+  );
 }
 
 function readSecret(value: unknown, rootConfig?: unknown): string | undefined {

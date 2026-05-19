@@ -9,6 +9,8 @@ const ARTICLE_SLUG_MAX_LENGTH = 80;
 const ARTICLE_EXCERPT_MAX_LENGTH = 500;
 const ARTICLE_TAG_MAX_COUNT = 12;
 const ARTICLE_TAG_MAX_LENGTH = 64;
+const ARTICLE_RESTRICTED_TAG_MAX_COUNT = 16;
+const ARTICLE_RESTRICTED_TAG_MAX_LENGTH = 64;
 const ARTICLE_AUTHOR_NAME_MAX_LENGTH = 100;
 const INJECTED_MEMORY_BLOCKS = [
     "recall",
@@ -51,6 +53,12 @@ const ArticleCreateToolParameters = {
             maxItems: ARTICLE_TAG_MAX_COUNT,
             items: { type: "string", maxLength: ARTICLE_TAG_MAX_LENGTH },
             description: "Tags for categorization.",
+        },
+        restrictedTags: {
+            type: "array",
+            maxItems: ARTICLE_RESTRICTED_TAG_MAX_COUNT,
+            items: { type: "string", maxLength: ARTICLE_RESTRICTED_TAG_MAX_LENGTH },
+            description: "Optional access scopes. Scoped API keys can only assign their own scopes; if omitted, Noosphere defaults scoped keys to their allowed scopes.",
         },
         authorName: {
             type: "string",
@@ -105,6 +113,7 @@ function normalizeArticleCreateParams(rawParams) {
         throw new Error("slug could not be generated from title");
     validateSlug(slug);
     const authorName = readOptionalString(params.authorName, "authorName", ARTICLE_AUTHOR_NAME_MAX_LENGTH);
+    const restrictedTags = readOptionalStringArray(params.restrictedTags, "restrictedTags", ARTICLE_RESTRICTED_TAG_MAX_COUNT, ARTICLE_RESTRICTED_TAG_MAX_LENGTH);
     return {
         request: {
             topicId,
@@ -114,12 +123,39 @@ function normalizeArticleCreateParams(rawParams) {
             excerpt: readOptionalString(params.excerpt, "excerpt", ARTICLE_EXCERPT_MAX_LENGTH)
                 ?? deriveExcerpt(content),
             tags: readOptionalTags(params.tags),
+            ...(restrictedTags ? { restrictedTags } : {}),
             ...(authorName ? { authorName } : {}),
             confidence: readOptionalConfidence(params.confidence),
             status: readOptionalStatus(params.status) ?? "published",
         },
         strippedBlocks: stripped.strippedBlocks,
     };
+}
+function readOptionalStringArray(value, field, maxItems, maxLength) {
+    if (value === undefined || value === null)
+        return undefined;
+    if (!Array.isArray(value))
+        throw new Error(`${field} must be an array of strings`);
+    if (value.length > maxItems)
+        throw new Error(`too many ${field}`);
+    const seen = new Set();
+    const values = [];
+    for (const item of value) {
+        if (typeof item !== "string") {
+            throw new Error(`${field} must be an array of strings`);
+        }
+        const normalized = item.trim();
+        if (!normalized)
+            continue;
+        if (normalized.length > maxLength) {
+            throw new Error(`${field} item is too long`);
+        }
+        if (!seen.has(normalized)) {
+            seen.add(normalized);
+            values.push(normalized);
+        }
+    }
+    return values.length ? values : undefined;
 }
 function readRequiredString(value, field, maxLength) {
     if (typeof value !== "string" || !value.trim()) {

@@ -5,6 +5,8 @@ const SAVE_CONTENT_MAX_LENGTH = 50_000;
 const SAVE_TOPIC_ID_MAX_LENGTH = 128;
 const SAVE_TAG_MAX_COUNT = 12;
 const SAVE_TAG_MAX_LENGTH = 64;
+const SAVE_RESTRICTED_TAG_MAX_COUNT = 16;
+const SAVE_RESTRICTED_TAG_MAX_LENGTH = 64;
 const SaveToolParameters = {
     type: "object",
     additionalProperties: false,
@@ -35,6 +37,12 @@ const SaveToolParameters = {
             maxItems: SAVE_TAG_MAX_COUNT,
             items: { type: "string", maxLength: SAVE_TAG_MAX_LENGTH },
             description: "Optional tags. Duplicates are normalized by slug server-side while preserving first-seen display casing.",
+        },
+        restrictedTags: {
+            type: "array",
+            maxItems: SAVE_RESTRICTED_TAG_MAX_COUNT,
+            items: { type: "string", maxLength: SAVE_RESTRICTED_TAG_MAX_LENGTH },
+            description: "Optional access scopes. Scoped API keys can only assign their own scopes; if omitted, Noosphere defaults scoped keys to their allowed scopes.",
         },
         source: {
             type: "string",
@@ -73,16 +81,44 @@ export function createNoosphereSaveTool(rawConfig, context) {
 }
 function normalizeSaveParams(rawParams) {
     const params = isRecord(rawParams) ? rawParams : {};
+    const restrictedTags = readOptionalStringArray(params.restrictedTags, "restrictedTags", SAVE_RESTRICTED_TAG_MAX_COUNT, SAVE_RESTRICTED_TAG_MAX_LENGTH);
     return {
         title: readRequiredString(params.title, "title", SAVE_TITLE_MAX_LENGTH),
         content: readRequiredString(params.content, "content", SAVE_CONTENT_MAX_LENGTH),
         topicId: readRequiredString(params.topicId, "topicId", SAVE_TOPIC_ID_MAX_LENGTH),
         excerpt: readOptionalString(params.excerpt, "excerpt", 500),
         tags: readOptionalTags(params.tags),
+        ...(restrictedTags ? { restrictedTags } : {}),
         source: readOptionalString(params.source, "source", 500),
         authorName: readOptionalString(params.authorName, "authorName", 100),
         confidence: readOptionalConfidence(params.confidence),
     };
+}
+function readOptionalStringArray(value, field, maxItems, maxLength) {
+    if (value === undefined || value === null)
+        return undefined;
+    if (!Array.isArray(value))
+        throw new Error(`${field} must be an array of strings`);
+    if (value.length > maxItems)
+        throw new Error(`too many ${field}`);
+    const seen = new Set();
+    const values = [];
+    for (const item of value) {
+        if (typeof item !== "string") {
+            throw new Error(`${field} must be an array of strings`);
+        }
+        const normalized = item.trim();
+        if (!normalized)
+            continue;
+        if (normalized.length > maxLength) {
+            throw new Error(`${field} item is too long`);
+        }
+        if (!seen.has(normalized)) {
+            seen.add(normalized);
+            values.push(normalized);
+        }
+    }
+    return values.length ? values : undefined;
 }
 function readRequiredString(value, field, maxLength) {
     if (typeof value !== "string" || !value.trim()) {

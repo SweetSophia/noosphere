@@ -70,7 +70,8 @@ async function main() {
     assertEqual(settings.maxInjectedTokens, 2000, "maxInjectedTokens");
     assertEqual(settings.recallVerbosity, "standard", "recallVerbosity");
     assertEqual(settings.deduplicationStrategy, "best-score", "deduplicationStrategy");
-    assertEqual(settings.enabledProviders.length, 0, "enabledProviders empty");
+    assertEqual(settings.enabledProviders.length, 1, "enabledProviders default count");
+    assertEqual(settings.enabledProviders[0], "noosphere", "enabledProviders default");
     assertEqual(settings.summaryFirst, true, "summaryFirst");
   });
 

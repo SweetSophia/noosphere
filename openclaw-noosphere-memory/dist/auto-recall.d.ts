@@ -1,6 +1,7 @@
 import { NoosphereRecallRequest } from "./client.js";
 import { NoosphereClientContext } from "./shared-init.js";
 export declare const MAX_QUERY_LENGTH = 1000;
+type NoosphereClientContextResolver = NoosphereClientContext | ((ctx: BeforePromptBuildContextLike) => NoosphereClientContext);
 export interface NoosphereAutoRecallConfig {
     autoRecall: boolean;
     autoProviders: string[];
@@ -43,7 +44,7 @@ export interface PromptInjectionResult {
     prependSystemContext?: string;
 }
 export declare function resolveAutoRecallConfig(rawConfig: unknown): NoosphereAutoRecallConfig;
-export declare function createNoosphereAutoRecallHook(rawConfig: unknown, clientContext: NoosphereClientContext, logger?: NoospherePluginLogger): {
+export declare function createNoosphereAutoRecallHook(rawConfig: unknown, clientContextOrResolver: NoosphereClientContextResolver, logger?: NoospherePluginLogger): {
     (event: BeforePromptBuildEventLike, ctx?: BeforePromptBuildContextLike): Promise<PromptInjectionResult | void>;
     registrationWarning(): void;
 };
@@ -53,4 +54,5 @@ export declare function createNoosphereAutoRecallHook(rawConfig: unknown, client
  */
 export declare function buildAutoRecallQuery(event: BeforePromptBuildEventLike, config: NoosphereAutoRecallConfig): string | undefined;
 export type AutoRecallRequestForTests = NoosphereRecallRequest;
+export {};
 //# sourceMappingURL=auto-recall.d.ts.map

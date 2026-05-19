@@ -3,6 +3,7 @@ import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, buildScopeFilter, canAccessScopes } from "@/lib/api/auth";
 import { buildTagConnections, countSearchArticles, searchArticleIds } from "@/lib/wiki";
+import { detectSecretInInputs } from "@/lib/memory/api/save";
 import {
   ARTICLE_LIMITS,
   deriveExcerpt,
@@ -240,39 +241,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate restrictedTags
-    if (restrictedTags !== undefined) {
-      if (!Array.isArray(restrictedTags) || !(restrictedTags as unknown[]).every((t) => typeof t === "string" && t.length > 0)) {
-        return NextResponse.json({ error: "restrictedTags must be an array of non-empty strings" }, { status: 400 });
-      }
-      // Validate each tag exists in RestrictedScope registry
-      if (restrictedTags.length > 0) {
-        const validScopes = await prisma.restrictedScope.findMany({
-          where: { tag: { in: restrictedTags } },
-          select: { tag: true },
-        });
-        const validSet = new Set(validScopes.map((s) => s.tag));
-        const invalid = restrictedTags.filter((t) => !validSet.has(t));
-        if (invalid.length > 0) {
-          return NextResponse.json(
-            { error: `Unknown restricted tag(s): ${invalid.join(", ")}. Valid tags: ${validScopes.map((s) => s.tag).join(", ")}` },
-            { status: 400 }
-          );
-        }
+    const secretError = detectSecretInInputs([
+      { field: "title", value: title },
+      { field: "content", value: content },
+      { field: "excerpt", value: excerpt },
+      { field: "authorName", value: authorName },
+      ...(Array.isArray(tags)
+        ? tags.map((value) => ({ field: "tags", value: typeof value === "string" ? value : undefined }))
+        : []),
+    ]);
+    if (secretError) {
+      return NextResponse.json({ error: secretError.error }, { status: secretError.status });
+    }
 
-        // Security: WRITE keys can only assign scopes that are in their allowedScopes.
-        // ADMIN (*) bypasses this check.
-        const callerScopes = auth.auth.allowedScopes;
-        if (!callerScopes?.includes("*")) {
-          const unauthorized = restrictedTags.filter((t) => !(callerScopes ?? []).includes(t));
-          if (unauthorized.length > 0) {
-            return NextResponse.json(
-              { error: `Cannot assign scope(s) you don't have: ${unauthorized.join(", ")}` },
-              { status: 403 }
-            );
-          }
-        }
-      }
+    const restrictedTagsResult = await resolveRestrictedTagsForCaller(
+      restrictedTags,
+      auth.auth.allowedScopes,
+    );
+    if (!restrictedTagsResult.ok) {
+      return NextResponse.json(
+        { error: restrictedTagsResult.error },
+        { status: restrictedTagsResult.status },
+      );
     }
 
     // Validate slug format
@@ -323,7 +313,7 @@ export async function POST(request: NextRequest) {
           tags: { create: tagConnections },
           confidence: confidence || null,
           status: status || "published",
-          restrictedTags: restrictedTags ?? [],
+          restrictedTags: restrictedTagsResult.value,
           revisions: {
             create: {
               authorId: auth.auth.userId ?? null,
@@ -389,4 +379,76 @@ class ConflictError extends Error {
     super(message);
     this.name = "ConflictError";
   }
+}
+
+type RestrictedTagsResult =
+  | { ok: true; value: string[] }
+  | { ok: false; status: number; error: string };
+
+async function resolveRestrictedTagsForCaller(
+  value: unknown,
+  allowedScopes: string[] | undefined,
+): Promise<RestrictedTagsResult> {
+  const callerScopes = allowedScopes ?? [];
+  const isAdminScope = callerScopes.includes("*");
+  let requestedTags: string[] = [];
+
+  if (value !== undefined && value !== null) {
+    if (!Array.isArray(value)) {
+      return {
+        ok: false,
+        status: 400,
+        error: "restrictedTags must be an array of non-empty strings",
+      };
+    }
+
+    const seen = new Set<string>();
+    for (const item of value) {
+      if (typeof item !== "string" || !item.trim()) {
+        return {
+          ok: false,
+          status: 400,
+          error: "restrictedTags must be an array of non-empty strings",
+        };
+      }
+      const tag = item.trim();
+      if (!seen.has(tag)) {
+        seen.add(tag);
+        requestedTags.push(tag);
+      }
+    }
+  }
+
+  if (!isAdminScope && callerScopes.length > 0 && requestedTags.length === 0) {
+    requestedTags = [...callerScopes];
+  }
+
+  if (!isAdminScope) {
+    const unauthorized = requestedTags.filter((tag) => !callerScopes.includes(tag));
+    if (unauthorized.length > 0) {
+      return {
+        ok: false,
+        status: 403,
+        error: `Cannot assign scope(s) you don't have: ${unauthorized.join(", ")}`,
+      };
+    }
+  }
+
+  if (requestedTags.length === 0) return { ok: true, value: [] };
+
+  const validScopes = await prisma.restrictedScope.findMany({
+    where: { tag: { in: requestedTags } },
+    select: { tag: true },
+  });
+  const validSet = new Set(validScopes.map((scope) => scope.tag));
+  const invalid = requestedTags.filter((tag) => !validSet.has(tag));
+  if (invalid.length > 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: `Unknown restricted tag(s): ${invalid.join(", ")}`,
+    };
+  }
+
+  return { ok: true, value: requestedTags };
 }

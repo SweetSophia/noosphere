@@ -633,5 +633,5 @@ DONE
 #   3. apiKey / NOOSPHERE_API_KEY    (default fallback)
 #
 # CURRENT KEYS ON THIS HOST:
-  Run: grep NOOSPHERE_API_KEY /proc/$(pgrep -f openclaw.*gateway | head -1)/environ
-  Or:  openclaw noosphere status
+#   Run: grep NOOSPHERE_API_KEY /proc/$(pgrep -f openclaw.*gateway | head -1)/environ
+#   Or:  openclaw noosphere status

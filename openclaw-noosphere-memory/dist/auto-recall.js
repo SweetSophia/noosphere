@@ -64,9 +64,9 @@ export function resolveAutoRecallConfig(rawConfig) {
         skipStatelessSessions: readBoolean(config.skipStatelessSessions) ?? true,
     };
 }
-export function createNoosphereAutoRecallHook(rawConfig, clientContext, logger) {
+export function createNoosphereAutoRecallHook(rawConfig, clientContextOrResolver, logger) {
     const staticConfig = resolveAutoRecallConfig(rawConfig);
-    const settingsCache = { settings: null, fetchedAt: 0 };
+    const settingsCaches = new Map();
     // Precompiled glob regexes (cached per config update)
     const compiledIgnorePatterns = [];
     const compiledStatelessPatterns = [];
@@ -74,6 +74,14 @@ export function createNoosphereAutoRecallHook(rawConfig, clientContext, logger) 
     let lastStatelessPatterns = [];
     // In-flight recall deduplication - key is normalized query string
     const inflightRecalls = new Map();
+    function resolveClientContext(ctx) {
+        return typeof clientContextOrResolver === "function"
+            ? clientContextOrResolver(ctx)
+            : clientContextOrResolver;
+    }
+    function getContextCacheKey(context) {
+        return `${context.config.baseUrl}|${context.config.apiKey ?? ""}`;
+    }
     /**
      * Compile glob patterns to regexes once and cache them.
      * Only recompiles when the pattern list changes.
@@ -118,19 +126,26 @@ export function createNoosphereAutoRecallHook(rawConfig, clientContext, logger) 
      * Fetches recall settings from the DB (with 30s cache TTL).
      * Falls back to null if no settings() method is available (backward compat).
      */
-    async function fetchRecallSettings() {
+    async function fetchRecallSettings(context, cacheKey) {
+        const settingsCache = settingsCaches.get(cacheKey) ?? {
+            settings: null,
+            fetchedAt: 0,
+        };
         const now = Date.now();
         if (settingsCache.settings && (now - settingsCache.fetchedAt) < SETTINGS_CACHE_TTL_MS) {
             return settingsCache.settings;
         }
         // Guard: client.settings() may not exist in test mocks or older clients
-        if (typeof clientContext.client.settings !== "function") {
+        if (typeof context.client.settings !== "function") {
             return null;
         }
         try {
-            const dbSettings = await clientContext.client.settings();
+            const dbSettings = await context.client.settings({
+                timeoutMs: staticConfig.timeoutMs,
+            });
             settingsCache.settings = dbSettings;
             settingsCache.fetchedAt = now;
+            settingsCaches.set(cacheKey, settingsCache);
             return dbSettings;
         }
         catch (err) {
@@ -140,12 +155,13 @@ export function createNoosphereAutoRecallHook(rawConfig, clientContext, logger) 
         }
     }
     /**
-     * Returns the effective auto-recall config by merging DB settings over static config.
-     * DB settings take precedence for: autoRecall, resultCap, tokenBudget, autoProviders.
-     * Static config is used as fallback for all other fields.
+     * Returns the effective auto-recall config by merging DB settings with static
+     * config. The static plugin config is the top-level local enable gate:
+     * DB settings can further disable/tune auto-recall, but never enable it when
+     * plugin config says autoRecall=false.
      */
-    async function getEffectiveConfig() {
-        const dbSettings = await fetchRecallSettings();
+    async function getEffectiveConfig(context, cacheKey) {
+        const dbSettings = await fetchRecallSettings(context, cacheKey);
         if (!dbSettings) {
             // No DB settings — fall back entirely to static config
             return staticConfig;
@@ -153,14 +169,18 @@ export function createNoosphereAutoRecallHook(rawConfig, clientContext, logger) 
         // Merge: DB values override static config for the fields it manages
         return {
             ...staticConfig,
-            autoRecall: dbSettings.autoRecallEnabled,
+            autoRecall: staticConfig.autoRecall && dbSettings.autoRecallEnabled,
             resultCap: clampNumber(dbSettings.maxInjectedMemories, 1, MAX_RESULT_CAP, staticConfig.resultCap),
             tokenBudget: clampNumber(dbSettings.maxInjectedTokens, 1, MAX_TOKEN_BUDGET, staticConfig.tokenBudget),
             autoProviders: dbSettings.enabledProviders.length > 0 ? dbSettings.enabledProviders : staticConfig.autoProviders,
         };
     }
     const hook = async (event, ctx = {}) => {
-        const effectiveConfig = await getEffectiveConfig();
+        if (!staticConfig.autoRecall)
+            return;
+        const clientContext = resolveClientContext(ctx);
+        const contextCacheKey = getContextCacheKey(clientContext);
+        const effectiveConfig = await getEffectiveConfig(clientContext, contextCacheKey);
         // Session pattern filtering (Hindsight-inspired) with cached regexes
         const sessionKey = ctx.sessionKey;
         if (sessionKey) {
@@ -189,7 +209,7 @@ export function createNoosphereAutoRecallHook(rawConfig, clientContext, logger) 
             return;
         try {
             // Deduplicate concurrent recalls for the same normalized query
-            const normalizedQuery = query.trim().toLowerCase().replace(/\s+/g, " ");
+            const normalizedQuery = `${contextCacheKey}|${query.trim().toLowerCase().replace(/\s+/g, " ")}`;
             let recallPromise = inflightRecalls.get(normalizedQuery);
             if (!recallPromise) {
                 recallPromise = clientContext.client.recall({

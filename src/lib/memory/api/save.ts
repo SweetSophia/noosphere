@@ -45,6 +45,7 @@ export interface MemorySaveRequest {
   source?: string;
   authorName?: string;
   confidence?: "low" | "medium" | "high";
+  restrictedTags?: string[];
 }
 
 export interface SanitizedMemorySaveInput {
@@ -56,6 +57,7 @@ export interface SanitizedMemorySaveInput {
   source?: string;
   authorName?: string;
   confidence?: "low" | "medium" | "high";
+  restrictedTags: string[];
   status: "draft";
   strippedBlocks: string[];
 }
@@ -82,6 +84,7 @@ export interface MemorySaveWriter {
 
 export interface MemorySaveExecutionOptions {
   writer?: MemorySaveWriter;
+  allowedScopes?: string[];
 }
 
 export type MemorySaveValidationResult =
@@ -92,7 +95,9 @@ export async function executeMemorySaveRequest(
   input: unknown,
   options: MemorySaveExecutionOptions = {},
 ): Promise<{ status: number; body: MemorySaveResponse | { error: string } }> {
-  const validation = validateMemorySaveRequest(input);
+  const validation = validateMemorySaveRequest(input, {
+    allowedScopes: options.allowedScopes,
+  });
   if (!validation.ok) {
     return { status: validation.status, body: { error: validation.error } };
   }
@@ -112,6 +117,7 @@ export async function executeMemorySaveRequest(
 
 export function validateMemorySaveRequest(
   input: unknown,
+  options: Pick<MemorySaveExecutionOptions, "allowedScopes"> = {},
 ): MemorySaveValidationResult {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return { ok: false, status: 400, error: "Request body must be an object" };
@@ -150,6 +156,11 @@ export function validateMemorySaveRequest(
   if (!tags.ok) return tags;
   const confidence = readOptionalConfidence(body.confidence);
   if (!confidence.ok) return confidence;
+  const restrictedTags = readRestrictedTagsForCaller(
+    body.restrictedTags,
+    options.allowedScopes,
+  );
+  if (!restrictedTags.ok) return restrictedTags;
 
   const stripped = stripInjectedMemoryBlocks(content.value);
   const sanitizedContent = normalizeContent(stripped.content);
@@ -177,6 +188,7 @@ export function validateMemorySaveRequest(
       source: source.value,
       authorName: authorName.value,
       confidence: confidence.value,
+      restrictedTags: restrictedTags.value,
       status: "draft",
       strippedBlocks: stripped.strippedBlocks,
     },
@@ -287,6 +299,7 @@ export async function getDefaultMemorySaveWriter(): Promise<MemorySaveWriter> {
             status: "draft",
             sourceType: "memory_candidate",
             sourceUrl: input.source ?? null,
+            restrictedTags: input.restrictedTags,
             tags: { create: tagConnections },
             revisions: {
               create: {
@@ -311,6 +324,7 @@ export async function getDefaultMemorySaveWriter(): Promise<MemorySaveWriter> {
               status: "draft",
               confidence: input.confidence ?? "low",
               tagCount: input.tags.length,
+              restrictedTags: input.restrictedTags,
               strippedBlocks: input.strippedBlocks,
             },
           },
@@ -375,7 +389,7 @@ export class MemorySaveError extends Error {
   }
 }
 
-function detectSecretInInputs(
+export function detectSecretInInputs(
   values: Array<{ field: string; value: string | undefined }>,
 ): Extract<MemorySaveValidationResult, { ok: false }> | undefined {
   for (const { field, value } of values) {
@@ -513,6 +527,60 @@ function readOptionalTags(
     }
   }
   return { ok: true, value: tags };
+}
+
+function readRestrictedTagsForCaller(
+  value: unknown,
+  allowedScopes: string[] | undefined,
+):
+  | { ok: true; value: string[] }
+  | Extract<MemorySaveValidationResult, { ok: false }> {
+  const callerScopes = allowedScopes ?? [];
+  const isAdminScope = callerScopes.includes("*");
+  let requestedTags: string[] = [];
+
+  if (value !== undefined && value !== null) {
+    if (!Array.isArray(value)) {
+      return {
+        ok: false,
+        status: 400,
+        error: "restrictedTags must be an array of non-empty strings",
+      };
+    }
+
+    const seen = new Set<string>();
+    for (const item of value) {
+      if (typeof item !== "string" || !item.trim()) {
+        return {
+          ok: false,
+          status: 400,
+          error: "restrictedTags must be an array of non-empty strings",
+        };
+      }
+      const tag = item.trim();
+      if (!seen.has(tag)) {
+        seen.add(tag);
+        requestedTags.push(tag);
+      }
+    }
+  }
+
+  if (!isAdminScope && callerScopes.length > 0 && requestedTags.length === 0) {
+    requestedTags = [...callerScopes];
+  }
+
+  if (!isAdminScope) {
+    const unauthorized = requestedTags.filter((tag) => !callerScopes.includes(tag));
+    if (unauthorized.length > 0) {
+      return {
+        ok: false,
+        status: 403,
+        error: `Cannot assign scope(s) you don't have: ${unauthorized.join(", ")}`,
+      };
+    }
+  }
+
+  return { ok: true, value: requestedTags };
 }
 
 function readOptionalConfidence(

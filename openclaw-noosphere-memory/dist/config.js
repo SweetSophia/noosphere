@@ -51,7 +51,39 @@ export function redactSecret(value) {
     return `${value.slice(0, 4)}…${value.slice(-4)}`;
 }
 function normalizeBaseUrl(value) {
-    return value.trim().replace(/\/+$/, "") || DEFAULT_NOOSPHERE_BASE_URL;
+    const trimmed = value.trim();
+    if (!trimmed)
+        return DEFAULT_NOOSPHERE_BASE_URL;
+    let url;
+    try {
+        url = new URL(trimmed);
+    }
+    catch {
+        return DEFAULT_NOOSPHERE_BASE_URL;
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+        return DEFAULT_NOOSPHERE_BASE_URL;
+    }
+    if (url.username || url.password) {
+        return DEFAULT_NOOSPHERE_BASE_URL;
+    }
+    if (url.protocol === "http:" && !isLoopbackHost(url.hostname)) {
+        return DEFAULT_NOOSPHERE_BASE_URL;
+    }
+    while (url.pathname.length > 1 && url.pathname.endsWith("/")) {
+        url.pathname = url.pathname.slice(0, -1);
+    }
+    url.search = "";
+    url.hash = "";
+    const normalized = url.toString();
+    return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+}
+function isLoopbackHost(hostname) {
+    const normalized = hostname.toLowerCase();
+    return (normalized === "localhost" ||
+        normalized === "::1" ||
+        normalized === "[::1]" ||
+        normalized.startsWith("127."));
 }
 function readSecret(value, rootConfig) {
     if (typeof value === "string" && value.trim())
