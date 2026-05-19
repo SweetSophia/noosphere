@@ -1,0 +1,60 @@
+{
+  "name": "@sweetsophia/opencode-noosphere-memory",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Opencode plugin for Noosphere memory: prompt-time auto-recall, optional idle auto-save, and explicit memory tools.",
+  "type": "module",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "src/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.14.18",
+    "@opencode-ai/sdk": "^1.14.18"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5"
+  },
+  "opencode": {
+    "type": "plugin",
+    "hooks": [
+      "chat.message",
+      "event"
+    ]
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SweetSophia/noosphere.git",
+    "directory": "opencode-noosphere-memory"
+  },
+  "bugs": {
+    "url": "https://github.com/SweetSophia/noosphere/issues"
+  },
+  "homepage": "https://github.com/SweetSophia/noosphere/tree/master/opencode-noosphere-memory",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "noosphere",
+    "memory",
+    "recall"
+  ]
+}

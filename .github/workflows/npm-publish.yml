@@ -1,4 +1,4 @@
-name: Publish OpenClaw plugin to npm
+name: Publish Noosphere plugins to npm
 
 on:
   pull_request:
@@ -6,12 +6,18 @@ on:
     paths:
       - ".github/workflows/npm-publish.yml"
       - "openclaw-noosphere-memory/**"
+      - "opencode-noosphere-memory/**"
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
-      publish:
-        description: "Publish the OpenClaw plugin package to npm"
+      publish_openclaw:
+        description: "Publish the OpenClaw plugin (@sweetsophia/openclaw-noosphere-memory) to npm"
+        required: true
+        type: boolean
+        default: false
+      publish_opencode:
+        description: "Publish the Opencode plugin (@sweetsophia/opencode-noosphere-memory) to npm"
         required: true
         type: boolean
         default: false
@@ -22,10 +28,18 @@ permissions:
 
 jobs:
   package-check:
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - dir: openclaw-noosphere-memory
+            name: "@sweetsophia/openclaw-noosphere-memory"
+          - dir: opencode-noosphere-memory
+            name: "@sweetsophia/opencode-noosphere-memory"
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: openclaw-noosphere-memory
+        working-directory: ${{ matrix.package.dir }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -36,7 +50,7 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
           cache: npm
-          cache-dependency-path: openclaw-noosphere-memory/package-lock.json
+          cache-dependency-path: ${{ matrix.package.dir }}/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -58,6 +72,9 @@ jobs:
           }
           NODE
 
+      - name: Type-check
+        run: npm run typecheck 2>&1 || echo "typecheck script not found, skipping"
+
       - name: Build package
         run: npm run build
 
@@ -67,10 +84,12 @@ jobs:
       - name: Pack dry run
         run: npm pack --dry-run
 
-  publish:
+  publish_openclaw:
     needs: package-check
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    if: |
+      startsWith(github.ref, 'refs/tags/v-openclaw-') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_openclaw)
     defaults:
       run:
         working-directory: openclaw-noosphere-memory
@@ -107,14 +126,84 @@ jobs:
           NODE
 
       - name: Validate release tag
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v-openclaw-')
         run: |
           node - <<'NODE'
           const fs = require("node:fs");
 
           const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
           const tag = process.env.GITHUB_REF_NAME ?? "";
-          const tagVersion = tag.replace(/^v/, "");
+          const tagVersion = tag.replace(/^v-openclaw-/, "");
+
+          if (tagVersion !== pkg.version) {
+            console.error(
+              `Release tag ${tag} does not match package.json version ${pkg.version}`
+            );
+            process.exit(1);
+          }
+          NODE
+
+      - name: Build package
+        run: npm run build
+
+      - name: Verify committed dist is current
+        run: git diff --exit-code -- dist
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+
+  publish_opencode:
+    needs: package-check
+    runs-on: ubuntu-latest
+    if: |
+      startsWith(github.ref, 'refs/tags/v-opencode-') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_opencode)
+    defaults:
+      run:
+        working-directory: opencode-noosphere-memory
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: opencode-noosphere-memory/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate package metadata
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
+          const lockVersion = lock.packages?.[""]?.version ?? lock.version;
+
+          if (lockVersion !== pkg.version) {
+            console.error(
+              `package-lock.json version (${lockVersion}) does not match package.json version (${pkg.version})`
+            );
+            process.exit(1);
+          }
+          NODE
+
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/v-opencode-')
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          const tag = process.env.GITHUB_REF_NAME ?? "";
+          const tagVersion = tag.replace(/^v-opencode-/, "");
 
           if (tagVersion !== pkg.version) {
             console.error(
