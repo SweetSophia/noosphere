@@ -54,7 +54,8 @@ export NOOSPHERE_API_KEY="noo_..."
 
 The key needs:
 
-- `READ` for recall/status/topic lookup
+- `READ` for recall and topic lookup
+- `ADMIN` for full status information (falls back to `/api/health` automatically if key lacks ADMIN)
 - `WRITE` for manual saves and auto-save
 
 ## Configuration

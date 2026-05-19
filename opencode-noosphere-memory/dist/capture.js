@@ -1,6 +1,9 @@
 import { truncate } from "./format.js";
 const promptsBySession = new Map();
 const capturedMessageIdsBySession = new Map();
+// Tracks sessions with an in-flight auto-save.  Prevents duplicate saves
+// when multiple idle events fire while a prior save is still pending.
+const pendingCapturesBySession = new Set();
 const MAX_PROMPTS_PER_SESSION = 100;
 const MIN_CAPTURE_LENGTH = 80;
 const TRIVIAL_PROMPT_RE = /^(thank you|thanks?|okay|ok|done|yes|no|sure|nice|cool|great|got it)[.!?\s]*$/i;
@@ -17,6 +20,25 @@ export function savePrompt(sessionId, messageId, content) {
 export function clearSessionPrompts(sessionId) {
     promptsBySession.delete(sessionId);
     capturedMessageIdsBySession.delete(sessionId);
+    pendingCapturesBySession.delete(sessionId);
+}
+/**
+ * Marks a session as having an in-flight auto-save.
+ * Returns `true` if the session was NOT already pending (caller should proceed);
+ * returns `false` if a save is already in-flight (caller should skip).
+ */
+export function markPendingCapture(sessionId) {
+    if (pendingCapturesBySession.has(sessionId))
+        return false;
+    pendingCapturesBySession.add(sessionId);
+    return true;
+}
+/**
+ * Clears the in-flight flag for a session.  Call from `finally` after
+ * `performAutoCapture` completes (success or failure).
+ */
+export function clearPendingCapture(sessionId) {
+    pendingCapturesBySession.delete(sessionId);
 }
 export async function performAutoCapture(ctx, client, config, sessionId) {
     if (!config.autoSaveTopicId)
@@ -36,7 +58,7 @@ export async function performAutoCapture(ctx, client, config, sessionId) {
     const toolCalls = extractToolCalls(aiMessages);
     if (textResponses.length === 0 && toolCalls.length === 0)
         return;
-    const userRequest = truncate(prompt.content.trim(), 1_500);
+    const userRequest = truncate(redactContent(prompt.content.trim()), 1_500);
     const aiResponse = truncate(textResponses.join("\n\n"), 4_000);
     const title = `Opencode: ${truncate(firstLine(userRequest), 100)}`;
     const content = [
@@ -132,7 +154,9 @@ function extractToolCalls(messages) {
                 continue;
             const name = typeof part.tool === "string" ? part.tool : "unknown";
             const state = isRecord(part.state) ? part.state : {};
-            const input = state.input === undefined ? "" : truncate(JSON.stringify(state.input), 160);
+            const input = state.input === undefined
+                ? ""
+                : truncate(safeStringify(state.input), 160);
             calls.push(input ? `${name}(${input})` : name);
         }
     }
@@ -143,5 +167,49 @@ function firstLine(value) {
 }
 function isRecord(value) {
     return !!value && typeof value === "object" && !Array.isArray(value);
+}
+/**
+ * JSON serializer that handles BigInt and prevents exceptions on circular
+ * references.  Used for serializing tool-call inputs before saving.
+ */
+function safeStringify(value) {
+    try {
+        return JSON.stringify(value, (_key, val) => typeof val === "bigint" ? `[bigint:${val}]` : val);
+    }
+    catch {
+        return "[unserializable input]";
+    }
+}
+/**
+ * Redacts obvious secret / credential patterns from content before saving.
+ * Applied to user prompts and assistant responses to reduce accidental
+ * credential leakage when auto-save is enabled.
+ */
+function redactContent(content) {
+    let redacted = content;
+    // Known secret prefix patterns (case-insensitive).
+    const SECRET_PATTERNS = [
+        // Noosphere API keys
+        [/noo_[A-Za-z0-9_-]{20,}/g, "[NOOSPHERE_API_KEY]"],
+        // OpenAI / provider keys
+        [/sk-[A-Za-z0-9_-]{20,}/g, "[API_KEY]"],
+        // Generic Bearer tokens (long alphanumeric strings following "Bearer")
+        [/Bearer\s+[A-Za-z0-9_+.-]{20,}/g, "Bearer [TOKEN]"],
+        // AWS access key / secret patterns
+        [/AKIA[A-Z0-9]{16}/g, "[AWS_KEY]"],
+        [/aws[_-]?secret[_-]?access[_-]?key/gi, "[AWS_SECRET_KEY]"],
+        // GitHub tokens
+        [/ghp_[A-Za-z0-9_]{36,}/g, "[GITHUB_TOKEN]"],
+        [/github[_-]?pat[_-]?[A-Za-z0-9_]{36,}/gi, "[GITHUB_TOKEN]"],
+        // Environment-variable style secrets (NAME=VALUE where VALUE is long base64-like)
+        [/[A-Z_][A-Z0-9_]*(?:API|KEY|SECRET|TOKEN|PASS|CREDENTIAL|AUTH)[=][A-Za-z0-9_+./-]{20,}/g,
+            "[ENV_SECRET]"],
+        // Long base64-like strings that are clearly encoded secrets
+        [/[A-Za-z0-9_+./]{40,}=*$/gm, "[SECRET]"],
+    ];
+    for (const [pattern, replacement] of SECRET_PATTERNS) {
+        redacted = redacted.replace(pattern, replacement);
+    }
+    return redacted;
 }
 //# sourceMappingURL=capture.js.map

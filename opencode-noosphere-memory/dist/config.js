@@ -36,7 +36,22 @@ function normalizeBaseUrl(value) {
     let end = trimmed.length;
     while (end > 0 && trimmed[end - 1] === "/")
         end -= 1;
-    return (end > 0 ? trimmed.slice(0, end) : DEFAULT_BASE_URL) || DEFAULT_BASE_URL;
+    const stripped = end > 0 ? trimmed.slice(0, end) : "";
+    const result = stripped || DEFAULT_BASE_URL;
+    // Validate: must parse as a URL, use http/https, and have no embedded credentials.
+    try {
+        const url = new URL(result);
+        if (url.protocol !== "http:" && url.protocol !== "https:") {
+            return DEFAULT_BASE_URL;
+        }
+        if (url.username || url.password) {
+            return DEFAULT_BASE_URL;
+        }
+        return result;
+    }
+    catch {
+        return DEFAULT_BASE_URL;
+    }
 }
 function readInjectOn(value, envValue) {
     const raw = readString(value) || readString(envValue);

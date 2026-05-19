@@ -25,6 +25,7 @@ export declare class NoosphereClient {
     private readonly config;
     constructor(config: NoospherePluginConfig);
     status(): Promise<unknown>;
+    health(): Promise<unknown>;
     topics(): Promise<TopicListResponse>;
     recall(request: RecallRequest): Promise<MemoryRecallResponse>;
     save(request: SaveRequest): Promise<MemorySaveResponse>;

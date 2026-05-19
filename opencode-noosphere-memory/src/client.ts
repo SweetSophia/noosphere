@@ -44,6 +44,10 @@ export class NoosphereClient {
     return this.requestJson("GET", "/api/memory/status");
   }
 
+  async health(): Promise<unknown> {
+    return this.requestJson("GET", "/api/health");
+  }
+
   async topics(): Promise<TopicListResponse> {
     return this.requestJson<TopicListResponse>("GET", "/api/topics");
   }

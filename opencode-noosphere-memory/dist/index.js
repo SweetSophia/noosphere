@@ -1,7 +1,7 @@
 import { tool } from "@opencode-ai/plugin";
-import { NoosphereClient } from "./client.js";
+import { NoosphereClient, NoosphereClientError } from "./client.js";
 import { resolveConfig, redactSecret } from "./config.js";
-import { clearSessionPrompts, performAutoCapture, savePrompt } from "./capture.js";
+import { clearSessionPrompts, markPendingCapture, clearPendingCapture, performAutoCapture, savePrompt } from "./capture.js";
 import { formatAutoRecall, formatRecallResults, jsonToolResult } from "./format.js";
 export const NoosphereOpencodePlugin = async (ctx, options) => {
     const config = resolveConfig(options);
@@ -15,14 +15,22 @@ export const NoosphereOpencodePlugin = async (ctx, options) => {
     });
     return {
         "chat.message": async (input, output) => {
-            if (!config.autoRecall || !config.apiKey)
+            if (!config.apiKey)
                 return;
             try {
                 const userMessage = extractText(output.parts);
                 if (!userMessage)
                     return;
                 const messageId = output.message.id;
-                savePrompt(input.sessionID, messageId, userMessage);
+                // Track prompt for auto-save whenever that feature is enabled —
+                // independent of whether auto-recall is enabled (fixes silent
+                // failure when NOOSPHERE_AUTO_RECALL=false but AUTO_SAVE=true).
+                if (config.autoSave) {
+                    savePrompt(input.sessionID, messageId, userMessage);
+                }
+                // Only run recall injection when auto-recall is explicitly enabled.
+                if (!config.autoRecall)
+                    return;
                 if (!(await shouldInjectRecall(ctx, input.sessionID, config.autoRecallInjectOn))) {
                     return;
                 }
@@ -56,19 +64,29 @@ export const NoosphereOpencodePlugin = async (ctx, options) => {
                 if (idleTimeout)
                     clearTimeout(idleTimeout);
                 idleTimeoutsBySession.delete(event.properties.sessionID);
+                clearPendingCapture(event.properties.sessionID);
                 return;
             }
             if (event.type !== "session.idle" || !config.autoSave || !config.apiKey) {
                 return;
             }
             const sessionId = event.properties.sessionID;
+            // Skip scheduling a new timeout if a save is already in-flight for this
+            // session (prevents duplicate saves when multiple idle events fire while
+            // a prior save has not yet completed).
+            if (!markPendingCapture(sessionId))
+                return;
             const existingIdleTimeout = idleTimeoutsBySession.get(sessionId);
             if (existingIdleTimeout)
                 clearTimeout(existingIdleTimeout);
             const idleTimeout = setTimeout(() => {
                 idleTimeoutsBySession.delete(sessionId);
-                performAutoCapture(ctx, client, config, event.properties.sessionID).catch((error) => {
+                performAutoCapture(ctx, client, config, sessionId)
+                    .catch((error) => {
                     void log(ctx, "warn", "Noosphere auto-save failed", formatError(error));
+                })
+                    .finally(() => {
+                    clearPendingCapture(sessionId);
                 });
             }, config.autoSaveDebounceMs);
             idleTimeoutsBySession.set(sessionId, idleTimeout);
@@ -92,6 +110,29 @@ export const NoosphereOpencodePlugin = async (ctx, options) => {
                         });
                     }
                     catch (error) {
+                        // /api/memory/status requires ADMIN (exposes internal provider config).
+                        // Fall back to /api/health if the key is non-ADMIN (READ/WRITE).
+                        if (error instanceof NoosphereClientError &&
+                            error.status === 403) {
+                            try {
+                                const health = await client.health();
+                                return jsonToolResult({
+                                    ok: true,
+                                    config: {
+                                        baseUrl: config.baseUrl,
+                                        apiKey: redactSecret(config.apiKey),
+                                        autoRecall: config.autoRecall,
+                                        autoSave: config.autoSave,
+                                        autoSaveTopicId: config.autoSaveTopicId,
+                                    },
+                                    status: health,
+                                    note: "Full memory/status unavailable (ADMIN key required); /api/health returned below.",
+                                });
+                            }
+                            catch {
+                                // Fall through to the error response.
+                            }
+                        }
                         return jsonToolResult({ ok: false, ...formatError(error) });
                     }
                 },
