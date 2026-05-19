@@ -54,7 +54,12 @@ export function redactSecret(value: string | undefined): string | undefined {
 }
 
 function normalizeBaseUrl(value: string): string {
-  return value.trim().replace(/\/+$/, "") || DEFAULT_BASE_URL;
+  const trimmed = value.trim();
+  // Strip trailing slashes without regex to avoid CodeQL js/polynomial-redos
+  // on pathological inputs (many repetitions of '/' from user/environment values).
+  let end = trimmed.length;
+  while (end > 0 && trimmed[end - 1] === "/") end -= 1;
+  return (end > 0 ? trimmed.slice(0, end) : DEFAULT_BASE_URL) || DEFAULT_BASE_URL;
 }
 
 function readInjectOn(value: unknown, envValue: unknown): "first" | "always" {

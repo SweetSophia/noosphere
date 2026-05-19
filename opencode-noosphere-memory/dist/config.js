@@ -30,7 +30,13 @@ export function redactSecret(value) {
     return `${value.slice(0, 4)}...${value.slice(-4)}`;
 }
 function normalizeBaseUrl(value) {
-    return value.trim().replace(/\/+$/, "") || DEFAULT_BASE_URL;
+    const trimmed = value.trim();
+    // Strip trailing slashes without regex to avoid CodeQL js/polynomial-redos
+    // on pathological inputs (many repetitions of '/' from user/environment values).
+    let end = trimmed.length;
+    while (end > 0 && trimmed[end - 1] === "/")
+        end -= 1;
+    return (end > 0 ? trimmed.slice(0, end) : DEFAULT_BASE_URL) || DEFAULT_BASE_URL;
 }
 function readInjectOn(value, envValue) {
     const raw = readString(value) || readString(envValue);
