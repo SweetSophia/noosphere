@@ -1,6 +1,6 @@
 import { truncate } from "./format.js";
 const promptsBySession = new Map();
-const capturedMessageIds = new Set();
+const capturedMessageIdsBySession = new Map();
 const MAX_PROMPTS_PER_SESSION = 100;
 const MIN_CAPTURE_LENGTH = 80;
 const TRIVIAL_PROMPT_RE = /^(ok|okay|thanks?|thank you|done|yes|no|sure|nice|cool|great|got it)[.!?\s]*$/i;
@@ -10,9 +10,11 @@ export function savePrompt(sessionId, messageId, content) {
     if (prompts.length > MAX_PROMPTS_PER_SESSION)
         prompts.shift();
     promptsBySession.set(sessionId, prompts);
+    pruneCapturedMessageIds(sessionId, prompts);
 }
 export function clearSessionPrompts(sessionId) {
     promptsBySession.delete(sessionId);
+    capturedMessageIdsBySession.delete(sessionId);
 }
 export async function performAutoCapture(ctx, client, config, sessionId) {
     if (!config.autoSaveTopicId)
@@ -20,7 +22,6 @@ export async function performAutoCapture(ctx, client, config, sessionId) {
     const prompt = getLastUncapturedPrompt(sessionId);
     if (!prompt || shouldSkipPrompt(prompt.content))
         return;
-    capturedMessageIds.add(prompt.messageId);
     const messagesResponse = await ctx.client.session.messages({
         path: { id: sessionId },
     });
@@ -62,15 +63,36 @@ export async function performAutoCapture(ctx, client, config, sessionId) {
         authorName: config.authorName,
         confidence: "medium",
     });
+    markPromptCaptured(sessionId, prompt.messageId);
 }
 function getLastUncapturedPrompt(sessionId) {
     const prompts = promptsBySession.get(sessionId) ?? [];
     for (let index = prompts.length - 1; index >= 0; index -= 1) {
         const prompt = prompts[index];
-        if (prompt && !capturedMessageIds.has(prompt.messageId))
+        if (prompt && !isPromptCaptured(sessionId, prompt.messageId))
             return prompt;
     }
     return undefined;
+}
+function isPromptCaptured(sessionId, messageId) {
+    return capturedMessageIdsBySession.get(sessionId)?.has(messageId) ?? false;
+}
+function markPromptCaptured(sessionId, messageId) {
+    const capturedMessageIds = capturedMessageIdsBySession.get(sessionId) ?? new Set();
+    capturedMessageIds.add(messageId);
+    capturedMessageIdsBySession.set(sessionId, capturedMessageIds);
+}
+function pruneCapturedMessageIds(sessionId, prompts) {
+    const capturedMessageIds = capturedMessageIdsBySession.get(sessionId);
+    if (!capturedMessageIds)
+        return;
+    const retainedMessageIds = new Set(prompts.map((prompt) => prompt.messageId));
+    for (const messageId of capturedMessageIds) {
+        if (!retainedMessageIds.has(messageId))
+            capturedMessageIds.delete(messageId);
+    }
+    if (capturedMessageIds.size === 0)
+        capturedMessageIdsBySession.delete(sessionId);
 }
 function shouldSkipPrompt(prompt) {
     const trimmed = prompt.trim();

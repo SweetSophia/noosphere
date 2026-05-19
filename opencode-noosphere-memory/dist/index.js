@@ -6,7 +6,7 @@ import { formatAutoRecall, formatRecallResults, jsonToolResult } from "./format.
 export const NoosphereOpencodePlugin = async (ctx, options) => {
     const config = resolveConfig(options);
     const client = new NoosphereClient(config);
-    let idleTimeout;
+    const idleTimeoutsBySession = new Map();
     await log(ctx, "info", "Noosphere Opencode plugin initialized", {
         baseUrl: config.baseUrl,
         apiKey: redactSecret(config.apiKey),
@@ -52,18 +52,26 @@ export const NoosphereOpencodePlugin = async (ctx, options) => {
         event: async ({ event }) => {
             if (event.type === "session.compacted") {
                 clearSessionPrompts(event.properties.sessionID);
+                const idleTimeout = idleTimeoutsBySession.get(event.properties.sessionID);
+                if (idleTimeout)
+                    clearTimeout(idleTimeout);
+                idleTimeoutsBySession.delete(event.properties.sessionID);
                 return;
             }
             if (event.type !== "session.idle" || !config.autoSave || !config.apiKey) {
                 return;
             }
-            if (idleTimeout)
-                clearTimeout(idleTimeout);
-            idleTimeout = setTimeout(() => {
+            const sessionId = event.properties.sessionID;
+            const existingIdleTimeout = idleTimeoutsBySession.get(sessionId);
+            if (existingIdleTimeout)
+                clearTimeout(existingIdleTimeout);
+            const idleTimeout = setTimeout(() => {
+                idleTimeoutsBySession.delete(sessionId);
                 performAutoCapture(ctx, client, config, event.properties.sessionID).catch((error) => {
                     void log(ctx, "warn", "Noosphere auto-save failed", formatError(error));
                 });
             }, config.autoSaveDebounceMs);
+            idleTimeoutsBySession.set(sessionId, idleTimeout);
         },
         tool: {
             noosphere_status: tool({
@@ -165,7 +173,8 @@ async function shouldInjectRecall(ctx, sessionId, injectOn) {
     try {
         const response = await ctx.client.session.messages({ path: { id: sessionId } });
         const messages = response.data ?? [];
-        const nonSyntheticUserMessages = messages.filter((message) => message.info.role === "user" &&
+        const nonSyntheticUserMessages = messages.filter((message) => message.info?.role === "user" &&
+            Array.isArray(message.parts) &&
             !message.parts.every((part) => part.type !== "text" || part.synthetic === true));
         const lastMessage = messages[messages.length - 1];
         return nonSyntheticUserMessages.length === 0 || lastMessage?.info?.summary === true;

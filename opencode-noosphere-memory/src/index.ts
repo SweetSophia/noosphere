@@ -12,7 +12,7 @@ export const NoosphereOpencodePlugin: Plugin = async (
 ) => {
   const config = resolveConfig(options);
   const client = new NoosphereClient(config);
-  let idleTimeout: ReturnType<typeof setTimeout> | undefined;
+  const idleTimeoutsBySession = new Map<string, ReturnType<typeof setTimeout>>();
 
   await log(ctx, "info", "Noosphere Opencode plugin initialized", {
     baseUrl: config.baseUrl,
@@ -62,6 +62,9 @@ export const NoosphereOpencodePlugin: Plugin = async (
     event: async ({ event }) => {
       if (event.type === "session.compacted") {
         clearSessionPrompts(event.properties.sessionID);
+        const idleTimeout = idleTimeoutsBySession.get(event.properties.sessionID);
+        if (idleTimeout) clearTimeout(idleTimeout);
+        idleTimeoutsBySession.delete(event.properties.sessionID);
         return;
       }
 
@@ -69,12 +72,17 @@ export const NoosphereOpencodePlugin: Plugin = async (
         return;
       }
 
-      if (idleTimeout) clearTimeout(idleTimeout);
-      idleTimeout = setTimeout(() => {
+      const sessionId = event.properties.sessionID;
+      const existingIdleTimeout = idleTimeoutsBySession.get(sessionId);
+      if (existingIdleTimeout) clearTimeout(existingIdleTimeout);
+
+      const idleTimeout = setTimeout(() => {
+        idleTimeoutsBySession.delete(sessionId);
         performAutoCapture(ctx, client, config, event.properties.sessionID).catch((error) => {
           void log(ctx, "warn", "Noosphere auto-save failed", formatError(error));
         });
       }, config.autoSaveDebounceMs);
+      idleTimeoutsBySession.set(sessionId, idleTimeout);
     },
 
     tool: {
@@ -185,7 +193,8 @@ async function shouldInjectRecall(
     const response = await ctx.client.session.messages({ path: { id: sessionId } });
     const messages = response.data ?? [];
     const nonSyntheticUserMessages = messages.filter((message) =>
-      message.info.role === "user" &&
+      message.info?.role === "user" &&
+      Array.isArray(message.parts) &&
       !message.parts.every((part) => part.type !== "text" || part.synthetic === true)
     );
     const lastMessage = messages[messages.length - 1];
