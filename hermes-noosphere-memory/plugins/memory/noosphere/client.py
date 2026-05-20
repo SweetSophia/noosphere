@@ -42,18 +42,20 @@ def normalize_base_url(value: Any) -> str:
         raise ValueError("Noosphere base_url must not include credentials")
 
     host = parsed.hostname
-    if _parse_ip_literal(host) is not None:
+    ip_literal = _parse_ip_literal(host)
+    if ip_literal is not None:
         try:
             ipaddress.ip_address(_normalized_host(host))
         except ValueError as error:
             raise ValueError("Noosphere base_url must use standard IP literal notation") from error
+    elif _looks_like_ipv4_literal(host):
+        raise ValueError("Noosphere base_url must use standard IP literal notation")
     if parsed.scheme == "http" and not _is_loopback_host(host):
         raise ValueError("Noosphere http base_url is allowed only for loopback hosts")
     if _is_blocked_network_host(host):
         raise ValueError("Noosphere base_url must not target private or reserved networks")
 
     netloc = host
-    ip_literal = _parse_ip_literal(host)
     if (
         ip_literal is not None
         and ip_literal.version == 6
@@ -77,6 +79,9 @@ def _is_loopback_host(host: str) -> bool:
     if normalized == "localhost":
         return True
     ip = _parse_ip_literal(normalized)
+    mapped = getattr(ip, "ipv4_mapped", None) if ip is not None else None
+    if mapped is not None:
+        ip = mapped
     return bool(ip and ip.is_loopback)
 
 
@@ -84,13 +89,14 @@ def _is_blocked_network_host(host: str) -> bool:
     ip = _parse_ip_literal(host)
     if ip is None:
         return False
-    if ip.is_loopback:
-        return False
     mapped = getattr(ip, "ipv4_mapped", None)
     if mapped is not None:
         ip = mapped
+    if ip.is_loopback:
+        return False
     return any(
         (
+            not ip.is_global,
             ip.is_private,
             ip.is_link_local,
             ip.is_multicast,
@@ -111,23 +117,54 @@ def _parse_ip_literal(host: str) -> Optional[Any]:
     except ValueError:
         pass
 
+    candidate = normalized[:-1] if normalized.endswith(".") else normalized
     try:
-        if re.fullmatch(r"(?:0x[0-9a-f]+|\d+)", normalized):
-            return ipaddress.ip_address(int(normalized, 0))
-        if "." in normalized and re.fullmatch(r"[0-9a-fx.]+", normalized):
-            parts = normalized.split(".")
-            if len(parts) == 4:
-                octets = [_parse_ipv4_component(part) for part in parts]
-                if all(octet is not None and 0 <= octet <= 255 for octet in octets):
-                    return ipaddress.ip_address(".".join(str(octet) for octet in octets))
+        return _parse_legacy_ipv4_literal(candidate)
     except ValueError:
         return None
-    return None
+
+
+def _looks_like_ipv4_literal(host: str) -> bool:
+    candidate = _normalized_host(host)
+    candidate = candidate[:-1] if candidate.endswith(".") else candidate
+    return bool(re.fullmatch(r"(?:0x[0-9a-f]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|[0-9]+)){0,3}", candidate))
+
+
+def _parse_legacy_ipv4_literal(value: str) -> Optional[Any]:
+    """Recognize inet_aton-style IPv4 forms so non-standard literals can be rejected."""
+
+    if not _looks_like_ipv4_literal(value):
+        return None
+    parts = [_parse_ipv4_component(part) for part in value.split(".")]
+    if any(part is None for part in parts):
+        return None
+
+    if len(parts) == 1:
+        number = parts[0]
+    elif len(parts) == 2:
+        if parts[0] > 0xFF or parts[1] > 0xFFFFFF:
+            return None
+        number = (parts[0] << 24) | parts[1]
+    elif len(parts) == 3:
+        if parts[0] > 0xFF or parts[1] > 0xFF or parts[2] > 0xFFFF:
+            return None
+        number = (parts[0] << 24) | (parts[1] << 16) | parts[2]
+    elif len(parts) == 4:
+        if any(part > 0xFF for part in parts):
+            return None
+        number = (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+    else:
+        return None
+
+    if number > 0xFFFFFFFF:
+        return None
+    return ipaddress.ip_address(number)
 
 
 def _parse_ipv4_component(value: str) -> Optional[int]:
     if not value:
         return None
+    value = value.lower()
     if value.startswith("0x"):
         return int(value, 16)
     if len(value) > 1 and value.startswith("0"):
@@ -188,7 +225,12 @@ class NoosphereClient:
         *,
         timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
-        return self._request_json("POST", "/api/memory/recall", request, timeout=timeout)
+        effective_timeout = (
+            self._auto_recall_timeout
+            if timeout is None and request.get("mode") == "auto"
+            else timeout
+        )
+        return self._request_json("POST", "/api/memory/recall", request, timeout=effective_timeout)
 
     def get(self, request: Dict[str, Any]) -> Dict[str, Any]:
         return self._request_json("POST", "/api/memory/get", request)

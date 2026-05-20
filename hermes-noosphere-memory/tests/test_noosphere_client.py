@@ -231,7 +231,7 @@ class NoosphereClientTest(unittest.TestCase):
 
     def test_normalize_base_url_accepts_safe_targets_and_strips_fragments(self):
         module = load_plugin_package()
-        normalize = module.NoosphereClient.__init__.__globals__["normalize_base_url"]
+        normalize = module.normalize_base_url
 
         cases = {
             "http://127.0.0.1:6578/path/?x=1#frag": "http://127.0.0.1:6578/path",
@@ -245,7 +245,7 @@ class NoosphereClientTest(unittest.TestCase):
 
     def test_normalize_base_url_rejects_unsafe_targets(self):
         module = load_plugin_package()
-        normalize = module.NoosphereClient.__init__.__globals__["normalize_base_url"]
+        normalize = module.normalize_base_url
 
         cases = [
             "file:///tmp/noosphere.sock",
@@ -254,8 +254,12 @@ class NoosphereClientTest(unittest.TestCase):
             "https://10.0.0.5",
             "https://172.16.0.5",
             "https://192.168.1.5",
+            "https://100.64.0.1",
             "https://169.254.169.254",
             "https://2130706433",
+            "https://127.1",
+            "https://192.168.1",
+            "https://127.0.0.1.",
             "https://0177.0.0.1",
             "https://0x7f.0.0.1",
             "https://[fc00::1]",
@@ -288,10 +292,14 @@ class NoosphereClientTest(unittest.TestCase):
             return_value=_JsonResponse({"ok": True}),
         ) as urlopen:
             client.status()
-            client.recall({"query": "deploy"}, timeout=1.25)
+            client.recall({"query": "deploy", "mode": "auto"})
+            client.recall({"query": "deploy", "mode": "inspection"})
+            client.recall({"query": "deploy", "mode": "inspection"}, timeout=2.5)
 
         self.assertEqual(urlopen.call_args_list[0].kwargs["timeout"], 0.75)
         self.assertEqual(urlopen.call_args_list[1].kwargs["timeout"], 1.25)
+        self.assertEqual(urlopen.call_args_list[2].kwargs["timeout"], 15.0)
+        self.assertEqual(urlopen.call_args_list[3].kwargs["timeout"], 2.5)
 
 
 if __name__ == "__main__":

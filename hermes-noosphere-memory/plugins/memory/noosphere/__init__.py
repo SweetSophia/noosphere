@@ -104,9 +104,8 @@ def _sanitize_config(raw: Dict[str, Any]) -> Dict[str, Any]:
     config = dict(_DEFAULT_CONFIG)
     config.update({key: value for key, value in raw.items() if value is not None})
 
-    config["base_url"] = normalize_base_url(
-        _as_string(config.get("base_url"), _DEFAULT_CONFIG["base_url"])
-    )
+    base_url = _as_string(config.get("base_url")) or str(_DEFAULT_CONFIG["base_url"])
+    config["base_url"] = normalize_base_url(base_url)
     config["auto_recall"] = _as_bool(config.get("auto_recall"), True)
     config["auto_capture"] = _as_bool(config.get("auto_capture"), False)
 
@@ -167,11 +166,11 @@ def _load_noosphere_config(hermes_home: str) -> Dict[str, Any]:
         return _sanitize_config(raw)
     except ValueError:
         logger.warning(
-            "Ignoring unsafe Noosphere config at %s; using defaults",
+            "Unsafe Noosphere config at %s; disabling provider",
             path,
             exc_info=True,
         )
-        return dict(_DEFAULT_CONFIG)
+        raise
 
 
 def _save_noosphere_config(values: Dict[str, Any], hermes_home: str) -> None:
@@ -278,7 +277,12 @@ class NoosphereMemoryProvider(MemoryProvider):
         self._agent_identity = _as_string(kwargs.get("agent_identity"), "default") or "default"
         self._agent_context = _as_string(kwargs.get("agent_context"))
 
-        self._config = _load_noosphere_config(self._hermes_home)
+        try:
+            self._config = _load_noosphere_config(self._hermes_home)
+        except ValueError:
+            self._active = False
+            self._client = None
+            return
         env_base_url = os.environ.get("NOOSPHERE_BASE_URL", "").strip()
         if env_base_url:
             try:

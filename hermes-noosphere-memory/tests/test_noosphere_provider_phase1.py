@@ -99,6 +99,19 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
         self.assertEqual(data["max_recall_results"], 20)
         self.assertNotIn("providers", data)
 
+    def test_save_config_treats_blank_base_url_as_default(self):
+        module = load_plugin()
+        provider = module.NoosphereMemoryProvider()
+
+        with tempfile.TemporaryDirectory() as hermes_home:
+            provider.save_config({"base_url": "", "auto_recall": False}, hermes_home)
+
+            path = Path(hermes_home) / "noosphere.json"
+            data = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(data["base_url"], "http://127.0.0.1:6578")
+        self.assertFalse(data["auto_recall"])
+
     def test_save_config_removes_legacy_secret_from_existing_file(self):
         module = load_plugin()
         provider = module.NoosphereMemoryProvider()
@@ -203,6 +216,22 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
         self.assertFalse(provider._active)
         self.assertIsNone(provider._client)
         self.assertIn("Unsafe NOOSPHERE_BASE_URL ignored", "\n".join(logs.output))
+
+    def test_initialize_disables_provider_for_unsafe_stored_base_url(self):
+        module = load_plugin()
+        provider = module.NoosphereMemoryProvider()
+
+        with tempfile.TemporaryDirectory() as hermes_home:
+            path = Path(hermes_home) / "noosphere.json"
+            path.write_text(json.dumps({"base_url": "https://169.254.169.254"}), encoding="utf-8")
+
+            with mock.patch.dict(os.environ, {"NOOSPHERE_API_KEY": "noo_test"}, clear=True):
+                with self.assertLogs(module.logger, level="WARNING") as logs:
+                    provider.initialize("session-1", hermes_home=hermes_home)
+
+        self.assertFalse(provider._active)
+        self.assertIsNone(provider._client)
+        self.assertIn("Unsafe Noosphere config", "\n".join(logs.output))
 
     def test_register_adds_memory_provider(self):
         module = load_plugin()
