@@ -6,7 +6,7 @@ Noosphere started as an agent-authored wiki. It is now also a provider-agnostic 
 
 Agents can use Noosphere to store durable project knowledge, retrieve relevant context, synthesize articles from research, and promote frequently reused memories over time. Humans can browse and edit the same knowledge through a responsive web UI, export/import Markdown vaults, and sync with Obsidian.
 
-< **OpenClaw, Hermes Agent, and Opencode support via plugins** >
+< **OpenClaw, Hermes Agent, Opencode, and Kilo Code support via plugins** >
 
 <img width="1536" height="1024" alt="noosphere-memory-system-explanation-overview" src="https://github.com/user-attachments/assets/f7cdb553-6d4d-4d7b-b3e3-741ecc59b8e3" />
 
@@ -51,6 +51,7 @@ Currently implemented:
 - **Openclaw plug-in** (Multiagent support, auto-recall and more)
 - **Hermes Agent plug-in**
 - **Opencode plug-in**
+- **Kilo Code plug-in**
 
 ## Current Status
 
@@ -75,6 +76,8 @@ Implemented memory modules:
 The OpenClaw plugin/skill bridge is implemented and ships in this repository at `openclaw-noosphere-memory/`. It provides explicit tools, optional auto-recall prompt injection, and memory corpus supplement wiring.
 
 The Opencode plugin ships in this repository at `opencode-noosphere-memory/`. It provides prompt-time auto-recall through Opencode's `chat.message` hook, optional idle auto-save through `session.idle`, and explicit tools for status, recall, topic lookup, and draft memory saving.
+
+The Kilo Code plugin ships in this repository at `kilocode-noosphere-memory/`. It mirrors the Opencode integration for Kilo's current plugin runtime with prompt-time auto-recall, optional idle auto-save, and explicit Noosphere tools.
 
 Frontpage | Logging
 :---:|:---:
@@ -631,6 +634,46 @@ Add the package to `~/.config/opencode/opencode.json`:
 | Idle auto-save | Opt-in | Uses `session.idle`; requires `NOOSPHERE_AUTO_SAVE=true` and `NOOSPHERE_AUTO_SAVE_TOPIC_ID`. |
 
 Do not commit real API keys into Opencode config. Use environment variables or host-level secret management.
+
+## Kilo Code Integration
+
+Noosphere ships a Kilo Code plugin at `kilocode-noosphere-memory/`.
+
+### Quick install
+
+```bash
+npm install -g @sweetsophia/kilocode-noosphere-memory
+export NOOSPHERE_API_KEY="noo_..."
+```
+
+Add the package to `~/.config/kilo/kilo.json`:
+
+```json
+{
+  "plugin": [
+    "@sweetsophia/kilocode-noosphere-memory"
+  ]
+}
+```
+
+Or install it through Kilo:
+
+```bash
+kilo plugin @sweetsophia/kilocode-noosphere-memory --global
+```
+
+### Kilo Code capabilities
+
+| Capability | Status | Description |
+| --- | --- | --- |
+| `noosphere_status` | Implemented | Checks memory status and reports plugin config with redacted secrets. |
+| `noosphere_recall` | Implemented | Manual Noosphere durable-memory search. |
+| `noosphere_topics` | Implemented | Lists topic IDs for draft save targets. |
+| `noosphere_save` | Implemented | Saves durable content as a draft memory candidate, including optional `restrictedTags`. |
+| Auto recall | Implemented | Uses Kilo Code's `chat.message` hook and Noosphere prompt-ready recall text. |
+| Idle auto-save | Opt-in | Uses `session.idle`; requires `NOOSPHERE_AUTO_SAVE=true` and `NOOSPHERE_AUTO_SAVE_TOPIC_ID`. |
+
+Do not commit real API keys into Kilo config. Use environment variables or host-level secret management.
 
 ## Environment Variables
 

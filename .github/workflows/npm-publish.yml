@@ -11,8 +11,9 @@ on:
       - "docs/OPENCLAW*.md"
       - "openclaw-noosphere-memory/**"
       - "opencode-noosphere-memory/**"
+      - "kilocode-noosphere-memory/**"
   push:
-    tags: ["v-openclaw-*", "v-opencode-*"]
+    tags: ["v-openclaw-*", "v-opencode-*", "v-kilocode-*"]
   workflow_dispatch:
     inputs:
       publish_openclaw:
@@ -22,6 +23,11 @@ on:
         default: false
       publish_opencode:
         description: "Publish the Opencode plugin (@sweetsophia/opencode-noosphere-memory) to npm"
+        required: true
+        type: boolean
+        default: false
+      publish_kilocode:
+        description: "Publish the Kilo Code plugin (@sweetsophia/kilocode-noosphere-memory) to npm"
         required: true
         type: boolean
         default: false
@@ -40,6 +46,8 @@ jobs:
             name: "@sweetsophia/openclaw-noosphere-memory"
           - dir: opencode-noosphere-memory
             name: "@sweetsophia/opencode-noosphere-memory"
+          - dir: kilocode-noosphere-memory
+            name: "@sweetsophia/kilocode-noosphere-memory"
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -208,6 +216,76 @@ jobs:
           const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
           const tag = process.env.GITHUB_REF_NAME ?? "";
           const tagVersion = tag.replace(/^v-opencode-/, "");
+
+          if (tagVersion !== pkg.version) {
+            console.error(
+              `Release tag ${tag} does not match package.json version ${pkg.version}`
+            );
+            process.exit(1);
+          }
+          NODE
+
+      - name: Build package
+        run: npm run build
+
+      - name: Verify committed dist is current
+        run: git diff --exit-code -- dist
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+
+  publish_kilocode:
+    needs: package-check
+    runs-on: ubuntu-latest
+    if: |
+      startsWith(github.ref, 'refs/tags/v-kilocode-') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_kilocode)
+    defaults:
+      run:
+        working-directory: kilocode-noosphere-memory
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: kilocode-noosphere-memory/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate package metadata
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
+          const lockVersion = lock.packages?.[""]?.version ?? lock.version;
+
+          if (lockVersion !== pkg.version) {
+            console.error(
+              `package-lock.json version (${lockVersion}) does not match package.json version (${pkg.version})`
+            );
+            process.exit(1);
+          }
+          NODE
+
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/v-kilocode-')
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          const tag = process.env.GITHUB_REF_NAME ?? "";
+          const tagVersion = tag.replace(/^v-kilocode-/, "");
 
           if (tagVersion !== pkg.version) {
             console.error(
