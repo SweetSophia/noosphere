@@ -1,4 +1,9 @@
 import crypto from "crypto";
+import {
+  normalizeRestrictedTagsForCaller,
+  validateRestrictedTagsExist,
+  type RestrictedScopeLookup,
+} from "@/lib/api/restricted-scopes";
 import { slugify } from "@/lib/memory/backfill";
 import { deriveExcerpt } from "@/lib/validation";
 import type { Prisma } from "@prisma/client";
@@ -23,9 +28,19 @@ const SECRET_PATTERNS: Array<{ name: string; pattern: RegExp }> = [
   { name: "OpenAI-style API key", pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/ },
   { name: "Noosphere API key", pattern: /\bnoo_[A-Za-z0-9_-]{16,}\b/ },
   { name: "GitHub token", pattern: /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/ },
+  { name: "AWS access key", pattern: /\bAKIA[0-9A-Z]{16}\b/ },
+  {
+    name: "JWT token",
+    pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
+  },
   {
     name: "generic bearer token",
     pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b/i,
+  },
+  {
+    name: "credential assignment",
+    pattern:
+      /\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|passwd|secret)\b\s*[:=]\s*["']?[A-Za-z0-9._~+/=-]{16,}["']?/i,
   },
   { name: "private key block", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
 ];
@@ -45,6 +60,7 @@ export interface MemorySaveRequest {
   source?: string;
   authorName?: string;
   confidence?: "low" | "medium" | "high";
+  restrictedTags?: string[];
 }
 
 export interface SanitizedMemorySaveInput {
@@ -56,6 +72,7 @@ export interface SanitizedMemorySaveInput {
   source?: string;
   authorName?: string;
   confidence?: "low" | "medium" | "high";
+  restrictedTags: string[];
   status: "draft";
   strippedBlocks: string[];
 }
@@ -82,6 +99,8 @@ export interface MemorySaveWriter {
 
 export interface MemorySaveExecutionOptions {
   writer?: MemorySaveWriter;
+  allowedScopes?: string[];
+  restrictedScopeLookup?: RestrictedScopeLookup;
 }
 
 export type MemorySaveValidationResult =
@@ -92,9 +111,22 @@ export async function executeMemorySaveRequest(
   input: unknown,
   options: MemorySaveExecutionOptions = {},
 ): Promise<{ status: number; body: MemorySaveResponse | { error: string } }> {
-  const validation = validateMemorySaveRequest(input);
+  const validation = validateMemorySaveRequest(input, {
+    allowedScopes: options.allowedScopes,
+  });
   if (!validation.ok) {
     return { status: validation.status, body: { error: validation.error } };
+  }
+
+  const restrictedTags = await validateRestrictedTagsExist(
+    validation.input.restrictedTags,
+    options.restrictedScopeLookup,
+  );
+  if (!restrictedTags.ok) {
+    return {
+      status: restrictedTags.status,
+      body: { error: restrictedTags.error },
+    };
   }
 
   const writer = options.writer ?? (await getDefaultMemorySaveWriter());
@@ -112,6 +144,7 @@ export async function executeMemorySaveRequest(
 
 export function validateMemorySaveRequest(
   input: unknown,
+  options: Pick<MemorySaveExecutionOptions, "allowedScopes"> = {},
 ): MemorySaveValidationResult {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return { ok: false, status: 400, error: "Request body must be an object" };
@@ -150,6 +183,11 @@ export function validateMemorySaveRequest(
   if (!tags.ok) return tags;
   const confidence = readOptionalConfidence(body.confidence);
   if (!confidence.ok) return confidence;
+  const restrictedTags = normalizeRestrictedTagsForCaller(
+    body.restrictedTags,
+    options.allowedScopes,
+  );
+  if (!restrictedTags.ok) return restrictedTags;
 
   const stripped = stripInjectedMemoryBlocks(content.value);
   const sanitizedContent = normalizeContent(stripped.content);
@@ -177,6 +215,7 @@ export function validateMemorySaveRequest(
       source: source.value,
       authorName: authorName.value,
       confidence: confidence.value,
+      restrictedTags: restrictedTags.value,
       status: "draft",
       strippedBlocks: stripped.strippedBlocks,
     },
@@ -287,6 +326,7 @@ export async function getDefaultMemorySaveWriter(): Promise<MemorySaveWriter> {
             status: "draft",
             sourceType: "memory_candidate",
             sourceUrl: input.source ?? null,
+            restrictedTags: input.restrictedTags,
             tags: { create: tagConnections },
             revisions: {
               create: {
@@ -311,6 +351,7 @@ export async function getDefaultMemorySaveWriter(): Promise<MemorySaveWriter> {
               status: "draft",
               confidence: input.confidence ?? "low",
               tagCount: input.tags.length,
+              restrictedTags: input.restrictedTags,
               strippedBlocks: input.strippedBlocks,
             },
           },
@@ -375,7 +416,7 @@ export class MemorySaveError extends Error {
   }
 }
 
-function detectSecretInInputs(
+export function detectSecretInInputs(
   values: Array<{ field: string; value: string | undefined }>,
 ): Extract<MemorySaveValidationResult, { ok: false }> | undefined {
   for (const { field, value } of values) {

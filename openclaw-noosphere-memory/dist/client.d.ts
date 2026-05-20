@@ -35,6 +35,7 @@ export interface NoosphereSaveRequest {
     source?: string;
     authorName?: string;
     confidence?: "low" | "medium" | "high";
+    restrictedTags?: string[];
 }
 export interface NoosphereTopicTree {
     id: string;
@@ -57,6 +58,7 @@ export interface NoosphereArticleCreateRequest {
     authorName?: string;
     confidence?: "low" | "medium" | "high";
     status?: "draft" | "reviewed" | "published";
+    restrictedTags?: string[];
 }
 export interface NoosphereArticleCreateResponse {
     id: string;
@@ -124,7 +126,9 @@ export declare class NoosphereMemoryClient {
     private readonly config;
     constructor(config: ResolvedNoosphereMemoryConfig);
     status(): Promise<NoosphereStatusResponse>;
-    settings(): Promise<NoosphereSettingsResponse>;
+    settings(options?: {
+        timeoutMs?: number;
+    }): Promise<NoosphereSettingsResponse>;
     get(request: NoosphereGetRequest): Promise<NoosphereGetResponse>;
     save(request: NoosphereSaveRequest): Promise<NoosphereSaveResponse>;
     topics(): Promise<NoosphereTopicsResponse>;

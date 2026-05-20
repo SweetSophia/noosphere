@@ -43,6 +43,15 @@ export declare function createNoosphereArticleCreateTool(rawConfig: unknown, con
                 };
                 readonly description: "Tags for categorization.";
             };
+            readonly restrictedTags: {
+                readonly type: "array";
+                readonly maxItems: 16;
+                readonly items: {
+                    readonly type: "string";
+                    readonly maxLength: 64;
+                };
+                readonly description: "Optional access scopes. Scoped API keys can only assign their own scopes; if omitted, Noosphere defaults scoped keys to their allowed scopes.";
+            };
             readonly authorName: {
                 readonly type: "string";
                 readonly description: "Optional display author name. Omit to let Noosphere attribute the article from the authenticated context.";

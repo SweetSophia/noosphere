@@ -5,10 +5,14 @@ on:
     branches: [main, master]
     paths:
       - ".github/workflows/npm-publish.yml"
+      - "install-openclaw.sh"
+      - "docker-compose.noosphere.yml"
+      - "README.md"
+      - "docs/OPENCLAW*.md"
       - "openclaw-noosphere-memory/**"
       - "opencode-noosphere-memory/**"
   push:
-    tags: ["v*"]
+    tags: ["v-openclaw-*", "v-opencode-*"]
   workflow_dispatch:
     inputs:
       publish_openclaw:
@@ -73,7 +77,7 @@ jobs:
           NODE
 
       - name: Type-check
-        run: npm run typecheck 2>&1 || echo "typecheck script not found, skipping"
+        run: npm run typecheck
 
       - name: Build package
         run: npm run build

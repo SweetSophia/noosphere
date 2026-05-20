@@ -10,6 +10,11 @@ export interface NoosphereMemoryConfig {
      * Example: { "shodan": "noo_abc...", "cylena": "noo_xyz..." }
      */
     apiKeys?: Record<string, string>;
+    /**
+     * Registers shared memory corpus access with the default key. Off by default
+     * because some OpenClaw hosts do not pass agent identity to corpus lookups.
+     */
+    allowDefaultCorpusSupplement?: boolean;
     timeoutMs?: number;
 }
 interface SecretRefInput {

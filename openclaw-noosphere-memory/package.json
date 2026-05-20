@@ -1,6 +1,6 @@
 {
   "name": "@sweetsophia/openclaw-noosphere-memory",
-  "version": "1.5.6",
+  "version": "1.5.7",
   "private": false,
   "description": "OpenClaw plugin for Noosphere: agent memory tools, Noosphere recall, draft memory saving, and automatic prompt-time memory injection.",
   "type": "module",
@@ -20,6 +20,9 @@
     "build": "tsc -p build-tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepack": "npm run build"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "devDependencies": {
     "@types/node": "^20",

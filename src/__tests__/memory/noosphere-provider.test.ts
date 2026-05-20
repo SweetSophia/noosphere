@@ -265,7 +265,7 @@ async function main() {
             Promise.resolve(
               mockArticle({
                 confidence: "high",
-                updatedAt: new Date("2026-04-25"),
+                updatedAt: new Date(),
               }),
             ),
         },

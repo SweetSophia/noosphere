@@ -94,6 +94,10 @@
     "allowedChatTypes": {
       "label": "Allowed Chat Types",
       "help": "Optional case-insensitive allowlist of message providers/channel IDs. Empty means all chat types."
+    },
+    "allowDefaultCorpusSupplement": {
+      "label": "Default Corpus Supplement",
+      "help": "Register shared memory corpus access using the default API key. Keep disabled unless the default key is intentionally scoped for all agents."
     }
   },
   "configSchema": {
@@ -208,6 +212,10 @@
       "skipStatelessSessions": {
         "type": "boolean",
         "default": true
+      },
+      "allowDefaultCorpusSupplement": {
+        "type": "boolean",
+        "default": false
       }
     }
   }

@@ -44,6 +44,7 @@ export interface NoosphereSaveRequest {
   source?: string;
   authorName?: string;
   confidence?: "low" | "medium" | "high";
+  restrictedTags?: string[];
 }
 
 export interface NoosphereTopicTree {
@@ -69,6 +70,7 @@ export interface NoosphereArticleCreateRequest {
   authorName?: string;
   confidence?: "low" | "medium" | "high";
   status?: "draft" | "reviewed" | "published";
+  restrictedTags?: string[];
 }
 
 export interface NoosphereArticleCreateResponse {
@@ -135,10 +137,16 @@ export class NoosphereMemoryClient {
     });
   }
 
-  async settings(): Promise<NoosphereSettingsResponse> {
-    return this.request<NoosphereSettingsResponse>("/api/memory/settings", {
-      method: "GET",
-    });
+  async settings(
+    options: { timeoutMs?: number } = {},
+  ): Promise<NoosphereSettingsResponse> {
+    return this.request<NoosphereSettingsResponse>(
+      "/api/memory/settings",
+      {
+        method: "GET",
+      },
+      options,
+    );
   }
 
   async get(request: NoosphereGetRequest): Promise<NoosphereGetResponse> {

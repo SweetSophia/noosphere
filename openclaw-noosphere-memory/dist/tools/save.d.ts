@@ -37,6 +37,15 @@ export declare function createNoosphereSaveTool(rawConfig: unknown, context?: No
                 };
                 readonly description: "Optional tags. Duplicates are normalized by slug server-side while preserving first-seen display casing.";
             };
+            readonly restrictedTags: {
+                readonly type: "array";
+                readonly maxItems: 16;
+                readonly items: {
+                    readonly type: "string";
+                    readonly maxLength: 64;
+                };
+                readonly description: "Optional access scopes. Scoped API keys can only assign their own scopes; if omitted, Noosphere defaults scoped keys to their allowed scopes.";
+            };
             readonly source: {
                 readonly type: "string";
                 readonly maxLength: 500;

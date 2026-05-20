@@ -10,8 +10,9 @@ describe("wiki tag helpers", () => {
     ]);
   });
 
-  it("drops inputs that cannot produce a slug", () => {
+  it("falls back and deduplicates inputs that cannot produce a slug", () => {
     assert.deepEqual(normalizeTagInputs(["!!!", "機械", "Valid"]), [
+      { name: "!!!", slug: "untitled" },
       { name: "Valid", slug: "valid" },
     ]);
   });

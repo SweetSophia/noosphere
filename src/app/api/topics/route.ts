@@ -1,27 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/wiki";
-import { checkRouteAuth } from "@/lib/api/auth";
+import { buildScopeFilter, checkRouteAuth, requirePermission } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/topics — List all topics (existing)
 export async function GET(request: NextRequest) {
   const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "topics-get" });
   if (!rl.allowed) return rl.response;
+
+  const auth = await requirePermission(request, [Permissions.READ]);
+  if (!auth.success) {
+    return auth.response;
+  }
+
   try {
     const allTopics = await prisma.topic.findMany({
-      include: {
-        _count: { select: { articles: true } },
-      },
       orderBy: { name: "asc" },
     });
 
     const counts = await prisma.article.groupBy({
       by: ["topicId"],
       _count: { id: true },
-      where: { topicId: { in: allTopics.map((t) => t.id) }, deletedAt: null },
+      where: buildScopeFilter(auth.auth.allowedScopes, {
+        topicId: { in: allTopics.map((t) => t.id) },
+        deletedAt: null,
+      }),
     });
     const countMap = new Map(counts.map((c) => [c.topicId, c._count.id]));
+    const fullAccess = auth.auth.allowedScopes?.includes("*") ?? false;
+    const visibleTopicIds = fullAccess
+      ? new Set(allTopics.map((topic) => topic.id))
+      : collectVisibleTopicIds(allTopics, countMap);
 
     type TopicTree = {
       id: string;
@@ -36,18 +47,20 @@ export async function GET(request: NextRequest) {
     const roots: TopicTree[] = [];
 
     for (const topic of allTopics) {
+      if (!visibleTopicIds.has(topic.id)) continue;
       topicMap.set(topic.id, {
         id: topic.id,
         name: topic.name,
         slug: topic.slug,
         description: topic.description,
-        articleCount: countMap.get(topic.id) ?? topic._count.articles,
+        articleCount: countMap.get(topic.id) ?? 0,
         children: [],
       });
     }
 
     for (const topic of allTopics) {
-      const node = topicMap.get(topic.id)!;
+      const node = topicMap.get(topic.id);
+      if (!node) continue;
       if (topic.parentId && topicMap.has(topic.parentId)) {
         topicMap.get(topic.parentId)!.children.push(node);
       } else {
@@ -60,6 +73,25 @@ export async function GET(request: NextRequest) {
     console.error("[GET /api/topics]", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
+}
+
+function collectVisibleTopicIds(
+  topics: Array<{ id: string; parentId: string | null }>,
+  countMap: Map<string, number>,
+): Set<string> {
+  const byId = new Map(topics.map((topic) => [topic.id, topic]));
+  const visible = new Set<string>();
+
+  for (const topicId of countMap.keys()) {
+    let current = byId.get(topicId);
+    while (current) {
+      if (visible.has(current.id)) break;
+      visible.add(current.id);
+      current = current.parentId ? byId.get(current.parentId) : undefined;
+    }
+  }
+
+  return visible;
 }
 
 // POST /api/topics — Create a topic or subtopic
