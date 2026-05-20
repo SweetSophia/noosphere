@@ -23,6 +23,11 @@ import {
   NOOSPHERE_PROVIDER_DESCRIPTOR,
   NOOSPHERE_PROVIDER_ID,
 } from "./noosphere-descriptor";
+import {
+  buildSearchCacheKey,
+  getCachedSearchResults,
+  setCachedSearchResults,
+} from "@/lib/cache/search-cache";
 
 export interface NoosphereProviderSettings {
   /** Optional Prisma client override for scripts, tests, or alternate runtimes. */
@@ -124,6 +129,26 @@ export class NoosphereProvider implements MemoryProvider {
 
     const limit = resolveSearchLimit(options.limit, options.config, config);
     const metadata = (options.metadata ?? {}) as NoosphereSearchOptionsMetadata;
+
+    // Build cache key from search parameters
+    const cacheKey = buildSearchCacheKey({
+      query: normalizedQuery,
+      topicSlug: metadata.topicSlug ?? options.scope,
+      tagSlug: metadata.tagSlug,
+      status: metadata.status,
+      confidence: metadata.confidence,
+      limit,
+      offset: normalizeOffset(metadata.offset),
+      allowedScopes: this.allowedScopes,
+    });
+
+    // Check cache first
+    const cachedResults = await getCachedSearchResults(cacheKey);
+    if (cachedResults !== null) {
+      return cachedResults;
+    }
+
+    // Cache miss - proceed with database query
     const articles = await this.searchArticles(normalizedQuery, {
       limit,
       offset: normalizeOffset(metadata.offset),
@@ -133,6 +158,9 @@ export class NoosphereProvider implements MemoryProvider {
       confidence: metadata.confidence,
       allowedScopes: this.allowedScopes,
     });
+
+    // Populate cache
+    await setCachedSearchResults(cacheKey, articles);
 
     return articles;
   }

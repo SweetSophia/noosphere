@@ -7,6 +7,7 @@ import {
 import { slugify } from "@/lib/memory/backfill";
 import { deriveExcerpt } from "@/lib/validation";
 import type { Prisma } from "@prisma/client";
+import { invalidateSearchCache } from "@/lib/cache/search-cache";
 
 export const MEMORY_SAVE_LIMITS = {
   maxTitleLength: 160,
@@ -131,6 +132,11 @@ export async function executeMemorySaveRequest(
 
   const writer = options.writer ?? (await getDefaultMemorySaveWriter());
   const candidate = await writer.saveCandidate(validation.input);
+
+  // Invalidate search cache on successful save
+  await invalidateSearchCache().catch((err) => {
+    console.error("Failed to invalidate search cache:", err);
+  });
 
   return {
     status: 201,
