@@ -226,6 +226,61 @@ test("memory save executes through injected writer", async () => {
   assert.deepEqual(seen[0].restrictedTags, []);
 });
 
+test("memory save validates restrictedTags against the scope registry before writing", async () => {
+  let writerCalled = false;
+
+  const response = await executeMemorySaveRequest(
+    validRequest({ restrictedTags: ["serianis", "unknown-scope"] }),
+    {
+      allowedScopes: ["*"],
+      restrictedScopeLookup: async () => ["serianis"],
+      writer: {
+        async saveCandidate(input) {
+          writerCalled = true;
+          return {
+            id: "article-1",
+            title: input.title,
+            slug: "noosphere-bridge-save-candidate",
+            topicId: input.topicId,
+            status: "draft",
+          };
+        },
+      },
+    },
+  );
+
+  assert.equal(writerCalled, false);
+  assert.deepEqual(response, {
+    status: 400,
+    body: { error: "Unknown restricted tag(s): unknown-scope" },
+  });
+});
+
+test("memory save writes after scoped defaults are confirmed in the scope registry", async () => {
+  const seen: SanitizedMemorySaveInput[] = [];
+
+  const response = await executeMemorySaveRequest(validRequest(), {
+    allowedScopes: ["cylena", "serianis"],
+    restrictedScopeLookup: async (tags) => tags,
+    writer: {
+      async saveCandidate(input) {
+        seen.push(input);
+        return {
+          id: "article-1",
+          title: input.title,
+          slug: "noosphere-bridge-save-candidate",
+          topicId: input.topicId,
+          status: "draft",
+        };
+      },
+    },
+  });
+
+  assert.equal(response.status, 201);
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0].restrictedTags, ["cylena", "serianis"]);
+});
+
 test("memory save propagates writer MemorySaveError", async () => {
   await assert.rejects(
     executeMemorySaveRequest(validRequest(), {

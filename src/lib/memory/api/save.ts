@@ -1,4 +1,9 @@
 import crypto from "crypto";
+import {
+  normalizeRestrictedTagsForCaller,
+  validateRestrictedTagsExist,
+  type RestrictedScopeLookup,
+} from "@/lib/api/restricted-scopes";
 import { slugify } from "@/lib/memory/backfill";
 import { deriveExcerpt } from "@/lib/validation";
 import type { Prisma } from "@prisma/client";
@@ -95,6 +100,7 @@ export interface MemorySaveWriter {
 export interface MemorySaveExecutionOptions {
   writer?: MemorySaveWriter;
   allowedScopes?: string[];
+  restrictedScopeLookup?: RestrictedScopeLookup;
 }
 
 export type MemorySaveValidationResult =
@@ -110,6 +116,17 @@ export async function executeMemorySaveRequest(
   });
   if (!validation.ok) {
     return { status: validation.status, body: { error: validation.error } };
+  }
+
+  const restrictedTags = await validateRestrictedTagsExist(
+    validation.input.restrictedTags,
+    options.restrictedScopeLookup,
+  );
+  if (!restrictedTags.ok) {
+    return {
+      status: restrictedTags.status,
+      body: { error: restrictedTags.error },
+    };
   }
 
   const writer = options.writer ?? (await getDefaultMemorySaveWriter());
@@ -166,7 +183,7 @@ export function validateMemorySaveRequest(
   if (!tags.ok) return tags;
   const confidence = readOptionalConfidence(body.confidence);
   if (!confidence.ok) return confidence;
-  const restrictedTags = readRestrictedTagsForCaller(
+  const restrictedTags = normalizeRestrictedTagsForCaller(
     body.restrictedTags,
     options.allowedScopes,
   );
@@ -537,60 +554,6 @@ function readOptionalTags(
     }
   }
   return { ok: true, value: tags };
-}
-
-function readRestrictedTagsForCaller(
-  value: unknown,
-  allowedScopes: string[] | undefined,
-):
-  | { ok: true; value: string[] }
-  | Extract<MemorySaveValidationResult, { ok: false }> {
-  const callerScopes = allowedScopes ?? [];
-  const isAdminScope = callerScopes.includes("*");
-  let requestedTags: string[] = [];
-
-  if (value !== undefined && value !== null) {
-    if (!Array.isArray(value)) {
-      return {
-        ok: false,
-        status: 400,
-        error: "restrictedTags must be an array of non-empty strings",
-      };
-    }
-
-    const seen = new Set<string>();
-    for (const item of value) {
-      if (typeof item !== "string" || !item.trim()) {
-        return {
-          ok: false,
-          status: 400,
-          error: "restrictedTags must be an array of non-empty strings",
-        };
-      }
-      const tag = item.trim();
-      if (!seen.has(tag)) {
-        seen.add(tag);
-        requestedTags.push(tag);
-      }
-    }
-  }
-
-  if (!isAdminScope && callerScopes.length > 0 && requestedTags.length === 0) {
-    requestedTags = [...callerScopes];
-  }
-
-  if (!isAdminScope) {
-    const unauthorized = requestedTags.filter((tag) => !callerScopes.includes(tag));
-    if (unauthorized.length > 0) {
-      return {
-        ok: false,
-        status: 403,
-        error: `Cannot assign scope(s) you don't have: ${unauthorized.join(", ")}`,
-      };
-    }
-  }
-
-  return { ok: true, value: requestedTags };
 }
 
 function readOptionalConfidence(
