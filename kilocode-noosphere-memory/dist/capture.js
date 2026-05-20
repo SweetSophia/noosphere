@@ -198,6 +198,8 @@ function redactContent(content) {
         [/Bearer\s+[A-Za-z0-9_+.-]{20,}/g, "Bearer [TOKEN]"],
         // AWS access key / secret patterns
         [/AKIA[A-Z0-9]{16}/g, "[AWS_KEY]"],
+        [/\baws[_-]?secret[_-]?access[_-]?key\b\s*[:=]\s*["']?[A-Za-z0-9/+=]{20,}["']?/gi,
+            "aws_secret_access_key=[AWS_SECRET_ACCESS_KEY]"],
         [/aws[_-]?secret[_-]?access[_-]?key/gi, "[AWS_SECRET_KEY]"],
         // GitHub tokens
         [/ghp_[A-Za-z0-9_]{36,}/g, "[GITHUB_TOKEN]"],
@@ -205,6 +207,9 @@ function redactContent(content) {
         // Environment-variable style secrets (NAME=VALUE where VALUE is long base64-like)
         [/[A-Z_][A-Z0-9_]*(?:API|KEY|SECRET|TOKEN|PASS|CREDENTIAL|AUTH)[=][A-Za-z0-9_+./-]{20,}/g,
             "[ENV_SECRET]"],
+        // Common JSON/YAML/inline credential assignments with lowercase names.
+        [/\b(?:api[_-]?key|password|secret|token|credential|auth)\b\s*[:=]\s*["']?[A-Za-z0-9_+./-]{20,}["']?/gi,
+            "[CREDENTIAL]"],
         // Long base64-like strings that are clearly encoded secrets
         [/[A-Za-z0-9_+./]{40,}=*$/gm, "[SECRET]"],
     ];

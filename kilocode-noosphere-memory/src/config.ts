@@ -8,14 +8,15 @@ export function resolveConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): NoospherePluginConfig {
   const raw = isRecord(options) ? options : {};
+  const explicitBaseUrl =
+    readString(raw.baseUrl) ||
+    readString(env.NOOSPHERE_BASE_URL) ||
+    readString(env.NOOSPHERE_URL);
 
   return {
-    baseUrl: normalizeBaseUrl(
-      readString(raw.baseUrl) ||
-        readString(env.NOOSPHERE_BASE_URL) ||
-        readString(env.NOOSPHERE_URL) ||
-        DEFAULT_BASE_URL,
-    ),
+    baseUrl: explicitBaseUrl
+      ? normalizeBaseUrl(explicitBaseUrl)
+      : DEFAULT_BASE_URL,
     apiKey: readString(raw.apiKey) || readString(env.NOOSPHERE_API_KEY),
     timeoutMs: readInteger(raw.timeoutMs, env.NOOSPHERE_TIMEOUT_MS, 5_000, 500, 30_000),
     autoRecall: readBoolean(raw.autoRecall, env.NOOSPHERE_AUTO_RECALL, true),
@@ -55,26 +56,28 @@ export function redactSecret(value: string | undefined): string | undefined {
 
 function normalizeBaseUrl(value: string): string {
   const trimmed = value.trim();
-  if (!trimmed) return DEFAULT_BASE_URL;
+  if (!trimmed) {
+    throw new Error("Noosphere baseUrl is required");
+  }
 
   let url: URL;
   try {
     url = new URL(trimmed);
   } catch {
-    return DEFAULT_BASE_URL;
+    throw new Error("Noosphere baseUrl must be a valid URL");
   }
 
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    return DEFAULT_BASE_URL;
+    throw new Error("Noosphere baseUrl must use http or https");
   }
   if (url.username || url.password) {
-    return DEFAULT_BASE_URL;
+    throw new Error("Noosphere baseUrl must not include credentials");
   }
   if (isBlockedInternalHost(url.hostname)) {
-    return DEFAULT_BASE_URL;
+    throw new Error("Noosphere baseUrl must not target private or reserved networks");
   }
   if (url.protocol === "http:" && !isLoopbackHost(url.hostname)) {
-    return DEFAULT_BASE_URL;
+    throw new Error("Noosphere http baseUrl is allowed only for loopback hosts");
   }
 
   while (url.pathname.length > 1 && url.pathname.endsWith("/")) {

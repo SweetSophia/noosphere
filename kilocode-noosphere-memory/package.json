@@ -48,8 +48,7 @@
   },
   "engines": {
     "node": ">=22",
-    "kilo": "^7.0.0",
-    "opencode": "^7.0.0"
+    "kilocode": "^7.0.0"
   },
   "publishConfig": {
     "access": "public"
