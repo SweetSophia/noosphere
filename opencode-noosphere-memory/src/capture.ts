@@ -71,7 +71,8 @@ export async function performAutoCapture(
   if (textResponses.length === 0 && toolCalls.length === 0) return;
 
   const userRequest = truncate(redactContent(prompt.content.trim()), 1_500);
-  const aiResponse = truncate(textResponses.join("\n\n"), 4_000);
+  const aiResponse = truncate(redactContent(textResponses.join("\n\n")), 4_000);
+  const redactedToolCalls = toolCalls.map((toolCall) => redactContent(toolCall));
   const title = `Opencode: ${truncate(firstLine(userRequest), 100)}`;
   const content = [
     "## User Request",
@@ -80,8 +81,8 @@ export async function performAutoCapture(
     aiResponse ? "## Assistant Response" : "",
     aiResponse,
     "",
-    toolCalls.length > 0 ? "## Tools Used" : "",
-    ...toolCalls.map((toolCall) => `- ${toolCall}`),
+    redactedToolCalls.length > 0 ? "## Tools Used" : "",
+    ...redactedToolCalls.map((toolCall) => `- ${toolCall}`),
     "",
     "## Session",
     `- Session: ${sessionId}`,
