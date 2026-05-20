@@ -224,7 +224,7 @@ async function shouldInjectRecall(ctx, sessionId, injectOn) {
         const messages = response.data ?? [];
         const nonSyntheticUserMessages = messages.filter((message) => message.info?.role === "user" &&
             Array.isArray(message.parts) &&
-            !message.parts.every((part) => part.type !== "text" || part.synthetic === true));
+            !message.parts.every((part) => isRecord(part) && (part.type !== "text" || part.synthetic === true)));
         const lastMessage = messages[messages.length - 1];
         return nonSyntheticUserMessages.length === 0 || lastMessage?.info?.summary === true;
     }
