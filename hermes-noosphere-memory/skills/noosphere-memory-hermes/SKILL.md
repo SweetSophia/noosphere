@@ -134,6 +134,8 @@ config.update({
     "topic_id": os.environ.get("NOOSPHERE_TOPIC_ID") or config.get("topic_id") or "",
     "author_name_template": config.get("author_name_template") or "Hermes:{identity}",
     "api_timeout": as_float(config.get("api_timeout"), 15.0, 0.5, 30.0),
+    "auto_recall_timeout": as_float(config.get("auto_recall_timeout"), 4.0, 0.5, 10.0),
+    "status_timeout": as_float(config.get("status_timeout"), 5.0, 0.5, 10.0),
 })
 
 path.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -161,6 +163,14 @@ For live smoke testing, use the provider tools:
 - `READ`: recall and get only.
 - `WRITE`: recall, get, and draft saves. Recommended default.
 - `ADMIN`: only needed for admin endpoints, not normal Hermes memory use.
+
+## Safety Defaults
+
+- Keep `base_url` on HTTPS for remote Noosphere deployments.
+- HTTP is only allowed for local loopback installs such as `http://127.0.0.1:6578`.
+- Do not use URLs with credentials, query strings, fragments, private network IPs, or metadata IPs.
+- Use `auto_recall_timeout` for prompt-time recall; keep it lower than `api_timeout` so turn construction fails open quickly.
+- Use `restrictedTags` on `noosphere_save` only when the memory should be narrowed to a known Noosphere scope. The server still enforces key permissions.
 
 ## Memory Use
 

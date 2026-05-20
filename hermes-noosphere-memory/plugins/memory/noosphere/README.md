@@ -11,6 +11,8 @@ This provider is currently in Phase 4:
 - it exposes status, recall, get, and topics tools
 - it uses Noosphere's prompt-ready recall API for `prefetch()`
 - it saves explicit durable memories as draft candidates
+- it supports scoped draft saves through optional `restrictedTags`
+- it validates `base_url` before sending authenticated requests
 - it can mirror explicit Hermes memory writes when `topic_id` is configured
 
 Direct article publication is intentionally added in later phases.
@@ -61,7 +63,9 @@ PY
   "token_budget": 1200,
   "topic_id": "",
   "author_name_template": "Hermes:{identity}",
-  "api_timeout": 15.0
+  "api_timeout": 15.0,
+  "auto_recall_timeout": 4.0,
+  "status_timeout": 5.0
 }
 JSON
 ```
@@ -80,7 +84,9 @@ Config file: `$HERMES_HOME/noosphere.json`
 | `token_budget` | `1200` | Prompt-ready recall token budget. |
 | `topic_id` | `""` | Default topic for draft saves and optional turn capture. |
 | `author_name_template` | `Hermes:{identity}` | Author name template for draft memory candidates. |
-| `api_timeout` | `15.0` | HTTP timeout in seconds. |
+| `api_timeout` | `15.0` | HTTP timeout in seconds for explicit tools and saves. |
+| `auto_recall_timeout` | `4.0` | Fail-fast HTTP timeout in seconds for prompt-time prefetch. |
+| `status_timeout` | `5.0` | Fail-fast HTTP timeout in seconds for status and health probes. |
 
 Secrets:
 
@@ -93,6 +99,10 @@ Secrets:
 
 `is_available()` checks only local environment. It does not make network calls during Hermes startup.
 
+`base_url` rejects malformed URLs, embedded credentials, non-loopback
+`http://` URLs, and literal private/reserved/link-local/multicast IPv4 or IPv6
+targets. Local loopback installs such as `http://127.0.0.1:6578` remain allowed.
+
 Writes are disabled during `cron`, `flush`, and `subagent` contexts.
 
 ## Tools
@@ -104,3 +114,7 @@ Writes are disabled during `cron`, `flush`, and `subagent` contexts.
 | `noosphere_get` | Calls `POST /api/memory/get` by canonical ref or provider/id. |
 | `noosphere_topics` | Calls `GET /api/topics` for topic selection. |
 | `noosphere_save` | Calls `POST /api/memory/save` and creates a draft memory candidate. |
+
+`noosphere_save` accepts optional `restrictedTags` for explicit scoped saves.
+The provider validates the shape only; the Noosphere API enforces whether the
+key may assign the requested scopes.

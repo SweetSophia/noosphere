@@ -66,10 +66,10 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
         module = load_plugin()
         provider = module.NoosphereMemoryProvider()
 
-        with mock.patch.dict(os.environ, {"NOOSPHERE_BASE_URL": "http://noosphere.test/"}, clear=True):
+        with mock.patch.dict(os.environ, {"NOOSPHERE_BASE_URL": "https://noosphere.test/"}, clear=True):
             schema = provider.get_config_schema()
 
-        self.assertEqual(schema[0]["url"], "http://noosphere.test/wiki/admin/keys")
+        self.assertEqual(schema[0]["url"], "https://noosphere.test/wiki/admin/keys")
 
     def test_save_config_persists_non_secret_values(self):
         module = load_plugin()
@@ -79,8 +79,10 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
             provider.save_config(
                 {
                     "api_key": "noo_secret",
-                    "base_url": "http://example.test:6578/",
+                    "base_url": "https://example.test:6578/",
                     "auto_capture": "true",
+                    "auto_recall_timeout": 99,
+                    "status_timeout": 99,
                     "max_recall_results": 99,
                 },
                 hermes_home,
@@ -90,10 +92,25 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
             data = json.loads(path.read_text(encoding="utf-8"))
 
         self.assertNotIn("api_key", data)
-        self.assertEqual(data["base_url"], "http://example.test:6578")
+        self.assertEqual(data["base_url"], "https://example.test:6578")
         self.assertTrue(data["auto_capture"])
+        self.assertEqual(data["auto_recall_timeout"], 10.0)
+        self.assertEqual(data["status_timeout"], 10.0)
         self.assertEqual(data["max_recall_results"], 20)
         self.assertNotIn("providers", data)
+
+    def test_save_config_treats_blank_base_url_as_default(self):
+        module = load_plugin()
+        provider = module.NoosphereMemoryProvider()
+
+        with tempfile.TemporaryDirectory() as hermes_home:
+            provider.save_config({"base_url": "", "auto_recall": False}, hermes_home)
+
+            path = Path(hermes_home) / "noosphere.json"
+            data = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(data["base_url"], "http://127.0.0.1:6578")
+        self.assertFalse(data["auto_recall"])
 
     def test_save_config_removes_legacy_secret_from_existing_file(self):
         module = load_plugin()
@@ -102,7 +119,7 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
         with tempfile.TemporaryDirectory() as hermes_home:
             path = Path(hermes_home) / "noosphere.json"
             path.write_text(
-                json.dumps({"api_key": "noo_legacy", "base_url": "http://stored.test"}),
+                json.dumps({"api_key": "noo_legacy", "base_url": "https://stored.test"}),
                 encoding="utf-8",
             )
 
@@ -111,7 +128,7 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
             data = json.loads(path.read_text(encoding="utf-8"))
 
         self.assertNotIn("api_key", data)
-        self.assertEqual(data["base_url"], "http://stored.test")
+        self.assertEqual(data["base_url"], "https://stored.test")
         self.assertTrue(data["auto_capture"])
 
     def test_save_config_logs_and_rebuilds_corrupt_existing_file(self):
@@ -123,12 +140,12 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
             path.write_text("{not-json", encoding="utf-8")
 
             with self.assertLogs(module.logger, level="WARNING") as logs:
-                provider.save_config({"base_url": "http://rebuilt.test"}, hermes_home)
+                provider.save_config({"base_url": "https://rebuilt.test"}, hermes_home)
 
             data = json.loads(path.read_text(encoding="utf-8"))
 
         self.assertIn("Failed to parse existing Noosphere config", "\n".join(logs.output))
-        self.assertEqual(data["base_url"], "http://rebuilt.test")
+        self.assertEqual(data["base_url"], "https://rebuilt.test")
 
     def test_initialize_loads_context_and_disables_writes_for_subagents(self):
         module = load_plugin()
@@ -137,7 +154,7 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
         with tempfile.TemporaryDirectory() as hermes_home:
             path = Path(hermes_home) / "noosphere.json"
             path.write_text(
-                json.dumps({"base_url": "http://stored.test", "auto_recall": False}),
+                json.dumps({"base_url": "https://stored.test", "auto_recall": False}),
                 encoding="utf-8",
             )
 
@@ -145,7 +162,7 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
                 os.environ,
                 {
                     "NOOSPHERE_API_KEY": "noo_test",
-                    "NOOSPHERE_BASE_URL": "http://env.test/",
+                    "NOOSPHERE_BASE_URL": "https://env.test/",
                 },
                 clear=True,
             ):
@@ -159,7 +176,7 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
 
         self.assertTrue(provider._active)
         self.assertFalse(provider._write_enabled)
-        self.assertEqual(provider._config["base_url"], "http://env.test")
+        self.assertEqual(provider._config["base_url"], "https://env.test")
         self.assertEqual(provider._agent_identity, "coder")
 
     def test_initialize_uses_hermes_home_env_when_kwarg_missing(self):
@@ -168,7 +185,7 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as hermes_home:
             path = Path(hermes_home) / "noosphere.json"
-            path.write_text(json.dumps({"base_url": "http://env-home.test"}), encoding="utf-8")
+            path.write_text(json.dumps({"base_url": "https://env-home.test"}), encoding="utf-8")
 
             with mock.patch.dict(
                 os.environ,
@@ -178,7 +195,43 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
                 provider.initialize("session-1")
 
         self.assertEqual(provider._hermes_home, hermes_home)
-        self.assertEqual(provider._config["base_url"], "http://env-home.test")
+        self.assertEqual(provider._config["base_url"], "https://env-home.test")
+
+    def test_initialize_disables_provider_for_unsafe_env_base_url(self):
+        module = load_plugin()
+        provider = module.NoosphereMemoryProvider()
+
+        with tempfile.TemporaryDirectory() as hermes_home:
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "NOOSPHERE_API_KEY": "noo_test",
+                    "NOOSPHERE_BASE_URL": "https://169.254.169.254",
+                },
+                clear=True,
+            ):
+                with self.assertLogs(module.logger, level="WARNING") as logs:
+                    provider.initialize("session-1", hermes_home=hermes_home)
+
+        self.assertFalse(provider._active)
+        self.assertIsNone(provider._client)
+        self.assertIn("Unsafe NOOSPHERE_BASE_URL ignored", "\n".join(logs.output))
+
+    def test_initialize_disables_provider_for_unsafe_stored_base_url(self):
+        module = load_plugin()
+        provider = module.NoosphereMemoryProvider()
+
+        with tempfile.TemporaryDirectory() as hermes_home:
+            path = Path(hermes_home) / "noosphere.json"
+            path.write_text(json.dumps({"base_url": "https://169.254.169.254"}), encoding="utf-8")
+
+            with mock.patch.dict(os.environ, {"NOOSPHERE_API_KEY": "noo_test"}, clear=True):
+                with self.assertLogs(module.logger, level="WARNING") as logs:
+                    provider.initialize("session-1", hermes_home=hermes_home)
+
+        self.assertFalse(provider._active)
+        self.assertIsNone(provider._client)
+        self.assertIn("Unsafe Noosphere config", "\n".join(logs.output))
 
     def test_register_adds_memory_provider(self):
         module = load_plugin()

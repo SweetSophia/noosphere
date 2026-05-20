@@ -124,7 +124,9 @@ PY
   "token_budget": 1200,
   "topic_id": "",
   "author_name_template": "Hermes:{identity}",
-  "api_timeout": 15.0
+  "api_timeout": 15.0,
+  "auto_recall_timeout": 4.0,
+  "status_timeout": 5.0
 }
 JSON
 

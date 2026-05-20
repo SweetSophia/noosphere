@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import http.client
+import ipaddress
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any, Dict, Optional
 
@@ -22,6 +24,152 @@ _SENSITIVE_FIELD_NAMES = {
 _SENSITIVE_VALUE_RE = re.compile(
     r"(?:noo_[A-Za-z0-9_-]+|Bearer\s+[A-Za-z0-9._~+/=-]{8,}|(?:sk|pk|tok|key)_[A-Za-z0-9_-]{16,})"
 )
+_ALLOWED_SCHEMES = {"http", "https"}
+
+
+def normalize_base_url(value: Any) -> str:
+    """Return a normalized Noosphere base URL or raise for unsafe egress targets."""
+
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError("Noosphere base_url is required")
+    parsed = urllib.parse.urlsplit(raw)
+    if parsed.scheme not in _ALLOWED_SCHEMES:
+        raise ValueError("Noosphere base_url must use http or https")
+    if not parsed.hostname:
+        raise ValueError("Noosphere base_url must include a host")
+    if parsed.username or parsed.password:
+        raise ValueError("Noosphere base_url must not include credentials")
+
+    host = parsed.hostname
+    ip_literal = _parse_ip_literal(host)
+    if ip_literal is not None:
+        try:
+            ipaddress.ip_address(_normalized_host(host))
+        except ValueError as error:
+            raise ValueError("Noosphere base_url must use standard IP literal notation") from error
+    elif _looks_like_ipv4_literal(host):
+        raise ValueError("Noosphere base_url must use standard IP literal notation")
+    if parsed.scheme == "http" and not _is_loopback_host(host):
+        raise ValueError("Noosphere http base_url is allowed only for loopback hosts")
+    if _is_blocked_network_host(host):
+        raise ValueError("Noosphere base_url must not target private or reserved networks")
+
+    netloc = host
+    if (
+        ip_literal is not None
+        and ip_literal.version == 6
+        and ":" in host
+        and not host.startswith("[")
+    ):
+        netloc = f"[{host}]"
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise ValueError("Noosphere base_url port is invalid") from error
+    if port is not None:
+        netloc = f"{netloc}:{port}"
+
+    path = parsed.path.rstrip("/")
+    return urllib.parse.urlunsplit((parsed.scheme, netloc, path, "", ""))
+
+
+def _is_loopback_host(host: str) -> bool:
+    normalized = _normalized_host(host)
+    if normalized == "localhost":
+        return True
+    ip = _parse_ip_literal(normalized)
+    mapped = getattr(ip, "ipv4_mapped", None) if ip is not None else None
+    if mapped is not None:
+        ip = mapped
+    return bool(ip and ip.is_loopback)
+
+
+def _is_blocked_network_host(host: str) -> bool:
+    ip = _parse_ip_literal(host)
+    if ip is None:
+        return False
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    if ip.is_loopback:
+        return False
+    return any(
+        (
+            not ip.is_global,
+            ip.is_private,
+            ip.is_link_local,
+            ip.is_multicast,
+            ip.is_reserved,
+            ip.is_unspecified,
+        )
+    )
+
+
+def _normalized_host(host: str) -> str:
+    return host.strip().lower().strip("[]").split("%", 1)[0]
+
+
+def _parse_ip_literal(host: str) -> Optional[Any]:
+    normalized = _normalized_host(host)
+    try:
+        return ipaddress.ip_address(normalized)
+    except ValueError:
+        pass
+
+    candidate = normalized[:-1] if normalized.endswith(".") else normalized
+    try:
+        return _parse_legacy_ipv4_literal(candidate)
+    except ValueError:
+        return None
+
+
+def _looks_like_ipv4_literal(host: str) -> bool:
+    candidate = _normalized_host(host)
+    candidate = candidate[:-1] if candidate.endswith(".") else candidate
+    return bool(re.fullmatch(r"(?:0x[0-9a-f]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|[0-9]+)){0,3}", candidate))
+
+
+def _parse_legacy_ipv4_literal(value: str) -> Optional[Any]:
+    """Recognize inet_aton-style IPv4 forms so non-standard literals can be rejected."""
+
+    if not _looks_like_ipv4_literal(value):
+        return None
+    parts = [_parse_ipv4_component(part) for part in value.split(".")]
+    if any(part is None for part in parts):
+        return None
+
+    if len(parts) == 1:
+        number = parts[0]
+    elif len(parts) == 2:
+        if parts[0] > 0xFF or parts[1] > 0xFFFFFF:
+            return None
+        number = (parts[0] << 24) | parts[1]
+    elif len(parts) == 3:
+        if parts[0] > 0xFF or parts[1] > 0xFF or parts[2] > 0xFFFF:
+            return None
+        number = (parts[0] << 24) | (parts[1] << 16) | parts[2]
+    elif len(parts) == 4:
+        if any(part > 0xFF for part in parts):
+            return None
+        number = (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+    else:
+        return None
+
+    if number > 0xFFFFFFFF:
+        return None
+    return ipaddress.ip_address(number)
+
+
+def _parse_ipv4_component(value: str) -> Optional[int]:
+    if not value:
+        return None
+    value = value.lower()
+    if value.startswith("0x"):
+        return int(value, 16)
+    if len(value) > 1 and value.startswith("0"):
+        return int(value, 8)
+    return int(value, 10)
 
 
 class NoosphereClientError(Exception):
@@ -40,18 +188,30 @@ class NoosphereClientError(Exception):
 
 
 class NoosphereClient:
-    def __init__(self, *, base_url: str, api_key: str, timeout: float) -> None:
-        self._base_url = base_url.rstrip("/")
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        timeout: float,
+        auto_recall_timeout: Optional[float] = None,
+        status_timeout: Optional[float] = None,
+    ) -> None:
+        self._base_url = normalize_base_url(base_url)
         self._api_key = api_key
         self._timeout = timeout
+        self._auto_recall_timeout = (
+            auto_recall_timeout if auto_recall_timeout is not None else min(timeout, 4.0)
+        )
+        self._status_timeout = status_timeout if status_timeout is not None else min(timeout, 5.0)
 
     def status(self) -> Dict[str, Any]:
         try:
-            return self._request_json("GET", "/api/memory/status")
+            return self._request_json("GET", "/api/memory/status", timeout=self._status_timeout)
         except NoosphereClientError as error:
             if error.status not in {401, 403}:
                 raise
-            health = self._request_json("GET", "/api/health")
+            health = self._request_json("GET", "/api/health", timeout=self._status_timeout)
             health["memoryStatusAvailable"] = False
             health["memoryStatusError"] = {
                 "status": error.status,
@@ -59,8 +219,18 @@ class NoosphereClient:
             }
             return health
 
-    def recall(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        return self._request_json("POST", "/api/memory/recall", request)
+    def recall(
+        self,
+        request: Dict[str, Any],
+        *,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        effective_timeout = (
+            self._auto_recall_timeout
+            if timeout is None and request.get("mode") == "auto"
+            else timeout
+        )
+        return self._request_json("POST", "/api/memory/recall", request, timeout=effective_timeout)
 
     def get(self, request: Dict[str, Any]) -> Dict[str, Any]:
         return self._request_json("POST", "/api/memory/get", request)
@@ -76,6 +246,8 @@ class NoosphereClient:
         method: str,
         path: str,
         body: Optional[Dict[str, Any]] = None,
+        *,
+        timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         url = f"{self._base_url}{path if path.startswith('/') else '/' + path}"
         data = None
@@ -89,7 +261,7 @@ class NoosphereClient:
 
         request = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(request, timeout=self._timeout) as response:
+            with urllib.request.urlopen(request, timeout=timeout or self._timeout) as response:
                 return _parse_json_response(response.read(_MAX_RESPONSE_BYTES + 1))
         except urllib.error.HTTPError as error:
             details = _safe_error_body(error)

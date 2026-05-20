@@ -95,6 +95,20 @@ class _StatusHandler(BaseHTTPRequestHandler):
         return
 
 
+class _JsonResponse:
+    def __init__(self, body):
+        self.body = json.dumps(body).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def read(self, size=-1):
+        return self.body
+
+
 class NoosphereClientTest(unittest.TestCase):
     def setUp(self):
         _StatusHandler.response_status = 200
@@ -214,6 +228,78 @@ class NoosphereClientTest(unittest.TestCase):
         self.assertEqual(redacted["keywords"], ["search", "terms"])
         self.assertEqual(redacted["access_token"], "[redacted]")
         self.assertEqual(redacted["message"], "[redacted]")
+
+    def test_normalize_base_url_accepts_safe_targets_and_strips_fragments(self):
+        module = load_plugin_package()
+        normalize = module.normalize_base_url
+
+        cases = {
+            "http://127.0.0.1:6578/path/?x=1#frag": "http://127.0.0.1:6578/path",
+            "http://localhost:6578/": "http://localhost:6578",
+            "http://[::1]:6578/": "http://[::1]:6578",
+            "https://noosphere.example.test/base/": "https://noosphere.example.test/base",
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                self.assertEqual(normalize(raw), expected)
+
+    def test_normalize_base_url_rejects_unsafe_targets(self):
+        module = load_plugin_package()
+        normalize = module.normalize_base_url
+
+        cases = [
+            "file:///tmp/noosphere.sock",
+            "https://user:pass@noosphere.example.test",
+            "http://noosphere.example.test",
+            "https://10.0.0.5",
+            "https://172.16.0.5",
+            "https://192.168.1.5",
+            "https://100.64.0.1",
+            "https://169.254.169.254",
+            "https://2130706433",
+            "https://127.1",
+            "https://192.168.1",
+            "https://127.0.0.1.",
+            "https://0177.0.0.1",
+            "https://0x7f.0.0.1",
+            "https://[fc00::1]",
+            "https://[fd00::1]",
+            "https://[fe80::1]",
+            "https://[fe80::1%25eth0]",
+            "https://[ff02::1]",
+            "https://[::ffff:192.168.1.5]",
+            "https://[2001:db8::1]",
+        ]
+        for raw in cases:
+            with self.subTest(raw=raw):
+                with self.assertRaises(ValueError):
+                    normalize(raw)
+
+    def test_status_and_recall_allow_call_specific_timeouts(self):
+        module = load_plugin_package()
+        client = module.NoosphereClient(
+            base_url=self.base_url,
+            api_key="noo_test",
+            timeout=15.0,
+            auto_recall_timeout=1.25,
+            status_timeout=0.75,
+        )
+
+        client_globals = module.NoosphereClient._request_json.__globals__
+        with mock.patch.object(
+            client_globals["urllib"].request,
+            "urlopen",
+            return_value=_JsonResponse({"ok": True}),
+        ) as urlopen:
+            client.status()
+            client.recall({"query": "deploy", "mode": "auto"})
+            client.recall({"query": "deploy", "mode": "inspection"})
+            client.recall({"query": "deploy", "mode": "inspection"}, timeout=2.5)
+
+        self.assertEqual(urlopen.call_args_list[0].kwargs["timeout"], 0.75)
+        self.assertEqual(urlopen.call_args_list[1].kwargs["timeout"], 1.25)
+        self.assertEqual(urlopen.call_args_list[2].kwargs["timeout"], 15.0)
+        self.assertEqual(urlopen.call_args_list[3].kwargs["timeout"], 2.5)
 
 
 if __name__ == "__main__":

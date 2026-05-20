@@ -95,6 +95,15 @@ NOOSPHERE_SAVE_SCHEMA = {
                 "items": {"type": "string"},
                 "description": "Optional tags.",
             },
+            "restrictedTags": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1, "maxLength": 64},
+                "maxItems": 16,
+                "description": (
+                    "Optional Noosphere restricted scope tags. The server rejects "
+                    "scopes not allowed for the API key."
+                ),
+            },
             "source": {"type": "string", "description": "Optional source pointer."},
             "confidence": {
                 "type": "string",
