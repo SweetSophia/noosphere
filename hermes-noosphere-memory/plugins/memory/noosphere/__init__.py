@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from agent.memory_provider import MemoryProvider
 
-from .client import NoosphereClient, NoosphereClientError
+from .client import NoosphereClient, NoosphereClientError, normalize_base_url
 from .formatting import strip_context_fences
 from .schemas import TOOL_SCHEMAS
 
@@ -37,6 +37,8 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     "topic_id": "",
     "author_name_template": "Hermes:{identity}",
     "api_timeout": 15.0,
+    "auto_recall_timeout": 4.0,
+    "status_timeout": 5.0,
 }
 _NON_WRITING_CONTEXTS = {"cron", "flush", "subagent"}
 _SECRET_CONFIG_KEYS = {"api_key"}
@@ -55,7 +57,10 @@ def _config_path(hermes_home: str) -> Path:
 
 def _setup_key_url() -> str:
     base_url = os.environ.get("NOOSPHERE_BASE_URL", _DEFAULT_CONFIG["base_url"])
-    base_url = _as_string(base_url, _DEFAULT_CONFIG["base_url"]).rstrip("/")
+    try:
+        base_url = normalize_base_url(_as_string(base_url, _DEFAULT_CONFIG["base_url"]))
+    except ValueError:
+        base_url = str(_DEFAULT_CONFIG["base_url"])
     return f"{base_url}/wiki/admin/keys"
 
 
@@ -99,8 +104,9 @@ def _sanitize_config(raw: Dict[str, Any]) -> Dict[str, Any]:
     config = dict(_DEFAULT_CONFIG)
     config.update({key: value for key, value in raw.items() if value is not None})
 
-    base_url = _as_string(config.get("base_url"), _DEFAULT_CONFIG["base_url"]).rstrip("/")
-    config["base_url"] = base_url or _DEFAULT_CONFIG["base_url"]
+    config["base_url"] = normalize_base_url(
+        _as_string(config.get("base_url"), _DEFAULT_CONFIG["base_url"])
+    )
     config["auto_recall"] = _as_bool(config.get("auto_recall"), True)
     config["auto_capture"] = _as_bool(config.get("auto_capture"), False)
 
@@ -130,6 +136,18 @@ def _sanitize_config(raw: Dict[str, Any]) -> Dict[str, Any]:
         minimum=0.5,
         maximum=30.0,
     )
+    config["auto_recall_timeout"] = _as_float(
+        config.get("auto_recall_timeout"),
+        float(_DEFAULT_CONFIG["auto_recall_timeout"]),
+        minimum=0.5,
+        maximum=10.0,
+    )
+    config["status_timeout"] = _as_float(
+        config.get("status_timeout"),
+        float(_DEFAULT_CONFIG["status_timeout"]),
+        minimum=0.5,
+        maximum=10.0,
+    )
     return config
 
 
@@ -145,7 +163,15 @@ def _load_noosphere_config(hermes_home: str) -> Dict[str, Any]:
     if not isinstance(raw, dict):
         logger.warning("Ignoring non-object Noosphere config at %s", path)
         return dict(_DEFAULT_CONFIG)
-    return _sanitize_config(raw)
+    try:
+        return _sanitize_config(raw)
+    except ValueError:
+        logger.warning(
+            "Ignoring unsafe Noosphere config at %s; using defaults",
+            path,
+            exc_info=True,
+        )
+        return dict(_DEFAULT_CONFIG)
 
 
 def _save_noosphere_config(values: Dict[str, Any], hermes_home: str) -> None:
@@ -253,9 +279,18 @@ class NoosphereMemoryProvider(MemoryProvider):
         self._agent_context = _as_string(kwargs.get("agent_context"))
 
         self._config = _load_noosphere_config(self._hermes_home)
-        env_base_url = os.environ.get("NOOSPHERE_BASE_URL", "").strip().rstrip("/")
+        env_base_url = os.environ.get("NOOSPHERE_BASE_URL", "").strip()
         if env_base_url:
-            self._config["base_url"] = env_base_url
+            try:
+                self._config["base_url"] = normalize_base_url(env_base_url)
+            except ValueError:
+                logger.warning(
+                    "Unsafe NOOSPHERE_BASE_URL ignored; Noosphere disabled",
+                    exc_info=True,
+                )
+                self._active = False
+                self._client = None
+                return
 
         self._api_key = os.environ.get("NOOSPHERE_API_KEY", "").strip()
         self._write_enabled = self._agent_context not in _NON_WRITING_CONTEXTS
@@ -266,6 +301,8 @@ class NoosphereMemoryProvider(MemoryProvider):
                 base_url=str(self._config["base_url"]),
                 api_key=self._api_key,
                 timeout=float(self._config["api_timeout"]),
+                auto_recall_timeout=float(self._config["auto_recall_timeout"]),
+                status_timeout=float(self._config["status_timeout"]),
             )
 
     def system_prompt_block(self) -> str:
@@ -291,7 +328,8 @@ class NoosphereMemoryProvider(MemoryProvider):
                     "mode": "auto",
                     "resultCap": self._config["max_recall_results"],
                     "tokenBudget": self._config["token_budget"],
-                }
+                },
+                timeout=float(self._config["auto_recall_timeout"]),
             )
         except Exception:
             logger.debug("Noosphere prefetch failed", exc_info=True)
@@ -514,7 +552,34 @@ def _read_save_args(
         clean_tags = [tag for tag in clean_tags if tag]
         if clean_tags:
             request["tags"] = clean_tags[:20]
+    restricted_tags = _read_restricted_tags(args.get("restrictedTags"))
+    if restricted_tags:
+        request["restrictedTags"] = restricted_tags
     return request
+
+
+def _read_restricted_tags(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("restrictedTags must be an array of non-empty strings")
+    if len(value) > 16:
+        raise ValueError("restrictedTags must contain at most 16 items")
+
+    seen = set()
+    tags: List[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError("restrictedTags must be an array of non-empty strings")
+        tag = item.strip()
+        if not tag:
+            raise ValueError("restrictedTags must be an array of non-empty strings")
+        if len(tag) > 64:
+            raise ValueError("restrictedTags entries must be at most 64 characters")
+        if tag not in seen:
+            seen.add(tag)
+            tags.append(tag)
+    return tags
 
 
 def _clean_capture_text(text: Any) -> str:

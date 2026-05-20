@@ -35,7 +35,9 @@ Implemented:
 - standard-library HTTP client with redacted errors
 - `noosphere_status`, `noosphere_recall`, `noosphere_get`, `noosphere_topics`, and `noosphere_save` tools
 - auto-recall prefetch through Noosphere's prompt-ready recall API
+- fail-fast prompt/status timeouts separate from explicit API tool timeouts
 - explicit Hermes memory-write mirroring through draft memory candidates
+- optional `restrictedTags` pass-through for scoped draft saves
 - optional `sync_turn` capture when `auto_capture=true` and `topic_id` is configured
 - Hermes setup skill installed to `$HERMES_HOME/skills/noosphere-memory-hermes`
 
@@ -75,7 +77,9 @@ Example:
       "token_budget": 1200,
       "topic_id": "",
       "author_name_template": "Hermes:{identity}",
-      "api_timeout": 15.0
+      "api_timeout": 15.0,
+      "auto_recall_timeout": 4.0,
+      "status_timeout": 5.0
     }
 
 Use scoped Noosphere API keys for each Hermes profile when you want different agents to see or write different knowledge areas.
@@ -115,12 +119,23 @@ PY
   "token_budget": 1200,
   "topic_id": "",
   "author_name_template": "Hermes:{identity}",
-  "api_timeout": 15.0
+  "api_timeout": 15.0,
+  "auto_recall_timeout": 4.0,
+  "status_timeout": 5.0
 }
 JSON
 ```
 
 Do not commit real API keys.
+
+`base_url` is validated before use. The provider rejects malformed URLs,
+credential-embedded URLs, non-loopback `http://` URLs, and literal private,
+reserved, link-local, multicast, documentation, or unspecified IPv4/IPv6
+targets for both HTTP and HTTPS. Query strings and fragments are stripped.
+
+`noosphere_save` accepts optional `restrictedTags` with up to 16 non-empty
+strings of at most 64 characters each. Noosphere enforces whether the API key
+may use those scopes.
 
 ## Verification
 

@@ -110,6 +110,49 @@ class NoosphereSavePhase4Test(unittest.TestCase):
         self.assertEqual(saved["content"], "Use pkapp PM2.")
         self.assertEqual(saved["tags"], ["ops"])
 
+    def test_save_tool_passes_bounded_restricted_tags(self):
+        provider = self.initialized_provider(topic_id="topic-1")
+
+        result = json.loads(
+            provider.handle_tool_call(
+                "noosphere_save",
+                {
+                    "title": "Deployment rule",
+                    "content": "Use this durable deployment rule for the configured system.",
+                    "restrictedTags": ["serianis", " cylena ", "serianis"],
+                },
+            )
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(provider._client.saved[0]["restrictedTags"], ["serianis", "cylena"])
+
+    def test_save_tool_rejects_malformed_restricted_tags(self):
+        provider = self.initialized_provider(topic_id="topic-1")
+
+        cases = [
+            "serianis",
+            [""],
+            ["x" * 65],
+            [str(index) for index in range(17)],
+            ["serianis", 42],
+        ]
+        for restricted_tags in cases:
+            with self.subTest(restricted_tags=restricted_tags):
+                error = json.loads(
+                    provider.handle_tool_call(
+                        "noosphere_save",
+                        {
+                            "title": "Deployment rule",
+                            "content": "Use this durable deployment rule for the configured system.",
+                            "restrictedTags": restricted_tags,
+                        },
+                    )
+                )
+
+                self.assertIn("restrictedTags", error["error"])
+        self.assertEqual(provider._client.saved, [])
+
     def test_save_tool_validates_confidence(self):
         provider = self.initialized_provider(topic_id="topic-1")
 

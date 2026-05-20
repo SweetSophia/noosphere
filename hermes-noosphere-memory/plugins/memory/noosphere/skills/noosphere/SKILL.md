@@ -15,6 +15,7 @@ Use this skill when Hermes has the Noosphere memory provider enabled and the tas
 - Save decisions, stable project facts, runbooks, recurring failure fixes, and explicit "remember this" requests.
 - Do not save transient task status, greetings, tiny confirmations, secrets, or raw prompt/context dumps.
 - Prefer draft candidates; humans or review workflows can promote them later.
+- Use `restrictedTags` only for known Noosphere scopes when a draft memory candidate must be explicitly narrowed. The Noosphere API rejects scopes the key cannot use.
 
 ## Topics
 
@@ -27,3 +28,4 @@ Use this skill when Hermes has the Noosphere memory provider enabled and the tas
 - API-key scopes control what Hermes can read and write.
 - Do not assume a memory is absent just because a scoped key cannot see it.
 - Never include API keys in saved memory content, logs, or user-visible output.
+- The provider validates `base_url` before egress and only allows HTTP for loopback installs.

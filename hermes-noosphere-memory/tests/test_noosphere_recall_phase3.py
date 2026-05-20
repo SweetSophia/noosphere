@@ -56,8 +56,8 @@ class _FakeClient:
     def topics(self):
         return {"topics": []}
 
-    def recall(self, request):
-        self.calls.append(("recall", request))
+    def recall(self, request, *, timeout=None):
+        self.calls.append(("recall", request, timeout))
         return {
             "results": [{"id": "one"}],
             "promptInjectionText": (
@@ -78,7 +78,7 @@ class _FakeClient:
 
 
 class _ExplodingClient:
-    def recall(self, request):
+    def recall(self, request, *, timeout=None):
         raise RuntimeError("boom")
 
     def topics(self):
@@ -103,6 +103,7 @@ class NoosphereRecallPhase3Test(unittest.TestCase):
         self.assertEqual(result, "Remember the Serianis deploy path.")
         self.assertEqual(provider._client.calls[0][0], "recall")
         self.assertEqual(provider._client.calls[0][1]["mode"], "auto")
+        self.assertEqual(provider._client.calls[0][2], provider._config["auto_recall_timeout"])
 
     def test_prefetch_suppresses_unexpected_client_errors(self):
         provider = self.initialized_provider()
