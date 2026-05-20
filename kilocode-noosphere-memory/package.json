@@ -1,0 +1,72 @@
+{
+  "name": "@sweetsophia/kilocode-noosphere-memory",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Kilo Code plugin for Noosphere memory: prompt-time auto-recall, optional idle auto-save, and explicit memory tools.",
+  "type": "module",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./server": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "config": {
+        "baseUrl": "{env:NOOSPHERE_BASE_URL}",
+        "apiKey": "{env:NOOSPHERE_API_KEY}"
+      }
+    }
+  },
+  "files": [
+    "dist/",
+    "src/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@kilocode/plugin": "^7.3.1",
+    "@kilocode/sdk": "^7.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5"
+  },
+  "kilocode": {
+    "type": "plugin",
+    "hooks": [
+      "chat.message",
+      "event"
+    ]
+  },
+  "engines": {
+    "node": ">=22",
+    "kilocode": "^7.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SweetSophia/noosphere.git",
+    "directory": "kilocode-noosphere-memory"
+  },
+  "bugs": {
+    "url": "https://github.com/SweetSophia/noosphere/issues"
+  },
+  "homepage": "https://github.com/SweetSophia/noosphere/tree/master/kilocode-noosphere-memory",
+  "keywords": [
+    "kilocode",
+    "kilocode-plugin",
+    "noosphere",
+    "memory",
+    "recall"
+  ]
+}

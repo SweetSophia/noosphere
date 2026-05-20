@@ -34,8 +34,8 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     # Skip Docker build for plugin version tags — Docker image only contains
-    # the OpenClaw plugin; Opencode and Hermes plugins are distributed via npm.
-    if: "!startsWith(github.ref, 'refs/tags/v-opencode-') && !startsWith(github.ref, 'refs/tags/v-hermes-')"
+    # the OpenClaw plugin; Opencode, Kilo Code, and Hermes plugins are distributed via npm.
+    if: "!startsWith(github.ref, 'refs/tags/v-opencode-') && !startsWith(github.ref, 'refs/tags/v-kilocode-') && !startsWith(github.ref, 'refs/tags/v-hermes-')"
     steps:
       - name: Checkout
         uses: actions/checkout@v6

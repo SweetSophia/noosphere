@@ -1,4 +1,4 @@
-import type { PluginInput } from "@opencode-ai/plugin";
+import type { PluginInput } from "@kilocode/plugin";
 import type { NoosphereClient } from "./client.js";
 import type { NoospherePluginConfig, SessionPrompt } from "./types.js";
 import { truncate } from "./format.js";
@@ -73,7 +73,7 @@ export async function performAutoCapture(
   const userRequest = truncate(redactContent(prompt.content.trim()), 1_500);
   const aiResponse = truncate(redactContent(textResponses.join("\n\n")), 4_000);
   const redactedToolCalls = toolCalls.map((toolCall) => redactContent(toolCall));
-  const title = `Opencode: ${truncate(firstLine(userRequest), 100)}`;
+  const title = `Kilo Code: ${truncate(firstLine(userRequest), 100)}`;
   const content = [
     "## User Request",
     userRequest,
@@ -96,8 +96,8 @@ export async function performAutoCapture(
     content,
     topicId: config.autoSaveTopicId,
     excerpt: firstLine(userRequest),
-    tags: ["opencode", "auto-capture"],
-    source: `opencode:${sessionId}:${prompt.messageId}`,
+    tags: ["kilocode", "auto-capture"],
+    source: `kilocode:${sessionId}:${prompt.messageId}`,
     authorName: config.authorName,
     confidence: "medium",
   });
