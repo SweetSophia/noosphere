@@ -7,6 +7,8 @@ services:
         DATABASE_URL: postgresql://noosphere:buildtime@db:5432/noosphere
     container_name: noosphere-app
     restart: unless-stopped
+    labels:
+      org.opencontainers.image.version: "1.6.0"
     ports:
       - "6578:3000"
     environment:
