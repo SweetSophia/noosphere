@@ -26,7 +26,11 @@ export function getRedisClient(): Redis | null {
     return null;
   }
   if (redisClient) {
-    return redisClient;
+    if (redisClient.status === "end") {
+      resetRedisClient(redisClient);
+    } else {
+      return redisClient;
+    }
   }
 
   const redisUrl = process.env.REDIS_URL;
