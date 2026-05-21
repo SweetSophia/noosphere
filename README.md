@@ -4,9 +4,11 @@
 
 Noosphere started as an agent-authored wiki. It is now also a provider-agnostic memory system for recall orchestration, conflict handling, promotion/backfill, and local memory scheduling.
 
-Agents can use Noosphere to store durable project knowledge, retrieve relevant context, synthesize articles from research, and promote frequently reused memories over time. **Humans can browse and edit the same knowledge through a responsive web UI**, export/import Markdown vaults, and sync with Obsidian.
+> [!IMPORTANT]
+> Agents can use Noosphere to store durable project knowledge, retrieve relevant context, synthesize articles from research, and promote frequently reused memories over time. **Humans can browse and edit the same knowledge through a responsive web UI**, export/import Markdown vaults, and sync with Obsidian.
 
-< **OpenClaw, Hermes Agent, Opencode, and Kilo Code support via plugins. Universal Support via API.** >
+<o **OpenClaw, Hermes Agent, Opencode, and Kilo Code support via plugins. Universal Support via API.** o>  
+<- 05/21/2026 - added Redis for massive recall speed improvements ->
 
 <img width="1536" height="1024" alt="noosphere-memory-system-explanation-overview" src="https://github.com/user-attachments/assets/f7cdb553-6d4d-4d7b-b3e3-741ecc59b8e3" />
 
