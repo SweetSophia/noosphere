@@ -7,7 +7,8 @@ This provider is currently in Phase 4:
 - it registers with Hermes as a memory provider
 - it exposes setup fields for the Noosphere API key and base URL
 - it stores non-secret configuration in `$HERMES_HOME/noosphere.json`
-- it reads the secret API key from `NOOSPHERE_API_KEY`
+- it reads the secret API key from `HERMES_NOOSPHERE_API_KEY`, with
+  `NOOSPHERE_API_KEY` as a compatibility fallback
 - it exposes status, recall, get, and topics tools
 - it uses Noosphere's prompt-ready recall API for `prefetch()`
 - it saves explicit durable memories as draft candidates
@@ -40,7 +41,7 @@ hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).
 env_path = hermes_home / ".env"
 env_path.parent.mkdir(parents=True, exist_ok=True)
 lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
-key = "NOOSPHERE_API_KEY"
+key = "HERMES_NOOSPHERE_API_KEY"
 value = "noo_..."
 updated = False
 for index, line in enumerate(lines):
@@ -92,8 +93,10 @@ Secrets:
 
 | Variable | Description |
 | --- | --- |
-| `NOOSPHERE_API_KEY` | Required Noosphere API key. |
-| `NOOSPHERE_BASE_URL` | Optional environment override for `base_url`. |
+| `HERMES_NOOSPHERE_API_KEY` | Preferred Noosphere API key for Hermes. |
+| `NOOSPHERE_API_KEY` | Backward-compatible fallback API key. |
+| `HERMES_NOOSPHERE_BASE_URL` | Preferred environment override for `base_url`. |
+| `NOOSPHERE_BASE_URL` | Backward-compatible fallback base URL override. |
 
 ## Safety
 

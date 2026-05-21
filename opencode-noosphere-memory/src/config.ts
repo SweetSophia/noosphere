@@ -12,36 +12,76 @@ export function resolveConfig(
   return {
     baseUrl: normalizeBaseUrl(
       readString(raw.baseUrl) ||
+        readString(env.OPENCODE_NOOSPHERE_BASE_URL) ||
+        readString(env.OPENCODE_NOOSPHERE_URL) ||
         readString(env.NOOSPHERE_BASE_URL) ||
         readString(env.NOOSPHERE_URL) ||
         DEFAULT_BASE_URL,
     ),
-    apiKey: readString(raw.apiKey) || readString(env.NOOSPHERE_API_KEY),
-    timeoutMs: readInteger(raw.timeoutMs, env.NOOSPHERE_TIMEOUT_MS, 5_000, 500, 30_000),
-    autoRecall: readBoolean(raw.autoRecall, env.NOOSPHERE_AUTO_RECALL, true),
-    autoRecallInjectOn: readInjectOn(raw.autoRecallInjectOn, env.NOOSPHERE_AUTO_RECALL_INJECT_ON),
-    autoRecallMax: readInteger(raw.autoRecallMax, env.NOOSPHERE_AUTO_RECALL_MAX, 5, 1, 10),
+    apiKey:
+      readString(raw.apiKey) ||
+      readString(env.OPENCODE_NOOSPHERE_API_KEY) ||
+      readString(env.NOOSPHERE_API_KEY),
+    timeoutMs: readInteger(
+      raw.timeoutMs,
+      firstEnv(env.OPENCODE_NOOSPHERE_TIMEOUT_MS, env.NOOSPHERE_TIMEOUT_MS),
+      5_000,
+      500,
+      30_000,
+    ),
+    autoRecall: readBoolean(
+      raw.autoRecall,
+      firstEnv(env.OPENCODE_NOOSPHERE_AUTO_RECALL, env.NOOSPHERE_AUTO_RECALL),
+      true,
+    ),
+    autoRecallInjectOn: readInjectOn(
+      raw.autoRecallInjectOn,
+      firstEnv(
+        env.OPENCODE_NOOSPHERE_AUTO_RECALL_INJECT_ON,
+        env.NOOSPHERE_AUTO_RECALL_INJECT_ON,
+      ),
+    ),
+    autoRecallMax: readInteger(
+      raw.autoRecallMax,
+      firstEnv(env.OPENCODE_NOOSPHERE_AUTO_RECALL_MAX, env.NOOSPHERE_AUTO_RECALL_MAX),
+      5,
+      1,
+      10,
+    ),
     autoRecallTokenBudget: readInteger(
       raw.autoRecallTokenBudget,
-      env.NOOSPHERE_AUTO_RECALL_TOKEN_BUDGET,
+      firstEnv(
+        env.OPENCODE_NOOSPHERE_AUTO_RECALL_TOKEN_BUDGET,
+        env.NOOSPHERE_AUTO_RECALL_TOKEN_BUDGET,
+      ),
       1_200,
       100,
       2_000,
     ),
-    autoSave: readBoolean(raw.autoSave, env.NOOSPHERE_AUTO_SAVE, false),
+    autoSave: readBoolean(
+      raw.autoSave,
+      firstEnv(env.OPENCODE_NOOSPHERE_AUTO_SAVE, env.NOOSPHERE_AUTO_SAVE),
+      false,
+    ),
     autoSaveDebounceMs: readInteger(
       raw.autoSaveDebounceMs,
-      env.NOOSPHERE_AUTO_SAVE_DEBOUNCE_MS,
+      firstEnv(
+        env.OPENCODE_NOOSPHERE_AUTO_SAVE_DEBOUNCE_MS,
+        env.NOOSPHERE_AUTO_SAVE_DEBOUNCE_MS,
+      ),
       10_000,
       1_000,
       120_000,
     ),
     autoSaveTopicId:
       readString(raw.autoSaveTopicId) ||
+      readString(env.OPENCODE_NOOSPHERE_AUTO_SAVE_TOPIC_ID) ||
+      readString(env.OPENCODE_NOOSPHERE_TOPIC_ID) ||
       readString(env.NOOSPHERE_AUTO_SAVE_TOPIC_ID) ||
       readString(env.NOOSPHERE_TOPIC_ID),
     authorName:
       readString(raw.authorName) ||
+      readString(env.OPENCODE_NOOSPHERE_AUTHOR_NAME) ||
       readString(env.NOOSPHERE_AUTHOR_NAME) ||
       "Opencode",
   };
@@ -124,6 +164,14 @@ function parseInteger(value: unknown): number | undefined {
   if (typeof value !== "string" || !value.trim()) return undefined;
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function firstEnv(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    const parsed = readString(value);
+    if (parsed !== undefined) return parsed;
+  }
+  return undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -30,7 +30,8 @@ Implemented:
 - Hermes `MemoryProvider` registration entry point
 - `hermes memory setup` config schema
 - profile-scoped `$HERMES_HOME/noosphere.json` config persistence
-- environment-based secret lookup through `NOOSPHERE_API_KEY`
+- environment-based secret lookup through `HERMES_NOOSPHERE_API_KEY` with
+  `NOOSPHERE_API_KEY` as a compatibility fallback
 - safe initialization without network calls
 - standard-library HTTP client with redacted errors
 - `noosphere_status`, `noosphere_recall`, `noosphere_get`, `noosphere_topics`, and `noosphere_save` tools
@@ -60,7 +61,7 @@ Store your key in:
 
 For example:
 
-    NOOSPHERE_API_KEY=noo_...
+    HERMES_NOOSPHERE_API_KEY=noo_...
 
 Then create or edit:
 
@@ -96,7 +97,7 @@ hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).
 env_path = hermes_home / ".env"
 env_path.parent.mkdir(parents=True, exist_ok=True)
 lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
-key = "NOOSPHERE_API_KEY"
+key = "HERMES_NOOSPHERE_API_KEY"
 value = "noo_..."
 updated = False
 for index, line in enumerate(lines):

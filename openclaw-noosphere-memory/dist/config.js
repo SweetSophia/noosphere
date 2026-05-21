@@ -7,9 +7,16 @@ export const DEFAULT_AUTO_RECALL_TIMEOUT_MS = 1_500;
 export const MAX_AUTO_RECALL_TIMEOUT_MS = 5_000;
 export function resolveNoosphereMemoryConfig(rawConfig, env = process.env, rootConfig) {
     const config = isRecord(rawConfig) ? rawConfig : {};
-    const baseUrl = normalizeBaseUrl(readString(config.baseUrl) || env.NOOSPHERE_BASE_URL || DEFAULT_NOOSPHERE_BASE_URL);
-    const defaultApiKey = readSecret(config.apiKey, rootConfig) || readString(env.NOOSPHERE_API_KEY);
-    const timeoutMs = clampTimeout(config.timeoutMs ?? readNumber(env.NOOSPHERE_TIMEOUT_MS), DEFAULT_NOOSPHERE_TIMEOUT_MS);
+    const baseUrl = normalizeBaseUrl(readString(config.baseUrl) ||
+        readString(env.OPENCLAW_NOOSPHERE_BASE_URL) ||
+        readString(env.NOOSPHERE_BASE_URL) ||
+        DEFAULT_NOOSPHERE_BASE_URL);
+    const defaultApiKey = readSecret(config.apiKey, rootConfig) ||
+        readString(env.OPENCLAW_NOOSPHERE_API_KEY) ||
+        readString(env.NOOSPHERE_API_KEY);
+    const timeoutMs = clampTimeout(config.timeoutMs ??
+        readNumber(env.OPENCLAW_NOOSPHERE_TIMEOUT_MS) ??
+        readNumber(env.NOOSPHERE_TIMEOUT_MS), DEFAULT_NOOSPHERE_TIMEOUT_MS);
     return {
         baseUrl,
         apiKey: defaultApiKey,
@@ -22,7 +29,8 @@ export function resolveNoosphereMemoryConfig(rawConfig, env = process.env, rootC
  * Priority:
  *   1. NOOSPHERE_API_KEY_<AGENT_ID> env var (e.g. NOOSPHERE_API_KEY_SHODAN)
  *   2. apiKeys[agentId] from plugin config (plain text, for multi-agent setups)
- *   3. Default apiKey (resolved from string, secret ref, or env.NOOSPHERE_API_KEY)
+ *   3. Default apiKey (resolved from string, secret ref, env.OPENCLAW_NOOSPHERE_API_KEY,
+ *      or env.NOOSPHERE_API_KEY)
  */
 export function resolveApiKeyForAgent(rawConfig, env = process.env, rootConfig, agentId) {
     const config = isRecord(rawConfig) ? rawConfig : {};
@@ -41,7 +49,9 @@ export function resolveApiKeyForAgent(rawConfig, env = process.env, rootConfig, 
         }
     }
     // 3. Default key (resolved from string, secret ref, or env.NOOSPHERE_API_KEY)
-    return (readSecret(config.apiKey, rootConfig) || readString(env.NOOSPHERE_API_KEY));
+    return (readSecret(config.apiKey, rootConfig) ||
+        readString(env.OPENCLAW_NOOSPHERE_API_KEY) ||
+        readString(env.NOOSPHERE_API_KEY));
 }
 export function redactSecret(value) {
     if (!value)

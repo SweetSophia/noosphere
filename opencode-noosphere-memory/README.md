@@ -49,8 +49,12 @@ Do not put real Noosphere API keys in repo files.
 Set the key in the environment used to launch Opencode:
 
 ```bash
-export NOOSPHERE_API_KEY="noo_..."
+export OPENCODE_NOOSPHERE_API_KEY="noo_..."
 ```
+
+Use `OPENCODE_NOOSPHERE_*` variables on machines that also run Kilo Code,
+OpenClaw, or Hermes. Generic `NOOSPHERE_*` variables are still supported as
+backward-compatible fallbacks.
 
 The key needs:
 
@@ -62,17 +66,17 @@ The key needs:
 
 | Option | Environment Variable | Default | Description |
 | --- | --- | --- | --- |
-| `baseUrl` | `NOOSPHERE_BASE_URL` or `NOOSPHERE_URL` | `http://127.0.0.1:6578` | Noosphere deployment URL. |
-| `apiKey` | `NOOSPHERE_API_KEY` | none | Noosphere API key. Prefer the environment variable. |
-| `timeoutMs` | `NOOSPHERE_TIMEOUT_MS` | `5000` | Request timeout. |
-| `autoRecall` | `NOOSPHERE_AUTO_RECALL` | `true` | Enable prompt-time recall injection. |
-| `autoRecallInjectOn` | `NOOSPHERE_AUTO_RECALL_INJECT_ON` | `first` | `first` or `always`. |
-| `autoRecallMax` | `NOOSPHERE_AUTO_RECALL_MAX` | `5` | Maximum recalled memories. |
-| `autoRecallTokenBudget` | `NOOSPHERE_AUTO_RECALL_TOKEN_BUDGET` | `1200` | Prompt injection token budget. |
-| `autoSave` | `NOOSPHERE_AUTO_SAVE` | `false` | Enable idle auto-save. |
-| `autoSaveDebounceMs` | `NOOSPHERE_AUTO_SAVE_DEBOUNCE_MS` | `10000` | Idle debounce before auto-save. |
-| `autoSaveTopicId` | `NOOSPHERE_AUTO_SAVE_TOPIC_ID` or `NOOSPHERE_TOPIC_ID` | none | Required for auto-save. |
-| `authorName` | `NOOSPHERE_AUTHOR_NAME` | `Opencode` | Draft candidate author display name. |
+| `baseUrl` | `OPENCODE_NOOSPHERE_BASE_URL` or `OPENCODE_NOOSPHERE_URL`; fallback: `NOOSPHERE_BASE_URL` or `NOOSPHERE_URL` | `http://127.0.0.1:6578` | Noosphere deployment URL. |
+| `apiKey` | `OPENCODE_NOOSPHERE_API_KEY`; fallback: `NOOSPHERE_API_KEY` | none | Noosphere API key. Prefer the tool-specific environment variable. |
+| `timeoutMs` | `OPENCODE_NOOSPHERE_TIMEOUT_MS`; fallback: `NOOSPHERE_TIMEOUT_MS` | `5000` | Request timeout. |
+| `autoRecall` | `OPENCODE_NOOSPHERE_AUTO_RECALL`; fallback: `NOOSPHERE_AUTO_RECALL` | `true` | Enable prompt-time recall injection. |
+| `autoRecallInjectOn` | `OPENCODE_NOOSPHERE_AUTO_RECALL_INJECT_ON`; fallback: `NOOSPHERE_AUTO_RECALL_INJECT_ON` | `first` | `first` or `always`. |
+| `autoRecallMax` | `OPENCODE_NOOSPHERE_AUTO_RECALL_MAX`; fallback: `NOOSPHERE_AUTO_RECALL_MAX` | `5` | Maximum recalled memories. |
+| `autoRecallTokenBudget` | `OPENCODE_NOOSPHERE_AUTO_RECALL_TOKEN_BUDGET`; fallback: `NOOSPHERE_AUTO_RECALL_TOKEN_BUDGET` | `1200` | Prompt injection token budget. |
+| `autoSave` | `OPENCODE_NOOSPHERE_AUTO_SAVE`; fallback: `NOOSPHERE_AUTO_SAVE` | `false` | Enable idle auto-save. |
+| `autoSaveDebounceMs` | `OPENCODE_NOOSPHERE_AUTO_SAVE_DEBOUNCE_MS`; fallback: `NOOSPHERE_AUTO_SAVE_DEBOUNCE_MS` | `10000` | Idle debounce before auto-save. |
+| `autoSaveTopicId` | `OPENCODE_NOOSPHERE_AUTO_SAVE_TOPIC_ID` or `OPENCODE_NOOSPHERE_TOPIC_ID`; fallback: `NOOSPHERE_AUTO_SAVE_TOPIC_ID` or `NOOSPHERE_TOPIC_ID` | none | Required for auto-save. |
+| `authorName` | `OPENCODE_NOOSPHERE_AUTHOR_NAME`; fallback: `NOOSPHERE_AUTHOR_NAME` | `Opencode` | Draft candidate author display name. |
 
 ## Auto-Recall
 
@@ -93,8 +97,8 @@ Auto-save is available but disabled by default to avoid unexpected writes from p
 To enable it:
 
 ```bash
-export NOOSPHERE_AUTO_SAVE=true
-export NOOSPHERE_AUTO_SAVE_TOPIC_ID="<topic UUID>"
+export OPENCODE_NOOSPHERE_AUTO_SAVE=true
+export OPENCODE_NOOSPHERE_AUTO_SAVE_TOPIC_ID="<topic UUID>"
 ```
 
 When Opencode emits `session.idle`, the plugin waits for the configured debounce, extracts the latest user request and assistant response, and saves a draft memory candidate. It skips short and trivial prompts.

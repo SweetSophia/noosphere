@@ -47,12 +47,19 @@ export function resolveNoosphereMemoryConfig(
 ): ResolvedNoosphereMemoryConfig {
   const config = isRecord(rawConfig) ? rawConfig as Partial<NoosphereMemoryConfig> : {};
   const baseUrl = normalizeBaseUrl(
-    readString(config.baseUrl) || env.NOOSPHERE_BASE_URL || DEFAULT_NOOSPHERE_BASE_URL,
+    readString(config.baseUrl) ||
+      readString(env.OPENCLAW_NOOSPHERE_BASE_URL) ||
+      readString(env.NOOSPHERE_BASE_URL) ||
+      DEFAULT_NOOSPHERE_BASE_URL,
   );
   const defaultApiKey =
-    readSecret(config.apiKey, rootConfig) || readString(env.NOOSPHERE_API_KEY);
+    readSecret(config.apiKey, rootConfig) ||
+    readString(env.OPENCLAW_NOOSPHERE_API_KEY) ||
+    readString(env.NOOSPHERE_API_KEY);
   const timeoutMs = clampTimeout(
-    config.timeoutMs ?? readNumber(env.NOOSPHERE_TIMEOUT_MS),
+    config.timeoutMs ??
+      readNumber(env.OPENCLAW_NOOSPHERE_TIMEOUT_MS) ??
+      readNumber(env.NOOSPHERE_TIMEOUT_MS),
     DEFAULT_NOOSPHERE_TIMEOUT_MS,
   );
 
@@ -69,7 +76,8 @@ export function resolveNoosphereMemoryConfig(
  * Priority:
  *   1. NOOSPHERE_API_KEY_<AGENT_ID> env var (e.g. NOOSPHERE_API_KEY_SHODAN)
  *   2. apiKeys[agentId] from plugin config (plain text, for multi-agent setups)
- *   3. Default apiKey (resolved from string, secret ref, or env.NOOSPHERE_API_KEY)
+ *   3. Default apiKey (resolved from string, secret ref, env.OPENCLAW_NOOSPHERE_API_KEY,
+ *      or env.NOOSPHERE_API_KEY)
  */
 export function resolveApiKeyForAgent(
   rawConfig: unknown,
@@ -96,7 +104,9 @@ export function resolveApiKeyForAgent(
 
   // 3. Default key (resolved from string, secret ref, or env.NOOSPHERE_API_KEY)
   return (
-    readSecret(config.apiKey, rootConfig) || readString(env.NOOSPHERE_API_KEY)
+    readSecret(config.apiKey, rootConfig) ||
+    readString(env.OPENCLAW_NOOSPHERE_API_KEY) ||
+    readString(env.NOOSPHERE_API_KEY)
   );
 }
 

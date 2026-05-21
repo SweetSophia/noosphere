@@ -33,6 +33,7 @@
       {
         "id": "noosphere-memory",
         "envVars": [
+          "OPENCLAW_NOOSPHERE_API_KEY",
           "NOOSPHERE_API_KEY"
         ]
       }

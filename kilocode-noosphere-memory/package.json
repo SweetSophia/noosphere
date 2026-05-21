@@ -1,6 +1,6 @@
 {
   "name": "@sweetsophia/kilocode-noosphere-memory",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "private": false,
   "description": "Kilo Code plugin for Noosphere memory: prompt-time auto-recall, optional idle auto-save, and explicit memory tools.",
   "type": "module",
@@ -16,8 +16,8 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts",
       "config": {
-        "baseUrl": "{env:NOOSPHERE_BASE_URL}",
-        "apiKey": "{env:NOOSPHERE_API_KEY}"
+        "baseUrl": "{env:KILOCODE_NOOSPHERE_BASE_URL}",
+        "apiKey": "{env:KILOCODE_NOOSPHERE_API_KEY}"
       }
     }
   },

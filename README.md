@@ -563,7 +563,7 @@ hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).
 env_path = hermes_home / ".env"
 env_path.parent.mkdir(parents=True, exist_ok=True)
 lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
-key = "NOOSPHERE_API_KEY"
+key = "HERMES_NOOSPHERE_API_KEY"
 value = "noo_..."
 updated = False
 for index, line in enumerate(lines):
@@ -607,7 +607,7 @@ Then create or edit `$HERMES_HOME/noosphere.json`:
 | Explicit memory mirroring | Implemented | Mirrors Hermes `on_memory_write(add, ...)` when `topic_id` is configured. |
 | Broad turn capture | Opt-in | Requires `auto_capture: true` and `topic_id`; default is disabled. |
 
-Use a scoped Noosphere API key for each Hermes profile. Scoped keys control which restricted articles the provider can read and where it can write.
+Use a scoped Noosphere API key for each Hermes profile. Scoped keys control which restricted articles the provider can read and where it can write. On machines with multiple Noosphere integrations, prefer `HERMES_NOOSPHERE_API_KEY`; the generic `NOOSPHERE_API_KEY` remains a compatibility fallback.
 
 ## Opencode Integration
 
@@ -617,7 +617,7 @@ Noosphere ships an Opencode plugin at `opencode-noosphere-memory/`.
 
 ```bash
 npm install -g @sweetsophia/opencode-noosphere-memory
-export NOOSPHERE_API_KEY="noo_..."
+export OPENCODE_NOOSPHERE_API_KEY="noo_..."
 ```
 
 Add the package to `~/.config/opencode/opencode.json`:
@@ -639,9 +639,9 @@ Add the package to `~/.config/opencode/opencode.json`:
 | `noosphere_topics` | Implemented | Lists topic IDs for draft save targets. |
 | `noosphere_save` | Implemented | Saves durable content as a draft memory candidate. |
 | Auto recall | Implemented | Uses Opencode's `chat.message` hook and Noosphere prompt-ready recall text. |
-| Idle auto-save | Opt-in | Uses `session.idle`; requires `NOOSPHERE_AUTO_SAVE=true` and `NOOSPHERE_AUTO_SAVE_TOPIC_ID`. |
+| Idle auto-save | Opt-in | Uses `session.idle`; requires `OPENCODE_NOOSPHERE_AUTO_SAVE=true` and `OPENCODE_NOOSPHERE_AUTO_SAVE_TOPIC_ID`. |
 
-Do not commit real API keys into Opencode config. Use environment variables or host-level secret management.
+Do not commit real API keys into Opencode config. Use environment variables or host-level secret management. Prefer `OPENCODE_NOOSPHERE_*` variables on hosts that also run Kilo Code, OpenClaw, or Hermes; generic `NOOSPHERE_*` variables remain compatibility fallbacks.
 
 ## Kilo Code Integration
 
@@ -651,7 +651,7 @@ Noosphere ships a Kilo Code plugin at `kilocode-noosphere-memory/`.
 
 ```bash
 npm install -g @sweetsophia/kilocode-noosphere-memory
-export NOOSPHERE_API_KEY="noo_..."
+export KILOCODE_NOOSPHERE_API_KEY="noo_..."
 ```
 
 Add the package to `~/.config/kilo/kilo.json`:
@@ -679,9 +679,9 @@ kilo plugin @sweetsophia/kilocode-noosphere-memory --global
 | `noosphere_topics` | Implemented | Lists topic IDs for draft save targets. |
 | `noosphere_save` | Implemented | Saves durable content as a draft memory candidate, including optional `restrictedTags`. |
 | Auto recall | Implemented | Uses Kilo Code's `chat.message` hook and Noosphere prompt-ready recall text. |
-| Idle auto-save | Opt-in | Uses `session.idle`; requires `NOOSPHERE_AUTO_SAVE=true` and `NOOSPHERE_AUTO_SAVE_TOPIC_ID`. |
+| Idle auto-save | Opt-in | Uses `session.idle`; requires `KILOCODE_NOOSPHERE_AUTO_SAVE=true` and `KILOCODE_NOOSPHERE_AUTO_SAVE_TOPIC_ID`. |
 
-Do not commit real API keys into Kilo config. Use environment variables or host-level secret management.
+Do not commit real API keys into Kilo config. Use environment variables or host-level secret management. Prefer `KILOCODE_NOOSPHERE_*` variables on hosts that also run Opencode, OpenClaw, or Hermes; generic `NOOSPHERE_*` variables remain compatibility fallbacks.
 
 ## Redis Recall Cache Add-on
 

@@ -101,7 +101,7 @@ hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).
 env_path = hermes_home / ".env"
 env_path.parent.mkdir(parents=True, exist_ok=True)
 lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
-key = "NOOSPHERE_API_KEY"
+key = "HERMES_NOOSPHERE_API_KEY"
 value = "noo_..."
 updated = False
 for index, line in enumerate(lines):
@@ -133,6 +133,7 @@ JSON
 Create the API key in Noosphere at:
   <NOOSPHERE_APP_URL>/wiki/admin/keys
 
-Use a scoped key for the Hermes profile. The plugin reads NOOSPHERE_API_KEY and
-does not print or store secrets in the repository.
+Use a scoped key for the Hermes profile. The plugin prefers
+HERMES_NOOSPHERE_API_KEY and falls back to NOOSPHERE_API_KEY for compatibility.
+It does not print or store secrets in the repository.
 EOF

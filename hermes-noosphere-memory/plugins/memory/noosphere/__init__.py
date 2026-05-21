@@ -56,7 +56,9 @@ def _config_path(hermes_home: str) -> Path:
 
 
 def _setup_key_url() -> str:
-    base_url = os.environ.get("NOOSPHERE_BASE_URL", _DEFAULT_CONFIG["base_url"])
+    base_url = _env_first("HERMES_NOOSPHERE_BASE_URL", "NOOSPHERE_BASE_URL") or str(
+        _DEFAULT_CONFIG["base_url"]
+    )
     try:
         base_url = normalize_base_url(_as_string(base_url, _DEFAULT_CONFIG["base_url"]))
     except ValueError:
@@ -96,6 +98,14 @@ def _as_string(value: Any, default: str = "") -> str:
     if value is None:
         return default
     return str(value).strip()
+
+
+def _env_first(*names: str) -> str:
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
 
 
 def _sanitize_config(raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -243,7 +253,7 @@ class NoosphereMemoryProvider(MemoryProvider):
         return "noosphere"
 
     def is_available(self) -> bool:
-        return bool(os.environ.get("NOOSPHERE_API_KEY", "").strip())
+        return bool(_env_first("HERMES_NOOSPHERE_API_KEY", "NOOSPHERE_API_KEY"))
 
     def get_config_schema(self) -> List[Dict[str, Any]]:
         return [
@@ -252,7 +262,7 @@ class NoosphereMemoryProvider(MemoryProvider):
                 "description": "Noosphere API key",
                 "secret": True,
                 "required": True,
-                "env_var": "NOOSPHERE_API_KEY",
+                "env_var": "HERMES_NOOSPHERE_API_KEY",
                 "url": _setup_key_url(),
             },
             {
@@ -283,20 +293,20 @@ class NoosphereMemoryProvider(MemoryProvider):
             self._active = False
             self._client = None
             return
-        env_base_url = os.environ.get("NOOSPHERE_BASE_URL", "").strip()
+        env_base_url = _env_first("HERMES_NOOSPHERE_BASE_URL", "NOOSPHERE_BASE_URL")
         if env_base_url:
             try:
                 self._config["base_url"] = normalize_base_url(env_base_url)
             except ValueError:
                 logger.warning(
-                    "Unsafe NOOSPHERE_BASE_URL ignored; Noosphere disabled",
+                    "Unsafe Hermes Noosphere base URL ignored; Noosphere disabled",
                     exc_info=True,
                 )
                 self._active = False
                 self._client = None
                 return
 
-        self._api_key = os.environ.get("NOOSPHERE_API_KEY", "").strip()
+        self._api_key = _env_first("HERMES_NOOSPHERE_API_KEY", "NOOSPHERE_API_KEY")
         self._write_enabled = self._agent_context not in _NON_WRITING_CONTEXTS
         self._active = bool(self._api_key)
         self._client = None
