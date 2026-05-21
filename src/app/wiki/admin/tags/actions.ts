@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/wiki";
+import { invalidateSearchCache } from "@/lib/cache/search-cache";
 
 async function requireEditor() {
   const session = await getServerSession(authOptions);
@@ -39,6 +40,7 @@ export async function createTagAction(formData: FormData) {
   if (existing) throw new Error(`Tag "${name}" already exists.`);
 
   await prisma.tag.create({ data: { name, slug: tagSlug } });
+  await invalidateSearchCache();
   revalidatePath("/wiki");
   revalidatePath("/wiki/admin/tags");
 }
@@ -65,6 +67,7 @@ export async function renameTagAction(formData: FormData) {
   }
 
   await prisma.tag.update({ where: { id }, data: { name, slug: newSlug } });
+  await invalidateSearchCache();
   revalidatePath("/wiki");
   revalidatePath("/wiki/admin/tags");
 }
@@ -86,6 +89,7 @@ export async function deleteTagAction(formData: FormData) {
   }
 
   await prisma.tag.delete({ where: { id } });
+  await invalidateSearchCache();
   revalidatePath("/wiki");
   revalidatePath("/wiki/admin/tags");
 }

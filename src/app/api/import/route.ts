@@ -6,6 +6,7 @@ import JSZip from "jszip";
 import yaml from "js-yaml";
 import { isValidConfidence, isValidStatus } from "@/lib/validation";
 import { rateLimit } from "@/lib/rate-limit";
+import { invalidateSearchCache } from "@/lib/cache/search-cache";
 
 // Disable Next.js body parsing for file uploads
 export const dynamic = "force-dynamic";
@@ -334,6 +335,10 @@ export async function POST(request: NextRequest) {
       results.imported++;
     }
   });
+
+  if (results.imported > 0) {
+    await invalidateSearchCache();
+  }
 
   return NextResponse.json({
     success: true,

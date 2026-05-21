@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/wiki";
 import { checkRouteAuth } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/rate-limit";
+import { invalidateSearchCache } from "@/lib/cache/search-cache";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -54,6 +55,8 @@ export async function PATCH(request: NextRequest, { params }: Props) {
       data: { name: name.trim(), slug: newSlug },
     });
 
+    await invalidateSearchCache();
+
     return NextResponse.json({ id: updated.id, name: updated.name, slug: updated.slug });
   } catch (error) {
     console.error("[PATCH /api/tags/[id]]", error);
@@ -92,6 +95,7 @@ export async function DELETE(request: NextRequest, { params }: Props) {
     }
 
     await prisma.tag.delete({ where: { id } });
+    await invalidateSearchCache();
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error("[DELETE /api/tags/[id]]", error);

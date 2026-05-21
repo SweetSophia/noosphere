@@ -23,12 +23,15 @@ services:
       PG_POOL_MAX: ${PG_POOL_MAX:-20}
       PG_IDLE_TIMEOUT_MS: ${PG_IDLE_TIMEOUT_MS:-30000}
       PG_CONN_TIMEOUT_MS: ${PG_CONN_TIMEOUT_MS:-5000}
+      REDIS_URL: redis://redis:6379
     volumes:
       - ./uploads:/app/uploads:rw
       - ./uploads/images:/app/uploads/images:rw
       - /home/niya/obsidian-vault/noosphere:/app/obsidian-vault:rw
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test:
@@ -62,8 +65,26 @@ services:
       retries: 5
       start_period: 10s
 
+  redis:
+    image: redis:7-alpine
+    container_name: noosphere-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
     driver: local
 
 networks:

@@ -6,6 +6,7 @@ NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
 NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
 NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-latest}"
 NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION}}"
+REDIS_URL="${REDIS_URL:-redis://redis:6379}"
 PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory}"
 SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$HOME/.openclaw/secrets}"
 SECRETS_FILE="${NOOSPHERE_SECRETS_FILE:-$SECRETS_DIR/noosphere-memory.json}"
@@ -79,6 +80,7 @@ POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
 NOOSPHERE_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 NOOSPHERE_BOOTSTRAP_API_KEY=${API_KEY}
+REDIS_URL=${REDIS_URL}
 ENV
   chmod 600 "$env_tmp"
   mv "$env_tmp" "$NOOSPHERE_HOME/.env"
@@ -395,7 +397,7 @@ API_KEY="${API_KEY:-noo_$(random_secret 32)}"
 # docker compose up may run the init service again through app.depends_on; the
 # second run must see the same admin/API credentials as the explicit bootstrap
 # run below.
-export NOOSPHERE_VERSION NOOSPHERE_PORT NOOSPHERE_IMAGE APP_URL BIND_ADDRESS POSTGRES_PASSWORD NEXTAUTH_SECRET
+export NOOSPHERE_VERSION NOOSPHERE_PORT NOOSPHERE_IMAGE APP_URL BIND_ADDRESS POSTGRES_PASSWORD NEXTAUTH_SECRET REDIS_URL
 export NOOSPHERE_ADMIN_PASSWORD="$ADMIN_PASSWORD"
 export NOOSPHERE_BOOTSTRAP_API_KEY="$API_KEY"
 
@@ -418,6 +420,10 @@ services:
       NEXTAUTH_URL: \${APP_URL:-http://127.0.0.1:6578}
       APP_URL: \${APP_URL:-http://127.0.0.1:6578}
       UPLOAD_DIR: /app/uploads
+      PG_POOL_MAX: \${PG_POOL_MAX:-20}
+      PG_IDLE_TIMEOUT_MS: \${PG_IDLE_TIMEOUT_MS:-30000}
+      PG_CONN_TIMEOUT_MS: \${PG_CONN_TIMEOUT_MS:-5000}
+      REDIS_URL: \${REDIS_URL:-redis://redis:6379}
     command: ["sh", "-c", "node docker/migrate-or-baseline.mjs && node docker/bootstrap.mjs"]
     volumes:
       - noosphere_uploads:/app/uploads:rw
@@ -437,11 +443,17 @@ services:
       NEXTAUTH_URL: \${APP_URL:-http://127.0.0.1:6578}
       APP_URL: \${APP_URL:-http://127.0.0.1:6578}
       UPLOAD_DIR: /app/uploads
+      PG_POOL_MAX: \${PG_POOL_MAX:-20}
+      PG_IDLE_TIMEOUT_MS: \${PG_IDLE_TIMEOUT_MS:-30000}
+      PG_CONN_TIMEOUT_MS: \${PG_CONN_TIMEOUT_MS:-5000}
+      REDIS_URL: \${REDIS_URL:-redis://redis:6379}
     volumes:
       - noosphere_uploads:/app/uploads:rw
     depends_on:
       init:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
@@ -466,18 +478,35 @@ services:
       retries: 5
       start_period: 10s
 
+  redis:
+    image: redis:7-alpine
+    container_name: noosphere-openclaw-redis
+    restart: unless-stopped
+    volumes:
+      - noosphere_redis_data:/data
+    command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
 volumes:
   noosphere_postgres_data:
     driver: local
   noosphere_uploads:
+    driver: local
+  noosphere_redis_data:
     driver: local
 YAML
 
 cd "$NOOSPHERE_HOME"
 echo "Starting Noosphere at ${APP_URL}..."
 docker compose pull
-docker compose up -d db
+docker compose up -d db redis
 wait_for_container_healthy noosphere-openclaw-db 60
+wait_for_container_healthy noosphere-openclaw-redis 30
 
 echo "Applying database schema and bootstrap data..."
 # Run bootstrap to a temp file so we can check exit status separately.

@@ -60,7 +60,7 @@ export function validateSlug(slug: string): { ok: true; slug: string } | { ok: f
  */
 export function sanitizeAuthorName(
   raw: string | undefined | null,
-  maxLength = ARTICLE_LIMITS.maxAuthorNameLength
+  maxLength: number = ARTICLE_LIMITS.maxAuthorNameLength
 ): string {
   if (!raw) return "";
   return raw

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { invalidateSearchCache } from "@/lib/cache/search-cache";
 
 async function requireAdmin() {
   const session = await getServerSession(authOptions);
@@ -27,6 +28,8 @@ export async function restoreArticleAction(formData: FormData) {
     data: { deletedAt: null, updatedAt: new Date() },
     include: { topic: true },
   });
+
+  await invalidateSearchCache();
 
   revalidatePath("/wiki");
   revalidatePath(`/wiki/${article.topic.slug}`);

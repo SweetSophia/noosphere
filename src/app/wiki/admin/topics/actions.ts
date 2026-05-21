@@ -6,6 +6,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/wiki";
+import { invalidateSearchCache } from "@/lib/cache/search-cache";
 
 async function requireEditor() {
   const session = await getServerSession(authOptions);
@@ -62,6 +63,8 @@ export async function createTopicAction(formData: FormData) {
       description: description || null,
     },
   });
+
+  await invalidateSearchCache();
 
   revalidatePath("/wiki");
   revalidatePath("/wiki/admin/topics");
@@ -123,6 +126,8 @@ export async function updateTopicAction(formData: FormData) {
     },
   });
 
+  await invalidateSearchCache();
+
   revalidatePath("/wiki");
   revalidatePath("/wiki/admin/topics");
 }
@@ -145,6 +150,8 @@ export async function deleteTopicAction(formData: FormData) {
   if (childCount > 0) throw new Error(`Topic has ${childCount} subtopic(s). Delete or reassign them first.`);
 
   await prisma.topic.delete({ where: { id } });
+
+  await invalidateSearchCache();
 
   revalidatePath("/wiki");
   revalidatePath("/wiki/admin/topics");
