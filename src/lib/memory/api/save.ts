@@ -133,10 +133,9 @@ export async function executeMemorySaveRequest(
   const writer = options.writer ?? (await getDefaultMemorySaveWriter());
   const candidate = await writer.saveCandidate(validation.input);
 
-  // Invalidate search cache on successful save
-  await invalidateSearchCache().catch((err) => {
-    console.error("Failed to invalidate search cache:", err);
-  });
+  // Invalidate search cache on successful save (fire-and-forget;
+  // invalidateSearchCache handles its own errors internally)
+  invalidateSearchCache();
 
   return {
     status: 201,

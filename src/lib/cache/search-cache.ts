@@ -36,6 +36,7 @@ export async function getCachedSearchResults(
 ): Promise<MemoryResult[] | null> {
   try {
     const redis = getRedisClient();
+    if (!redis) return null;
     const cached = await redis.get(cacheKey);
     if (cached) {
       return JSON.parse(cached) as MemoryResult[];
@@ -53,6 +54,7 @@ export async function setCachedSearchResults(
 ): Promise<void> {
   try {
     const redis = getRedisClient();
+    if (!redis) return;
     await redis.setex(cacheKey, SEARCH_CACHE_TTL_SECONDS, JSON.stringify(results));
   } catch (error) {
     console.error("Redis set error:", error);
@@ -63,10 +65,22 @@ export async function setCachedSearchResults(
 export async function invalidateSearchCache(): Promise<void> {
   try {
     const redis = getRedisClient();
-    const keys = await redis.keys(`${SEARCH_CACHE_PREFIX}*`);
-    if (keys.length > 0) {
-      await redis.del(...keys);
-    }
+    if (!redis) return;
+
+    let cursor = "0";
+    do {
+      const [nextCursor, keys] = await redis.scan(
+        cursor,
+        "MATCH",
+        `${SEARCH_CACHE_PREFIX}*`,
+        "COUNT",
+        100,
+      );
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        await redis.del(...keys);
+      }
+    } while (cursor !== "0");
   } catch (error) {
     console.error("Redis invalidate error:", error);
     // Fail silently - cache will expire via TTL

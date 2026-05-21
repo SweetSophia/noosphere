@@ -160,7 +160,7 @@ export class NoosphereProvider implements MemoryProvider {
     });
 
     // Populate cache
-    await setCachedSearchResults(cacheKey, articles);
+    setCachedSearchResults(cacheKey, articles);
 
     return articles;
   }
