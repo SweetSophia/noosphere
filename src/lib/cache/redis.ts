@@ -5,6 +5,7 @@ let isConfigured = true;
 let nextConnectAttemptAt = 0;
 
 const REDIS_RECONNECT_COOLDOWN_MS = 5000;
+const TERMINAL_REDIS_STATUSES = new Set(["close", "end"]);
 
 function resetRedisClient(client: Redis | null = redisClient): void {
   if (client) {
@@ -26,7 +27,7 @@ export function getRedisClient(): Redis | null {
     return null;
   }
   if (redisClient) {
-    if (redisClient.status === "end") {
+    if (TERMINAL_REDIS_STATUSES.has(redisClient.status)) {
       resetRedisClient(redisClient);
     } else {
       return redisClient;

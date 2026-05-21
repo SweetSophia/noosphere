@@ -5,7 +5,7 @@ import {
   invalidateSearchCache,
   setCachedSearchResults,
 } from "@/lib/cache/search-cache";
-import { _redisTestHooks } from "@/lib/cache/redis";
+import { getRedisClient, _redisTestHooks } from "@/lib/cache/redis";
 import type { MemoryResult } from "@/lib/memory/types";
 import assert from "assert";
 
@@ -77,6 +77,26 @@ describe("Search Cache Key Generation", () => {
 });
 
 describe("Search Cache Redis Operations", () => {
+  it("discards terminal Redis clients before future cache lookups", () => {
+    const previousRedisUrl = process.env.REDIS_URL;
+    delete process.env.REDIS_URL;
+    const redis = new FakeRedisClient();
+    redis.status = "close";
+    _redisTestHooks.setClientForTesting(redis as never);
+
+    try {
+      assert.strictEqual(getRedisClient(), null);
+      assert.strictEqual(redis.status, "end");
+    } finally {
+      if (previousRedisUrl === undefined) {
+        delete process.env.REDIS_URL;
+      } else {
+        process.env.REDIS_URL = previousRedisUrl;
+      }
+      _redisTestHooks.reset();
+    }
+  });
+
   it("connects a lazy Redis client before executing cache commands", async () => {
     const redis = new FakeRedisClient();
     _redisTestHooks.setClientForTesting(redis as never);
