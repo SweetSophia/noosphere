@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/api/auth";
 import { apiError } from "@/lib/api/errors";
 import { ARTICLE_LIMITS, deriveExcerpt, sanitizeAuthorName } from "@/lib/validation";
 import { rateLimit } from "@/lib/rate-limit";
+import { invalidateSearchCache } from "@/lib/cache/search-cache";
 
 // POST /api/ingest — Process a source into multiple wiki articles
 // Auth: API key (WRITE/ADMIN) or session (EDITOR/ADMIN)
@@ -236,6 +237,10 @@ export async function POST(request: NextRequest) {
 
     return { logId: logEntry.id };
   });
+
+  if (createdArticles.length > 0) {
+    await invalidateSearchCache();
+  }
 
   return NextResponse.json(
     {

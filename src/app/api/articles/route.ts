@@ -343,8 +343,7 @@ export async function POST(request: NextRequest) {
       return created;
     });
 
-    // Invalidate search cache (fire-and-forget)
-    invalidateSearchCache();
+    await invalidateSearchCache();
 
     return NextResponse.json(
       {

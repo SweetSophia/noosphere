@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/wiki";
 import { checkRouteAuth } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/rate-limit";
+import { invalidateSearchCache } from "@/lib/cache/search-cache";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -94,6 +95,8 @@ export async function PATCH(request: NextRequest, { params }: Props) {
       },
     });
 
+    await invalidateSearchCache();
+
     return NextResponse.json(updated);
   } catch (error) {
     console.error("[PATCH /api/topics/[id]]", error);
@@ -141,6 +144,7 @@ export async function DELETE(request: NextRequest, { params }: Props) {
     }
 
     await prisma.topic.delete({ where: { id } });
+    await invalidateSearchCache();
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error("[DELETE /api/topics/[id]]", error);

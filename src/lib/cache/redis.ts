@@ -2,6 +2,16 @@ import Redis from "ioredis";
 
 let redisClient: Redis | null = null;
 let isConfigured = true;
+let nextConnectAttemptAt = 0;
+
+const REDIS_RECONNECT_COOLDOWN_MS = 5000;
+
+function resetRedisClient(client: Redis | null = redisClient): void {
+  if (client) {
+    client.disconnect();
+  }
+  redisClient = null;
+}
 
 /**
  * Returns the Redis singleton, or null when REDIS_URL is not configured.
@@ -10,6 +20,9 @@ let isConfigured = true;
  */
 export function getRedisClient(): Redis | null {
   if (!isConfigured) {
+    return null;
+  }
+  if (Date.now() < nextConnectAttemptAt) {
     return null;
   }
   if (redisClient) {
@@ -26,9 +39,11 @@ export function getRedisClient(): Redis | null {
     maxRetriesPerRequest: null,
     connectTimeout: 2000,
     enableOfflineQueue: false,
-    retryStrategy() {
-      // Reconnect every 5 seconds without destroying the client
-      return 5000;
+    retryStrategy(times) {
+      if (times > 1) {
+        return null;
+      }
+      return 500;
     },
     lazyConnect: true,
   });
@@ -48,10 +63,46 @@ export function getRedisClient(): Redis | null {
   return redisClient;
 }
 
-export async function closeRedisClient(): Promise<void> {
-  if (redisClient) {
-    await redisClient.quit();
-    redisClient = null;
+export async function getReadyRedisClient(): Promise<Redis | null> {
+  const client = getRedisClient();
+  if (!client) {
+    return null;
   }
-  isConfigured = true;
+
+  if (client.status === "ready") {
+    return client;
+  }
+
+  if (client.status !== "wait") {
+    return null;
+  }
+
+  try {
+    await client.connect();
+    return (client.status as string) === "ready" ? client : null;
+  } catch (error) {
+    console.error("Redis connection error:", error);
+    nextConnectAttemptAt = Date.now() + REDIS_RECONNECT_COOLDOWN_MS;
+    resetRedisClient(client);
+    return null;
+  }
 }
+
+export async function closeRedisClient(): Promise<void> {
+  resetRedisClient();
+  isConfigured = true;
+  nextConnectAttemptAt = 0;
+}
+
+export const _redisTestHooks = {
+  setClientForTesting(client: Redis | null) {
+    redisClient = client;
+    isConfigured = true;
+    nextConnectAttemptAt = 0;
+  },
+  reset() {
+    resetRedisClient();
+    isConfigured = true;
+    nextConnectAttemptAt = 0;
+  },
+};

@@ -95,8 +95,7 @@ export async function createArticle(
     },
   });
 
-  // Invalidate search cache (fire-and-forget)
-  invalidateSearchCache();
+  await invalidateSearchCache();
 
   revalidatePath(`/wiki/${topicSlug}`);
   revalidatePath(`/wiki/${topicSlug}/${article.slug}`);

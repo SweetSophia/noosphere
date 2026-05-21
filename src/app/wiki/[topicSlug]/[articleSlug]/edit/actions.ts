@@ -115,8 +115,7 @@ export async function saveArticle(
     });
   }
 
-  // Invalidate search cache (fire-and-forget)
-  invalidateSearchCache();
+  await invalidateSearchCache();
 
   revalidatePath(`/wiki/${topicSlug}`);
   revalidatePath(`/wiki/${topicSlug}/${articleSlug}`);
@@ -147,8 +146,7 @@ export async function deleteArticle(
     data: { deletedAt: new Date(), updatedAt: new Date() },
   });
 
-  // Invalidate search cache (fire-and-forget)
-  invalidateSearchCache();
+  await invalidateSearchCache();
 
   revalidatePath(`/wiki/${topicSlug}`);
   revalidatePath(`/wiki/${topicSlug}/${articleSlug}`);

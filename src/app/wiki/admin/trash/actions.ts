@@ -29,8 +29,7 @@ export async function restoreArticleAction(formData: FormData) {
     include: { topic: true },
   });
 
-  // Invalidate search cache (fire-and-forget)
-  invalidateSearchCache();
+  await invalidateSearchCache();
 
   revalidatePath("/wiki");
   revalidatePath(`/wiki/${article.topic.slug}`);

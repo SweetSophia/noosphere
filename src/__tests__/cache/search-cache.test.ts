@@ -1,6 +1,59 @@
 import { describe, it } from "node:test";
-import { buildSearchCacheKey } from "@/lib/cache/search-cache";
+import {
+  buildSearchCacheKey,
+  getCachedSearchResults,
+  invalidateSearchCache,
+  setCachedSearchResults,
+} from "@/lib/cache/search-cache";
+import { _redisTestHooks } from "@/lib/cache/redis";
+import type { MemoryResult } from "@/lib/memory/types";
 import assert from "assert";
+
+class FakeRedisClient {
+  status = "wait";
+  private readonly store = new Map<string, string>();
+
+  async connect() {
+    this.status = "ready";
+  }
+
+  disconnect() {
+    this.status = "end";
+  }
+
+  async get(key: string) {
+    this.assertReady();
+    return this.store.get(key) ?? null;
+  }
+
+  async setex(key: string, _ttlSeconds: number, value: string) {
+    this.assertReady();
+    this.store.set(key, value);
+    return "OK";
+  }
+
+  async incr(key: string) {
+    this.assertReady();
+    const value = Number(this.store.get(key) ?? "0") + 1;
+    this.store.set(key, String(value));
+    return value;
+  }
+
+  private assertReady() {
+    if (this.status !== "ready") {
+      throw new Error("Redis command executed before client was ready");
+    }
+  }
+}
+
+const cachedResult: MemoryResult = {
+  id: "article-1",
+  provider: "noosphere",
+  sourceType: "noosphere",
+  title: "Cached Article",
+  content: "Cached content",
+  metadata: {},
+};
 
 describe("Search Cache Key Generation", () => {
   it("should normalize queries case-insensitively and trim spaces", () => {
@@ -23,40 +76,37 @@ describe("Search Cache Key Generation", () => {
   });
 });
 
-describe("Prisma Cache Invalidation Extension", () => {
-  it("should trigger invalidateSearchCache on write operations", async () => {
-    const { prisma } = require("@/lib/prisma");
-    const { _testHooks } = require("@/lib/cache/search-cache");
-
-    const startCount = _testHooks.invalidateSearchCacheCallCount;
+describe("Search Cache Redis Operations", () => {
+  it("connects a lazy Redis client before executing cache commands", async () => {
+    const redis = new FakeRedisClient();
+    _redisTestHooks.setClientForTesting(redis as never);
 
     try {
-      await prisma.activityLog.create({
-        data: {
-          type: "test",
-          title: "Test Invalidation",
-          details: {},
-        },
-      });
+      const cacheKey = buildSearchCacheKey({ query: "lazy redis" });
 
-      assert.strictEqual(_testHooks.invalidateSearchCacheCallCount, startCount + 1);
+      await setCachedSearchResults(cacheKey, [cachedResult]);
+      const cached = await getCachedSearchResults(cacheKey);
+
+      assert.strictEqual(redis.status, "ready");
+      assert.deepStrictEqual(cached, [cachedResult]);
     } finally {
-      try {
-        await prisma.activityLog.deleteMany({
-          where: {
-            title: "Test Invalidation",
-          },
-        });
-      } catch (err) {
-        console.error("Failed to clean up test activity log:", err);
-      }
-      await prisma.$disconnect();
-      try {
-        const { closeRedisClient } = require("@/lib/cache/redis");
-        await closeRedisClient();
-      } catch (err) {
-        console.error("Failed to close Redis client in test:", err);
-      }
+      _redisTestHooks.reset();
+    }
+  });
+
+  it("does not write stale search results when the invalidation version changed", async () => {
+    const redis = new FakeRedisClient();
+    _redisTestHooks.setClientForTesting(redis as never);
+
+    try {
+      const cacheKey = buildSearchCacheKey({ query: "stale race", cacheVersion: "0" });
+
+      await invalidateSearchCache();
+      await setCachedSearchResults(cacheKey, [cachedResult], "0");
+
+      assert.strictEqual(await getCachedSearchResults(cacheKey), null);
+    } finally {
+      _redisTestHooks.reset();
     }
   });
 });

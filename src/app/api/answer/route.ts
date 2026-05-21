@@ -11,6 +11,7 @@ import {
   validateSlug,
 } from "@/lib/validation";
 import { rateLimit } from "@/lib/rate-limit";
+import { invalidateSearchCache } from "@/lib/cache/search-cache";
 
 // POST /api/answer — Save a synthesized answer as a new wiki article
 // Auth: API key (WRITE/ADMIN) or session (EDITOR/ADMIN)
@@ -177,6 +178,8 @@ export async function POST(request: NextRequest) {
 
     return created;
   });
+
+  await invalidateSearchCache();
 
   return NextResponse.json(
     {

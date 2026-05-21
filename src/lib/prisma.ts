@@ -34,46 +34,13 @@ function createPrismaClient() {
 
   const adapter = new PrismaPg(pool);
 
-  const rawClient = new PrismaClient({
+  return new PrismaClient({
     adapter,
     log:
       process.env.NODE_ENV === "development"
         ? ["query", "error", "warn"]
         : ["error"],
   });
-
-  const extendedClient = rawClient.$extends({
-    query: {
-      $allModels: {
-        async $allOperations({ operation, query, args }) {
-          const result = await query(args);
-          const writeOperations = [
-            "create",
-            "createMany",
-            "createManyAndReturn",
-            "update",
-            "updateMany",
-            "upsert",
-            "delete",
-            "deleteMany",
-          ];
-          if (writeOperations.includes(operation)) {
-            try {
-              const { invalidateSearchCache } = require("@/lib/cache/search-cache");
-              invalidateSearchCache().catch((err: any) => {
-                console.error("Failed to invalidate search cache in Prisma hook:", err);
-              });
-            } catch (error) {
-              console.error("Error loading cache module in Prisma hook:", error);
-            }
-          }
-          return result;
-        },
-      },
-    },
-  });
-
-  return extendedClient as unknown as PrismaClient;
 }
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();

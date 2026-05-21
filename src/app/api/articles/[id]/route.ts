@@ -274,8 +274,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       });
     });
 
-    // Invalidate search cache (fire-and-forget)
-    invalidateSearchCache();
+    await invalidateSearchCache();
 
     return NextResponse.json({
       id: updatedArticle!.id,
@@ -341,8 +340,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     return new NextResponse(null, { status: 204 });
   }
 
-  // Invalidate search cache (fire-and-forget)
-  invalidateSearchCache();
+  await invalidateSearchCache();
 
   // Log the deletion for audit trail
   const authorName = auth.auth.name ?? "API";

@@ -26,6 +26,7 @@ import {
 import {
   buildSearchCacheKey,
   getCachedSearchResults,
+  getSearchCacheVersion,
   setCachedSearchResults,
 } from "@/lib/cache/search-cache";
 
@@ -130,22 +131,26 @@ export class NoosphereProvider implements MemoryProvider {
     const limit = resolveSearchLimit(options.limit, options.config, config);
     const metadata = (options.metadata ?? {}) as NoosphereSearchOptionsMetadata;
 
-    // Build cache key from search parameters
-    const cacheKey = buildSearchCacheKey({
-      query: normalizedQuery,
-      topicSlug: metadata.topicSlug ?? options.scope,
-      tagSlug: metadata.tagSlug,
-      status: metadata.status,
-      confidence: metadata.confidence,
-      limit,
-      offset: normalizeOffset(metadata.offset),
-      allowedScopes: this.allowedScopes,
-    });
+    const cacheVersion = await getSearchCacheVersion();
+    const cacheKey = cacheVersion === null
+      ? null
+      : buildSearchCacheKey({
+          query: normalizedQuery,
+          topicSlug: metadata.topicSlug ?? options.scope,
+          tagSlug: metadata.tagSlug,
+          status: metadata.status,
+          confidence: metadata.confidence,
+          limit,
+          offset: normalizeOffset(metadata.offset),
+          allowedScopes: this.allowedScopes,
+          cacheVersion,
+        });
 
-    // Check cache first
-    const cachedResults = await getCachedSearchResults(cacheKey);
-    if (cachedResults !== null) {
-      return cachedResults;
+    if (cacheKey) {
+      const cachedResults = await getCachedSearchResults(cacheKey);
+      if (cachedResults !== null) {
+        return cachedResults;
+      }
     }
 
     // Cache miss - proceed with database query
@@ -159,8 +164,10 @@ export class NoosphereProvider implements MemoryProvider {
       allowedScopes: this.allowedScopes,
     });
 
-    // Populate cache
-    setCachedSearchResults(cacheKey, articles);
+    if (cacheKey && cacheVersion !== null) {
+      // Start best-effort cache population if the invalidation version is unchanged.
+      void setCachedSearchResults(cacheKey, articles, cacheVersion);
+    }
 
     return articles;
   }
