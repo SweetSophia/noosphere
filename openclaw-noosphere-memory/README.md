@@ -59,7 +59,11 @@ The plugin resolves keys in this order:
 
 1. `NOOSPHERE_API_KEY_<AGENT_ID>`
 2. `config.apiKeys[agentId]`
-3. default `config.apiKey` / `NOOSPHERE_API_KEY`
+3. default `config.apiKey` / `OPENCLAW_NOOSPHERE_API_KEY` / `NOOSPHERE_API_KEY`
+
+Use `OPENCLAW_NOOSPHERE_*` for OpenClaw-wide defaults on machines that also run
+Opencode, Kilo Code, or Hermes. The generic `NOOSPHERE_*` variables remain
+compatibility fallbacks.
 
 ## Tools
 

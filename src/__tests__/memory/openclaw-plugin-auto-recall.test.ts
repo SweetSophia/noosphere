@@ -21,6 +21,7 @@ import {
 } from "../../../openclaw-noosphere-memory/src/client.js";
 import {
   DEFAULT_NOOSPHERE_BASE_URL,
+  resolveApiKeyForAgent,
   resolveNoosphereMemoryConfig,
 } from "../../../openclaw-noosphere-memory/src/config.js";
 import type {
@@ -141,6 +142,34 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
         .baseUrl,
       "https://[::1]:6578",
     );
+  });
+
+  it("uses OpenClaw-specific default env vars before generic Noosphere env vars", () => {
+    const env = {
+      OPENCLAW_NOOSPHERE_BASE_URL: "https://openclaw.example.test",
+      NOOSPHERE_BASE_URL: "https://generic.example.test",
+      OPENCLAW_NOOSPHERE_API_KEY: "noo_openclaw",
+      NOOSPHERE_API_KEY: "noo_generic",
+      OPENCLAW_NOOSPHERE_TIMEOUT_MS: "1234",
+      NOOSPHERE_TIMEOUT_MS: "9999",
+    } as NodeJS.ProcessEnv;
+
+    const config = resolveNoosphereMemoryConfig({}, env);
+
+    assert.equal(config.baseUrl, "https://openclaw.example.test");
+    assert.equal(config.apiKey, "noo_openclaw");
+    assert.equal(config.timeoutMs, 1234);
+  });
+
+  it("keeps per-agent OpenClaw keys above default env fallbacks", () => {
+    const env = {
+      NOOSPHERE_API_KEY_CYLENA: "noo_cylena",
+      OPENCLAW_NOOSPHERE_API_KEY: "noo_openclaw",
+      NOOSPHERE_API_KEY: "noo_generic",
+    } as NodeJS.ProcessEnv;
+
+    assert.equal(resolveApiKeyForAgent({}, env, undefined, "cylena"), "noo_cylena");
+    assert.equal(resolveApiKeyForAgent({}, env, undefined, "other"), "noo_openclaw");
   });
 
   it("injects promptInjectionText from Noosphere auto recall when enabled", async () => {

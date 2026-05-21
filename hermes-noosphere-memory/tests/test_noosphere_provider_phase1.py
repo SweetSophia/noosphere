@@ -62,14 +62,25 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
         with mock.patch.dict(os.environ, {"NOOSPHERE_API_KEY": "noo_test"}, clear=True):
             self.assertTrue(provider.is_available())
 
+        with mock.patch.dict(os.environ, {"HERMES_NOOSPHERE_API_KEY": "noo_test"}, clear=True):
+            self.assertTrue(provider.is_available())
+
     def test_config_schema_uses_base_url_env_for_key_help(self):
         module = load_plugin()
         provider = module.NoosphereMemoryProvider()
 
-        with mock.patch.dict(os.environ, {"NOOSPHERE_BASE_URL": "https://noosphere.test/"}, clear=True):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "HERMES_NOOSPHERE_BASE_URL": "https://hermes-noosphere.test/",
+                "NOOSPHERE_BASE_URL": "https://generic-noosphere.test/",
+            },
+            clear=True,
+        ):
             schema = provider.get_config_schema()
 
-        self.assertEqual(schema[0]["url"], "https://noosphere.test/wiki/admin/keys")
+        self.assertEqual(schema[0]["env_var"], "HERMES_NOOSPHERE_API_KEY")
+        self.assertEqual(schema[0]["url"], "https://hermes-noosphere.test/wiki/admin/keys")
 
     def test_save_config_persists_non_secret_values(self):
         module = load_plugin()
@@ -161,8 +172,10 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
             with mock.patch.dict(
                 os.environ,
                 {
-                    "NOOSPHERE_API_KEY": "noo_test",
-                    "NOOSPHERE_BASE_URL": "https://env.test/",
+                    "HERMES_NOOSPHERE_API_KEY": "noo_hermes",
+                    "NOOSPHERE_API_KEY": "noo_generic",
+                    "HERMES_NOOSPHERE_BASE_URL": "https://hermes-env.test/",
+                    "NOOSPHERE_BASE_URL": "https://generic-env.test/",
                 },
                 clear=True,
             ):
@@ -176,7 +189,8 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
 
         self.assertTrue(provider._active)
         self.assertFalse(provider._write_enabled)
-        self.assertEqual(provider._config["base_url"], "https://env.test")
+        self.assertEqual(provider._api_key, "noo_hermes")
+        self.assertEqual(provider._config["base_url"], "https://hermes-env.test")
         self.assertEqual(provider._agent_identity, "coder")
 
     def test_initialize_uses_hermes_home_env_when_kwarg_missing(self):
@@ -215,7 +229,7 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
 
         self.assertFalse(provider._active)
         self.assertIsNone(provider._client)
-        self.assertIn("Unsafe NOOSPHERE_BASE_URL ignored", "\n".join(logs.output))
+        self.assertIn("Unsafe Hermes Noosphere base URL ignored", "\n".join(logs.output))
 
     def test_initialize_disables_provider_for_unsafe_stored_base_url(self):
         module = load_plugin()

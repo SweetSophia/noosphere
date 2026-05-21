@@ -5,11 +5,11 @@ services:
       dockerfile: Dockerfile
       args:
         DATABASE_URL: postgresql://noosphere:buildtime@db:5432/noosphere
-        NOOSPHERE_VERSION: ${NOOSPHERE_VERSION:-1.6.0}
+        NOOSPHERE_VERSION: ${NOOSPHERE_VERSION:-1.6.1}
     container_name: noosphere-app
     restart: unless-stopped
     labels:
-      org.opencontainers.image.version: "${NOOSPHERE_VERSION:-1.6.0}"
+      org.opencontainers.image.version: "${NOOSPHERE_VERSION:-1.6.1}"
     ports:
       - "6578:3000"
     environment:

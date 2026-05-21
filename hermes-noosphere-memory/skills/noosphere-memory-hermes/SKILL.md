@@ -68,12 +68,12 @@ env_path.parent.mkdir(parents=True, exist_ok=True)
 lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
 updated = False
 for index, line in enumerate(lines):
-    if line.split("=", 1)[0].strip() == "NOOSPHERE_API_KEY":
-        lines[index] = f"NOOSPHERE_API_KEY={api_key}"
+    if line.split("=", 1)[0].strip() == "HERMES_NOOSPHERE_API_KEY":
+        lines[index] = f"HERMES_NOOSPHERE_API_KEY={api_key}"
         updated = True
         break
 if not updated:
-    lines.append(f"NOOSPHERE_API_KEY={api_key}")
+    lines.append(f"HERMES_NOOSPHERE_API_KEY={api_key}")
 env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 env_path.chmod(0o600)
 PY
@@ -126,7 +126,12 @@ if path.exists():
         config = {}
 
 config.update({
-    "base_url": (os.environ.get("NOOSPHERE_BASE_URL") or config.get("base_url") or "http://127.0.0.1:6578").rstrip("/"),
+    "base_url": (
+        os.environ.get("HERMES_NOOSPHERE_BASE_URL")
+        or os.environ.get("NOOSPHERE_BASE_URL")
+        or config.get("base_url")
+        or "http://127.0.0.1:6578"
+    ).rstrip("/"),
     "auto_recall": as_bool(config.get("auto_recall"), True),
     "auto_capture": as_bool(config.get("auto_capture"), False),
     "max_recall_results": as_int(config.get("max_recall_results"), 5, 1, 20),

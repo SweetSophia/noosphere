@@ -248,8 +248,8 @@ value used by the plugin when no config is supplied. "Installer value" is what
 
 | Field | Plugin default | Installer value | Notes |
 | --- | --- | --- | --- |
-| `baseUrl` | `http://localhost:3000` | `http://127.0.0.1:6578` | Noosphere server base URL. |
-| `apiKey` | unset | file secret reference | Default API key. Used when no per-agent key matches. String, `{ value }`, or OpenClaw file secret reference. Required for memory APIs. |
+| `baseUrl` | `http://localhost:3000` | `http://127.0.0.1:6578` | Noosphere server base URL. Config wins; otherwise `OPENCLAW_NOOSPHERE_BASE_URL`, then `NOOSPHERE_BASE_URL`, then default. |
+| `apiKey` | unset | file secret reference | Default API key. Used when no per-agent key matches. String, `{ value }`, or OpenClaw file secret reference. Env fallback is `OPENCLAW_NOOSPHERE_API_KEY`, then `NOOSPHERE_API_KEY`. Required for memory APIs. |
 | `apiKeys` | unset | unset | Per-agent API key map `{ [agentId]: keyString }`. Takes precedence over `apiKey` for matching agents. Use env vars for secret keys (see below). |
 | `timeoutMs` | `5000` | default | Explicit HTTP request timeout. Max `30000`. |
 | `autoRecall` | `false` | `true` | Enables `before_prompt_build` recall injection. |
@@ -341,7 +341,7 @@ When multiple agents share the same OpenClaw plugin, each agent should use its o
 
 1. **`NOOSPHERE_API_KEY_<AGENT_ID>`** — Environment variable. Recommended. Key stays secret (not in any config file).
 2. **`apiKeys[agentId]`** — Config map. Plain text, visible in `openclaw.json`.
-3. **`apiKey` / `NOOSPHERE_API_KEY`** — Default fallback.
+3. **`apiKey` / `OPENCLAW_NOOSPHERE_API_KEY` / `NOOSPHERE_API_KEY`** — Default fallback.
 
 ### Adding a new agent key (recommended method)
 
