@@ -21,6 +21,24 @@ describe("Noosphere plugin environment isolation", () => {
     assert.equal(config.autoSaveTopicId, "topic-opencode");
   });
 
+  it("reports the Opencode-specific API key name when the client is unconfigured", async () => {
+    const { NoosphereClient } = await import(
+      new URL("../../../opencode-noosphere-memory/dist/client.js", import.meta.url).href
+    );
+    const { resolveConfig } = await import(
+      new URL("../../../opencode-noosphere-memory/dist/config.js", import.meta.url).href
+    );
+
+    const client = new NoosphereClient(resolveConfig(undefined, {} as NodeJS.ProcessEnv));
+
+    await assert.rejects(() => client.status(), (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      assert.match(message, /OPENCODE_NOOSPHERE_API_KEY/);
+      assert.match(message, /NOOSPHERE_API_KEY/);
+      return true;
+    });
+  });
+
   it("prefers Kilo-specific variables before generic Noosphere fallbacks", async () => {
     const { resolveConfig: resolveKiloConfig } = await import(
       new URL("../../../kilocode-noosphere-memory/dist/config.js", import.meta.url).href
@@ -38,5 +56,43 @@ describe("Noosphere plugin environment isolation", () => {
     assert.equal(config.baseUrl, "https://kilo.example.test");
     assert.equal(config.apiKey, "noo_kilo");
     assert.equal(config.autoSaveTopicId, "topic-kilo");
+  });
+
+  it("reports the Kilo-specific API key name when the client is unconfigured", async () => {
+    const { NoosphereClient } = await import(
+      new URL("../../../kilocode-noosphere-memory/dist/client.js", import.meta.url).href
+    );
+    const { resolveConfig } = await import(
+      new URL("../../../kilocode-noosphere-memory/dist/config.js", import.meta.url).href
+    );
+
+    const client = new NoosphereClient(resolveConfig(undefined, {} as NodeJS.ProcessEnv));
+
+    await assert.rejects(() => client.status(), (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      assert.match(message, /KILOCODE_NOOSPHERE_API_KEY/);
+      assert.match(message, /NOOSPHERE_API_KEY/);
+      return true;
+    });
+  });
+
+  it("reports the OpenClaw-specific API key name when the client is unconfigured", async () => {
+    const { NoosphereMemoryClient } = await import(
+      new URL("../../../openclaw-noosphere-memory/dist/client.js", import.meta.url).href
+    );
+    const { resolveNoosphereMemoryConfig } = await import(
+      new URL("../../../openclaw-noosphere-memory/dist/config.js", import.meta.url).href
+    );
+
+    const client = new NoosphereMemoryClient(
+      resolveNoosphereMemoryConfig({}, {} as NodeJS.ProcessEnv),
+    );
+
+    await assert.rejects(() => client.status(), (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      assert.match(message, /OPENCLAW_NOOSPHERE_API_KEY/);
+      assert.match(message, /NOOSPHERE_API_KEY/);
+      return true;
+    });
   });
 });

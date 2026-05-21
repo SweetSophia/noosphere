@@ -906,6 +906,10 @@
   border-collapse: collapse;
 }
 
+.api-key-table {
+  min-width: 1040px;
+}
+
 .admin-table th,
 .admin-table td {
   padding: 0.9rem 1rem;
@@ -925,6 +929,24 @@
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+}
+
+.api-key-table-wrap {
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-bottom: 0.25rem;
+}
+
+.api-key-action-cell {
+  min-width: 15rem;
+}
+
+.api-key-actions,
+.key-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
 }
 
 /* ── Admin nav ─────────────────────────────────────────────────────────────── */
@@ -980,6 +1002,7 @@
 
 .secret-box {
   margin-top: 0.5rem;
+  min-width: 0;
   padding: 0.85rem 1rem;
   border: 1px solid var(--code-border);
   border-radius: var(--radius-md);
@@ -1789,6 +1812,94 @@ h2.activity-title {
   }
 }
 
+@media (max-width: 1100px) {
+  .api-key-table-wrap {
+    overflow: visible;
+    border: 0;
+    background: transparent;
+  }
+
+  .api-key-table {
+    min-width: 0;
+    border-collapse: separate;
+    border-spacing: 0 0.85rem;
+  }
+
+  .api-key-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .api-key-table,
+  .api-key-table tbody,
+  .api-key-table tr,
+  .api-key-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .api-key-table tr {
+    padding: 0.95rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    background: var(--surface-color);
+    box-shadow: var(--shadow-1);
+  }
+
+  .api-key-table td {
+    display: grid;
+    grid-template-columns: minmax(7.5rem, 32%) minmax(0, 1fr);
+    gap: 0.85rem;
+    padding: 0.65rem 0;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .api-key-table td::before {
+    content: attr(data-label);
+    color: var(--text-faint);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .api-key-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .api-key-action-cell {
+    min-width: 0;
+  }
+
+  .api-key-actions,
+  .key-action-buttons {
+    align-items: stretch;
+  }
+
+  .scope-edit-dropdown {
+    width: 100%;
+  }
+
+  .scope-edit-dropdown > summary {
+    width: 100%;
+  }
+
+  .scope-edit-panel {
+    position: static;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    margin-top: 0.5rem;
+  }
+}
+
 @media (max-width: 640px) {
   .wiki-header {
     padding: 0.85rem 0.85rem 0;
@@ -1826,6 +1937,15 @@ h2.activity-title {
   .nav-link,
   .btn,
   .filter-chip {
+    width: 100%;
+  }
+
+  .api-key-table td {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
+
+  .secret-box-row .btn {
     width: 100%;
   }
 

@@ -356,7 +356,11 @@ class NoosphereMemoryProvider(MemoryProvider):
 
     def handle_tool_call(self, tool_name: str, args: Dict[str, Any], **kwargs: Any) -> str:
         if not self._active or not self._client:
-            return json.dumps({"error": "Noosphere is not configured. Set NOOSPHERE_API_KEY."})
+            error = (
+                "Noosphere is not configured. Set HERMES_NOOSPHERE_API_KEY, "
+                "or NOOSPHERE_API_KEY as a compatibility fallback."
+            )
+            return json.dumps({"error": error})
 
         try:
             if tool_name == "noosphere_status":

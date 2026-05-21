@@ -67,7 +67,7 @@ export class NoosphereClient {
   ): Promise<T> {
     if (!this.config.apiKey) {
       throw new NoosphereClientError(
-        "NOOSPHERE_API_KEY is required for Noosphere memory requests",
+        "Set OPENCODE_NOOSPHERE_API_KEY for Opencode Noosphere memory requests, or NOOSPHERE_API_KEY as a compatibility fallback",
       );
     }
 
