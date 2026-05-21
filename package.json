@@ -15,7 +15,9 @@
     "db:push": "prisma db push",
     "db:seed": "tsx scripts/seed-topics.ts",
     "memory:scheduler": "tsx scripts/memory-scheduler.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "version:sync": "node scripts/sync-version.mjs",
+    "version:check": "node scripts/sync-version.mjs --check"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.7.0",
