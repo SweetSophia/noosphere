@@ -19,7 +19,7 @@ Agents can use Noosphere to store durable project knowledge, retrieve relevant c
 | **Auto-Capture** | ✅ Bundled capture guidance + ingest API + backfill | ✅ Every turn | ❌ Manual indexing | ✅ Continuous learning | ✅ `memory.add()` | ✅ Smart extraction |
 | **Auto-Recall** | ✅ Hook injection with dual-block (memory capture guidance + recall results) | ✅ Before each turn | ✅ Keyword search only | ✅ Proactive context loading | ✅ `memory.search()` | ✅ Before prompt build |
 | **Manual Recall** | ✅ REST API + tools | ✅ MCP tools | ✅ CLI / tool query | ✅ REST API | ✅ SDK + REST | ✅ CLI + MCP tools |
-| **Semantic Search** | ✅ PostgreSQL FTS (live) + vector (planned) | ✅ Vector + biomimetic | ⚠️ Keyword + pending vector | ✅ pgvector | ✅ Semantic + BM25 + entity fusion | ✅ Vector + BM25 hybrid |
+| **Semantic Search** | ✅ PostgreSQL FTS (live) + vector (planned) + Redis recall cache | ✅ Vector + biomimetic | ⚠️ Keyword + pending vector | ✅ pgvector | ✅ Semantic + BM25 + entity fusion | ✅ Vector + BM25 hybrid |
 | **Keyword Search** | ✅ PostgreSQL full-text | ✅ | ✅ Primary mode | ✅ | ✅ BM25 | ✅ BM25 |
 | **Cross-Encoder Rerank** | ❌ (planned) | ❌ | ❌ | ❌ | ❌ | ✅ Cross-encoder |
 | **Memory Types** | Articles (wiki) | world / experience / observation | Markdown files | Categories / Items / Resources | Facts (ADD-only v3) | 6-category classification |
@@ -130,6 +130,7 @@ Noosphere's memory layer normalizes multiple sources into a single result shape:
 ```text
 MemoryProvider
   → RecallOrchestrator
+  → optional Redis cache-aside lookup
   → ranking
   → deduplication
   → conflict resolution
@@ -140,6 +141,7 @@ MemoryProvider
 Core concepts:
 
 - **Providers** return normalized `MemoryResult` objects.
+- **Redis recall cache** short-circuits repeat Noosphere article searches before the PostgreSQL full-text path when `REDIS_URL` is configured.
 - **Curation levels** are `ephemeral → managed → curated`.
 - **Composite score** combines relevance, confidence, recency, and curation.
 - **Auto recall** respects provider-level `allowAutoRecall` settings.
@@ -203,6 +205,7 @@ Articles can also have:
 | ORM | Prisma 7 with adapter pattern |
 | Auth | NextAuth.js for humans, Bearer API keys for agents |
 | Markdown | `react-markdown`, `remark-gfm`, syntax highlighting |
+| Cache | Redis 7 for optional recall/search acceleration |
 | Memory | Provider abstraction, orchestrator, dedup, conflict, budget, promotion, backfill, scheduler |
 | Runtime | Node.js 22 |
 | Container | Docker + Docker Compose |
@@ -226,6 +229,8 @@ cp .env.example .env
 # Generate secrets for .env
 openssl rand -hex 32  # NEXTAUTH_SECRET
 openssl rand -hex 32  # POSTGRES_PASSWORD
+# Optional for non-Compose deployments; Compose includes Redis automatically
+# REDIS_URL=redis://localhost:6379
 
 docker compose up -d
 # Navigate to http://localhost:4400/wiki in your browser.
@@ -675,6 +680,35 @@ kilo plugin @sweetsophia/kilocode-noosphere-memory --global
 | Idle auto-save | Opt-in | Uses `session.idle`; requires `NOOSPHERE_AUTO_SAVE=true` and `NOOSPHERE_AUTO_SAVE_TOPIC_ID`. |
 
 Do not commit real API keys into Kilo config. Use environment variables or host-level secret management.
+
+## Redis Recall Cache Add-on
+
+Noosphere includes an optional Redis cache-aside layer for repeated Noosphere article recall and search queries. It is enabled whenever `REDIS_URL` is configured; Docker Compose installs include Redis by default.
+
+How it works:
+
+- Recall checks Redis for the normalized query, filters, allowed scopes, and current cache version before running PostgreSQL full-text search.
+- Cache keys use SHA-256 and include caller scope filters, so restricted results are not shared across differently scoped API keys.
+- Writes invalidate cached recall results by incrementing a version token instead of scanning or deleting Redis keys.
+- Cached entries expire after 30 seconds.
+- Redis is fail-open: if Redis is missing, unreachable, or intentionally disabled, Noosphere continues to use PostgreSQL without failing requests.
+
+Install and runtime notes:
+
+- Docker Compose services start `redis:7-alpine` as `noosphere-redis` and set `REDIS_URL=redis://redis:6379` for the app.
+- The OpenClaw installer also provisions Redis, waits for Redis health, and writes `REDIS_URL` into the runtime environment.
+- For non-Compose deployments, run Redis separately and set `REDIS_URL`, for example `redis://localhost:6379`.
+- Cache correctness tests are part of `npm test` through `npm run test:cache`.
+
+Live verification from the Noosphere deployment on 2026-05-21:
+
+| Query | Path | Result |
+| --- | --- | --- |
+| `GET /api/health` | Local container | HTTP 200 in 4.6 ms |
+| `POST /api/memory/recall` query `deployment` | Cold cache after version bump | HTTP 200 in 58.0 ms, 4 results |
+| Same recall query | Cached repeat | HTTP 200 in 21.9 ms, 4 results |
+| Same recall query | Cached repeat | HTTP 200 in 11.6 ms, 4 results |
+| Same recall query | Live internal route | HTTP 200 in 19.4 ms, 4 results |
 
 ## Environment Variables
 
