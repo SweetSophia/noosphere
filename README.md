@@ -467,6 +467,7 @@ Default runtime locations:
 - OpenClaw secret file: `~/.openclaw/secrets/noosphere-memory.json`
 - Docker image: `ghcr.io/sweetsophia/noosphere:latest`
 - Default port: `6578`
+- Redis: bundled Compose service for recall/search cache acceleration
 
 ### Plugin capabilities
 
@@ -684,6 +685,7 @@ Do not commit real API keys into Kilo config. Use environment variables or host-
 | `NEXTAUTH_URL` | Base URL, for example `http://localhost:4400` |
 | `APP_URL` | Public URL of the app |
 | `POSTGRES_PASSWORD` | PostgreSQL password for Docker Compose |
+| `REDIS_URL` | Redis connection string; use `redis://redis:6379` inside Docker Compose |
 
 ## Deployment
 
@@ -694,8 +696,8 @@ git pull origin master
 # 2. Build (pass ~/.noosphere/.env to ensure correct secrets are baked in)
 docker compose -f docker-compose.yml --env-file ~/.noosphere/.env build app
 
-# 3. Recreate app container with fresh image and env
-docker compose -f docker-compose.yml --env-file ~/.noosphere/.env up -d --no-deps --force-recreate app
+# 3. Recreate app container with fresh image and ensure Redis exists
+docker compose -f docker-compose.yml --env-file ~/.noosphere/.env up -d redis app
 
 # 4. Verify
 curl http://127.0.0.1:6578/api/health

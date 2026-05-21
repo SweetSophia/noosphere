@@ -7,6 +7,7 @@ The default install is intentionally local-only:
 - Noosphere web app: `http://127.0.0.1:6578`
 - App container port: `3000`
 - PostgreSQL: Compose-internal only
+- Redis: Compose-internal only, used for optional recall/search caching
 - Runtime directory: `~/.noosphere`
 - OpenClaw secret file: `~/.openclaw/secrets/noosphere-memory.json`
 
@@ -44,7 +45,7 @@ The installer:
 2. Creates `~/.noosphere/`.
 3. Generates local secrets.
 4. Writes a production `docker-compose.yml` using `ghcr.io/sweetsophia/noosphere`.
-5. Starts PostgreSQL and Noosphere.
+5. Starts PostgreSQL, Redis, and Noosphere.
 6. Runs Prisma migrations through `docker/migrate-or-baseline.mjs`.
 7. Runs repeatable bootstrap through `docker/bootstrap.mjs` using the same generated admin/API credentials that are later written to `.env` and OpenClaw secrets.
 8. Writes `~/.openclaw/secrets/noosphere-memory.json`.
@@ -83,6 +84,7 @@ Set these environment variables before running the installer when you need non-d
 | `NOOSPHERE_PORT` | `6578` | Localhost port exposed by the app. |
 | `NOOSPHERE_VERSION` | `latest` | GHCR image tag. |
 | `NOOSPHERE_IMAGE` | `ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION}` | Full image reference override. |
+| `REDIS_URL` | `redis://redis:6379` | Redis connection string used inside Compose. Leave default for the bundled Redis service. |
 | `APP_URL` | `http://127.0.0.1:${NOOSPHERE_PORT}` | URL stored in Noosphere/OpenClaw config. When set, skips the interactive IP selection prompt. |
 | `BIND_ADDRESS` | derived from `APP_URL` host (if a valid IP) or `127.0.0.1` | Docker port binding address. Set explicitly to override the derived value (e.g., `0.0.0.0` to bind all interfaces, or `127.0.0.1` to force localhost regardless of `APP_URL`). |
 | `NOOSPHERE_PLUGIN_SPEC` | `npm:@sweetsophia/openclaw-noosphere-memory` | Plugin install spec. Useful for testing local tarballs. |
@@ -167,6 +169,7 @@ done
 ```
 
 The production Compose template includes a one-shot `init` service. It waits for PostgreSQL, applies migrations, runs bootstrap, then allows the app service to start.
+It also starts a Redis service for recall/search caching; if Redis is unavailable, Noosphere fails open and continues serving search from PostgreSQL.
 
 ## Manual OpenClaw plugin install
 
@@ -387,7 +390,7 @@ openclaw plugins update noosphere-memory
 openclaw noosphere doctor
 ```
 
-The Compose `init` service runs migration/bootstrap logic before app startup. Bootstrap is repeatable and preserves article/topic content, but it reconciles the bootstrap admin account: it may reset that account's name/password to the values in `.env`, and `NOOSPHERE_FORCE_ADMIN=true` can force its role back to ADMIN.
+The Compose `init` service runs migration/bootstrap logic before app startup, and `docker compose up -d` is preferred over app-only recreation when upgrading to versions that add services such as Redis. Bootstrap is repeatable and preserves article/topic content, but it reconciles the bootstrap admin account: it may reset that account's name/password to the values in `.env`, and `NOOSPHERE_FORCE_ADMIN=true` can force its role back to ADMIN.
 
 ## Uninstall
 
