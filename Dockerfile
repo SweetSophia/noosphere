@@ -1,4 +1,6 @@
 # Noosphere — Next.js wiki app Dockerfile
+ARG NOOSPHERE_VERSION=dev
+
 FROM node:22-alpine AS base
 
 # Install dependencies only when needed
@@ -36,9 +38,12 @@ RUN npm run build
 
 # Production image
 FROM base AS runner
+ARG NOOSPHERE_VERSION
 WORKDIR /app
 
 ENV NODE_ENV=production
+
+LABEL org.opencontainers.image.version=$NOOSPHERE_VERSION
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 noosphere
