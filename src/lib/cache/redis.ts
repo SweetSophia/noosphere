@@ -1,6 +1,7 @@
 import Redis from "ioredis";
 
 let redisClient: Redis | null = null;
+let isConfigured = true;
 
 /**
  * Returns the Redis singleton, or null when REDIS_URL is not configured.
@@ -8,33 +9,37 @@ let redisClient: Redis | null = null;
  * and skip caching without noisy error logs on every request.
  */
 export function getRedisClient(): Redis | null {
+  if (!isConfigured) {
+    return null;
+  }
   if (redisClient) {
     return redisClient;
   }
 
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) {
+    isConfigured = false;
     return null;
   }
 
   const client = new Redis(redisUrl, {
-    maxRetriesPerRequest: 3,
+    maxRetriesPerRequest: null,
     connectTimeout: 2000,
     enableOfflineQueue: false,
-    retryStrategy(times) {
-      if (times > 3) {
-        // All retries exhausted — reset singleton so next call can try fresh
-        redisClient = null;
-        return null;
-      }
-      return Math.min(times * 100, 3000);
+    retryStrategy() {
+      // Reconnect every 5 seconds without destroying the client
+      return 5000;
     },
     lazyConnect: true,
   });
 
   client.on("error", (err) => {
     // Only log non-connection errors (connection errors are expected when Redis is down)
-    if (!(err instanceof Error) || !err.message.includes("ECONNREFUSED")) {
+    if (
+      !(err instanceof Error) ||
+      (!err.message.includes("ECONNREFUSED") &&
+        !err.message.includes("Connection is closed"))
+    ) {
       console.error("Redis client error:", err);
     }
   });
@@ -48,4 +53,5 @@ export async function closeRedisClient(): Promise<void> {
     await redisClient.quit();
     redisClient = null;
   }
+  isConfigured = true;
 }

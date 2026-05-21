@@ -25,7 +25,7 @@ export function buildSearchCacheKey(options: SearchCacheKey): string {
     confidence: options.confidence ?? "",
     limit: options.limit === undefined ? "none" : options.limit,
     offset: options.offset ?? 0,
-    scopes: (options.allowedScopes ?? []).sort().join(","),
+    scopes: [...(options.allowedScopes ?? [])].sort().join(","),
   };
   const hash = crypto.createHash("md5").update(JSON.stringify(normalized)).digest("hex");
   return `${SEARCH_CACHE_PREFIX}${hash}`;
@@ -62,7 +62,12 @@ export async function setCachedSearchResults(
   }
 }
 
+export const _testHooks = {
+  invalidateSearchCacheCallCount: 0,
+};
+
 export async function invalidateSearchCache(): Promise<void> {
+  _testHooks.invalidateSearchCacheCallCount++;
   try {
     const redis = getRedisClient();
     if (!redis) return;
