@@ -17,6 +17,7 @@ services:
       PG_POOL_MAX: ${PG_POOL_MAX:-20}
       PG_IDLE_TIMEOUT_MS: ${PG_IDLE_TIMEOUT_MS:-30000}
       PG_CONN_TIMEOUT_MS: ${PG_CONN_TIMEOUT_MS:-5000}
+      REDIS_URL: redis://redis:6379
     command: ["sh", "-c", "node docker/migrate-or-baseline.mjs && node docker/bootstrap.mjs"]
     volumes:
       - noosphere_uploads:/app/uploads:rw
@@ -39,11 +40,14 @@ services:
       PG_POOL_MAX: ${PG_POOL_MAX:-20}
       PG_IDLE_TIMEOUT_MS: ${PG_IDLE_TIMEOUT_MS:-30000}
       PG_CONN_TIMEOUT_MS: ${PG_CONN_TIMEOUT_MS:-5000}
+      REDIS_URL: redis://redis:6379
     volumes:
       - noosphere_uploads:/app/uploads:rw
     depends_on:
       init:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     healthcheck:
       test:
         [
@@ -74,8 +78,24 @@ services:
       retries: 5
       start_period: 10s
 
+  redis:
+    image: redis:7-alpine
+    container_name: noosphere-openclaw-redis
+    restart: unless-stopped
+    volumes:
+      - noosphere_redis_data:/data
+    command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
 volumes:
   noosphere_postgres_data:
     driver: local
   noosphere_uploads:
+    driver: local
+  noosphere_redis_data:
     driver: local

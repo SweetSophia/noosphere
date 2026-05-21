@@ -5,6 +5,7 @@ import { requirePermission, buildScopeFilter, canAccessScopes } from "@/lib/api/
 import { resolveRestrictedTagsForCaller } from "@/lib/api/restricted-scopes";
 import { buildTagConnections, countSearchArticles, searchArticleIds } from "@/lib/wiki";
 import { detectSecretInInputs } from "@/lib/memory/api/save";
+import { invalidateSearchCache } from "@/lib/cache/search-cache";
 import {
   ARTICLE_LIMITS,
   deriveExcerpt,
@@ -341,6 +342,9 @@ export async function POST(request: NextRequest) {
 
       return created;
     });
+
+    // Invalidate search cache (fire-and-forget)
+    invalidateSearchCache();
 
     return NextResponse.json(
       {

@@ -17,23 +17,29 @@ export function getRedisClient(): Redis | null {
     return null;
   }
 
-  redisClient = new Redis(redisUrl, {
+  const client = new Redis(redisUrl, {
     maxRetriesPerRequest: 3,
     connectTimeout: 2000,
     enableOfflineQueue: false,
     retryStrategy(times) {
       if (times > 3) {
-        return null; // Stop retrying
+        // All retries exhausted — reset singleton so next call can try fresh
+        redisClient = null;
+        return null;
       }
       return Math.min(times * 100, 3000);
     },
     lazyConnect: true,
   });
 
-  redisClient.on("error", (err) => {
-    console.error("Redis client error:", err);
+  client.on("error", (err) => {
+    // Only log non-connection errors (connection errors are expected when Redis is down)
+    if (!(err instanceof Error) || !err.message.includes("ECONNREFUSED")) {
+      console.error("Redis client error:", err);
+    }
   });
 
+  redisClient = client;
   return redisClient;
 }
 

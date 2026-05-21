@@ -7,6 +7,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildTagConnections, parseTagInput, slugify } from "@/lib/wiki";
 import { isValidConfidence, isValidStatus } from "@/lib/validation";
+import { invalidateSearchCache } from "@/lib/cache/search-cache";
 
 async function requireEditorSession() {
   const session = await getServerSession(authOptions);
@@ -93,6 +94,9 @@ export async function createArticle(
       },
     },
   });
+
+  // Invalidate search cache (fire-and-forget)
+  invalidateSearchCache();
 
   revalidatePath(`/wiki/${topicSlug}`);
   revalidatePath(`/wiki/${topicSlug}/${article.slug}`);

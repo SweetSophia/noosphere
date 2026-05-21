@@ -6,6 +6,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildTagConnections, parseTagInput } from "@/lib/wiki";
+import { invalidateSearchCache } from "@/lib/cache/search-cache";
 
 async function requireEditorSession() {
   const session = await getServerSession(authOptions);
@@ -114,6 +115,9 @@ export async function saveArticle(
     });
   }
 
+  // Invalidate search cache (fire-and-forget)
+  invalidateSearchCache();
+
   revalidatePath(`/wiki/${topicSlug}`);
   revalidatePath(`/wiki/${topicSlug}/${articleSlug}`);
   revalidatePath("/wiki");
@@ -142,6 +146,9 @@ export async function deleteArticle(
     where: { id: article.id },
     data: { deletedAt: new Date(), updatedAt: new Date() },
   });
+
+  // Invalidate search cache (fire-and-forget)
+  invalidateSearchCache();
 
   revalidatePath(`/wiki/${topicSlug}`);
   revalidatePath(`/wiki/${topicSlug}/${articleSlug}`);

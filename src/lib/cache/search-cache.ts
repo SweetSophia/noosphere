@@ -23,7 +23,7 @@ export function buildSearchCacheKey(options: SearchCacheKey): string {
     tag: options.tagSlug ?? "",
     status: options.status ?? "",
     confidence: options.confidence ?? "",
-    limit: options.limit ?? 0,
+    limit: options.limit === undefined ? "none" : options.limit,
     offset: options.offset ?? 0,
     scopes: (options.allowedScopes ?? []).sort().join(","),
   };

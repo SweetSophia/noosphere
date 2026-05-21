@@ -10,6 +10,7 @@ import {
   isValidStatus,
   validateSlug,
 } from "@/lib/validation";
+import { invalidateSearchCache } from "@/lib/cache/search-cache";
 import { rateLimit } from "@/lib/rate-limit";
 
 // PATCH /api/articles/[id] — Update article
@@ -273,6 +274,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       });
     });
 
+    // Invalidate search cache (fire-and-forget)
+    invalidateSearchCache();
+
     return NextResponse.json({
       id: updatedArticle!.id,
       title: updatedArticle!.title,
@@ -336,6 +340,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     // Article was already deleted — safe to return 204 idempotently
     return new NextResponse(null, { status: 204 });
   }
+
+  // Invalidate search cache (fire-and-forget)
+  invalidateSearchCache();
 
   // Log the deletion for audit trail
   const authorName = auth.auth.name ?? "API";
