@@ -29,7 +29,7 @@ export class NoosphereClient {
     }
     async requestJson(method, path, body) {
         if (!this.config.apiKey) {
-            throw new NoosphereClientError("NOOSPHERE_API_KEY is required for Noosphere memory requests");
+            throw new NoosphereClientError("Set OPENCODE_NOOSPHERE_API_KEY for Opencode Noosphere memory requests, or NOOSPHERE_API_KEY as a compatibility fallback");
         }
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);

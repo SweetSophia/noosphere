@@ -125,7 +125,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
       "https://[fe80::1]",
     ]) {
       assert.equal(
-        resolveNoosphereMemoryConfig({ baseUrl }, {} as any).baseUrl,
+        resolveNoosphereMemoryConfig({ baseUrl }, {} as NodeJS.ProcessEnv).baseUrl,
         DEFAULT_NOOSPHERE_BASE_URL,
       );
     }
@@ -133,12 +133,12 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
 
   it("keeps localhost baseUrl targets usable for local installs", () => {
     assert.equal(
-      resolveNoosphereMemoryConfig({ baseUrl: "http://127.0.0.1:6578/" }, {} as any)
+      resolveNoosphereMemoryConfig({ baseUrl: "http://127.0.0.1:6578/" }, {} as NodeJS.ProcessEnv)
         .baseUrl,
       "http://127.0.0.1:6578",
     );
     assert.equal(
-      resolveNoosphereMemoryConfig({ baseUrl: "https://[::1]:6578/" }, {} as any)
+      resolveNoosphereMemoryConfig({ baseUrl: "https://[::1]:6578/" }, {} as NodeJS.ProcessEnv)
         .baseUrl,
       "https://[::1]:6578",
     );

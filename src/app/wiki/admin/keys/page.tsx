@@ -132,8 +132,8 @@ export default async function ApiKeysPage({ searchParams }: Props) {
         {keys.length === 0 ? (
           <EmptyState title="No API keys yet" description="Create one above for agents or external automation." />
         ) : (
-          <div className="admin-table-wrap">
-            <table className="admin-table">
+          <div className="admin-table-wrap api-key-table-wrap">
+            <table className="admin-table api-key-table">
               <thead>
                 <tr>
                   <th>Name</th>
@@ -149,43 +149,45 @@ export default async function ApiKeysPage({ searchParams }: Props) {
               <tbody>
                 {keys.map((key) => (
                   <tr key={key.id}>
-                    <td>{key.name}</td>
-                    <td><code>{key.keyPrefix}…</code></td>
-                    <td>{key.permissions}</td>
-                    <td>
+                    <td data-label="Name">{key.name}</td>
+                    <td data-label="Prefix"><code>{key.keyPrefix}…</code></td>
+                    <td data-label="Permissions">{key.permissions}</td>
+                    <td data-label="Scopes">
                       <ScopeBadges scopes={key.allowedScopes} />
                     </td>
-                    <td>{new Date(key.createdAt).toLocaleDateString()}</td>
-                    <td>{key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleDateString() : "Never"}</td>
-                    <td>{key.revokedAt ? "Revoked" : "Active"}</td>
-                    <td>
-                      {!key.revokedAt && (
-                        <details className="scope-edit-dropdown">
-                          <summary className="btn btn-secondary btn-sm">Edit Scopes</summary>
-                          <div className="scope-edit-panel">
-                            <p className="scope-edit-title">
-                              Edit scopes for <strong>{key.name}</strong>
-                            </p>
-                            <form action={updateApiKeyScopesAction} className="scope-edit-form">
-                              <input type="hidden" name="id" value={key.id} />
-                              <ScopePicker scopes={scopes} selected={key.allowedScopes} />
-                              <div className="scope-edit-actions">
-                                <button type="submit" className="btn btn-primary btn-sm">
-                                  Save
-                                </button>
-                              </div>
-                            </form>
-                          </div>
-                        </details>
-                      )}
-                      <KeyActionButtons
-                        keyId={key.id}
-                        keyName={key.name}
-                        isRevoked={!!key.revokedAt}
-                        revokeAction={revokeApiKeyAction}
-                        rotateAction={rotateApiKeyAction}
-                        deleteAction={deleteApiKeyAction}
-                      />
+                    <td data-label="Created">{new Date(key.createdAt).toLocaleDateString()}</td>
+                    <td data-label="Last Used">{key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleDateString() : "Never"}</td>
+                    <td data-label="Status">{key.revokedAt ? "Revoked" : "Active"}</td>
+                    <td data-label="Actions" className="api-key-action-cell">
+                      <div className="api-key-actions">
+                        {!key.revokedAt && (
+                          <details className="scope-edit-dropdown">
+                            <summary className="btn btn-secondary btn-sm">Edit Scopes</summary>
+                            <div className="scope-edit-panel">
+                              <p className="scope-edit-title">
+                                Edit scopes for <strong>{key.name}</strong>
+                              </p>
+                              <form action={updateApiKeyScopesAction} className="scope-edit-form">
+                                <input type="hidden" name="id" value={key.id} />
+                                <ScopePicker scopes={scopes} selected={key.allowedScopes} />
+                                <div className="scope-edit-actions">
+                                  <button type="submit" className="btn btn-primary btn-sm">
+                                    Save
+                                  </button>
+                                </div>
+                              </form>
+                            </div>
+                          </details>
+                        )}
+                        <KeyActionButtons
+                          keyId={key.id}
+                          keyName={key.name}
+                          isRevoked={!!key.revokedAt}
+                          revokeAction={revokeApiKeyAction}
+                          rotateAction={rotateApiKeyAction}
+                          deleteAction={deleteApiKeyAction}
+                        />
+                      </div>
                     </td>
                   </tr>
                 ))}

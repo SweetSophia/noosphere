@@ -21,7 +21,7 @@ export function KeyActionButtons({
 }: KeyActionButtonsProps) {
   if (isRevoked) {
     return (
-      <div style={{ display: "flex", gap: "0.25rem" }}>
+      <div className="key-action-buttons">
         <form action={deleteAction}>
           <input type="hidden" name="id" value={keyId} />
           <button
@@ -45,7 +45,7 @@ export function KeyActionButtons({
   }
 
   return (
-    <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap", alignItems: "center" }}>
+    <div className="key-action-buttons">
       {/* Rotate — creates new key, revokes this one */}
       <form action={rotateAction}>
         <input type="hidden" name="id" value={keyId} />

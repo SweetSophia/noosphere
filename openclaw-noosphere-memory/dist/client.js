@@ -59,7 +59,7 @@ export class NoosphereMemoryClient {
     }
     async request(path, init, options = {}) {
         if (!this.config.apiKey) {
-            throw new NoosphereClientError("Noosphere API key is not configured");
+            throw new NoosphereClientError("Noosphere API key is not configured. Set OPENCLAW_NOOSPHERE_API_KEY for OpenClaw Noosphere memory requests, or NOOSPHERE_API_KEY as a compatibility fallback.");
         }
         const requestTimeoutMs = options.timeoutMs ?? this.config.timeoutMs;
         const controller = new AbortController();

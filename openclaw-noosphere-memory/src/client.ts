@@ -202,7 +202,9 @@ export class NoosphereMemoryClient {
     options: { timeoutMs?: number } = {},
   ): Promise<T> {
     if (!this.config.apiKey) {
-      throw new NoosphereClientError("Noosphere API key is not configured");
+      throw new NoosphereClientError(
+        "Noosphere API key is not configured. Set OPENCLAW_NOOSPHERE_API_KEY for OpenClaw Noosphere memory requests, or NOOSPHERE_API_KEY as a compatibility fallback.",
+      );
     }
 
     const requestTimeoutMs = options.timeoutMs ?? this.config.timeoutMs;

@@ -277,6 +277,15 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
             ],
         )
 
+    def test_unconfigured_tool_error_names_hermes_api_key_env(self):
+        module = load_plugin()
+        provider = module.NoosphereMemoryProvider()
+
+        result = json.loads(provider.handle_tool_call("noosphere_status", {}))
+
+        self.assertIn("HERMES_NOOSPHERE_API_KEY", result["error"])
+        self.assertIn("NOOSPHERE_API_KEY", result["error"])
+
 
 if __name__ == "__main__":
     unittest.main()
