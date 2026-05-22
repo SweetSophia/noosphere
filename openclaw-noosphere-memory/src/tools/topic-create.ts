@@ -50,7 +50,7 @@ export function createNoosphereTopicCreateTool(
     name: "noosphere_topic_create",
     label: "Noosphere Topic Create",
     description:
-      "Create a Noosphere topic or subtopic. Requires an ADMIN-scoped Noosphere API key. Use this when noosphere_article_create needs a topicId and the appropriate topic does not exist yet.",
+      "Create a Noosphere topic or subtopic. Requires a WRITE-scoped Noosphere API key. Use this when noosphere_article_create needs a topicId and the appropriate topic does not exist yet.",
     parameters: TopicCreateToolParameters,
     async execute(_toolCallId: string, rawParams: unknown) {
       try {
