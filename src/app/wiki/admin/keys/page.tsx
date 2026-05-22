@@ -158,7 +158,7 @@ export default async function ApiKeysPage({ searchParams }: Props) {
                     <td data-label="Created">{new Date(key.createdAt).toLocaleDateString()}</td>
                     <td data-label="Last Used">{key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleDateString() : "Never"}</td>
                     <td data-label="Status">{key.revokedAt ? "Revoked" : "Active"}</td>
-                    <td data-label="Actions" className="api-key-action-cell">
+                    <td data-label="Action" className="api-key-action-cell">
                       <div className="api-key-actions">
                         {!key.revokedAt && (
                           <details className="scope-edit-dropdown">
