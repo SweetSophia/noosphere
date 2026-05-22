@@ -1,7 +1,7 @@
 {
   "id": "noosphere-memory",
   "name": "Noosphere Memory Bridge",
-  "description": "Explicit OpenClaw tools and optional auto-recall prompt injection for Noosphere memory over HTTP. Recall/get require READ permission; save requires WRITE; status requires an ADMIN-scoped Noosphere API key.",
+  "description": "Explicit OpenClaw tools and optional auto-recall prompt injection for Noosphere memory over HTTP. Recall/get/topics require READ permission; save/article creation require WRITE; topic creation/status require an ADMIN-scoped Noosphere API key.",
   "contracts": {
     "tools": [
       "noosphere_status",
@@ -9,6 +9,7 @@
       "noosphere_get",
       "noosphere_save",
       "noosphere_topics",
+      "noosphere_topic_create",
       "noosphere_article_create"
     ],
     "hooks": [

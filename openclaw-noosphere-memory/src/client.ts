@@ -60,6 +60,23 @@ export interface NoosphereTopicsResponse {
   topics: NoosphereTopicTree[];
 }
 
+export interface NoosphereTopicCreateRequest {
+  name: string;
+  slug?: string;
+  parentId?: string;
+  description?: string;
+}
+
+export interface NoosphereTopicCreateResponse {
+  id: string;
+  name: string;
+  slug: string;
+  parentId: string | null;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface NoosphereArticleCreateRequest {
   topicId: string;
   title: string;
@@ -168,6 +185,16 @@ export class NoosphereMemoryClient {
   async topics(): Promise<NoosphereTopicsResponse> {
     return this.request<NoosphereTopicsResponse>("/api/topics", {
       method: "GET",
+    });
+  }
+
+  async topicCreate(
+    request: NoosphereTopicCreateRequest,
+  ): Promise<NoosphereTopicCreateResponse> {
+    return this.request<NoosphereTopicCreateResponse>("/api/topics", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
     });
   }
 

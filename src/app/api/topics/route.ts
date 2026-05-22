@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/wiki";
-import { buildScopeFilter, checkRouteAuth, requirePermission } from "@/lib/api/auth";
+import { buildScopeFilter, checkRouteAuth, hasPermission, requirePermission } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/topics — List all topics (existing)
@@ -103,8 +103,14 @@ export async function POST(request: NextRequest) {
   if (!auth.authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (auth.role !== "EDITOR" && auth.role !== "ADMIN") {
-    return NextResponse.json({ error: "Editor or admin role required" }, { status: 403 });
+  const allowed = auth.permissions
+    ? hasPermission(auth, [Permissions.ADMIN])
+    : hasPermission(auth, [Permissions.WRITE]);
+  if (!allowed) {
+    return NextResponse.json(
+      { error: "Admin API key or editor/admin session required" },
+      { status: 403 },
+    );
   }
 
   try {

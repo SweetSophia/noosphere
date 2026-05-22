@@ -72,6 +72,8 @@ compatibility fallbacks.
 - `noosphere_save` creates a draft memory candidate.
 - `noosphere_article_create` creates a curated wiki article.
 - `noosphere_topics` lists visible topics for the caller's scopes.
+- `noosphere_topic_create` creates a topic or subtopic. It requires an ADMIN
+  Noosphere API key because topic taxonomy changes affect every caller.
 - `noosphere_status` checks health/status. Full memory status requires ADMIN.
 
 Scoped API keys can only assign scopes they already have. When a scoped key saves

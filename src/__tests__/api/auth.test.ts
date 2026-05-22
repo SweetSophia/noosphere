@@ -52,6 +52,18 @@ test("hasPermission checks session role hierarchy", () => {
   assert.equal(hasPermission(viewer, ["ADMIN"]), false);
 });
 
+test("topic creation policy can preserve editor sessions while requiring admin API keys", () => {
+  const adminKey = authWithPermissions("ADMIN");
+  const writeKey = authWithPermissions("WRITE");
+  const editorSession = authWithRole("EDITOR");
+  const viewerSession = authWithRole("VIEWER");
+
+  assert.equal(hasPermission(adminKey, ["ADMIN"]), true);
+  assert.equal(hasPermission(writeKey, ["ADMIN"]), false);
+  assert.equal(hasPermission(editorSession, ["WRITE"]), true);
+  assert.equal(hasPermission(viewerSession, ["WRITE"]), false);
+});
+
 test("hasPermission rejects unauthorized", () => {
   assert.equal(hasPermission({ authorized: false }, ["READ"]), false);
 });

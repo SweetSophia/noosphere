@@ -48,6 +48,21 @@ export interface NoosphereTopicTree {
 export interface NoosphereTopicsResponse {
     topics: NoosphereTopicTree[];
 }
+export interface NoosphereTopicCreateRequest {
+    name: string;
+    slug?: string;
+    parentId?: string;
+    description?: string;
+}
+export interface NoosphereTopicCreateResponse {
+    id: string;
+    name: string;
+    slug: string;
+    parentId: string | null;
+    description: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
 export interface NoosphereArticleCreateRequest {
     topicId: string;
     title: string;
@@ -132,6 +147,7 @@ export declare class NoosphereMemoryClient {
     get(request: NoosphereGetRequest): Promise<NoosphereGetResponse>;
     save(request: NoosphereSaveRequest): Promise<NoosphereSaveResponse>;
     topics(): Promise<NoosphereTopicsResponse>;
+    topicCreate(request: NoosphereTopicCreateRequest): Promise<NoosphereTopicCreateResponse>;
     articleCreate(request: NoosphereArticleCreateRequest): Promise<NoosphereArticleCreateResponse>;
     recall(request: NoosphereRecallRequest, options?: {
         timeoutMs?: number;
