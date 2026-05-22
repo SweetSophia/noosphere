@@ -103,13 +103,11 @@ export async function POST(request: NextRequest) {
   if (!auth.authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const allowed = auth.permissions
-    ? hasPermission(auth, [Permissions.ADMIN])
-    : hasPermission(auth, [Permissions.WRITE]);
+  const allowed = hasPermission(auth, [Permissions.WRITE]);
   if (!allowed) {
     return NextResponse.json(
-      { error: "Admin API key or editor/admin session required" },
-      { status: 403 },
+      { error: "Write API key or editor/admin session required" },
+      { status: 403 }
     );
   }
 
