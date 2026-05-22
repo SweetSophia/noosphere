@@ -1,6 +1,6 @@
 {
   "name": "@sweetsophia/openclaw-noosphere-memory",
-  "version": "1.6.4",
+  "version": "1.6.5",
   "private": false,
   "description": "OpenClaw plugin for Noosphere: agent memory tools, Noosphere recall, draft memory saving, and automatic prompt-time memory injection.",
   "type": "module",
