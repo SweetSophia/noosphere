@@ -18,6 +18,8 @@ import {
   type NoosphereGetResponse,
   type NoosphereSaveRequest,
   type NoosphereSaveResponse,
+  type NoosphereTopicCreateRequest,
+  type NoosphereTopicCreateResponse,
 } from "../../../openclaw-noosphere-memory/src/client.js";
 import {
   DEFAULT_NOOSPHERE_BASE_URL,
@@ -30,6 +32,7 @@ import type {
 } from "../../../openclaw-noosphere-memory/src/client.js";
 import { createNoosphereGetTool } from "../../../openclaw-noosphere-memory/src/tools/get.js";
 import { createNoosphereSaveTool } from "../../../openclaw-noosphere-memory/src/tools/save.js";
+import { createNoosphereTopicCreateTool } from "../../../openclaw-noosphere-memory/src/tools/topic-create.js";
 import type { NoosphereClientContext } from "../../../openclaw-noosphere-memory/src/shared-init.js";
 
 function makeContext(
@@ -1123,6 +1126,77 @@ describe("OpenClaw Noosphere save tool", () => {
     assert.equal(calls.length, 0);
     assert.match(String(missing.content[0]?.text), /topicId is required/);
     assert.match(String(badTags.content[0]?.text), /tags must be an array/);
+  });
+});
+
+describe("OpenClaw Noosphere topic create tool", () => {
+  function makeTopicCreateContext() {
+    const calls: NoosphereTopicCreateRequest[] = [];
+    const response: NoosphereTopicCreateResponse = {
+      id: "topic-1",
+      name: "Operations",
+      slug: "operations",
+      parentId: null,
+      description: "Operational runbooks",
+      createdAt: "2026-05-22T00:00:00.000Z",
+      updatedAt: "2026-05-22T00:00:00.000Z",
+    };
+
+    const context = {
+      config: {
+        baseUrl: "https://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
+      client: {
+        async topicCreate(request: NoosphereTopicCreateRequest) {
+          calls.push(request);
+          return response;
+        },
+      },
+    } as unknown as NoosphereClientContext;
+
+    return { context, calls, response };
+  }
+
+  it("normalizes topic create requests", async () => {
+    const { context, calls, response } = makeTopicCreateContext();
+    const tool = createNoosphereTopicCreateTool({}, context);
+
+    const result = await tool.execute("tool-1", {
+      name: " Operations ",
+      slug: "operations",
+      parentId: " parent-topic ",
+      description: " Operational runbooks ",
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.deepEqual(calls, [
+      {
+        name: "Operations",
+        slug: "operations",
+        parentId: "parent-topic",
+        description: "Operational runbooks",
+      },
+    ]);
+    assert.match(String(result.content[0]?.text), new RegExp(response.id));
+  });
+
+  it("rejects malformed topic create params before calling the client", async () => {
+    const { context, calls } = makeTopicCreateContext();
+    const tool = createNoosphereTopicCreateTool({}, context);
+
+    const missing = await tool.execute("tool-1", {});
+    const badSlug = await tool.execute("tool-2", {
+      name: "Operations",
+      slug: "Operations!",
+    });
+
+    assert.equal(missing.isError, true);
+    assert.equal(badSlug.isError, true);
+    assert.equal(calls.length, 0);
+    assert.match(String(missing.content[0]?.text), /name is required/);
+    assert.match(String(badSlug.content[0]?.text), /slug must contain only/);
   });
 });
 

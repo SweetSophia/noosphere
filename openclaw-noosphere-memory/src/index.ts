@@ -8,6 +8,7 @@ import { createNoosphereGetTool } from "./tools/get.js";
 import { createNoosphereRecallTool } from "./tools/recall.js";
 import { createNoosphereSaveTool } from "./tools/save.js";
 import { createNoosphereStatusTool } from "./tools/status.js";
+import { createNoosphereTopicCreateTool } from "./tools/topic-create.js";
 import { createNoosphereTopicsTool } from "./tools/topics.js";
 import { isRecord, readBoolean } from "./config.js";
 
@@ -94,6 +95,16 @@ export default definePluginEntry({
         api.config,
       );
       return createNoosphereTopicsTool(api.pluginConfig, clientContext);
+    });
+
+    api.registerTool((ctx: ToolContext) => {
+      const agentId = ctx.agentId ?? "default";
+      const clientContext = createNoosphereClientContextForAgent(
+        api.pluginConfig,
+        agentId,
+        api.config,
+      );
+      return createNoosphereTopicCreateTool(api.pluginConfig, clientContext);
     });
 
     api.registerTool((ctx: ToolContext) => {

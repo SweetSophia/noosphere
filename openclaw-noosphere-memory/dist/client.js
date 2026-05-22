@@ -43,6 +43,13 @@ export class NoosphereMemoryClient {
             method: "GET",
         });
     }
+    async topicCreate(request) {
+        return this.request("/api/topics", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(request),
+        });
+    }
     async articleCreate(request) {
         return this.request("/api/articles", {
             method: "POST",

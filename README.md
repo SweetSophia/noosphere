@@ -408,6 +408,7 @@ Default runtime locations:
 | `noosphere_get` | READ | Direct lookup by provider/id or canonical ref |
 | `noosphere_save` | WRITE | Save a draft memory candidate; never auto-publishes |
 | `noosphere_topics` | READ | List all topics in hierarchical tree form; use to find topic IDs before creating articles |
+| `noosphere_topic_create` | ADMIN | Create a topic or subtopic when a target topic does not exist yet |
 | `noosphere_article_create` | WRITE | Create a curated wiki article directly (published by default); strips injected memory blocks, validates content bounds, and handles Unicode/non-ASCII titles |
 
 **Auto-injection:**
