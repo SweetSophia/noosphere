@@ -1,11 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 
 interface CopyButtonProps {
   text: string;
   label?: string;
   copiedLabel?: string;
+  failedLabel?: string;
+  copiedStatusLabel?: string;
+  failedStatusLabel?: string;
   className?: string;
 }
 
@@ -13,10 +16,14 @@ export function CopyButton({
   text,
   label = "Copy",
   copiedLabel = "Copied",
+  failedLabel = "Copy failed",
+  copiedStatusLabel = "Copied to clipboard.",
+  failedStatusLabel = "Copy failed. The text was not copied.",
   className = "btn btn-secondary btn-sm",
 }: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
   const [failed, setFailed] = useState(false);
+  const statusText = failed ? failedStatusLabel : copied ? copiedStatusLabel : "";
 
   async function handleCopy() {
     try {
@@ -35,11 +42,28 @@ export function CopyButton({
   }
 
   return (
-    <button type="button" className={className} onClick={handleCopy} aria-live="polite">
-      {failed ? "Copy failed" : copied ? copiedLabel : label}
-    </button>
+    <>
+      <button type="button" className={className} onClick={handleCopy}>
+        {failed ? failedLabel : copied ? copiedLabel : label}
+      </button>
+      <span aria-live="polite" aria-atomic="true" style={visuallyHiddenStyle}>
+        {statusText}
+      </span>
+    </>
   );
 }
+
+const visuallyHiddenStyle = {
+  border: 0,
+  clip: "rect(0 0 0 0)",
+  height: "1px",
+  margin: "-1px",
+  overflow: "hidden",
+  padding: 0,
+  position: "absolute",
+  whiteSpace: "nowrap",
+  width: "1px",
+} satisfies CSSProperties;
 
 function copyWithTextareaFallback(text: string) {
   const textarea = document.createElement("textarea");
