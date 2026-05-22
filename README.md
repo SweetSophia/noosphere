@@ -8,9 +8,18 @@ Noosphere started as an agent-authored wiki. It is now also a provider-agnostic 
 > Agents can use Noosphere to store durable project knowledge, retrieve relevant context, synthesize articles from research, and promote frequently reused memories over time. **Humans can browse and edit the same knowledge through a responsive web UI**, export/import Markdown vaults, and sync with Obsidian.
 
 <o **OpenClaw, Hermes Agent, Opencode, and Kilo Code support via plugins. Universal Support via API.** o>  
-<- 05/21/2026 - added Redis for massive recall speed improvements ->
 
 <img width="1536" height="1024" alt="noosphere-memory-system-explanation-overview" src="https://github.com/user-attachments/assets/f7cdb553-6d4d-4d7b-b3e3-741ecc59b8e3" />
+
+# Quick Installation Guides:
+**Prerequisites:** [Getting Started](#prerequisites)  
+**Install for OpenClaw:** [OpenClaw](#openclaw-integration)  
+**Install for Hermes Agent:** [Hermes Agent](#hermes-agent-integration)  
+**Install for OpenCode and oh my opencode slim:** [OpenCode and OMOS](#opencode-integration)  
+**Install for KiloCode:** [KiloCode](#kilo-code-capabilities)  
+**API for all systems without plugins:** [Universal API Integration](https://github.com/SweetSophia/noosphere#setup)
+
+**Optional new Speed Boost Redis Cache:** [Redis Cache](#redis-recall-cache-add-on)
 
 ---
 
@@ -125,94 +134,6 @@ Frontpage | Logging
 - **Sync/export** content for Obsidian and Markdown workflows.
 - **Images Support** you can add images to articles
 
-## Memory Architecture
-
-Noosphere's memory layer normalizes multiple sources into a single result shape:
-
-```text
-MemoryProvider
-  → RecallOrchestrator
-  → optional Redis cache-aside lookup
-  → ranking
-  → deduplication
-  → conflict resolution
-  → context budgeting
-  → prompt injection text / inspection results
-```
-
-Core concepts:
-
-- **Providers** return normalized `MemoryResult` objects.
-- **Redis recall cache** short-circuits repeat Noosphere article searches before the PostgreSQL full-text path when `REDIS_URL` is configured.
-- **Curation levels** are `ephemeral → managed → curated`.
-- **Composite score** combines relevance, confidence, recency, and curation.
-- **Auto recall** respects provider-level `allowAutoRecall` settings.
-- **Inspection recall** queries enabled providers without auto-recall filtering.
-- **Deduplication** collapses exact, canonical, or semantic overlap while preserving provenance.
-- **Conflict resolution** can surface conflicts, suppress low-quality matches, or prefer recent/curated/highest-scoring results.
-- **Budgeting** enforces prompt-safe token and result caps.
-- **Promotion** identifies high-value recurring memories for review.
-- **Backfill** turns approved or historical material into durable articles.
-
-See the full implementation reference: [`docs/NOOSPHERE-MEMORY-ARCHITECTURE.md`](docs/NOOSPHERE-MEMORY-ARCHITECTURE.md).
-
----
-
-## Advanced Memory Features
-
-| Feature | **Noosphere** | **Hindsight** | **QMD** | **memU** | **mem0** | **LanceDB Pro** |
-|---|---|---|---|---|---|---|
-| **Multi-Provider Recall** | ✅ Noosphere + Hindsight + extensible | ❌ (single provider) | ❌ (single store) | ❌ (single provider) | ❌ (single provider) | ❌ (single store) |
-| **Recall Orchestration** | ✅ Concurrent fan-out + ranking | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Cross-Provider Dedup** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Conflict Detection** | ✅ Configurable strategies | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Token Budget Manager** | ✅ Prompt-safe recall blocks | ✅ `recallMaxTokens` | ❌ | ❌ | ❌ | ❌ |
-| **Promotion (ephemeral → curated)** | ✅ Scheduled + manual threshold triggers | ❌ | ❌ | ❌ | ❌ | ⚠️ Decay model (Weibull) |
-| **Backfill / Synthesis** | ✅ Job lifecycle with retry | ✅ Historical backfill CLI | ❌ | ❌ | ❌ | ❌ |
-| **Local Scheduler** | ✅ Built-in memory job runner | ❌ | ❌ | ✅ Continuous sync loop | ❌ | ❌ |
-| **Revision History** | ✅ Per-article | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Topic Hierarchy** | ✅ Unlimited depth | ❌ | ❌ | ✅ Category hierarchy | ❌ | ❌ |
-| **Tags / Relations** | ✅ Tags + article edges | ❌ | ❌ | ✅ Cross-references | ✅ Entity linking (v3) | ❌ |
-| **Soft Delete / Trash** | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
-
----
-
-## Wiki Model
-
-```text
-Topic
-├── Subtopic
-│   ├── Article
-│   └── Article
-└── Subtopic
-    └── Article
-```
-
-Articles can also have:
-
-- tags
-- source metadata
-- confidence level: `low | medium | high`
-- status: `draft | reviewed | published`
-- revision history
-- related article edges
-- soft-delete state
-
-## Tech Stack
-
-| Layer | Technology |
-| --- | --- |
-| App | Next.js 16, App Router, TypeScript, Turbopack |
-| Database | PostgreSQL 16 |
-| ORM | Prisma 7 with adapter pattern |
-| Auth | NextAuth.js for humans, Bearer API keys for agents |
-| Markdown | `react-markdown`, `remark-gfm`, syntax highlighting |
-| Cache | Redis 7 for optional recall/search acceleration |
-| Memory | Provider abstraction, orchestrator, dedup, conflict, budget, promotion, backfill, scheduler |
-| Runtime | Node.js 22 |
-| Container | Docker + Docker Compose |
-| Deployment | Self-hosted VPS or any Node.js 22 host |
-
 ## Getting Started
 
 ### Prerequisites
@@ -220,7 +141,7 @@ Articles can also have:
 - Docker + Docker Compose
 - Node.js 22+ for local development
 
-### Setup
+### Setup for non-plugin systems
 
 ```bash
 git clone https://github.com/SweetSophia/noosphere.git
@@ -703,6 +624,95 @@ kilo plugin @sweetsophia/kilocode-noosphere-memory --global
 | Idle auto-save | Opt-in | Uses `session.idle`; requires `KILOCODE_NOOSPHERE_AUTO_SAVE=true` and `KILOCODE_NOOSPHERE_AUTO_SAVE_TOPIC_ID`. |
 
 Do not commit real API keys into Kilo config. Use environment variables or host-level secret management. Prefer `KILOCODE_NOOSPHERE_*` variables on hosts that also run Opencode, OpenClaw, or Hermes; generic `NOOSPHERE_*` variables remain compatibility fallbacks.
+
+
+## Memory Architecture
+
+Noosphere's memory layer normalizes multiple sources into a single result shape:
+
+```text
+MemoryProvider
+  → RecallOrchestrator
+  → optional Redis cache-aside lookup
+  → ranking
+  → deduplication
+  → conflict resolution
+  → context budgeting
+  → prompt injection text / inspection results
+```
+
+Core concepts:
+
+- **Providers** return normalized `MemoryResult` objects.
+- **Redis recall cache** short-circuits repeat Noosphere article searches before the PostgreSQL full-text path when `REDIS_URL` is configured.
+- **Curation levels** are `ephemeral → managed → curated`.
+- **Composite score** combines relevance, confidence, recency, and curation.
+- **Auto recall** respects provider-level `allowAutoRecall` settings.
+- **Inspection recall** queries enabled providers without auto-recall filtering.
+- **Deduplication** collapses exact, canonical, or semantic overlap while preserving provenance.
+- **Conflict resolution** can surface conflicts, suppress low-quality matches, or prefer recent/curated/highest-scoring results.
+- **Budgeting** enforces prompt-safe token and result caps.
+- **Promotion** identifies high-value recurring memories for review.
+- **Backfill** turns approved or historical material into durable articles.
+
+See the full implementation reference: [`docs/NOOSPHERE-MEMORY-ARCHITECTURE.md`](docs/NOOSPHERE-MEMORY-ARCHITECTURE.md).
+
+---
+
+## Advanced Memory Features
+
+| Feature | **Noosphere** | **Hindsight** | **QMD** | **memU** | **mem0** | **LanceDB Pro** |
+|---|---|---|---|---|---|---|
+| **Multi-Provider Recall** | ✅ Noosphere + Hindsight + extensible | ❌ (single provider) | ❌ (single store) | ❌ (single provider) | ❌ (single provider) | ❌ (single store) |
+| **Recall Orchestration** | ✅ Concurrent fan-out + ranking | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Cross-Provider Dedup** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Conflict Detection** | ✅ Configurable strategies | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Token Budget Manager** | ✅ Prompt-safe recall blocks | ✅ `recallMaxTokens` | ❌ | ❌ | ❌ | ❌ |
+| **Promotion (ephemeral → curated)** | ✅ Scheduled + manual threshold triggers | ❌ | ❌ | ❌ | ❌ | ⚠️ Decay model (Weibull) |
+| **Backfill / Synthesis** | ✅ Job lifecycle with retry | ✅ Historical backfill CLI | ❌ | ❌ | ❌ | ❌ |
+| **Local Scheduler** | ✅ Built-in memory job runner | ❌ | ❌ | ✅ Continuous sync loop | ❌ | ❌ |
+| **Revision History** | ✅ Per-article | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Topic Hierarchy** | ✅ Unlimited depth | ❌ | ❌ | ✅ Category hierarchy | ❌ | ❌ |
+| **Tags / Relations** | ✅ Tags + article edges | ❌ | ❌ | ✅ Cross-references | ✅ Entity linking (v3) | ❌ |
+| **Soft Delete / Trash** | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+
+---
+
+## Wiki Model
+
+```text
+Topic
+├── Subtopic
+│   ├── Article
+│   └── Article
+└── Subtopic
+    └── Article
+```
+
+Articles can also have:
+
+- tags
+- source metadata
+- confidence level: `low | medium | high`
+- status: `draft | reviewed | published`
+- revision history
+- related article edges
+- soft-delete state
+
+## Tech Stack
+
+| Layer | Technology |
+| --- | --- |
+| App | Next.js 16, App Router, TypeScript, Turbopack |
+| Database | PostgreSQL 16 |
+| ORM | Prisma 7 with adapter pattern |
+| Auth | NextAuth.js for humans, Bearer API keys for agents |
+| Markdown | `react-markdown`, `remark-gfm`, syntax highlighting |
+| Cache | Redis 7 for optional recall/search acceleration |
+| Memory | Provider abstraction, orchestrator, dedup, conflict, budget, promotion, backfill, scheduler |
+| Runtime | Node.js 22 |
+| Container | Docker + Docker Compose |
+| Deployment | Self-hosted VPS or any Node.js 22 host |
 
 ## Redis Recall Cache Add-on
 
