@@ -10,11 +10,8 @@ It provides:
 
 ## Install
 
-```bash
-npm install -g @sweetsophia/opencode-noosphere-memory
-```
-
-Add it to `~/.config/opencode/opencode.json`:
+Add it to `~/.config/opencode/opencode.json`. Opencode can auto-install scoped
+npm plugins from this config:
 
 ```json
 {
@@ -23,6 +20,40 @@ Add it to `~/.config/opencode/opencode.json`:
   ]
 }
 ```
+
+Or install the package globally first if you prefer explicit local installs:
+
+```bash
+npm install -g @sweetsophia/opencode-noosphere-memory
+```
+
+### oh-my-opencode-slim
+
+`oh-my-opencode-slim` is an Opencode orchestration plugin, so Noosphere does not
+need a separate fork. Install both plugins and keep both entries in
+`~/.config/opencode/opencode.json`:
+
+```bash
+npx oh-my-opencode-slim@latest install
+# Optional: Opencode can also auto-install npm plugins from opencode.json.
+npm install -g @sweetsophia/opencode-noosphere-memory
+export OPENCODE_NOOSPHERE_API_KEY="noo_..."
+```
+
+```json
+{
+  "plugin": [
+    "oh-my-opencode-slim",
+    "@sweetsophia/opencode-noosphere-memory"
+  ]
+}
+```
+
+The `oh-my-opencode-slim` installer preserves non-matching plugin entries when
+it updates `opencode.json`; rerunning it should not remove the Noosphere entry.
+Opencode can auto-install the scoped npm package from the plugin array, so the
+global `npm install -g` step is useful for explicit local installs but is not a
+runtime compatibility requirement.
 
 Or configure it with explicit options:
 

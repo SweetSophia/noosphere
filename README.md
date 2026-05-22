@@ -77,7 +77,7 @@ Implemented memory modules:
 
 The OpenClaw plugin/skill bridge is implemented and ships in this repository at `openclaw-noosphere-memory/`. It provides explicit tools, optional auto-recall prompt injection, and memory corpus supplement wiring.
 
-The Opencode plugin ships in this repository at `opencode-noosphere-memory/`. It provides prompt-time auto-recall through Opencode's `chat.message` hook, optional idle auto-save through `session.idle`, and explicit tools for status, recall, topic lookup, and draft memory saving.
+The Opencode plugin ships in this repository at `opencode-noosphere-memory/`. It provides prompt-time auto-recall through Opencode's `chat.message` hook, optional idle auto-save through `session.idle`, and explicit tools for status, recall, topic lookup, and draft memory saving. It is also compatible with `oh-my-opencode-slim`, which runs as a second Opencode plugin in the same `~/.config/opencode/opencode.json` plugin array.
 
 The Kilo Code plugin ships in this repository at `kilocode-noosphere-memory/`. It mirrors the Opencode integration for Kilo's current plugin runtime with prompt-time auto-recall, optional idle auto-save, and explicit Noosphere tools.
 
@@ -615,12 +615,8 @@ Noosphere ships an Opencode plugin at `opencode-noosphere-memory/`.
 
 ### Quick install
 
-```bash
-npm install -g @sweetsophia/opencode-noosphere-memory
-export OPENCODE_NOOSPHERE_API_KEY="noo_..."
-```
-
-Add the package to `~/.config/opencode/opencode.json`:
+Add the package to `~/.config/opencode/opencode.json`. Opencode can auto-install
+scoped npm plugins from this config:
 
 ```json
 {
@@ -629,6 +625,31 @@ Add the package to `~/.config/opencode/opencode.json`:
   ]
 }
 ```
+
+Optional explicit global install:
+
+```bash
+npm install -g @sweetsophia/opencode-noosphere-memory
+export OPENCODE_NOOSPHERE_API_KEY="noo_..."
+```
+
+If you use [`oh-my-opencode-slim`](https://github.com/alvinunreal/oh-my-opencode-slim),
+install it normally and keep both Opencode plugins registered:
+
+```json
+{
+  "plugin": [
+    "oh-my-opencode-slim",
+    "@sweetsophia/opencode-noosphere-memory"
+  ]
+}
+```
+
+`oh-my-opencode-slim` manages its own agent configuration in
+`~/.config/opencode/oh-my-opencode-slim.json`; Noosphere keeps using
+`OPENCODE_NOOSPHERE_*` environment variables and the same `noosphere_*` tools.
+Opencode can auto-install the scoped npm plugin from this config; a global npm
+install is optional.
 
 ### Opencode capabilities
 
