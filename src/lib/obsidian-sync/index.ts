@@ -6,7 +6,7 @@
  */
 
 import { createHash } from "crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { join, resolve, relative as pathRelative } from "path";
 import { spawn } from "child_process";
 import yaml from "js-yaml";
@@ -573,20 +573,35 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
           continue;
         }
 
-        // Conflict detection: check if local file was modified since last sync
-        // Only meaningful when we're about to overwrite with DB content
+        // Conflict detection: check if local file was modified since last sync.
+        // Only meaningful when we're about to overwrite with DB content.
+        // We use a two-stage check: byte size first, then hash. Obsidian sync
+        // tools (e.g., ob sync, iCloud, Dropbox) may touch files and change
+        // their hash without modifying content. If byte sizes match, the change
+        // is cosmetic (line-ending normalization, metadata touch, etc.) and we
+        // skip the conflict.
         if (existsSync(safe) && existingEntry) {
           const diskHash = fileHash(safe);
-          // diskHash vs canonicalHash — if they differ, the local file has been
-          // edited since the last sync (which used the same canonicalHash)
           if (diskHash && diskHash !== canonicalHash) {
-            stats.conflictsDetected++;
-            if (config.preserveLocalChanges) {
-              const diskContent = readFileSync(safe, "utf-8");
-              const backupRel = archiveConflict(vaultPath, relativePath, diskContent);
-              warnings.push(`Local modification preserved: ${relativePath} → ${backupRel}`);
+            // Hash differs — check byte size before declaring a real conflict
+            const canonicalContent = renderMarkdown(article, topicPath, canonicalHash, syncedAt, config.publish);
+            const diskSize = statSync(safe).size;
+            const canonicalSize = Buffer.byteLength(canonicalContent, "utf-8");
+            if (diskSize === canonicalSize) {
+              // Same size, different hash — likely a cosmetic change from a sync tool
+              // (line-ending normalization, BOM, etc.). Not a real conflict.
+              stats.skipped++;
+              warnings.push(`Byte-size match, skipping false-positive conflict: ${relativePath}`);
             } else {
-              warnings.push(`Local modification overwritten by database: ${relativePath}`);
+              // Different size AND different hash — genuine local modification
+              stats.conflictsDetected++;
+              if (config.preserveLocalChanges) {
+                const diskContent = readFileSync(safe, "utf-8");
+                const backupRel = archiveConflict(vaultPath, relativePath, diskContent);
+                warnings.push(`Local modification preserved: ${relativePath} → ${backupRel}`);
+              } else {
+                warnings.push(`Local modification overwritten by database: ${relativePath}`);
+              }
             }
           }
         }
