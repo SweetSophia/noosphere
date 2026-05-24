@@ -166,10 +166,9 @@ function normalizeManagedGitPaths(vaultPath: string, managedPaths: string[]): st
 
 async function gitAddManaged(dir: string, managedPaths: string[]): Promise<void> {
   const safeManagedPaths = normalizeManagedGitPaths(dir, managedPaths);
-  if (safeManagedPaths.length === 0) return;
+  // Always stage .noosphere-sync/ (manifest, conflicts) even when no article paths changed.
+  const args = ["add", "--", ...safeManagedPaths, ".noosphere-sync"];
   return new Promise((resolve, reject) => {
-    // Stage only managed content and .noosphere-sync/
-    const args = ["add", "--", ...safeManagedPaths, ".noosphere-sync"];
     const proc = spawn("git", args, { cwd: dir });
     proc.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git add exited ${code}`))));
     proc.on("error", reject);
@@ -391,8 +390,8 @@ function writeLastRun(vaultPath: string, config: ObsidianSyncConfig, result: Syn
 function safePath(vaultPath: string, relativePath: string): string | null {
   // Normalize vaultPath: strip trailing separators so the startsWith boundary check
   // is not bypassed by resolve("/data/vault/", "../etc/passwd") → /data/etc/passwd
-  const normalizedVault = vaultPath.replace(/[/\\]+$/, "");
-  const resolved = resolve(normalizedVault, relativePath);
+  const normalizedVault = vaultPath.replace(/[/\\]+$/, "").replace(/\\/g, "/");
+  const resolved = resolve(vaultPath.replace(/[/\\]+$/, ""), relativePath).replace(/\\/g, "/");
   if (!resolved.startsWith(normalizedVault + "/")) return null; // path traversal
   return resolved;
 }
