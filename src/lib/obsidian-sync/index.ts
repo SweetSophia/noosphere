@@ -33,8 +33,10 @@ export interface ManifestEntry {
   path: string;
   updatedAt: string; // ISO string
   contentHash: string;
-  /** SHA-256 hash of the exact bytes last written to disk (includes real syncedAt). Used for conflict detection. */
-  writtenHash: string;
+  /** SHA-256 hash of the exact bytes last written to disk (includes real syncedAt).
+   *  Used for conflict detection. Undefined for legacy manifests created before
+   *  this field existed, or on first sync when the file hasn't been written yet. */
+  writtenHash?: string;
   deletedAt: string | null;
 }
 
@@ -585,18 +587,23 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
         // For manifests created before writtenHash existed, we treat the current
         // disk hash as the baseline (no conflict on first run with new format).
         if (existsSync(safe) && existingEntry) {
-          const diskBuffer = readFileSync(safe);
-          const diskHash = createHash("sha256").update(diskBuffer).digest("hex");
-          const baseline = existingEntry.writtenHash || diskHash;
-          if (diskHash !== baseline) {
-            // File on disk differs from what we last wrote — genuine local modification.
-            stats.conflictsDetected++;
-            if (config.preserveLocalChanges) {
-              const backupRel = archiveConflict(vaultPath, relativePath, diskBuffer.toString("utf-8"));
-              warnings.push(`Local modification preserved: ${relativePath} → ${backupRel}`);
-            } else {
-              warnings.push(`Local modification overwritten by database: ${relativePath}`);
+          try {
+            const diskBuffer = readFileSync(safe);
+            const diskHash = createHash("sha256").update(diskBuffer).digest("hex");
+            const baseline = existingEntry.writtenHash || diskHash;
+            if (diskHash !== baseline) {
+              // File on disk differs from what we last wrote — genuine local modification.
+              stats.conflictsDetected++;
+              if (config.preserveLocalChanges) {
+                const backupRel = archiveConflict(vaultPath, relativePath, diskBuffer.toString("utf-8"));
+                warnings.push(`Local modification preserved: ${relativePath} → ${backupRel}`);
+              } else {
+                warnings.push(`Local modification overwritten by database: ${relativePath}`);
+              }
             }
+          } catch {
+            // File deleted or unreadable between existsSync and readFileSync —
+            // skip conflict detection and proceed to write (re-creating the file).
           }
         }
 
@@ -611,9 +618,11 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
         // Compute writtenHash from the exact bytes written to disk
         lastWrittenHash = createHash("sha256").update(markdown).digest("hex");
       } else if (!shouldWrite) {
+        // shouldWrite is false only when mode != "full", existingEntry exists,
+        // and content hasn't changed — so existingEntry is always defined here.
         stats.unchanged++;
-        if (existingEntry) managedPaths.push(relativePath);
-        lastWrittenHash = null;
+        managedPaths.push(relativePath);
+        // lastWrittenHash stays null from loop initialization — no new write.
       }
 
       // Update manifest entry — store writtenHash for accurate conflict detection
@@ -623,7 +632,7 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
         path: relativePath,
         updatedAt: article.updatedAt.toISOString(),
         contentHash: canonicalHash,
-        writtenHash: lastWrittenHash ?? existingEntry?.writtenHash ?? "",
+        writtenHash: lastWrittenHash ?? existingEntry?.writtenHash,
         deletedAt: null,
       };
     }
