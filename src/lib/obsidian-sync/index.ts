@@ -143,11 +143,33 @@ async function gitStatusPorcelain(dir: string): Promise<string> {
   });
 }
 
+function normalizeManagedGitPaths(vaultPath: string, managedPaths: string[]): string[] {
+  const safePaths = new Set<string>();
+
+  for (const managedPath of managedPaths) {
+    const safeAbsolutePath = safePath(vaultPath, managedPath);
+    if (!safeAbsolutePath) continue;
+
+    const relativePath = pathRelative(vaultPath, safeAbsolutePath).replace(/\\/g, "/");
+    if (!relativePath || relativePath === "." || relativePath === ".." || relativePath.startsWith("../")) {
+      continue;
+    }
+    if (relativePath === ".git" || relativePath.startsWith(".git/")) {
+      continue;
+    }
+
+    safePaths.add(relativePath);
+  }
+
+  return [...safePaths];
+}
+
 async function gitAddManaged(dir: string, managedPaths: string[]): Promise<void> {
-  if (managedPaths.length === 0) return;
+  const safeManagedPaths = normalizeManagedGitPaths(dir, managedPaths);
+  if (safeManagedPaths.length === 0) return;
   return new Promise((resolve, reject) => {
     // Stage only managed content and .noosphere-sync/
-    const args = ["add", "--", ...managedPaths, join(dir, ".noosphere-sync")];
+    const args = ["add", "--", ...safeManagedPaths, ".noosphere-sync"];
     const proc = spawn("git", args, { cwd: dir });
     proc.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git add exited ${code}`))));
     proc.on("error", reject);
@@ -349,7 +371,7 @@ function writeLastRun(vaultPath: string, config: ObsidianSyncConfig, result: Syn
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const lastRunFile = join(vaultPath, config.lastRunPath);
   const summary = {
-    lastRunAt: result.stats ? undefined : undefined, // filled below
+    lastRunAt: new Date().toISOString(),
     mode: result.mode,
     dryRun: result.dryRun,
     stats: result.stats,
@@ -378,15 +400,6 @@ function safePath(vaultPath: string, relativePath: string): string | null {
 // ─────────────────────────────────────────────
 // Conflict detection
 // ─────────────────────────────────────────────
-
-function fileHash(filePath: string): string | null {
-  try {
-    const content = readFileSync(filePath);
-    return createHash("sha256").update(content).digest("hex");
-  } catch {
-    return null;
-  }
-}
 
 function archiveConflict(
   vaultPath: string,
@@ -625,7 +638,6 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
         // shouldWrite is false only when mode != "full", existingEntry exists,
         // content hasn't changed, and no legacy empty writtenHash needs repair.
         stats.unchanged++;
-        managedPaths.push(relativePath);
         // lastWrittenHash stays null from loop initialization — no new write.
       }
 
