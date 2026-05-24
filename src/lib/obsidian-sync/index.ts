@@ -6,7 +6,7 @@
  */
 
 import { createHash } from "crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
 import { join, resolve, relative as pathRelative } from "path";
 import { spawn } from "child_process";
 import yaml from "js-yaml";
@@ -33,6 +33,8 @@ export interface ManifestEntry {
   path: string;
   updatedAt: string; // ISO string
   contentHash: string;
+  /** SHA-256 hash of the exact bytes last written to disk (includes real syncedAt). Used for conflict detection. */
+  writtenHash: string;
   deletedAt: string | null;
 }
 
@@ -550,6 +552,7 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
 
     // ── Process each article ───────────────────────────────────────────────
     for (const article of articles) {
+      let lastWrittenHash: string | null = null;
       const topicPath = buildTopicPath(topicMap, article.topicId);
       const relativePath = buildArticlePath(topicPath, article.slug);
       const canonicalHash = computeContentHash(article, topicPath);
@@ -574,34 +577,25 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
         }
 
         // Conflict detection: check if local file was modified since last sync.
-        // Only meaningful when we're about to overwrite with DB content.
-        // We use a two-stage check: byte size first, then hash. Obsidian sync
-        // tools (e.g., ob sync, iCloud, Dropbox) may touch files and change
-        // their hash without modifying content. If byte sizes match, the change
-        // is cosmetic (line-ending normalization, metadata touch, etc.) and we
-        // skip the conflict.
+        // Compares the on-disk hash against the hash of the exact bytes we last
+        // wrote (writtenHash from manifest). Previous versions compared against
+        // canonicalHash (computed with fake timestamp), which never matched the
+        // real file on disk — causing every file to appear as a conflict.
+        //
+        // For manifests created before writtenHash existed, we treat the current
+        // disk hash as the baseline (no conflict on first run with new format).
         if (existsSync(safe) && existingEntry) {
-          const diskHash = fileHash(safe);
-          if (diskHash && diskHash !== canonicalHash) {
-            // Hash differs — check byte size before declaring a real conflict
-            const canonicalContent = renderMarkdown(article, topicPath, canonicalHash, syncedAt, config.publish);
-            const diskSize = statSync(safe).size;
-            const canonicalSize = Buffer.byteLength(canonicalContent, "utf-8");
-            if (diskSize === canonicalSize) {
-              // Same size, different hash — likely a cosmetic change from a sync tool
-              // (line-ending normalization, BOM, etc.). Not a real conflict.
-              stats.skipped++;
-              warnings.push(`Byte-size match, skipping false-positive conflict: ${relativePath}`);
+          const diskBuffer = readFileSync(safe);
+          const diskHash = createHash("sha256").update(diskBuffer).digest("hex");
+          const baseline = existingEntry.writtenHash || diskHash;
+          if (diskHash !== baseline) {
+            // File on disk differs from what we last wrote — genuine local modification.
+            stats.conflictsDetected++;
+            if (config.preserveLocalChanges) {
+              const backupRel = archiveConflict(vaultPath, relativePath, diskBuffer.toString("utf-8"));
+              warnings.push(`Local modification preserved: ${relativePath} → ${backupRel}`);
             } else {
-              // Different size AND different hash — genuine local modification
-              stats.conflictsDetected++;
-              if (config.preserveLocalChanges) {
-                const diskContent = readFileSync(safe, "utf-8");
-                const backupRel = archiveConflict(vaultPath, relativePath, diskContent);
-                warnings.push(`Local modification preserved: ${relativePath} → ${backupRel}`);
-              } else {
-                warnings.push(`Local modification overwritten by database: ${relativePath}`);
-              }
+              warnings.push(`Local modification overwritten by database: ${relativePath}`);
             }
           }
         }
@@ -613,16 +607,23 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
         if (isNew) stats.created++;
         else if (existingEntry) stats.updated++;
         stats.written++;
+
+        // Compute writtenHash from the exact bytes written to disk
+        lastWrittenHash = createHash("sha256").update(markdown).digest("hex");
       } else if (!shouldWrite) {
         stats.unchanged++;
         if (existingEntry) managedPaths.push(relativePath);
+        lastWrittenHash = null;
       }
 
-      // Update manifest entry
+      // Update manifest entry — store writtenHash for accurate conflict detection
+      // on the next sync. This is the hash of the exact bytes on disk.
+      // When we didn't write (unchanged), preserve the existing writtenHash.
       manifest.articles[article.id] = {
         path: relativePath,
         updatedAt: article.updatedAt.toISOString(),
         contentHash: canonicalHash,
+        writtenHash: lastWrittenHash ?? existingEntry?.writtenHash ?? "",
         deletedAt: null,
       };
     }
