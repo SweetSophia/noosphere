@@ -566,9 +566,10 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
         pathChanged ||
         existingEntry.updatedAt !== article.updatedAt.toISOString() ||
         existingEntry.contentHash !== canonicalHash;
+      const hasEmptyWrittenHash = existingEntry?.writtenHash === "";
 
       const isNew = !existingEntry;
-      const shouldWrite = options.mode === "full" || !existingEntry || contentChanged;
+      const shouldWrite = options.mode === "full" || !existingEntry || contentChanged || hasEmptyWrittenHash;
 
       if (shouldWrite && !options.dryRun) {
         const safe = safePath(vaultPath, relativePath);
@@ -586,11 +587,14 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
         //
         // For manifests created before writtenHash existed, we treat the current
         // disk hash as the baseline (no conflict on first run with new format).
+        // A persisted empty string is different: it came from the short-lived
+        // sentinel fallback and must be treated as invalid so we archive before
+        // rewriting rather than silently blessing the current disk state.
         if (existsSync(safe) && existingEntry) {
           try {
             const diskBuffer = readFileSync(safe);
             const diskHash = createHash("sha256").update(diskBuffer).digest("hex");
-            const baseline = existingEntry.writtenHash || diskHash;
+            const baseline = existingEntry.writtenHash ?? diskHash;
             if (diskHash !== baseline) {
               // File on disk differs from what we last wrote — genuine local modification.
               stats.conflictsDetected++;
@@ -619,7 +623,7 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
         lastWrittenHash = createHash("sha256").update(markdown).digest("hex");
       } else if (!shouldWrite) {
         // shouldWrite is false only when mode != "full", existingEntry exists,
-        // and content hasn't changed — so existingEntry is always defined here.
+        // content hasn't changed, and no legacy empty writtenHash needs repair.
         stats.unchanged++;
         managedPaths.push(relativePath);
         // lastWrittenHash stays null from loop initialization — no new write.
