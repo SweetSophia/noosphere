@@ -6,7 +6,7 @@
  */
 
 import { createHash } from "crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
 import { join, resolve, relative as pathRelative } from "path";
 import { spawn } from "child_process";
 import yaml from "js-yaml";
@@ -33,6 +33,10 @@ export interface ManifestEntry {
   path: string;
   updatedAt: string; // ISO string
   contentHash: string;
+  /** SHA-256 hash of the exact bytes last written to disk (includes real syncedAt).
+   *  Used for conflict detection. Undefined for legacy manifests created before
+   *  this field existed, or on first sync when the file hasn't been written yet. */
+  writtenHash?: string;
   deletedAt: string | null;
 }
 
@@ -139,11 +143,32 @@ async function gitStatusPorcelain(dir: string): Promise<string> {
   });
 }
 
+function normalizeManagedGitPaths(vaultPath: string, managedPaths: string[]): string[] {
+  const safePaths = new Set<string>();
+
+  for (const managedPath of managedPaths) {
+    const safeAbsolutePath = safePath(vaultPath, managedPath);
+    if (!safeAbsolutePath) continue;
+
+    const relativePath = pathRelative(vaultPath, safeAbsolutePath).replace(/\\/g, "/");
+    if (!relativePath || relativePath === "." || relativePath === ".." || relativePath.startsWith("../")) {
+      continue;
+    }
+    if (relativePath === ".git" || relativePath.startsWith(".git/")) {
+      continue;
+    }
+
+    safePaths.add(relativePath);
+  }
+
+  return [...safePaths];
+}
+
 async function gitAddManaged(dir: string, managedPaths: string[]): Promise<void> {
-  if (managedPaths.length === 0) return;
+  const safeManagedPaths = normalizeManagedGitPaths(dir, managedPaths);
+  // Always stage .noosphere-sync/ (manifest, conflicts) even when no article paths changed.
+  const args = ["add", "--", ...safeManagedPaths, ".noosphere-sync"];
   return new Promise((resolve, reject) => {
-    // Stage only managed content and .noosphere-sync/
-    const args = ["add", "--", ...managedPaths, join(dir, ".noosphere-sync")];
     const proc = spawn("git", args, { cwd: dir });
     proc.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git add exited ${code}`))));
     proc.on("error", reject);
@@ -345,7 +370,7 @@ function writeLastRun(vaultPath: string, config: ObsidianSyncConfig, result: Syn
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const lastRunFile = join(vaultPath, config.lastRunPath);
   const summary = {
-    lastRunAt: result.stats ? undefined : undefined, // filled below
+    lastRunAt: new Date().toISOString(),
     mode: result.mode,
     dryRun: result.dryRun,
     stats: result.stats,
@@ -365,8 +390,8 @@ function writeLastRun(vaultPath: string, config: ObsidianSyncConfig, result: Syn
 function safePath(vaultPath: string, relativePath: string): string | null {
   // Normalize vaultPath: strip trailing separators so the startsWith boundary check
   // is not bypassed by resolve("/data/vault/", "../etc/passwd") → /data/etc/passwd
-  const normalizedVault = vaultPath.replace(/[/\\]+$/, "");
-  const resolved = resolve(normalizedVault, relativePath);
+  const normalizedVault = vaultPath.replace(/[/\\]+$/, "").replace(/\\/g, "/");
+  const resolved = resolve(vaultPath.replace(/[/\\]+$/, ""), relativePath).replace(/\\/g, "/");
   if (!resolved.startsWith(normalizedVault + "/")) return null; // path traversal
   return resolved;
 }
@@ -374,15 +399,6 @@ function safePath(vaultPath: string, relativePath: string): string | null {
 // ─────────────────────────────────────────────
 // Conflict detection
 // ─────────────────────────────────────────────
-
-function fileHash(filePath: string): string | null {
-  try {
-    const content = readFileSync(filePath);
-    return createHash("sha256").update(content).digest("hex");
-  } catch {
-    return null;
-  }
-}
 
 function archiveConflict(
   vaultPath: string,
@@ -550,6 +566,7 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
 
     // ── Process each article ───────────────────────────────────────────────
     for (const article of articles) {
+      let lastWrittenHash: string | null = null;
       const topicPath = buildTopicPath(topicMap, article.topicId);
       const relativePath = buildArticlePath(topicPath, article.slug);
       const canonicalHash = computeContentHash(article, topicPath);
@@ -561,9 +578,10 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
         pathChanged ||
         existingEntry.updatedAt !== article.updatedAt.toISOString() ||
         existingEntry.contentHash !== canonicalHash;
+      const hasEmptyWrittenHash = existingEntry?.writtenHash === "";
 
       const isNew = !existingEntry;
-      const shouldWrite = options.mode === "full" || !existingEntry || contentChanged;
+      const shouldWrite = options.mode === "full" || !existingEntry || contentChanged || hasEmptyWrittenHash;
 
       if (shouldWrite && !options.dryRun) {
         const safe = safePath(vaultPath, relativePath);
@@ -574,35 +592,34 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
         }
 
         // Conflict detection: check if local file was modified since last sync.
-        // Only meaningful when we're about to overwrite with DB content.
-        // We use a two-stage check: byte size first, then hash. Obsidian sync
-        // tools (e.g., ob sync, iCloud, Dropbox) may touch files and change
-        // their hash without modifying content. If byte sizes match, the change
-        // is cosmetic (line-ending normalization, metadata touch, etc.) and we
-        // skip the conflict.
+        // Compares the on-disk hash against the hash of the exact bytes we last
+        // wrote (writtenHash from manifest). Previous versions compared against
+        // canonicalHash (computed with fake timestamp), which never matched the
+        // real file on disk — causing every file to appear as a conflict.
+        //
+        // For manifests created before writtenHash existed, we treat the current
+        // disk hash as the baseline (no conflict on first run with new format).
+        // A persisted empty string is different: it came from the short-lived
+        // sentinel fallback and must be treated as invalid so we archive before
+        // rewriting rather than silently blessing the current disk state.
         if (existsSync(safe) && existingEntry) {
-          const diskHash = fileHash(safe);
-          if (diskHash && diskHash !== canonicalHash) {
-            // Hash differs — check byte size before declaring a real conflict
-            const canonicalContent = renderMarkdown(article, topicPath, canonicalHash, syncedAt, config.publish);
-            const diskSize = statSync(safe).size;
-            const canonicalSize = Buffer.byteLength(canonicalContent, "utf-8");
-            if (diskSize === canonicalSize) {
-              // Same size, different hash — likely a cosmetic change from a sync tool
-              // (line-ending normalization, BOM, etc.). Not a real conflict.
-              stats.skipped++;
-              warnings.push(`Byte-size match, skipping false-positive conflict: ${relativePath}`);
-            } else {
-              // Different size AND different hash — genuine local modification
+          try {
+            const diskBuffer = readFileSync(safe);
+            const diskHash = createHash("sha256").update(diskBuffer).digest("hex");
+            const baseline = existingEntry.writtenHash ?? diskHash;
+            if (diskHash !== baseline) {
+              // File on disk differs from what we last wrote — genuine local modification.
               stats.conflictsDetected++;
               if (config.preserveLocalChanges) {
-                const diskContent = readFileSync(safe, "utf-8");
-                const backupRel = archiveConflict(vaultPath, relativePath, diskContent);
+                const backupRel = archiveConflict(vaultPath, relativePath, diskBuffer.toString("utf-8"));
                 warnings.push(`Local modification preserved: ${relativePath} → ${backupRel}`);
               } else {
                 warnings.push(`Local modification overwritten by database: ${relativePath}`);
               }
             }
+          } catch {
+            // File deleted or unreadable between existsSync and readFileSync —
+            // skip conflict detection and proceed to write (re-creating the file).
           }
         }
 
@@ -613,16 +630,24 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
         if (isNew) stats.created++;
         else if (existingEntry) stats.updated++;
         stats.written++;
+
+        // Compute writtenHash from the exact bytes written to disk
+        lastWrittenHash = createHash("sha256").update(markdown).digest("hex");
       } else if (!shouldWrite) {
+        // shouldWrite is false only when mode != "full", existingEntry exists,
+        // content hasn't changed, and no legacy empty writtenHash needs repair.
         stats.unchanged++;
-        if (existingEntry) managedPaths.push(relativePath);
+        // lastWrittenHash stays null from loop initialization — no new write.
       }
 
-      // Update manifest entry
+      // Update manifest entry — store writtenHash for accurate conflict detection
+      // on the next sync. This is the hash of the exact bytes on disk.
+      // When we didn't write (unchanged), preserve the existing writtenHash.
       manifest.articles[article.id] = {
         path: relativePath,
         updatedAt: article.updatedAt.toISOString(),
         contentHash: canonicalHash,
+        writtenHash: lastWrittenHash ?? existingEntry?.writtenHash,
         deletedAt: null,
       };
     }
