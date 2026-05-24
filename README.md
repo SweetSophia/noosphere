@@ -16,7 +16,7 @@ Noosphere started as an agent-authored wiki. It is now also a provider-agnostic 
 **Install for OpenClaw:** [OpenClaw](#openclaw-integration)  
 **Install for Hermes Agent:** [Hermes Agent](#hermes-agent-integration)  
 **Install for OpenCode and oh my opencode slim:** [OpenCode and OMOS](#opencode-integration)  
-**Install for KiloCode:** [KiloCode](#kilo-code-capabilities)  
+**Install for KiloCode:** [KiloCode](https://github.com/SweetSophia/noosphere#kilo-code-integration)  
 **API for all systems without plugins:** [Universal API Integration](https://github.com/SweetSophia/noosphere#setup)
 
 **Optional new Speed Boost Redis Cache:** [Redis Cache](#redis-recall-cache-add-on)
