@@ -201,7 +201,9 @@ export function parseNoosphereMarkdown(content: string): NoosphereMarkdownParseR
 
 export function readMarkdownString(frontmatter: Record<string, unknown>, key: string): string | undefined {
   const value = frontmatter[key];
-  return typeof value === "string" ? value.trim() : undefined;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 export function readMarkdownStringArray(frontmatter: Record<string, unknown>, key: string): string[] {

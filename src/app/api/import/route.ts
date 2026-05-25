@@ -60,8 +60,13 @@ export async function GET(request: NextRequest) {
       required: ["title", "topic", "content"],
       optional: ["id", "slug", "topicPath", "tags", "excerpt", "confidence", "status", "sourceUrl", "sourceType", "lastReviewed", "restrictedTags", "noosphere"],
     },
+    notes: {
+      id: "preserved as exported metadata; this importer matches existing articles by topic+slug",
+      slug: "optional; blank or missing values fall back to the markdown filename",
+      topicPath: "optional hierarchy; when topic is missing, the last topicPath entry is used",
+    },
     exampleFrontmatter: `---
-id: optional-existing-article-id
+id: exported-article-id
 slug: my-article-title
 title: My Article Title
 topic: engineering
