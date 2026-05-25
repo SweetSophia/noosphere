@@ -3,8 +3,28 @@ import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, buildScopeFilter } from "@/lib/api/auth";
 import JSZip from "jszip";
-import yaml from "js-yaml";
 import { rateLimit } from "@/lib/rate-limit";
+import { renderNoosphereMarkdown } from "@/lib/markdown/noosphere-markdown";
+
+interface ExportTopicNode {
+  id: string;
+  slug: string;
+  parentId: string | null;
+}
+
+function buildExportTopicPath(topicMap: Map<string, ExportTopicNode>, topicId: string): string[] {
+  const path: string[] = [];
+  let current = topicMap.get(topicId);
+  const seen = new Set<string>();
+
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    path.unshift(current.slug);
+    current = current.parentId ? topicMap.get(current.parentId) : undefined;
+  }
+
+  return path;
+}
 
 // GET /api/export — Export all articles as a zip of markdown files
 // Auth: API key (READ/WRITE/ADMIN) or session (human)
@@ -31,33 +51,40 @@ export async function GET(request: NextRequest) {
 
     const zip = new JSZip();
     const folder = zip.folder("noosphere-export");
+    const exportedAt = new Date().toISOString();
+    const topics = await prisma.topic.findMany({
+      select: { id: true, slug: true, parentId: true },
+    });
+    const topicMap = new Map<string, ExportTopicNode>(topics.map((topic) => [topic.id, topic]));
 
     if (!folder) {
       return NextResponse.json({ error: "Failed to create zip folder" }, { status: 500 });
     }
 
     for (const article of articles) {
-      const frontmatter: Record<string, unknown> = {
-        title: article.title,
-        topic: article.topic.slug,
-        tags: article.tags.map((t) => t.tag.slug),
-        createdAt: article.createdAt.toISOString(),
-        updatedAt: article.updatedAt.toISOString(),
-      };
-
-      if (article.restrictedTags && article.restrictedTags.length > 0) {
-        frontmatter.restrictedTags = article.restrictedTags;
-      }
-
-      if (article.confidence) frontmatter.confidence = article.confidence;
-      if (article.status) frontmatter.status = article.status;
-      if (article.lastReviewed) frontmatter.lastReviewed = article.lastReviewed.toISOString();
-      if (article.sourceUrl) frontmatter.sourceUrl = article.sourceUrl;
-      if (article.sourceType) frontmatter.sourceType = article.sourceType;
-      if (article.excerpt) frontmatter.excerpt = article.excerpt;
-
-      const fm = yaml.dump(frontmatter, { indent: 2, lineWidth: -1, quotingType: '"' });
-      const mdContent = `---\n${fm}---\n\n${article.content}`;
+      const topicPath = buildExportTopicPath(topicMap, article.topicId);
+      const topicSlug = topicPath.at(-1) ?? article.topic.slug;
+      const mdContent = renderNoosphereMarkdown(
+        {
+          id: article.id,
+          slug: article.slug,
+          title: article.title,
+          topic: topicSlug,
+          topicPath: topicPath.length > 0 ? topicPath : [article.topic.slug],
+          content: article.content,
+          tags: article.tags.map((t) => t.tag.slug),
+          restrictedTags: article.restrictedTags,
+          excerpt: article.excerpt,
+          confidence: article.confidence,
+          status: article.status,
+          sourceUrl: article.sourceUrl,
+          sourceType: article.sourceType,
+          lastReviewed: article.lastReviewed,
+          createdAt: article.createdAt,
+          updatedAt: article.updatedAt,
+        },
+        { syncedAt: exportedAt }
+      );
       const filename = `${article.slug}.md`;
       folder.file(filename, mdContent);
     }
@@ -65,7 +92,7 @@ export async function GET(request: NextRequest) {
     // Add a README
     folder.file(
       "README.md",
-      `# Noosphere Export\n\nExported ${articles.length} article(s).\n\n## Format\n\nEach .md file has YAML frontmatter:\n\n\`\`\`yaml\n---\ntitle: Article Title\ntopic: topic-slug\ntags: [tag1, tag2]\nrestrictedTags: [health, intimate]  # optional — controls access\ncreatedAt: 2024-01-01T00:00:00Z\n---\n\n# Article Title\n\nContent here...\n\`\`\`\n\n## Topics\n\n${[...new Map(articles.map((a) => [a.topic.slug, a.topic.name])).entries()].map(([slug, name]) => `- ${name} (${slug})`).join("\n")}\n`
+      `# Noosphere Export\n\nExported ${articles.length} article(s).\n\n## Format\n\nEach .md file has YAML frontmatter rendered by the shared Noosphere markdown codec:\n\n\`\`\`yaml\n---\nid: article-id\nslug: article-slug\ntitle: Article Title\ntopic: topic-slug\ntopicPath: [parent-topic, topic-slug]\ntags: [tag1, tag2]\nrestrictedTags: [health, intimate]  # optional — controls access\ncreatedAt: 2024-01-01T00:00:00Z\nupdatedAt: 2024-01-02T00:00:00Z\nnoosphere:\n  entity: article\n  schemaVersion: 1\n  syncedAt: 2024-01-02T00:00:00Z\n  contentHash: sha256:...\n  sourceOfTruth: database\n---\n\n# Article Title\n\nContent here...\n\`\`\`\n\n## Topics\n\n${[...new Map(articles.map((a) => [a.topic.slug, a.topic.name])).entries()].map(([slug, name]) => `- ${name} (${slug})`).join("\n")}\n`
     );
 
     const buffer = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
