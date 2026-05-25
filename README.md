@@ -273,6 +273,10 @@ POST /api/import
 # multipart form fields: file, defaultTopicSlug?, overwrite?
 ```
 
+Export, import, and Obsidian sync share the same versioned frontmatter codec in
+`src/lib/markdown/noosphere-markdown.ts`, including `noosphere.schemaVersion`,
+`noosphere.contentHash`, topic metadata, tags, and restricted scopes.
+
 ## Memory Module API
 
 The memory layer is exposed in two ways:

@@ -203,6 +203,7 @@ createdAt: 2026-04-01T10:00:00.000Z
 updatedAt: 2026-04-15T14:32:11.000Z
 noosphere:
   entity: article
+  schemaVersion: 1
   syncedAt: 2026-04-15T14:35:00.000Z
   contentHash: sha256:...
   sourceOfTruth: database
@@ -236,7 +237,14 @@ noosphere:
 2. Add `topicPath` because the filesystem mirrors full hierarchy and Obsidian users may want the full context in metadata.
 3. `noosphere.contentHash` is the hash of the fully rendered markdown payload or article body plus canonical metadata fields.
 4. `noosphere.syncedAt` is sync-time metadata, not article update time.
-5. Frontmatter order should be stable for clean diffs.
+5. `noosphere.schemaVersion` is the shared markdown codec version used by sync, export, and import.
+6. Frontmatter order should be stable for clean diffs.
+
+### Shared codec
+The canonical implementation lives in `src/lib/markdown/noosphere-markdown.ts`.
+Obsidian sync, ZIP export, and ZIP import should all use this module instead of
+hand-rolled YAML parsing/rendering so reverse import work can rely on one
+frontmatter contract.
 
 ### Body content
 After frontmatter, write the raw article markdown body exactly as stored in DB.

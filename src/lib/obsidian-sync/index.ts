@@ -9,11 +9,15 @@ import { createHash } from "crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
 import { join, resolve, relative as pathRelative } from "path";
 import { spawn } from "child_process";
-import yaml from "js-yaml";
 import type { ObsidianSyncConfig } from "./config";
 import { getObsidianSyncConfig } from "./config";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
+import {
+  computeNoosphereContentHash,
+  renderNoosphereMarkdown,
+  type NoosphereMarkdownArticle,
+} from "@/lib/markdown/noosphere-markdown";
 
 // ─────────────────────────────────────────────
 // Types
@@ -251,75 +255,41 @@ interface ArticleForSync {
   lastReviewed: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  restrictedTags: string[];
   authorName: string | null;
   topicId: string;
   tags: Array<{ tag: { name: string; slug: string } }>;
   topic: { id: string; slug: string; name: string };
 }
 
-// Ordered frontmatter keys for deterministic output (consistent with export route)
-const FM_KEYS = [
-  "id", "slug", "title", "topic", "topicPath",
-  "confidence", "status", "tags", "excerpt",
-  "authorName", "sourceUrl", "sourceType", "lastReviewed",
-  "createdAt", "updatedAt", "noosphere", "publish",
-] as const;
-
-function buildFrontmatter(
-  article: ArticleForSync,
-  topicPath: string[],
-  contentHash: string,
-  syncedAt: string,
-  publish: boolean
-): string {
-  const fm: Record<string, unknown> = {
+function toMarkdownArticle(article: ArticleForSync, topicPath: string[]): NoosphereMarkdownArticle {
+  return {
     id: article.id,
     slug: article.slug,
     title: article.title,
     topic: article.topic.slug,
     topicPath,
-    noosphere: {
-      entity: "article",
-      syncedAt,
-      contentHash: `sha256:${contentHash}`,
-      sourceOfTruth: "database",
-      url: `/wiki/${[...topicPath, article.slug].join("/")}`,
-    },
-    createdAt: article.createdAt.toISOString(),
-    updatedAt: article.updatedAt.toISOString(),
+    content: article.content,
+    confidence: article.confidence,
+    status: article.status,
+    tags: article.tags.map((t) => t.tag.slug),
+    restrictedTags: article.restrictedTags,
+    excerpt: article.excerpt,
+    authorName: article.authorName,
+    sourceUrl: article.sourceUrl,
+    sourceType: article.sourceType,
+    lastReviewed: article.lastReviewed,
+    createdAt: article.createdAt,
+    updatedAt: article.updatedAt,
   };
-
-  if (article.confidence) fm.confidence = article.confidence;
-  if (article.status) fm.status = article.status;
-  if (article.tags.length > 0) fm.tags = article.tags.map((t) => t.tag.slug);
-  if (article.excerpt) fm.excerpt = article.excerpt;
-  if (article.authorName) fm.authorName = article.authorName;
-  if (article.sourceUrl) fm.sourceUrl = article.sourceUrl;
-  if (article.sourceType) fm.sourceType = article.sourceType;
-  if (article.lastReviewed) fm.lastReviewed = article.lastReviewed.toISOString();
-  if (publish) fm.publish = true;
-
-  // Build ordered object matching FM_KEYS for stable serialization
-  const ordered: Record<string, unknown> = {};
-  for (const key of FM_KEYS) {
-    if (fm[key] !== undefined) ordered[key] = fm[key];
-  }
-
-  // js-yaml.dump for proper YAML (not JSON.stringify per-field — breaks on colons/quotes)
-  const yamlStr = yaml.dump(ordered, {
-    indent: 2,
-    lineWidth: -1,
-    quotingType: '"',
-    forceQuotes: false,
-    noRefs: true,
-    sortKeys: false,
-  });
-
-  return `---\n${yamlStr.trim()}\n---\n`;
 }
 
 function renderMarkdown(article: ArticleForSync, topicPath: string[], contentHash: string, syncedAt: string, publish: boolean): string {
-  return buildFrontmatter(article, topicPath, contentHash, syncedAt, publish) + "\n" + article.content;
+  return renderNoosphereMarkdown(toMarkdownArticle(article, topicPath), {
+    contentHash,
+    syncedAt,
+    publish,
+  });
 }
 
 /**
@@ -328,15 +298,7 @@ function renderMarkdown(article: ArticleForSync, topicPath: string[], contentHas
  * regardless of when the sync runs.
  */
 function computeContentHash(article: ArticleForSync, topicPath: string[]): string {
-  // Use false for publish so the hash is stable regardless of the publish setting
-  const stable = buildFrontmatter(
-    article,
-    topicPath,
-    "STABLE_HASH",
-    "1970-01-01T00:00:00.000Z",
-    false
-  ) + "\n" + article.content;
-  return createHash("sha256").update(stable).digest("hex");
+  return computeNoosphereContentHash(toMarkdownArticle(article, topicPath));
 }
 
 // ─────────────────────────────────────────────

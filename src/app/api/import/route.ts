@@ -3,10 +3,14 @@ import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, canAccessScopes } from "@/lib/api/auth";
 import JSZip from "jszip";
-import yaml from "js-yaml";
 import { isValidConfidence, isValidStatus } from "@/lib/validation";
 import { rateLimit } from "@/lib/rate-limit";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
+import {
+  parseNoosphereMarkdown,
+  readMarkdownString,
+  readMarkdownStringArray,
+} from "@/lib/markdown/noosphere-markdown";
 
 // Disable Next.js body parsing for file uploads
 export const dynamic = "force-dynamic";
@@ -54,16 +58,24 @@ export async function GET(request: NextRequest) {
     },
     frontmatterFields: {
       required: ["title", "topic", "content"],
-      optional: ["tags", "excerpt", "confidence", "status", "sourceUrl", "sourceType", "lastReviewed", "restrictedTags"],
+      optional: ["id", "slug", "topicPath", "tags", "excerpt", "confidence", "status", "sourceUrl", "sourceType", "lastReviewed", "restrictedTags", "noosphere"],
     },
     exampleFrontmatter: `---
+id: optional-existing-article-id
+slug: my-article-title
 title: My Article Title
 topic: engineering
+topicPath: [engineering]
 tags: [python, backend]
 restrictedTags: [health, intimate]  # optional — controls access
 createdAt: 2024-01-01T00:00:00Z
+updatedAt: 2024-01-02T00:00:00Z
 confidence: high
 status: published
+noosphere:
+  entity: article
+  schemaVersion: 1
+  sourceOfTruth: database
 ---`,
     response: {
       success: true,
@@ -170,24 +182,16 @@ export async function POST(request: NextRequest) {
     // Update cumulative size after successful decompression
     totalUncompressed += entrySize;
 
-    // Parse frontmatter (handles both \n and \r\n)
-    const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
-    if (!fmMatch) {
-      toImport.push({ filename: entry.name, title: "", slug: "", topicSlug: "", content: "", tags: [], error: "No YAML frontmatter found" });
+    const parsed = parseNoosphereMarkdown(content);
+    if (!parsed.ok) {
+      toImport.push({ filename: entry.name, title: "", slug: "", topicSlug: "", content: "", tags: [], error: parsed.error });
       continue;
     }
 
-    let frontmatter: Record<string, unknown>;
-    try {
-      frontmatter = yaml.load(fmMatch[1]) as Record<string, unknown>;
-    } catch {
-      toImport.push({ filename: entry.name, title: "", slug: "", topicSlug: "", content: "", tags: [], error: "Invalid YAML frontmatter" });
-      continue;
-    }
-
-    const title = typeof frontmatter.title === "string" ? frontmatter.title.trim() : "";
-    const topicSlug = (typeof frontmatter.topic === "string" ? frontmatter.topic : defaultTopicSlug ?? "") as string;
-    const articleContent = fmMatch[2];
+    const { frontmatter, content: articleContent } = parsed.markdown;
+    const title = readMarkdownString(frontmatter, "title") ?? "";
+    const topicPath = readMarkdownStringArray(frontmatter, "topicPath");
+    const topicSlug = readMarkdownString(frontmatter, "topic") ?? topicPath.at(-1) ?? defaultTopicSlug ?? "";
 
     if (!title || !articleContent.trim()) {
       toImport.push({ filename: entry.name, title, slug: "", topicSlug, content: articleContent, tags: [], error: "Missing required field: title or content" });
@@ -199,10 +203,9 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    // Derive slug from filename (strip path and .md)
-    const slug = entry.name
-      .replace(/\.md$/i, "")
-      .replace(/.*\//, "")
+    // Prefer the shared frontmatter slug. Fall back to filename for legacy imports.
+    const slugSource = readMarkdownString(frontmatter, "slug") ?? entry.name.replace(/\.md$/i, "").replace(/.*\//, "");
+    const slug = slugSource
       .toLowerCase()
       .replace(/[^a-z0-9-]/g, "-")
       .replace(/-+/g, "-")
@@ -214,10 +217,8 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    const tags = Array.isArray(frontmatter.tags) ? (frontmatter.tags as string[]).map(String) : [];
-    const restrictedTags = Array.isArray(frontmatter.restrictedTags)
-      ? (frontmatter.restrictedTags as string[]).filter((t) => typeof t === "string" && t.length > 0)
-      : undefined;
+    const tags = readMarkdownStringArray(frontmatter, "tags");
+    const restrictedTags = readMarkdownStringArray(frontmatter, "restrictedTags");
 
     toImport.push({
       filename: entry.name,
@@ -226,12 +227,12 @@ export async function POST(request: NextRequest) {
       slug,
       content: articleContent,
       tags,
-      excerpt: typeof frontmatter.excerpt === "string" ? frontmatter.excerpt : undefined,
-      confidence: typeof frontmatter.confidence === "string" ? frontmatter.confidence : undefined,
-      status: typeof frontmatter.status === "string" ? frontmatter.status : undefined,
-      sourceUrl: typeof frontmatter.sourceUrl === "string" ? frontmatter.sourceUrl : undefined,
-      sourceType: typeof frontmatter.sourceType === "string" ? frontmatter.sourceType : undefined,
-      restrictedTags,
+      excerpt: readMarkdownString(frontmatter, "excerpt"),
+      confidence: readMarkdownString(frontmatter, "confidence"),
+      status: readMarkdownString(frontmatter, "status"),
+      sourceUrl: readMarkdownString(frontmatter, "sourceUrl"),
+      sourceType: readMarkdownString(frontmatter, "sourceType"),
+      restrictedTags: restrictedTags.length > 0 ? restrictedTags : undefined,
     });
   }
 
