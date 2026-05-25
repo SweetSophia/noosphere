@@ -95,11 +95,11 @@ test("parseNoosphereMarkdown reports missing and invalid frontmatter distinctly"
 test("readMarkdownString helpers normalize imported metadata", () => {
   const frontmatter = {
     title: "  Title  ",
-    tags: [" alpha ", "beta", "alpha", 42],
+    tags: [" alpha ", "beta", "alpha", 42, true, { bad: "value" }],
     restrictedTags: "not-an-array",
   };
 
   assert.equal(readMarkdownString(frontmatter, "title"), "Title");
-  assert.deepEqual(readMarkdownStringArray(frontmatter, "tags"), ["alpha", "beta"]);
+  assert.deepEqual(readMarkdownStringArray(frontmatter, "tags"), ["alpha", "beta", "42", "true"]);
   assert.deepEqual(readMarkdownStringArray(frontmatter, "restrictedTags"), []);
 });

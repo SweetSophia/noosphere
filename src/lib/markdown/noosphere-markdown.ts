@@ -56,16 +56,25 @@ function normalizeStringArray(values: string[] | undefined): string[] {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
-export function buildNoosphereFrontmatter(
+function normalizeMarkdownArrayValue(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return null;
+}
+
+type BuildFrontmatterRecordOptions = Omit<RenderNoosphereMarkdownOptions, "contentHash"> & {
+  contentHash?: string | null;
+};
+
+function buildFrontmatterRecord(
   article: NoosphereMarkdownArticle,
-  options: RenderNoosphereMarkdownOptions = {}
-): string {
+  options: BuildFrontmatterRecordOptions = {}
+): Record<string, unknown> {
   const topicPath = article.topicPath && article.topicPath.length > 0
     ? article.topicPath
     : [article.topic];
   const syncedAt = options.syncedAt ?? new Date().toISOString();
   const sourceOfTruth = options.sourceOfTruth ?? "database";
-  const contentHash = options.contentHash ?? computeNoosphereContentHash(article, { sourceOfTruth });
 
   const fm: Record<string, unknown> = {
     title: article.title,
@@ -75,10 +84,13 @@ export function buildNoosphereFrontmatter(
       entity: "article",
       schemaVersion: NOOSPHERE_MARKDOWN_SCHEMA_VERSION,
       syncedAt,
-      contentHash: `sha256:${contentHash}`,
       sourceOfTruth,
     },
   };
+
+  if (options.contentHash) {
+    (fm.noosphere as Record<string, unknown>).contentHash = `sha256:${options.contentHash}`;
+  }
 
   if (article.id) fm.id = article.id;
   if (article.slug) fm.slug = article.slug;
@@ -115,7 +127,11 @@ export function buildNoosphereFrontmatter(
     if (fm[key] !== undefined) ordered[key] = fm[key];
   }
 
-  const yamlStr = yaml.dump(ordered, {
+  return ordered;
+}
+
+function dumpFrontmatter(record: Record<string, unknown>): string {
+  const yamlStr = yaml.dump(record, {
     indent: 2,
     lineWidth: -1,
     quotingType: '"',
@@ -125,6 +141,15 @@ export function buildNoosphereFrontmatter(
   });
 
   return `---\n${yamlStr.trim()}\n---\n`;
+}
+
+export function buildNoosphereFrontmatter(
+  article: NoosphereMarkdownArticle,
+  options: RenderNoosphereMarkdownOptions = {}
+): string {
+  const sourceOfTruth = options.sourceOfTruth ?? "database";
+  const contentHash = options.contentHash ?? computeNoosphereContentHash(article, { sourceOfTruth });
+  return dumpFrontmatter(buildFrontmatterRecord(article, { ...options, contentHash, sourceOfTruth }));
 }
 
 export function renderNoosphereMarkdown(
@@ -138,13 +163,17 @@ export function computeNoosphereContentHash(
   article: NoosphereMarkdownArticle,
   options: Pick<RenderNoosphereMarkdownOptions, "sourceOfTruth"> = {}
 ): string {
-  const stableFrontmatter = buildNoosphereFrontmatter(article, {
-    contentHash: "STABLE_HASH",
+  const stableFrontmatter = dumpFrontmatter(buildFrontmatterRecord(article, {
     syncedAt: "1970-01-01T00:00:00.000Z",
     publish: false,
     sourceOfTruth: options.sourceOfTruth,
-  });
-  return createHash("sha256").update(`${stableFrontmatter}\n${article.content}`).digest("hex");
+    contentHash: null,
+  }));
+  return createHash("sha256")
+    .update(stableFrontmatter)
+    .update("\n")
+    .update(article.content)
+    .digest("hex");
 }
 
 export function parseNoosphereMarkdown(content: string): NoosphereMarkdownParseResult {
@@ -178,5 +207,9 @@ export function readMarkdownString(frontmatter: Record<string, unknown>, key: st
 export function readMarkdownStringArray(frontmatter: Record<string, unknown>, key: string): string[] {
   const value = frontmatter[key];
   if (!Array.isArray(value)) return [];
-  return normalizeStringArray(value.filter((item): item is string => typeof item === "string"));
+  return normalizeStringArray(
+    value
+      .map(normalizeMarkdownArrayValue)
+      .filter((item): item is string => item !== null)
+  );
 }
