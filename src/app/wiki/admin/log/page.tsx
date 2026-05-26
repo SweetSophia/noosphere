@@ -17,6 +17,7 @@ const TYPE_COLORS: Record<string, string> = {
   update: "#f59e0b",
   delete: "#ef4444",
   lint: "#8b5cf6",
+  "sync-conflict": "#f97316",
 };
 
 function buildLogHref(type?: string, author?: string) {

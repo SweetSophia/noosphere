@@ -21,6 +21,7 @@ import { spawn } from "child_process";
 // ─── Test helpers ────────────────────────────────────────────────────────────
 
 let testCounter = 0;
+let tempDirCounter = 0;
 function test(name: string, fn: () => void | Promise<void>): void {
   testCounter++;
   const label = `[${testCounter}] ${name}`;
@@ -55,7 +56,7 @@ function _rejects(promise: Promise<unknown>, msg = ""): Promise<void> {
 }
 
 async function withTempDir(fn: (dir: string) => void | Promise<void>): Promise<void> {
-  const dir = `/tmp/noosphere-sync-test-${Date.now()}`;
+  const dir = `/tmp/noosphere-sync-test-${Date.now()}-${process.pid}-${++tempDirCounter}`;
   mkdirSync(dir, { recursive: true });
   try {
     await fn(dir);

@@ -18,6 +18,8 @@ import {
   renderNoosphereMarkdown,
   type NoosphereMarkdownArticle,
 } from "@/lib/markdown/noosphere-markdown";
+import { buildSyncConflictReviewCreateInput } from "@/lib/markdown-sync/conflict-review";
+import { recordSyncConflictReview } from "@/lib/markdown-sync/api/conflict-review";
 
 // ─────────────────────────────────────────────
 // Types
@@ -573,7 +575,22 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
               // File on disk differs from what we last wrote — genuine local modification.
               stats.conflictsDetected++;
               if (config.preserveLocalChanges) {
-                const backupRel = archiveConflict(vaultPath, relativePath, diskBuffer.toString("utf-8"));
+                const diskContent = diskBuffer.toString("utf-8");
+                const backupRel = archiveConflict(vaultPath, relativePath, diskContent);
+                try {
+                  await recordSyncConflictReview(
+                    buildSyncConflictReviewCreateInput({
+                      article,
+                      relativePath,
+                      archivePath: backupRel,
+                      noosphereHash: canonicalHash,
+                      markdownContent: diskContent,
+                    })
+                  );
+                } catch (error) {
+                  warnings.push(`Conflict review record failed: ${relativePath}`);
+                  console.error("[obsidian-sync] Failed to record conflict review", error);
+                }
                 warnings.push(`Local modification preserved: ${relativePath} → ${backupRel}`);
               } else {
                 warnings.push(`Local modification overwritten by database: ${relativePath}`);
