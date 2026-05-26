@@ -16,36 +16,35 @@ import {
 export async function recordSyncConflictReview(input: SyncConflictReviewCreateInput) {
   const now = new Date();
 
-  return prisma.syncConflictReview.upsert({
-    where: { archivePath: input.archivePath },
-    update: {
-      articleId: input.articleId,
-      direction: input.direction,
-      status: "open",
-      resolution: null,
-      relativePath: input.relativePath,
-      noosphereHash: input.noosphereHash,
-      markdownHash: input.markdownHash,
-      noosphereUpdatedAt: input.noosphereUpdatedAt,
-      markdownUpdatedAt: input.markdownUpdatedAt,
-      summary: input.summary as unknown as Prisma.InputJsonValue,
-      resolvedAt: null,
-      resolvedBy: null,
-      updatedAt: now,
-    },
-    create: {
-      articleId: input.articleId,
-      direction: input.direction,
-      relativePath: input.relativePath,
-      archivePath: input.archivePath,
-      noosphereHash: input.noosphereHash,
-      markdownHash: input.markdownHash,
-      noosphereUpdatedAt: input.noosphereUpdatedAt,
-      markdownUpdatedAt: input.markdownUpdatedAt,
-      summary: input.summary as unknown as Prisma.InputJsonValue,
-      updatedAt: now,
-    },
-  });
+  try {
+    return await prisma.syncConflictReview.create({
+      data: {
+        articleId: input.articleId,
+        direction: input.direction,
+        relativePath: input.relativePath,
+        archivePath: input.archivePath,
+        noosphereHash: input.noosphereHash,
+        markdownHash: input.markdownHash,
+        noosphereUpdatedAt: input.noosphereUpdatedAt,
+        markdownUpdatedAt: input.markdownUpdatedAt,
+        summary: input.summary as unknown as Prisma.InputJsonValue,
+        updatedAt: now,
+      },
+    });
+  } catch (error) {
+    if (!isPrismaUniqueConstraintError(error)) {
+      throw error;
+    }
+
+    // Archive paths include a timestamp, so a duplicate should be rare. If it
+    // does happen, preserve the existing review state rather than reopening a
+    // conflict that an admin may already have resolved.
+    const existing = await prisma.syncConflictReview.findUnique({
+      where: { archivePath: input.archivePath },
+    });
+    if (existing) return existing;
+    throw error;
+  }
 }
 
 export async function resolveSyncConflictReview(args: {
@@ -56,30 +55,41 @@ export async function resolveSyncConflictReview(args: {
   const status = statusForSyncConflictReviewAction(args.action);
   const resolvedAt = new Date();
 
-  const review = await prisma.syncConflictReview.update({
-    where: { id: args.id },
-    data: {
-      status,
-      resolution: args.action,
-      resolvedAt,
-      resolvedBy: args.resolvedBy,
-    },
-  });
-
-  await prisma.activityLog.create({
-    data: {
-      type: "sync-conflict",
-      title: `Sync conflict ${status} — ${review.relativePath}`,
-      authorName: args.resolvedBy,
-      details: {
-        conflictId: review.id,
-        action: args.action,
+  return prisma.$transaction(async (tx) => {
+    const review = await tx.syncConflictReview.update({
+      where: { id: args.id },
+      data: {
         status,
-        archivePath: review.archivePath,
-        articleId: review.articleId,
+        resolution: args.action,
+        resolvedAt,
+        resolvedBy: args.resolvedBy,
       },
-    },
-  });
+    });
 
-  return review;
+    await tx.activityLog.create({
+      data: {
+        type: "sync-conflict",
+        title: `Sync conflict ${status} — ${review.relativePath}`,
+        authorName: args.resolvedBy,
+        details: {
+          conflictId: review.id,
+          action: args.action,
+          status,
+          archivePath: review.archivePath,
+          articleId: review.articleId,
+        },
+      },
+    });
+
+    return review;
+  });
+}
+
+function isPrismaUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "P2002"
+  );
 }

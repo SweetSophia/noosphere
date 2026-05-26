@@ -6,7 +6,9 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import {
   isSyncConflictReviewAction,
+  SYNC_CONFLICT_REVIEW_STATUSES,
   type SyncConflictReviewAction,
+  type SyncConflictReviewStatus,
 } from "@/lib/markdown-sync/conflict-review";
 import { resolveSyncConflictReview } from "@/lib/markdown-sync/api/conflict-review";
 
@@ -24,6 +26,7 @@ export async function resolveSyncConflictAction(formData: FormData) {
   const resolvedBy = await requireAdminName();
   const id = formData.get("conflictId");
   const action = formData.get("action");
+  const returnStatus = normalizeReturnStatus(formData.get("returnStatus"));
 
   if (typeof id !== "string" || !id) {
     throw new Error("Missing conflict id.");
@@ -40,5 +43,11 @@ export async function resolveSyncConflictAction(formData: FormData) {
   });
 
   revalidatePath("/wiki/admin/sync-conflicts");
-  redirect("/wiki/admin/sync-conflicts");
+  redirect(`/wiki/admin/sync-conflicts?status=${returnStatus}`);
+}
+
+function normalizeReturnStatus(value: FormDataEntryValue | null): SyncConflictReviewStatus {
+  return SYNC_CONFLICT_REVIEW_STATUSES.includes(value as SyncConflictReviewStatus)
+    ? (value as SyncConflictReviewStatus)
+    : "open";
 }

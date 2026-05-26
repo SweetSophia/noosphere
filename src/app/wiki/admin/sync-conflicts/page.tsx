@@ -184,11 +184,36 @@ export default async function SyncConflictsPage({
 
                 {review.status === "open" && (
                   <div className="sync-conflict-actions" aria-label="Resolve sync conflict">
-                    <ConflictActionButton label="Keep Noosphere" action="keep-noosphere" conflictId={review.id} />
-                    <ConflictActionButton label="Keep Markdown" action="keep-markdown" conflictId={review.id} />
-                    <ConflictActionButton label="Mark Resolved" action="mark-resolved" conflictId={review.id} />
-                    <ConflictActionButton label="Ignore Once" action="ignore-once" conflictId={review.id} />
-                    <ConflictActionButton label="Ignore Always" action="ignore-always" conflictId={review.id} />
+                    <ConflictActionButton
+                      label="Keep Noosphere"
+                      action="keep-noosphere"
+                      conflictId={review.id}
+                      returnStatus={status}
+                    />
+                    <ConflictActionButton
+                      label="Keep Markdown"
+                      action="keep-markdown"
+                      conflictId={review.id}
+                      returnStatus={status}
+                    />
+                    <ConflictActionButton
+                      label="Mark Resolved"
+                      action="mark-resolved"
+                      conflictId={review.id}
+                      returnStatus={status}
+                    />
+                    <ConflictActionButton
+                      label="Ignore Once"
+                      action="ignore-once"
+                      conflictId={review.id}
+                      returnStatus={status}
+                    />
+                    <ConflictActionButton
+                      label="Ignore Always"
+                      action="ignore-always"
+                      conflictId={review.id}
+                      returnStatus={status}
+                    />
                   </div>
                 )}
               </article>
@@ -220,15 +245,18 @@ function ConflictActionButton({
   label,
   action,
   conflictId,
+  returnStatus,
 }: {
   label: string;
   action: string;
   conflictId: string;
+  returnStatus: SyncConflictReviewStatus;
 }) {
   return (
     <form action={resolveSyncConflictAction}>
       <input type="hidden" name="conflictId" value={conflictId} />
       <input type="hidden" name="action" value={action} />
+      <input type="hidden" name="returnStatus" value={returnStatus} />
       <button className="btn btn-secondary btn-sm" type="submit">
         {label}
       </button>
