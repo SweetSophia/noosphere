@@ -294,6 +294,4 @@ model SyncConflictPreferences {
   vaultToNoosphere String @default("manual-review")
 
   updatedAt DateTime @updatedAt
-
-  @@unique([id])
 }

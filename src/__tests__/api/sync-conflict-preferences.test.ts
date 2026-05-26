@@ -69,6 +69,12 @@ test("validateSyncConflictPreferencesUpdate rejects invalid behaviors and direct
   assert.ok(result.errors.some((error) => error.includes("extra")));
 });
 
+test("validateSyncConflictPreferencesUpdate returns structural body errors verbatim", () => {
+  const result = validateSyncConflictPreferencesUpdate([]);
+
+  assert.deepEqual(result, { ok: false, errors: ["Body must be a JSON object"] });
+});
+
 test("validateSyncConflictPreferencesUpdate returns normalized partial updates", () => {
   const result = validateSyncConflictPreferencesUpdate({
     defaultBehavior: "overwrite",

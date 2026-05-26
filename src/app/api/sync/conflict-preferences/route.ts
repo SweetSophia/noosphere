@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
 
   const validation = validateSyncConflictPreferencesUpdate(body);
   if (!validation.ok) {
-    return NextResponse.json({ error: `Invalid fields: ${validation.errors.join("; ")}` }, { status: 400 });
+    return NextResponse.json({ error: validation.errors.join("; ") }, { status: 400 });
   }
 
   try {
