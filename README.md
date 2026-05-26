@@ -156,7 +156,7 @@ openssl rand -hex 32  # POSTGRES_PASSWORD
 # REDIS_URL=redis://localhost:6379
 
 docker compose up -d
-# Navigate to http://localhost:4400/wiki in your browser.
+# Navigate to http://localhost:6578/wiki in your browser.
 ```
 
 ### Create an Admin Account
@@ -170,13 +170,21 @@ Then visit `/wiki/login`.
 
 ### Official Docker Compose image
 
-For the published image flow, copy `noosphere.env.example` next to the production Compose template and set strong secrets before starting:
+For the published image flow, use the GHCR image directly:
+
+```bash
+docker pull ghcr.io/sweetsophia/noosphere:latest
+```
+
+Then copy `noosphere.env.example` next to the production Compose template and set strong secrets before starting:
 
 ```bash
 cp noosphere.env.example .env
 # edit .env: POSTGRES_PASSWORD, NEXTAUTH_SECRET, NOOSPHERE_ADMIN_PASSWORD, NOOSPHERE_BOOTSTRAP_API_KEY
 docker compose -f docker-compose.noosphere.yml up -d
 ```
+
+The production Compose template runs `ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION:-latest}` and exposes the app on `http://127.0.0.1:6578` by default. Override `NOOSPHERE_PORT`, `BIND_ADDRESS`, or `APP_URL` in `.env` when you need a different network binding.
 
 The production Compose template includes a one-shot `init` service. It waits for Postgres, applies Prisma migrations with `docker/migrate-or-baseline.mjs`, bootstraps the admin/API key/topics, and only then lets the app start. This prevents `/api/health` from reporting healthy before the schema exists.
 
@@ -194,18 +202,18 @@ cp .env.example .env
 # - DATABASE_URL should use the Postgres host port exposed by Docker Compose:
 #   DATABASE_URL="postgresql://noosphere:YOUR_POSTGRES_PASSWORD@localhost:5433/noosphere"
 # - Set NEXTAUTH_SECRET.
-# - Set NEXTAUTH_URL="http://localhost:4400".
-# - Set APP_URL="http://localhost:4400".
+# - Set NEXTAUTH_URL="http://localhost:6578".
+# - Set APP_URL="http://localhost:6578".
 # - Set POSTGRES_PASSWORD.
 
 docker compose up db -d
 npx prisma migrate dev
-npm run dev
+PORT=6578 npm run dev
 ```
 
 ## Agent API Reference
 
-Base URL: `http://localhost:4400/api`
+Base URL: `http://localhost:6578/api`
 
 Auth header:
 
@@ -311,7 +319,7 @@ npx tsc --noEmit
 
 ### HTTP API (for agents and OpenClaw plugins)
 
-Base URL: `http://localhost:4400/api`
+Base URL: `http://localhost:6578/api`
 Auth: `Authorization: Bearer <api_key>`
 
 | Endpoint | Method | Description |
@@ -324,7 +332,7 @@ Auth: `Authorization: Bearer <api_key>`
 Example recall request:
 
 ```bash
-curl -s -X POST http://localhost:4400/api/memory/recall \
+curl -s -X POST http://localhost:6578/api/memory/recall \
   -H "Authorization: Bearer noo_..." \
   -H "Content-Type: application/json" \
   -d '{"query": "pk-pro database schema", "mode": "auto", "resultCap": 5}'
@@ -333,7 +341,7 @@ curl -s -X POST http://localhost:4400/api/memory/recall \
 Example memory get:
 
 ```bash
-curl -s -X POST http://localhost:4400/api/memory/get \
+curl -s -X POST http://localhost:6578/api/memory/get \
   -H "Authorization: Bearer noo_..." \
   -H "Content-Type: application/json" \
   -d '{"canonicalRef": "noosphere:article:abc123"}'
@@ -342,7 +350,7 @@ curl -s -X POST http://localhost:4400/api/memory/get \
 Example memory save:
 
 ```bash
-curl -s -X POST http://localhost:4400/api/memory/save \
+curl -s -X POST http://localhost:6578/api/memory/save \
   -H "Authorization: Bearer noo_..." \
   -H "Content-Type: application/json" \
   -d '{"title": "PK-PRO Database Schema", "content": "...", "topicId": "...", "tags": ["pk-pro"]}'
@@ -754,7 +762,7 @@ Live verification from the Noosphere deployment on 2026-05-21:
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string |
 | `NEXTAUTH_SECRET` | Secret for session encryption |
-| `NEXTAUTH_URL` | Base URL, for example `http://localhost:4400` |
+| `NEXTAUTH_URL` | Base URL, for example `http://localhost:6578` |
 | `APP_URL` | Public URL of the app |
 | `POSTGRES_PASSWORD` | PostgreSQL password for Docker Compose |
 | `REDIS_URL` | Redis connection string; use `redis://redis:6379` inside Docker Compose |
