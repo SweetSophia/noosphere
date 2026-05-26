@@ -126,6 +126,7 @@ export function buildSyncConflictReviewSummary(
 
 export function buildSyncConflictReviewCreateInput(args: {
   article: SyncConflictReviewArticleInput;
+  direction: "noosphere-to-vault" | "vault-to-noosphere";
   relativePath: string;
   archivePath: string;
   noosphereHash: string | null;
@@ -136,7 +137,7 @@ export function buildSyncConflictReviewCreateInput(args: {
 
   return {
     articleId: args.article.id,
-    direction: "vault-to-noosphere",
+    direction: args.direction,
     relativePath: args.relativePath,
     archivePath: args.archivePath,
     noosphereHash: args.noosphereHash,

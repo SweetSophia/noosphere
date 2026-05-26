@@ -65,6 +65,7 @@ test("buildSyncConflictReviewSummary extracts comparable metadata", () => {
 test("buildSyncConflictReviewCreateInput prepares vault-to-noosphere review rows", () => {
   const input = buildSyncConflictReviewCreateInput({
     article,
+    direction: "noosphere-to-vault",
     relativePath: "projects/noosphere-source.md",
     archivePath: ".noosphere-sync/conflicts/2026-projects---noosphere-source.md",
     noosphereHash: "database-hash",
@@ -72,8 +73,7 @@ test("buildSyncConflictReviewCreateInput prepares vault-to-noosphere review rows
   });
 
   assert.equal(input.articleId, "article-1");
-  assert.equal(input.direction, "vault-to-noosphere");
-  assert.equal(input.status, undefined);
+  assert.equal(input.direction, "noosphere-to-vault");
   assert.equal(input.relativePath, "projects/noosphere-source.md");
   assert.equal(input.summary.markdown.title, "Markdown Source");
   assert.equal(input.markdownUpdatedAt?.toISOString(), "2026-05-26T11:00:00.000Z");
