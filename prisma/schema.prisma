@@ -278,3 +278,20 @@ model RecallSettings {
 
   @@unique([id])
 }
+
+// ─────────────────────────────────────────────
+// Sync Conflict Preferences — singleton config for markdown sync conflicts
+// ─────────────────────────────────────────────
+model SyncConflictPreferences {
+  id        String   @id @default("singleton")
+
+  // Conflict behavior values: "preserve" | "overwrite" | "manual-review"
+  defaultBehavior String @default("manual-review")
+
+  // Per-direction preferences. Direction names match the public API keys:
+  // "noosphere-to-vault" and "vault-to-noosphere".
+  noosphereToVault String @default("manual-review")
+  vaultToNoosphere String @default("manual-review")
+
+  updatedAt DateTime @updatedAt
+}
