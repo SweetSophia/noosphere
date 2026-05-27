@@ -3,6 +3,21 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import type { Role } from "@prisma/client";
+import { rateLimitIdentifier } from "@/lib/rate-limit";
+
+function getAuthRateLimitIdentifier(headers?: Record<string, string | string[] | undefined>) {
+  const headerValue = (name: string) => {
+    const value = headers?.[name];
+    return Array.isArray(value) ? value[0] : value;
+  };
+
+  return (
+    headerValue("x-real-ip") ??
+    headerValue("cf-connecting-ip") ??
+    headerValue("x-forwarded-for")?.split(",")[0]?.trim() ??
+    "unknown"
+  );
+}
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -12,8 +27,16 @@ export const authOptions: NextAuthOptions = {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         if (!credentials?.email || !credentials?.password) {
+          return null;
+        }
+
+        const limit = await rateLimitIdentifier(
+          getAuthRateLimitIdentifier(request.headers),
+          { windowMs: 60_000, maxRequests: 10, keyPrefix: "auth" },
+        );
+        if (!limit.allowed) {
           return null;
         }
 

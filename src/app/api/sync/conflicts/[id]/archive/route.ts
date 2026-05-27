@@ -19,7 +19,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "sync-conflict-archive-get" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "sync-conflict-archive-get" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [Permissions.ADMIN]);

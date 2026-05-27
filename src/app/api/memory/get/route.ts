@@ -6,7 +6,7 @@ import { executeMemoryGetRequest } from "@/lib/memory/api/get";
 import { rateLimit } from "@/lib/rate-limit";
 
 export async function POST(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "memory-get" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "memory-get" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [Permissions.READ]);

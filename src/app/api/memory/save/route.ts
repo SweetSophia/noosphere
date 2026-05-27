@@ -9,7 +9,7 @@ import {
 import { rateLimit } from "@/lib/rate-limit";
 
 export async function POST(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "memory-save" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "memory-save" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [Permissions.WRITE]);

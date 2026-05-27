@@ -18,7 +18,7 @@ import { rateLimit } from "@/lib/rate-limit";
 //   { entries: [{id, type, title, details, sourceUrl, authorName, createdAt}], total, limit, offset }
 
 export async function GET(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "log-get" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "log-get" });
   if (!rl.allowed) return rl.response;
 
   // Auth: API key (any permission) or session

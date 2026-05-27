@@ -6,7 +6,7 @@ import { getRecallSettingsFromDB } from "@/lib/memory/api/settings";
 import { rateLimit } from "@/lib/rate-limit";
 
 export async function GET(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "memory-status" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "memory-status" });
   if (!rl.allowed) return rl.response;
   // ADMIN required: status exposes internal provider configuration
   // (priority weights, capabilities, max results) — operational data,

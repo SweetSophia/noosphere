@@ -8,7 +8,7 @@ import { rateLimit } from "@/lib/rate-limit";
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "upload" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "upload" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [Permissions.WRITE]);

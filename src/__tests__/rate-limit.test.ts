@@ -69,6 +69,20 @@ class FakeRedisClient {
     return JSON.parse(this.store.get(setKey) ?? "[]").length;
   }
 
+  zrem(key: string, member: string): number {
+    this.assertReady();
+    const setKey = `zset:${key}`;
+    const arr: Array<{ member: string; score: number }> = JSON.parse(this.store.get(setKey) ?? "[]");
+    const filtered = arr.filter((item) => item.member !== member);
+    this.store.set(setKey, JSON.stringify(filtered));
+    return arr.length - filtered.length;
+  }
+
+  expire(_key: string, _seconds: number): number {
+    this.assertReady();
+    return 1;
+  }
+
   private assertReady() {
     if (this.status !== "ready") {
       throw new Error("Redis command executed before client was ready");
@@ -76,35 +90,30 @@ class FakeRedisClient {
   }
 
   pipeline() {
-    const commands: Array<{ method: string; args: unknown[] }> = [];
+    const commands: Array<() => unknown> = [];
 
     const pipelineObj = {
       zremrangebyscore: (key: string, min: string, max: string) => {
-        commands.push({ method: "zremrangebyscore", args: [key, min, max] });
+        commands.push(() => this.zremrangebyscore(key, min, max));
         return pipelineObj;
       },
       zcard: (key: string) => {
-        commands.push({ method: "zcard", args: [key] });
+        commands.push(() => this.zcard(key));
         return pipelineObj;
       },
       zadd: (key: string, score: number, member: string) => {
-        commands.push({ method: "zadd", args: [key, score, member] });
+        commands.push(() => this.zadd(key, score, member));
         return pipelineObj;
       },
       expire: (key: string, seconds: number) => {
-        commands.push({ method: "expire", args: [key, seconds] });
+        commands.push(() => this.expire(key, seconds));
         return pipelineObj;
       },
-      exec: () => {
+      exec: async () => {
         const results: Array<[Error | null, unknown]> = [];
-        for (const cmd of commands) {
+        for (const command of commands) {
           try {
-            // eslint-disable-next-line @typescript-eslint/no-this-alias
-            const client = this as unknown as Record<string, (...args: unknown[]) => unknown>;
-            const result = client[cmd.method](...cmd.args);
-            if (result instanceof Promise) {
-              throw new Error("Pipeline exec called with async methods but should be synchronous");
-            }
+            const result = command();
             results.push([null, result]);
           } catch (err) {
             results.push([err as Error, null]);
@@ -145,12 +154,14 @@ describe("Redis Rate Limiter", () => {
     const request = makeRequest("10.0.0.2");
     const options = { windowMs: 60_000, maxRequests: 3, keyPrefix: "test-block" };
 
-    // Use up the limit
+    await rateLimit(request, options);
     await rateLimit(request, options);
     await rateLimit(request, options);
     const result = await rateLimit(request, options);
 
-    assert.deepStrictEqual(result, { allowed: false });
+    if (result.allowed) {
+      assert.fail("Expected request to be rate-limited");
+    }
     assert.equal(result.response.status, 429);
   });
 
@@ -238,7 +249,9 @@ describe("Rate Limiter Edge Cases", () => {
     await rateLimit(request, options);
     const result = await rateLimit(request, options);
 
-    assert.equal(result.allowed, false);
+    if (result.allowed) {
+      assert.fail("Expected request to be rate-limited");
+    }
     assert.equal(result.response.status, 429);
   });
 

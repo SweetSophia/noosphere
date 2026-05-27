@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { apiError } from "@/lib/api/errors";
 import { getRedisClient } from "@/lib/cache/redis";
 
-interface RateLimitOptions {
+export interface RateLimitOptions {
   windowMs: number;
   maxRequests: number;
   keyPrefix?: string;
@@ -22,7 +22,13 @@ export async function rateLimit(
   request: NextRequest,
   options: RateLimitOptions
 ): Promise<{ allowed: true } | { allowed: false; response: NextResponse }> {
-  const clientId = getClientIdentifier(request);
+  return rateLimitIdentifier(getClientIdentifier(request), options);
+}
+
+export async function rateLimitIdentifier(
+  clientId: string,
+  options: RateLimitOptions
+): Promise<{ allowed: true } | { allowed: false; response: NextResponse }> {
   const key = `ratelimit:${options.keyPrefix ?? "default"}:${clientId}`;
   const now = Date.now();
   const windowStart = now - options.windowMs;
@@ -36,10 +42,11 @@ export async function rateLimit(
   try {
     const pipeline = redis.pipeline();
 
-    pipeline.zremrangebyscore(key, "-inf", windowStart.toString());
-    pipeline.zcard(key);
     const member = `${now}:${randomUUID()}`;
+
+    pipeline.zremrangebyscore(key, "-inf", windowStart.toString());
     pipeline.zadd(key, now, member);
+    pipeline.zcard(key);
     pipeline.expire(key, Math.ceil(options.windowMs / 1000) + 1);
 
     const results = await pipeline.exec();
@@ -48,14 +55,15 @@ export async function rateLimit(
       return { allowed: true };
     }
 
-    const countResult = results[1];
+    const countResult = results[2];
     if (countResult[0]) {
       return { allowed: true };
     }
 
     const currentCount = countResult[1] as number;
 
-    if (currentCount >= options.maxRequests - 1) {
+    if (currentCount > options.maxRequests) {
+      await redis.zrem(key, member);
       return {
         allowed: false,
         response: apiError("Too many requests", 429),

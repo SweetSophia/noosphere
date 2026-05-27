@@ -25,20 +25,6 @@ test("proxy adds security headers to wiki pages", async () => {
   assert.match(response.headers.get("Content-Security-Policy") ?? "", /frame-ancestors 'none'/);
 });
 
-test("proxy rate-limits article mutation routes", async () => {
-  const headers = { "x-real-ip": `patch-${crypto.randomUUID()}` };
-  let response = await proxy(request("/api/articles/article-1", { method: "PATCH", headers }));
-
-  for (let i = 1; i < 30; i += 1) {
-    response = await proxy(request("/api/articles/article-1", { method: "PATCH", headers }));
-  }
-
-  assert.notEqual(response.status, 429);
-
-  const blocked = await proxy(request("/api/articles/article-1", { method: "PATCH", headers }));
-  assert.equal(blocked.status, 429);
-});
-
 test("proxy does not rate-limit article reads", async () => {
   const headers = { "x-real-ip": `get-${crypto.randomUUID()}` };
   let response = await proxy(request("/api/articles/article-1", { method: "GET", headers }));

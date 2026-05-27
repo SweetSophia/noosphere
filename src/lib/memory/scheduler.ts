@@ -70,14 +70,16 @@ export interface SchedulerStatusSnapshot {
 }
 
 class Deferred<T> {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-  reject: (error: Error) => void;
+  promise!: Promise<T>;
+  resolve!: (value: T) => void;
+  reject!: (error: Error) => void;
   constructor() {
     this.promise = new Promise<T>((resolve, reject) => {
       this.resolve = resolve;
       this.reject = reject;
     });
+    // The lock owner may fail without any concurrent waiter attached yet.
+    void this.promise.catch(() => undefined);
   }
 }
 
@@ -216,13 +218,15 @@ export class LocalMemoryScheduler {
     this.inFlight.set(jobId, run);
 
     try {
-      return await run;
+      const result = await run;
+      this.releaseJobLock(jobId, result);
+      return result;
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      this.failJobLock(jobId, error);
+      throw error;
     } finally {
       this.inFlight.delete(jobId);
-      run.then(
-        (result) => this.releaseJobLock(jobId, result),
-        (err) => this.failJobLock(jobId, err as Error),
-      );
     }
   }
 
@@ -269,8 +273,12 @@ export class LocalMemoryScheduler {
         continue;
       }
 
-      if (!job.nextRunAt) continue;
-      if (Date.parse(job.nextRunAt) <= now.getTime()) {
+      if (this.inFlight.has(job.id) || this._jobLocks.has(job.id)) {
+        due.push(this.runJob(job.id));
+        continue;
+      }
+
+      if (job.nextRunAt && Date.parse(job.nextRunAt) <= now.getTime()) {
         due.push(this.runJob(job.id));
       }
     }

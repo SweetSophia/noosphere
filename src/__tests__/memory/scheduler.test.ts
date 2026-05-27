@@ -376,7 +376,99 @@ describe("local memory scheduler", () => {
     assert.deepEqual(runDueJobsSnapshots[0], runJobSnapshot);
   });
 
-  test("[15] timeout schedules exactly at nextRunAt after completion", async () => {
+  test("[15] runJob releases per-job lock when internal execution rejects", async () => {
+    let nowCalls = 0;
+    let throwOnCompletion = true;
+    let runs = 0;
+    const scheduler = createLocalMemoryScheduler(
+      [
+        makeJob({
+          run: () => {
+            runs += 1;
+          },
+        }),
+      ],
+      {
+        now: () => {
+          nowCalls += 1;
+          if (throwOnCompletion && nowCalls === 3) {
+            throw new Error("clock failed during completion");
+          }
+          return new Date("2026-04-28T00:00:00.000Z");
+        },
+      },
+    );
+
+    await assert.rejects(
+      () => scheduler.runJob("job.test"),
+      /clock failed during completion/,
+    );
+
+    throwOnCompletion = false;
+    const nextRun = await Promise.race([
+      scheduler.runJob("job.test"),
+      new Promise<"lock-still-held">((resolve) => {
+        setTimeout(() => resolve("lock-still-held"), 20);
+      }),
+    ]);
+
+    assert.notEqual(nextRun, "lock-still-held");
+    assert.equal(runs, 2);
+  });
+
+  test("[16] runDueJobs includes running jobs without parsing a sentinel date", async () => {
+    let resolveRun: (() => void) | undefined;
+    let calls = 0;
+    const scheduler = createLocalMemoryScheduler(
+      [
+        makeJob({
+          id: "job.parse-safe",
+          intervalMs: 1_000,
+          run: () => {
+            calls += 1;
+            return new Promise<void>((resolve) => {
+              resolveRun = resolve;
+            });
+          },
+        }),
+      ],
+      {
+        now: fixedClock("2026-04-28T00:00:00.000Z"),
+      },
+    );
+
+    const originalParse = Date.parse;
+    Date.parse = ((value: string) => {
+      if (value === "0") {
+        return Number.NaN;
+      }
+      return originalParse(value);
+    }) as typeof Date.parse;
+
+    try {
+      const runJobPromise = scheduler.runJob("job.parse-safe");
+      await flushMicrotasks();
+
+      const runDueJobsPromise = scheduler.runDueJobs(
+        new Date("2026-04-28T00:00:01.000Z"),
+      );
+      await flushMicrotasks();
+
+      assert.equal(calls, 1);
+      resolveRun?.();
+
+      const [runJobSnapshot, runDueJobsSnapshots] = await Promise.all([
+        runJobPromise,
+        runDueJobsPromise,
+      ]);
+      assert.equal(runDueJobsSnapshots.length, 1);
+      assert.deepEqual(runDueJobsSnapshots[0], runJobSnapshot);
+    } finally {
+      Date.parse = originalParse;
+    }
+  });
+
+  test("[17] timeout schedules exactly at nextRunAt after completion", async () => {
     const scheduledDelays: number[] = [];
     const callbacks: (() => void)[] = [];
     let calls = 0;

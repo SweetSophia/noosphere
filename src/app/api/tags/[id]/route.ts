@@ -11,7 +11,7 @@ interface Props {
 
 // PATCH /api/tags/[id] — Rename a tag
 export async function PATCH(request: NextRequest, { params }: Props) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "tags-patch" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "tags-patch" });
   if (!rl.allowed) return rl.response;
 
   const auth = await checkRouteAuth(request);
@@ -66,7 +66,7 @@ export async function PATCH(request: NextRequest, { params }: Props) {
 
 // DELETE /api/tags/[id] — Delete a tag
 export async function DELETE(request: NextRequest, { params }: Props) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "tags-delete" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "tags-delete" });
   if (!rl.allowed) return rl.response;
 
   const auth = await checkRouteAuth(request);
