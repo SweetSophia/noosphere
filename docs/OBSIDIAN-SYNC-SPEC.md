@@ -16,7 +16,8 @@ Add a one-way "shadow sync" that writes Noosphere articles to a local Obsidian-c
 
 ### Non-goals
 1. No bidirectional sync.
-2. No importing edits from Obsidian back into the database.
+2. No applying edits from Obsidian back into the database during shadow sync.
+   Reverse-import work starts with a separate read-only scanner.
 3. No real-time file watching in v1.
 4. No per-file conflict resolution UI in v1.
 5. No support for multiple output formats beyond markdown in v1.
@@ -651,6 +652,31 @@ To keep implementation practical, v1 should ship with these defaults:
 3. Soft-deleted articles removed from mirror
 4. Local edits overwritten, optionally backed up
 5. Git commit optional and best-effort
-6. No reverse import from Obsidian
+6. No automatic reverse import from Obsidian during shadow sync
 
 This gives a robust one-way shadow vault without turning Noosphere into a bidirectional sync engine.
+
+## 10. Reverse Markdown Import Scanner
+
+The first reverse-import phase is intentionally read-only. `POST
+/api/sync/import-scan` inspects the configured Obsidian vault and returns
+candidate Markdown files for later review/apply phases.
+
+Scanner behavior:
+
+1. Load `.noosphere-sync/manifest.json` when present.
+2. Compare tracked files against `writtenHash`, the exact bytes Noosphere last
+   wrote to disk.
+3. Report tracked files as:
+   - `modified` when the current vault hash differs from `writtenHash`
+   - `missing` when the manifest path no longer exists
+   - `baseline-missing` when an old manifest entry lacks `writtenHash`
+4. Optionally include `untracked` `.md` files outside `.noosphere-sync/` and
+   `.git/`.
+5. Parse Noosphere frontmatter with the shared codec and return safe metadata
+   plus parse errors.
+6. Never write vault files, DB records, manifests, review rows, or activity log
+   entries.
+
+This gives agents and admins a deterministic inventory of possible vault-side
+changes before later phases implement apply/reconciliation behavior.
