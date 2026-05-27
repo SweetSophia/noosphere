@@ -7,6 +7,7 @@ import {
   MARKDOWN_IMPORT_SCAN_PERMISSIONS,
   MarkdownImportScanLimitError,
   scanMarkdownImportCandidates,
+  validateMarkdownImportScanBodyText,
   validateMarkdownImportScanContentLength,
   validateMarkdownImportScanRequestBody,
 } from "@/lib/markdown-sync/import-scanner";
@@ -164,6 +165,34 @@ test("scanMarkdownImportCandidates enforces maxFiles", () => {
   });
 });
 
+test("scanMarkdownImportCandidates enforces maxFiles for tracked manifest entries", () => {
+  withVault((vaultPath) => {
+    writeFileSync(join(vaultPath, "projects/one.md"), markdown({ id: "one", title: "One" }, "One"), "utf-8");
+    writeFileSync(join(vaultPath, "projects/two.md"), markdown({ id: "two", title: "Two" }, "Two"), "utf-8");
+    writeManifest(vaultPath, {
+      one: {
+        path: "projects/one.md",
+        updatedAt: "2026-05-27T10:00:00.000Z",
+        contentHash: "one-db-hash",
+        writtenHash: sha256("one-old"),
+        deletedAt: null,
+      },
+      two: {
+        path: "projects/two.md",
+        updatedAt: "2026-05-27T10:00:00.000Z",
+        contentHash: "two-db-hash",
+        writtenHash: sha256("two-old"),
+        deletedAt: null,
+      },
+    });
+
+    assert.throws(
+      () => scanMarkdownImportCandidates({ vaultPath, manifestPath, includeUntracked: false, maxFiles: 1 }),
+      MarkdownImportScanLimitError,
+    );
+  });
+});
+
 test("markdown import scan request validation rejects malformed input", () => {
   assert.deepEqual(validateMarkdownImportScanContentLength(null, 10), { ok: true });
   assert.deepEqual(validateMarkdownImportScanContentLength("abc", 10), {
@@ -172,6 +201,11 @@ test("markdown import scan request validation rejects malformed input", () => {
     error: "Invalid content-length header",
   });
   assert.deepEqual(validateMarkdownImportScanContentLength("11", 10), {
+    ok: false,
+    status: 413,
+    error: "Request body too large. Maximum size is 10 bytes.",
+  });
+  assert.deepEqual(validateMarkdownImportScanBodyText("12345678901", 10), {
     ok: false,
     status: 413,
     error: "Request body too large. Maximum size is 10 bytes.",

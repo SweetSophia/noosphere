@@ -6,7 +6,7 @@
  */
 
 import { createHash } from "crypto";
-import { existsSync, readdirSync, readFileSync, statSync } from "fs";
+import { existsSync, readdirSync, readFileSync } from "fs";
 import { join, relative, resolve } from "path";
 import {
   parseNoosphereMarkdown,
@@ -126,6 +126,17 @@ export function validateMarkdownImportScanContentLength(
   return { ok: true };
 }
 
+export function validateMarkdownImportScanBodyText(
+  bodyText: string,
+  maxBytes = MARKDOWN_IMPORT_SCAN_MAX_BODY_BYTES,
+): MarkdownImportScanBodyValidationResult {
+  if (Buffer.byteLength(bodyText, "utf-8") > maxBytes) {
+    return { ok: false, status: 413, error: `Request body too large. Maximum size is ${maxBytes} bytes.` };
+  }
+
+  return { ok: true };
+}
+
 export function validateMarkdownImportScanRequestBody(body: unknown): {
   includeUntracked: boolean;
   maxFiles: number;
@@ -182,6 +193,10 @@ export function scanMarkdownImportCandidates(options: MarkdownImportScanOptions)
     durationMs: 0,
   };
 
+  if (trackedEntries.length > maxFiles) {
+    throw new MarkdownImportScanLimitError(maxFiles);
+  }
+
   for (const [articleId, entry] of trackedEntries) {
     trackedPaths.add(normalizeRelativePath(entry.path));
     const candidate = scanTrackedEntry(options.vaultPath, articleId, entry, warnings);
@@ -195,7 +210,7 @@ export function scanMarkdownImportCandidates(options: MarkdownImportScanOptions)
   }
 
   if (includeUntracked) {
-    const markdownPaths = listMarkdownFiles(options.vaultPath, maxFiles);
+    const markdownPaths = listMarkdownFiles(options.vaultPath, maxFiles, warnings);
     for (const relativePath of markdownPaths) {
       if (trackedPaths.has(relativePath)) continue;
       const absolutePath = resolveVaultPath(options.vaultPath, relativePath);
@@ -205,7 +220,15 @@ export function scanMarkdownImportCandidates(options: MarkdownImportScanOptions)
         continue;
       }
 
-      const loaded = loadMarkdownFile(absolutePath);
+      let loaded: LoadedMarkdown;
+      try {
+        loaded = loadMarkdownFile(absolutePath);
+      } catch (error) {
+        warnings.push(`Failed to read untracked file ${relativePath}: ${errorMessage(error)}`);
+        stats.skipped++;
+        continue;
+      }
+
       const candidate: MarkdownImportCandidate = {
         kind: "untracked",
         relativePath,
@@ -277,7 +300,23 @@ function scanTrackedEntry(
     };
   }
 
-  const loaded = loadMarkdownFile(absolutePath);
+  let loaded: LoadedMarkdown;
+  try {
+    loaded = loadMarkdownFile(absolutePath);
+  } catch (error) {
+    return {
+      kind: baselineHash ? "modified" : "baseline-missing",
+      relativePath,
+      articleId,
+      manifestPath: relativePath,
+      baselineHash,
+      markdownHash: null,
+      sizeBytes: null,
+      metadata: null,
+      parseError: `Failed to read file: ${errorMessage(error)}`,
+    };
+  }
+
   if (!baselineHash) {
     return {
       kind: "baseline-missing",
@@ -372,7 +411,7 @@ function extractMetadata(frontmatter: Record<string, unknown>): MarkdownImportMe
   };
 }
 
-function listMarkdownFiles(vaultPath: string, maxFiles: number): string[] {
+function listMarkdownFiles(vaultPath: string, maxFiles: number, warnings: string[]): string[] {
   if (!existsSync(vaultPath)) return [];
 
   const root = resolve(vaultPath);
@@ -381,8 +420,15 @@ function listMarkdownFiles(vaultPath: string, maxFiles: number): string[] {
   return files.sort();
 
   function walk(directory: string) {
-    const entries = readdirSync(directory, { withFileTypes: true })
-      .sort((a, b) => a.name.localeCompare(b.name));
+    let entries;
+    try {
+      entries = readdirSync(directory, { withFileTypes: true });
+    } catch (error) {
+      warnings.push(`Failed to read directory ${directory}: ${errorMessage(error)}`);
+      return;
+    }
+
+    entries.sort((a, b) => a.name.localeCompare(b.name));
 
     for (const entry of entries) {
       const absolutePath = join(directory, entry.name);
@@ -397,7 +443,6 @@ function listMarkdownFiles(vaultPath: string, maxFiles: number): string[] {
       }
 
       if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".md")) continue;
-      if (!safeListedPath(root, absolutePath)) continue;
 
       files.push(relativePath);
       if (files.length > maxFiles) {
@@ -423,12 +468,6 @@ function resolveVaultPath(vaultPath: string, relativePath: string): string | nul
   return absolutePath;
 }
 
-function safeListedPath(root: string, absolutePath: string): boolean {
-  const normalizedRoot = root.replace(/[/\\]+$/, "").replace(/\\/g, "/");
-  const normalizedPath = absolutePath.replace(/\\/g, "/");
-  return normalizedPath.startsWith(`${normalizedRoot}/`) && statSync(absolutePath).isFile();
-}
-
 function normalizeRelativePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\/+/, "");
 }
@@ -452,4 +491,8 @@ function readNestedString(record: Record<string, unknown>, key: string): string 
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

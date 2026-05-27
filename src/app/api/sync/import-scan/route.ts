@@ -12,9 +12,9 @@ import { Permissions } from "@prisma/client";
 import { requirePermission } from "@/lib/api/auth";
 import { getObsidianSyncConfig } from "@/lib/obsidian-sync/config";
 import {
-  MARKDOWN_IMPORT_SCAN_MAX_BODY_BYTES,
   MarkdownImportScanLimitError,
   scanMarkdownImportCandidates,
+  validateMarkdownImportScanBodyText,
   validateMarkdownImportScanContentLength,
   validateMarkdownImportScanRequestBody,
 } from "@/lib/markdown-sync/import-scanner";
@@ -29,7 +29,16 @@ export async function POST(request: NextRequest) {
     return auth.response;
   }
 
-  const config = getObsidianSyncConfig();
+  let config;
+  try {
+    config = getObsidianSyncConfig();
+  } catch (err) {
+    return NextResponse.json(
+      { error: `Configuration error: ${(err as Error).message}` },
+      { status: 400 },
+    );
+  }
+
   if (!config) {
     return NextResponse.json({ error: "Obsidian sync is not enabled" }, { status: 400 });
   }
@@ -43,11 +52,9 @@ export async function POST(request: NextRequest) {
   try {
     const bodyText = await request.text();
     if (bodyText.trim()) {
-      if (new TextEncoder().encode(bodyText).byteLength > MARKDOWN_IMPORT_SCAN_MAX_BODY_BYTES) {
-        return NextResponse.json(
-          { error: `Request body too large. Maximum size is ${MARKDOWN_IMPORT_SCAN_MAX_BODY_BYTES} bytes.` },
-          { status: 413 },
-        );
+      const bodyTextValidation = validateMarkdownImportScanBodyText(bodyText);
+      if (!bodyTextValidation.ok) {
+        return NextResponse.json({ error: bodyTextValidation.error }, { status: bodyTextValidation.status });
       }
       body = JSON.parse(bodyText);
     }
