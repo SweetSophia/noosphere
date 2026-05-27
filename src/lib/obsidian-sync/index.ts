@@ -581,7 +581,7 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
                   await recordSyncConflictReview(
                     buildSyncConflictReviewCreateInput({
                       article,
-                      direction: "noosphere-to-vault",
+                      direction: "vault-to-noosphere",
                       relativePath,
                       archivePath: backupRel,
                       noosphereHash: canonicalHash,
