@@ -69,6 +69,18 @@ export interface SchedulerStatusSnapshot {
   jobs: SchedulerJobSnapshot[];
 }
 
+class Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: Error) => void;
+  constructor() {
+    this.promise = new Promise<T>((resolve, reject) => {
+      this.resolve = resolve;
+      this.reject = reject;
+    });
+  }
+}
+
 export interface LocalMemorySchedulerOptions {
   /** Clock hook for deterministic tests. */
   now?: () => Date;
@@ -101,6 +113,7 @@ export class LocalMemoryScheduler {
     ReturnType<typeof globalThis.setTimeout>
   >();
   private readonly inFlight = new Map<string, Promise<SchedulerJobSnapshot>>();
+  private readonly _jobLocks = new Map<string, Deferred<SchedulerJobSnapshot>>();
   private running = false;
 
   private readonly now: () => Date;
@@ -191,18 +204,22 @@ export class LocalMemoryScheduler {
       return snapshotJob(job);
     }
 
-    if (job.status === "running") {
-      return this.inFlight.get(job.id) ?? snapshotJob(job);
+    if (!this.tryAcquireJobLock(jobId)) {
+      const deferred = this._jobLocks.get(jobId);
+      if (deferred) {
+        return deferred.promise;
+      }
     }
 
-    this.clearJobTimer(job.id);
+    this.clearJobTimer(jobId);
     const run = this.executeJob(job);
-    this.inFlight.set(job.id, run);
+    this.inFlight.set(jobId, run);
 
     try {
       return await run;
     } finally {
-      this.inFlight.delete(job.id);
+      this.inFlight.delete(jobId);
+      run.then((result) => this.releaseJobLock(jobId, result)).catch(() => {});
     }
   }
 
@@ -245,11 +262,11 @@ export class LocalMemoryScheduler {
     const due: Promise<SchedulerJobSnapshot>[] = [];
 
     for (const job of this.jobs.values()) {
-      if (!job.enabled || job.status === "running" || !job.nextRunAt) {
+      if (!job.enabled) {
         continue;
       }
 
-      if (Date.parse(job.nextRunAt) <= now.getTime()) {
+      if (Date.parse(job.nextRunAt ?? "0") <= now.getTime()) {
         due.push(this.runJob(job.id));
       }
     }
@@ -272,6 +289,23 @@ export class LocalMemoryScheduler {
       throw new Error(`Unknown scheduler job: ${jobId}`);
     }
     return job;
+  }
+
+  private tryAcquireJobLock(jobId: string): boolean {
+    if (this._jobLocks.has(jobId)) {
+      return false;
+    }
+    const deferred = new Deferred<SchedulerJobSnapshot>();
+    this._jobLocks.set(jobId, deferred);
+    return true;
+  }
+
+  private releaseJobLock(jobId: string, result: SchedulerJobSnapshot): void {
+    const deferred = this._jobLocks.get(jobId);
+    if (deferred) {
+      this._jobLocks.delete(jobId);
+      deferred.resolve(result);
+    }
   }
 
   private startJobTimer(jobId: string): void {
