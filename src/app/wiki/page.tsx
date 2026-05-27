@@ -92,7 +92,7 @@ export default async function WikiHomePage() {
     prisma.topic.findMany({ orderBy: { name: "asc" } }),
     prisma.article.groupBy({
       by: ["topicId"],
-      where: { deletedAt: null },
+      where: scopeWhere,
       _count: { topicId: true },
     }),
     prisma.article.findMany({
