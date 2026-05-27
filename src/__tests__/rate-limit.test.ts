@@ -5,7 +5,7 @@ import { _redisTestHooks } from "@/lib/cache/redis";
 import { NextRequest } from "next/server";
 
 class FakeRedisClient {
-  status = "wait";
+  status: "wait" | "ready" | "end" = "ready";
   private readonly store = new Map<string, string>();
   private readonly expires = new Map<string, number>();
 
@@ -35,37 +35,35 @@ class FakeRedisClient {
     return "OK";
   }
 
-  async zadd(key: string, _score: number, member: string): Promise<number> {
+  zadd(key: string, score: number, member: string): number {
     this.assertReady();
     const setKey = `zset:${key}`;
     if (!this.store.has(setKey)) {
       this.store.set(setKey, JSON.stringify([]));
     }
-    const arr: string[] = JSON.parse(this.store.get(setKey) ?? "[]");
-    if (!arr.includes(member)) {
-      arr.push(member);
+    const arr: Array<{ member: string; score: number }> = JSON.parse(this.store.get(setKey) ?? "[]");
+    const existing = arr.findIndex((item) => item.member === member);
+    if (existing === -1) {
+      arr.push({ member, score });
       this.store.set(setKey, JSON.stringify(arr));
       return 1;
     }
     return 0;
   }
 
-  async zremrangebyscore(key: string, min: string, max: string): Promise<number> {
+  zremrangebyscore(key: string, min: string, max: string): number {
     this.assertReady();
     const setKey = `zset:${key}`;
-    const arr: string[] = JSON.parse(this.store.get(setKey) ?? "[]");
+    const arr: Array<{ member: string; score: number }> = JSON.parse(this.store.get(setKey) ?? "[]");
     const before = arr.length;
     const minNum = parseFloat(min);
     const maxNum = parseFloat(max);
-    const filtered = arr.filter((item) => {
-      const timestamp = parseFloat(item.split(":")[1] ?? "0");
-      return timestamp < minNum || timestamp > maxNum;
-    });
+    const filtered = arr.filter((item) => item.score < minNum || item.score > maxNum);
     this.store.set(setKey, JSON.stringify(filtered));
     return before - filtered.length;
   }
 
-  async zcard(key: string): Promise<number> {
+  zcard(key: string): number {
     this.assertReady();
     const setKey = `zset:${key}`;
     return JSON.parse(this.store.get(setKey) ?? "[]").length;
@@ -101,7 +99,12 @@ class FakeRedisClient {
         const results: Array<[Error | null, unknown]> = [];
         for (const cmd of commands) {
           try {
-            const result = (this as Record<string, (...args: unknown[]) => unknown>)[cmd.method](...cmd.args);
+            // eslint-disable-next-line @typescript-eslint/no-this-alias
+            const client = this as unknown as Record<string, (...args: unknown[]) => unknown>;
+            const result = client[cmd.method](...cmd.args);
+            if (result instanceof Promise) {
+              throw new Error("Pipeline exec called with async methods but should be synchronous");
+            }
             results.push([null, result]);
           } catch (err) {
             results.push([err as Error, null]);
@@ -132,80 +135,80 @@ describe("Redis Rate Limiter", () => {
     _redisTestHooks.reset();
   });
 
-  it("allows requests within limit", () => {
+  it("allows requests within limit", async () => {
     const request = makeRequest("10.0.0.1");
-    const result = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "test" });
+    const result = await rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "test" });
     assert.deepStrictEqual(result, { allowed: true });
   });
 
-  it("blocks requests exceeding limit", () => {
+  it("blocks requests exceeding limit", async () => {
     const request = makeRequest("10.0.0.2");
     const options = { windowMs: 60_000, maxRequests: 3, keyPrefix: "test-block" };
 
     // Use up the limit
-    rateLimit(request, options);
-    rateLimit(request, options);
-    const result = rateLimit(request, options);
+    await rateLimit(request, options);
+    await rateLimit(request, options);
+    const result = await rateLimit(request, options);
 
     assert.deepStrictEqual(result, { allowed: false });
     assert.equal(result.response.status, 429);
   });
 
-  it("uses unique keys per client IP", () => {
+  it("uses unique keys per client IP", async () => {
     const request1 = makeRequest("10.0.0.3");
     const request2 = makeRequest("10.0.0.4");
     const options = { windowMs: 60_000, maxRequests: 2, keyPrefix: "test-ip" };
 
     // Both IPs should be allowed independently
-    assert.deepStrictEqual(rateLimit(request1, options), { allowed: true });
-    assert.deepStrictEqual(rateLimit(request2, options), { allowed: true });
+    assert.deepStrictEqual(await rateLimit(request1, options), { allowed: true });
+    assert.deepStrictEqual(await rateLimit(request2, options), { allowed: true });
   });
 
-  it("uses unique keys per keyPrefix", () => {
+  it("uses unique keys per keyPrefix", async () => {
     const request = makeRequest("10.0.0.5");
 
-    rateLimit(request, { windowMs: 60_000, maxRequests: 1, keyPrefix: "prefix-a" });
-    const result = rateLimit(request, { windowMs: 60_000, maxRequests: 1, keyPrefix: "prefix-b" });
+    await rateLimit(request, { windowMs: 60_000, maxRequests: 1, keyPrefix: "prefix-a" });
+    const result = await rateLimit(request, { windowMs: 60_000, maxRequests: 1, keyPrefix: "prefix-b" });
 
     // Different prefixes should not share counters
     assert.deepStrictEqual(result, { allowed: true });
   });
 
-  it("handles x-forwarded-for header correctly", () => {
+  it("handles x-forwarded-for header correctly", async () => {
     const headers = new Headers();
     headers.set("x-forwarded-for", "203.0.113.195, 70.41.3.18, 150.172.238.178");
     const request = new NextRequest("http://localhost/api/test", { headers });
 
-    const result = rateLimit(request, { windowMs: 60_000, maxRequests: 5, keyPrefix: "test-fwd" });
+    const result = await rateLimit(request, { windowMs: 60_000, maxRequests: 5, keyPrefix: "test-fwd" });
     assert.deepStrictEqual(result, { allowed: true });
   });
 
-  it("handles cf-connecting-ip header correctly", () => {
+  it("handles cf-connecting-ip header correctly", async () => {
     const headers = new Headers();
     headers.set("cf-connecting-ip", "203.0.113.195");
     const request = new NextRequest("http://localhost/api/test", { headers });
 
-    const result = rateLimit(request, { windowMs: 60_000, maxRequests: 5, keyPrefix: "test-cf" });
+    const result = await rateLimit(request, { windowMs: 60_000, maxRequests: 5, keyPrefix: "test-cf" });
     assert.deepStrictEqual(result, { allowed: true });
   });
 
-  it("falls back to allowing when Redis client is unavailable", () => {
+  it("falls back to allowing when Redis client is unavailable", async () => {
     // Simulate Redis not configured by passing null-like state
     const request = makeRequest("10.0.0.6");
 
     // With a disconnected client, should fail open (allow)
     fakeRedis.status = "end";
-    const result = rateLimit(request, { windowMs: 60_000, maxRequests: 1, keyPrefix: "test-failopen" });
+    const result = await rateLimit(request, { windowMs: 60_000, maxRequests: 1, keyPrefix: "test-failopen" });
     assert.deepStrictEqual(result, { allowed: true });
   });
 
-  it("falls back to allowing when Redis URL is not set", () => {
+  it("falls back to allowing when Redis URL is not set", async () => {
     const previousRedisUrl = process.env.REDIS_URL;
     delete process.env.REDIS_URL;
     _redisTestHooks.reset();
 
     const request = makeRequest("10.0.0.7");
-    const result = rateLimit(request, { windowMs: 60_000, maxRequests: 1, keyPrefix: "test-noredis" });
+    const result = await rateLimit(request, { windowMs: 60_000, maxRequests: 1, keyPrefix: "test-noredis" });
 
     if (previousRedisUrl !== undefined) {
       process.env.REDIS_URL = previousRedisUrl;
@@ -228,24 +231,24 @@ describe("Rate Limiter Edge Cases", () => {
     _redisTestHooks.reset();
   });
 
-  it("returns correct error message on rate limit", () => {
+  it("returns correct error message on rate limit", async () => {
     const request = makeRequest("10.0.0.10");
     const options = { windowMs: 60_000, maxRequests: 1, keyPrefix: "test-msg" };
 
-    rateLimit(request, options);
-    const result = rateLimit(request, options);
+    await rateLimit(request, options);
+    const result = await rateLimit(request, options);
 
     assert.equal(result.allowed, false);
     assert.equal(result.response.status, 429);
   });
 
-  it("handles concurrent requests from same IP", () => {
+  it("handles concurrent requests from same IP", async () => {
     const request = makeRequest("10.0.0.11");
     const options = { windowMs: 60_000, maxRequests: 100, keyPrefix: "test-concurrent" };
 
     // Simulate burst of requests
     for (let i = 0; i < 50; i++) {
-      const result = rateLimit(request, options);
+      const result = await rateLimit(request, options);
       assert.equal(result.allowed, true);
     }
   });

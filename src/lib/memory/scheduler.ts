@@ -219,7 +219,10 @@ export class LocalMemoryScheduler {
       return await run;
     } finally {
       this.inFlight.delete(jobId);
-      run.then((result) => this.releaseJobLock(jobId, result)).catch(() => {});
+      run.then(
+        (result) => this.releaseJobLock(jobId, result),
+        (err) => this.failJobLock(jobId, err as Error),
+      );
     }
   }
 
@@ -266,7 +269,8 @@ export class LocalMemoryScheduler {
         continue;
       }
 
-      if (Date.parse(job.nextRunAt ?? "0") <= now.getTime()) {
+      if (!job.nextRunAt) continue;
+      if (Date.parse(job.nextRunAt) <= now.getTime()) {
         due.push(this.runJob(job.id));
       }
     }
@@ -305,6 +309,14 @@ export class LocalMemoryScheduler {
     if (deferred) {
       this._jobLocks.delete(jobId);
       deferred.resolve(result);
+    }
+  }
+
+  private failJobLock(jobId: string, error: Error): void {
+    const deferred = this._jobLocks.get(jobId);
+    if (deferred) {
+      this._jobLocks.delete(jobId);
+      deferred.reject(error);
     }
   }
 

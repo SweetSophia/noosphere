@@ -17,10 +17,10 @@ function getClientIdentifier(request: NextRequest): string {
   );
 }
 
-export function rateLimit(
+export async function rateLimit(
   request: NextRequest,
   options: RateLimitOptions
-): { allowed: true } | { allowed: false; response: NextResponse } {
+): Promise<{ allowed: true } | { allowed: false; response: NextResponse }> {
   const clientId = getClientIdentifier(request);
   const key = `ratelimit:${options.keyPrefix ?? "default"}:${clientId}`;
   const now = Date.now();
@@ -33,13 +33,28 @@ export function rateLimit(
   }
 
   try {
-    redis.zremrangebyscore(key, "-inf", windowStart.toString());
-    const count = redis.zcard(key);
-    const member = `${now}:${crypto.randomUUID()}`;
-    redis.zadd(key, now, member);
-    redis.expire(key, Math.ceil(options.windowMs / 1000) + 1);
+    const pipeline = redis.pipeline();
 
-    if (count >= options.maxRequests) {
+    pipeline.zremrangebyscore(key, "-inf", windowStart.toString());
+    pipeline.zcard(key);
+    const member = `${now}:${crypto.randomUUID()}`;
+    pipeline.zadd(key, now, member);
+    pipeline.expire(key, Math.ceil(options.windowMs / 1000) + 1);
+
+    const results = await pipeline.exec();
+
+    if (!results) {
+      return { allowed: true };
+    }
+
+    const countResult = results[1];
+    if (countResult[0]) {
+      return { allowed: true };
+    }
+
+    const currentCount = countResult[1] as number;
+
+    if (currentCount >= options.maxRequests - 1) {
       return {
         allowed: false,
         response: apiError("Too many requests", 429),
