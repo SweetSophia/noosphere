@@ -8,11 +8,11 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { Permissions } from "@prisma/client";
 import { requirePermission } from "@/lib/api/auth";
 import { getObsidianSyncConfig } from "@/lib/obsidian-sync/config";
 import {
   MarkdownImportScanLimitError,
+  MARKDOWN_IMPORT_SCAN_PERMISSIONS,
   scanMarkdownImportCandidates,
   validateMarkdownImportScanBodyText,
   validateMarkdownImportScanContentLength,
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
   const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 20, keyPrefix: "sync-import-scan-post" });
   if (!rl.allowed) return rl.response;
 
-  const auth = await requirePermission(request, [Permissions.ADMIN]);
+  const auth = await requirePermission(request, [...MARKDOWN_IMPORT_SCAN_PERMISSIONS]);
   if (!auth.success) {
     return auth.response;
   }

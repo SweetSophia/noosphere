@@ -6,8 +6,9 @@
  */
 
 import { createHash } from "crypto";
-import { existsSync, readdirSync, readFileSync } from "fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "fs";
 import { join, relative, resolve } from "path";
+import { Permissions } from "@prisma/client";
 import {
   parseNoosphereMarkdown,
   readMarkdownString,
@@ -17,7 +18,7 @@ import type { Manifest, ManifestEntry } from "@/lib/obsidian-sync";
 
 export const MARKDOWN_IMPORT_SCAN_MAX_BODY_BYTES = 32 * 1024;
 export const MARKDOWN_IMPORT_SCAN_DEFAULT_MAX_FILES = 5_000;
-export const MARKDOWN_IMPORT_SCAN_PERMISSIONS = ["ADMIN"] as const;
+export const MARKDOWN_IMPORT_SCAN_PERMISSIONS = [Permissions.ADMIN] as const;
 
 export type MarkdownImportCandidateKind =
   | "modified"
@@ -110,11 +111,12 @@ export function validateMarkdownImportScanContentLength(
   maxBytes = MARKDOWN_IMPORT_SCAN_MAX_BODY_BYTES,
 ): MarkdownImportScanBodyValidationResult {
   if (headerValue === null) return { ok: true };
-  if (!/^\d+$/.test(headerValue)) {
+  const normalized = headerValue.trim();
+  if (!/^\d+$/.test(normalized)) {
     return { ok: false, status: 400, error: "Invalid content-length header" };
   }
 
-  const length = Number(headerValue);
+  const length = Number(normalized);
   if (!Number.isSafeInteger(length)) {
     return { ok: false, status: 400, error: "Invalid content-length header" };
   }
@@ -210,9 +212,11 @@ export function scanMarkdownImportCandidates(options: MarkdownImportScanOptions)
   }
 
   if (includeUntracked) {
-    const markdownPaths = listMarkdownFiles(options.vaultPath, maxFiles, warnings);
+    const remainingFileBudget = maxFiles - trackedEntries.length;
+    const markdownPaths = remainingFileBudget > 0
+      ? listMarkdownFiles(options.vaultPath, remainingFileBudget, warnings, trackedPaths)
+      : [];
     for (const relativePath of markdownPaths) {
-      if (trackedPaths.has(relativePath)) continue;
       const absolutePath = resolveVaultPath(options.vaultPath, relativePath);
       if (!absolutePath) {
         warnings.push(`Path traversal rejected during scan: ${relativePath}`);
@@ -222,7 +226,7 @@ export function scanMarkdownImportCandidates(options: MarkdownImportScanOptions)
 
       let loaded: LoadedMarkdown;
       try {
-        loaded = loadMarkdownFile(absolutePath);
+        loaded = loadMarkdownFile(options.vaultPath, relativePath);
       } catch (error) {
         warnings.push(`Failed to read untracked file ${relativePath}: ${errorMessage(error)}`);
         stats.skipped++;
@@ -277,7 +281,7 @@ function scanTrackedEntry(
       relativePath,
       articleId,
       manifestPath: relativePath,
-      baselineHash: entry.writtenHash ?? entry.contentHash ?? null,
+      baselineHash: entry.writtenHash ?? null,
       markdownHash: null,
       sizeBytes: null,
       metadata: null,
@@ -302,7 +306,7 @@ function scanTrackedEntry(
 
   let loaded: LoadedMarkdown;
   try {
-    loaded = loadMarkdownFile(absolutePath);
+    loaded = loadMarkdownFile(vaultPath, relativePath);
   } catch (error) {
     return {
       kind: baselineHash ? "modified" : "baseline-missing",
@@ -357,7 +361,7 @@ function readManifest(vaultPath: string, manifestPath: string, warnings: string[
 
   try {
     const parsed = JSON.parse(readFileSync(absolutePath, "utf-8")) as Manifest;
-    if (parsed.version !== 1 || !parsed.articles || typeof parsed.articles !== "object") {
+    if (parsed.version !== 1 || !isManifestArticles(parsed.articles)) {
       warnings.push(`Unsupported manifest format: ${manifestPath}`);
       return null;
     }
@@ -368,7 +372,11 @@ function readManifest(vaultPath: string, manifestPath: string, warnings: string[
   }
 }
 
-function loadMarkdownFile(absolutePath: string): LoadedMarkdown {
+function loadMarkdownFile(vaultPath: string, relativePath: string): LoadedMarkdown {
+  const absolutePath = resolveExistingVaultFilePath(vaultPath, relativePath);
+  if (!absolutePath) {
+    throw new Error("File path escapes vault root, is a symlink, or is not a regular file");
+  }
   const content = readFileSync(absolutePath, "utf-8");
   const parsed = parseNoosphereMarkdown(content);
   const markdownHash = hashMarkdownContent(content);
@@ -411,7 +419,12 @@ function extractMetadata(frontmatter: Record<string, unknown>): MarkdownImportMe
   };
 }
 
-function listMarkdownFiles(vaultPath: string, maxFiles: number, warnings: string[]): string[] {
+function listMarkdownFiles(
+  vaultPath: string,
+  maxFiles: number,
+  warnings: string[],
+  ignoredPaths: Set<string>,
+): string[] {
   if (!existsSync(vaultPath)) return [];
 
   const root = resolve(vaultPath);
@@ -443,6 +456,7 @@ function listMarkdownFiles(vaultPath: string, maxFiles: number, warnings: string
       }
 
       if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".md")) continue;
+      if (ignoredPaths.has(relativePath)) continue;
 
       files.push(relativePath);
       if (files.length > maxFiles) {
@@ -465,6 +479,20 @@ function resolveVaultPath(vaultPath: string, relativePath: string): string | nul
   const root = resolve(vaultPath).replace(/[/\\]+$/, "").replace(/\\/g, "/");
   const absolutePath = resolve(vaultPath, relativePath).replace(/\\/g, "/");
   if (!absolutePath.startsWith(`${root}/`)) return null;
+  return absolutePath;
+}
+
+function resolveExistingVaultFilePath(vaultPath: string, relativePath: string): string | null {
+  const absolutePath = resolveVaultPath(vaultPath, relativePath);
+  if (!absolutePath) return null;
+
+  const stat = lstatSync(absolutePath);
+  if (stat.isSymbolicLink() || !stat.isFile()) return null;
+
+  const root = realpathSync(vaultPath).replace(/[/\\]+$/, "").replace(/\\/g, "/");
+  const realPath = realpathSync(absolutePath).replace(/\\/g, "/");
+  if (!realPath.startsWith(`${root}/`)) return null;
+
   return absolutePath;
 }
 
@@ -491,6 +519,20 @@ function readNestedString(record: Record<string, unknown>, key: string): string 
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isManifestArticles(value: unknown): value is Record<string, ManifestEntry> {
+  if (!isPlainObject(value)) return false;
+  return Object.values(value).every((entry) => {
+    if (!isPlainObject(entry)) return false;
+    return (
+      typeof entry["path"] === "string" &&
+      typeof entry["updatedAt"] === "string" &&
+      typeof entry["contentHash"] === "string" &&
+      (entry["writtenHash"] === undefined || typeof entry["writtenHash"] === "string") &&
+      (entry["deletedAt"] === null || typeof entry["deletedAt"] === "string")
+    );
+  });
 }
 
 function errorMessage(error: unknown): string {

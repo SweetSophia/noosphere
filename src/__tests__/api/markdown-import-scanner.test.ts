@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import {
@@ -193,8 +193,76 @@ test("scanMarkdownImportCandidates enforces maxFiles for tracked manifest entrie
   });
 });
 
+test("scanMarkdownImportCandidates does not count tracked paths against untracked walk", () => {
+  withVault((vaultPath) => {
+    const content = markdown({ id: "one", title: "One" }, "One");
+    writeFileSync(join(vaultPath, "projects/one.md"), content, "utf-8");
+    writeManifest(vaultPath, {
+      one: {
+        path: "projects/one.md",
+        updatedAt: "2026-05-27T10:00:00.000Z",
+        contentHash: "one-db-hash",
+        writtenHash: sha256(content),
+        deletedAt: null,
+      },
+    });
+
+    const result = scanMarkdownImportCandidates({
+      vaultPath,
+      manifestPath,
+      includeUntracked: true,
+      maxFiles: 1,
+    });
+
+    assert.equal(result.stats.unchanged, 1);
+    assert.equal(result.candidates.length, 0);
+  });
+});
+
+test("scanMarkdownImportCandidates rejects malformed manifest article maps", () => {
+  withVault((vaultPath) => {
+    writeFileSync(
+      join(vaultPath, manifestPath),
+      JSON.stringify({
+        version: 1,
+        vaultPath,
+        lastRunAt: "2026-05-27T10:00:00.000Z",
+        articles: [],
+      }),
+      "utf-8",
+    );
+
+    const result = scanMarkdownImportCandidates({ vaultPath, manifestPath, includeUntracked: false });
+
+    assert.equal(result.manifest.present, false);
+    assert.equal(result.warnings.some((warning) => warning.includes("Unsupported manifest format")), true);
+  });
+});
+
+test("scanMarkdownImportCandidates rejects tracked symlink targets", () => {
+  withVault((vaultPath) => {
+    symlinkSync("/etc/passwd", join(vaultPath, "projects/link.md"));
+    writeManifest(vaultPath, {
+      link: {
+        path: "projects/link.md",
+        updatedAt: "2026-05-27T10:00:00.000Z",
+        contentHash: "link-db-hash",
+        writtenHash: sha256("old"),
+        deletedAt: null,
+      },
+    });
+
+    const result = scanMarkdownImportCandidates({ vaultPath, manifestPath, includeUntracked: false });
+
+    assert.equal(result.stats.modified, 1);
+    assert.equal(result.candidates[0].markdownHash, null);
+    assert.match(result.candidates[0].parseError ?? "", /symlink|vault root/);
+  });
+});
+
 test("markdown import scan request validation rejects malformed input", () => {
   assert.deepEqual(validateMarkdownImportScanContentLength(null, 10), { ok: true });
+  assert.deepEqual(validateMarkdownImportScanContentLength(" 10 ", 10), { ok: true });
   assert.deepEqual(validateMarkdownImportScanContentLength("abc", 10), {
     ok: false,
     status: 400,
