@@ -1,5 +1,15 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
+import { prisma } from "@/lib/prisma";
+import {
+  recordSyncConflictReview,
+  resolveSyncConflictReview,
+  SyncConflictReviewClosedError,
+} from "@/lib/markdown-sync/api/conflict-review";
+import { runObsidianSync } from "@/lib/obsidian-sync";
 import {
   buildSyncConflictReviewCreateInput,
   buildSyncConflictReviewSummary,
@@ -77,6 +87,189 @@ test("buildSyncConflictReviewCreateInput prepares vault-to-noosphere review rows
   assert.equal(input.relativePath, "projects/noosphere-source.md");
   assert.equal(input.summary.markdown.title, "Markdown Source");
   assert.equal(input.markdownUpdatedAt?.toISOString(), "2026-05-26T11:00:00.000Z");
+});
+
+test("recordSyncConflictReview suppresses exact ignored-always conflicts", async () => {
+  const input = buildSyncConflictReviewCreateInput({
+    article,
+    direction: "vault-to-noosphere",
+    relativePath: "projects/noosphere-source.md",
+    archivePath: ".noosphere-sync/conflicts/2026-projects---noosphere-source.md",
+    noosphereHash: "database-hash",
+    markdownContent: markdown,
+  });
+  const delegate = prisma.syncConflictReview as unknown as {
+    findFirst: (args: unknown) => Promise<unknown>;
+    create: (args: unknown) => Promise<unknown>;
+  };
+  const originalFindFirst = delegate.findFirst;
+  const originalCreate = delegate.create;
+  let findFirstCalls = 0;
+  let createCalls = 0;
+
+  try {
+    delegate.findFirst = async (args: unknown) => {
+      findFirstCalls++;
+      assert.deepEqual(args, {
+        where: {
+          articleId: "article-1",
+          direction: "vault-to-noosphere",
+          relativePath: "projects/noosphere-source.md",
+          markdownHash: input.markdownHash,
+          status: "ignored-always",
+        },
+        orderBy: [{ resolvedAt: "desc" }, { createdAt: "desc" }],
+      });
+      return { id: "ignored-review", status: "ignored-always" };
+    };
+    delegate.create = async () => {
+      createCalls++;
+      throw new Error("create should not run for ignored-always conflicts");
+    };
+
+    const review = await recordSyncConflictReview(input);
+
+    assert.equal((review as { id: string }).id, "ignored-review");
+    assert.equal(findFirstCalls, 1);
+    assert.equal(createCalls, 0);
+  } finally {
+    delegate.findFirst = originalFindFirst;
+    delegate.create = originalCreate;
+  }
+});
+
+test("resolveSyncConflictReview rejects already terminal reviews", async () => {
+  const tx = {
+    syncConflictReview: {
+      updateMany: async () => ({ count: 0 }),
+      findUnique: async () => ({ status: "ignored-always" }),
+    },
+    activityLog: {
+      create: async () => {
+        throw new Error("activity log should not be written for terminal reviews");
+      },
+    },
+  };
+  type TransactionStub = typeof tx;
+  const client = prisma as unknown as {
+    $transaction: <T>(fn: (tx: TransactionStub) => Promise<T>) => Promise<T>;
+  };
+  const originalTransaction = client.$transaction;
+
+  try {
+    client.$transaction = async (fn) => fn(tx);
+
+    await assert.rejects(
+      () =>
+        resolveSyncConflictReview({
+          id: "review-1",
+          action: "keep-noosphere",
+          resolvedBy: "Admin",
+        }),
+      SyncConflictReviewClosedError,
+    );
+  } finally {
+    client.$transaction = originalTransaction;
+  }
+});
+
+test("runObsidianSync keeps local markdown visible when conflict review persistence fails", async () => {
+  const vaultPath = `/tmp/noosphere-conflict-review-${Date.now()}-${process.pid}`;
+  const oldEnabled = process.env.OBSIDIAN_SYNC_ENABLED;
+  const oldVaultPath = process.env.OBSIDIAN_SYNC_VAULT_PATH;
+  const oldPreserve = process.env.OBSIDIAN_SYNC_PRESERVE_LOCAL_CHANGES;
+  const relativePath = "projects/noosphere-source.md";
+  const localMarkdown = "# Local-only markdown";
+
+  try {
+    process.env.OBSIDIAN_SYNC_ENABLED = "true";
+    process.env.OBSIDIAN_SYNC_VAULT_PATH = vaultPath;
+    process.env.OBSIDIAN_SYNC_PRESERVE_LOCAL_CHANGES = "true";
+
+    mkdirSync(join(vaultPath, "projects"), { recursive: true });
+    mkdirSync(join(vaultPath, ".noosphere-sync"), { recursive: true });
+    writeFileSync(join(vaultPath, relativePath), localMarkdown, "utf-8");
+    writeFileSync(
+      join(vaultPath, ".noosphere-sync", "manifest.json"),
+      JSON.stringify({
+        version: 1,
+        vaultPath,
+        lastRunAt: "2026-05-26T00:00:00.000Z",
+        articles: {
+          "article-1": {
+            path: relativePath,
+            updatedAt: "2026-05-26T09:00:00.000Z",
+            contentHash: "previous-noosphere-hash",
+            writtenHash: createHash("sha256").update("# Previous noosphere markdown").digest("hex"),
+            deletedAt: null,
+          },
+        },
+      }),
+      "utf-8",
+    );
+
+    const topic = { id: "topic-1", slug: "projects", parentId: null, name: "Projects" };
+    const syncArticle = {
+      ...article,
+      content: "# Noosphere markdown",
+      excerpt: null,
+      sourceUrl: null,
+      sourceType: null,
+      lastReviewed: null,
+      createdAt: new Date("2026-05-26T08:00:00.000Z"),
+      topicId: "topic-1",
+      topic,
+      tags: [],
+    };
+
+    const client = prisma as unknown as { $queryRaw: () => Promise<unknown> };
+    const originalQueryRaw = client.$queryRaw;
+    const originalTopicFindMany = prisma.topic.findMany;
+    const originalArticleFindMany = prisma.article.findMany;
+    const originalConflictFindFirst = prisma.syncConflictReview.findFirst;
+    const originalConflictCreate = prisma.syncConflictReview.create;
+    const originalActivityLogCreate = prisma.activityLog.create;
+    const originalConsoleError = console.error;
+
+    client.$queryRaw = async () => [{ acquire: true }];
+    prisma.topic.findMany = async () => [topic];
+    prisma.article.findMany = async () => [syncArticle];
+    prisma.syncConflictReview.findFirst = async () => null;
+    prisma.syncConflictReview.create = async () => {
+      throw new Error("database unavailable");
+    };
+    prisma.activityLog.create = async () => ({});
+    console.error = () => {};
+
+    try {
+      const result = await runObsidianSync({ mode: "full", clean: false, git: false, dryRun: false });
+
+      assert.equal(readFileSync(join(vaultPath, relativePath), "utf-8"), localMarkdown);
+      assert.equal(result.stats.skipped, 1);
+      assert.equal(result.stats.written, 0);
+      assert.equal(
+        result.warnings.some((warning) => warning.includes("Conflict review record failed; sync skipped")),
+        true,
+      );
+      assert.equal(existsSync(join(vaultPath, ".noosphere-sync", "conflicts")), true);
+    } finally {
+      client.$queryRaw = originalQueryRaw;
+      prisma.topic.findMany = originalTopicFindMany;
+      prisma.article.findMany = originalArticleFindMany;
+      prisma.syncConflictReview.findFirst = originalConflictFindFirst;
+      prisma.syncConflictReview.create = originalConflictCreate;
+      prisma.activityLog.create = originalActivityLogCreate;
+      console.error = originalConsoleError;
+    }
+  } finally {
+    if (oldEnabled === undefined) delete process.env.OBSIDIAN_SYNC_ENABLED;
+    else process.env.OBSIDIAN_SYNC_ENABLED = oldEnabled;
+    if (oldVaultPath === undefined) delete process.env.OBSIDIAN_SYNC_VAULT_PATH;
+    else process.env.OBSIDIAN_SYNC_VAULT_PATH = oldVaultPath;
+    if (oldPreserve === undefined) delete process.env.OBSIDIAN_SYNC_PRESERVE_LOCAL_CHANGES;
+    else process.env.OBSIDIAN_SYNC_PRESERVE_LOCAL_CHANGES = oldPreserve;
+    rmSync(vaultPath, { recursive: true, force: true });
+  }
 });
 
 test("resolveVaultArchivePath only allows archived conflict files", () => {

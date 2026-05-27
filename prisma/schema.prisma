@@ -336,5 +336,6 @@ model SyncConflictReview {
   @@index([articleId])
   @@index([status])
   @@index([direction])
+  @@index([articleId, relativePath, direction, status])
   @@index([createdAt])
 }

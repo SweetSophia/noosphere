@@ -1836,6 +1836,16 @@ h2.activity-title {
   padding-top: 0.25rem;
 }
 
+.sync-conflict-decision-note {
+  margin: 0;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
 @media (max-width: 960px) {
   .wiki-header-top,
   .wiki-header-bottom,

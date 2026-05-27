@@ -15,6 +15,8 @@ import {
 
 export async function recordSyncConflictReview(input: SyncConflictReviewCreateInput) {
   const now = new Date();
+  const ignored = await findIgnoredAlwaysSyncConflictReview(input);
+  if (ignored) return ignored;
 
   try {
     return await prisma.syncConflictReview.create({
@@ -47,6 +49,22 @@ export async function recordSyncConflictReview(input: SyncConflictReviewCreateIn
   }
 }
 
+export async function findIgnoredAlwaysSyncConflictReview(input: Pick<
+  SyncConflictReviewCreateInput,
+  "articleId" | "direction" | "relativePath" | "markdownHash"
+>) {
+  return prisma.syncConflictReview.findFirst({
+    where: {
+      articleId: input.articleId,
+      direction: input.direction,
+      relativePath: input.relativePath,
+      markdownHash: input.markdownHash,
+      status: "ignored-always",
+    },
+    orderBy: [{ resolvedAt: "desc" }, { createdAt: "desc" }],
+  });
+}
+
 export async function resolveSyncConflictReview(args: {
   id: string;
   action: SyncConflictReviewAction;
@@ -56,14 +74,29 @@ export async function resolveSyncConflictReview(args: {
   const resolvedAt = new Date();
 
   return prisma.$transaction(async (tx) => {
-    const review = await tx.syncConflictReview.update({
-      where: { id: args.id },
+    const update = await tx.syncConflictReview.updateMany({
+      where: { id: args.id, status: "open" },
       data: {
         status,
         resolution: args.action,
         resolvedAt,
         resolvedBy: args.resolvedBy,
       },
+    });
+
+    if (update.count === 0) {
+      const existing = await tx.syncConflictReview.findUnique({
+        where: { id: args.id },
+        select: { status: true },
+      });
+      if (existing) {
+        throw new SyncConflictReviewClosedError(existing.status);
+      }
+      throw new SyncConflictReviewNotFoundError(args.id);
+    }
+
+    const review = await tx.syncConflictReview.findUniqueOrThrow({
+      where: { id: args.id },
     });
 
     await tx.activityLog.create({
@@ -83,6 +116,20 @@ export async function resolveSyncConflictReview(args: {
 
     return review;
   });
+}
+
+export class SyncConflictReviewClosedError extends Error {
+  constructor(status: string) {
+    super(`Sync conflict review is already ${status}.`);
+    this.name = "SyncConflictReviewClosedError";
+  }
+}
+
+export class SyncConflictReviewNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Sync conflict review not found: ${id}`);
+    this.name = "SyncConflictReviewNotFoundError";
+  }
 }
 
 function isPrismaUniqueConstraintError(error: unknown): boolean {

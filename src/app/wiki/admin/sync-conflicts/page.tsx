@@ -183,38 +183,44 @@ export default async function SyncConflictsPage({
                 </div>
 
                 {review.status === "open" && (
-                  <div className="sync-conflict-actions" aria-label="Resolve sync conflict">
-                    <ConflictActionButton
-                      label="Keep Noosphere"
-                      action="keep-noosphere"
-                      conflictId={review.id}
-                      returnStatus={status}
-                    />
-                    <ConflictActionButton
-                      label="Keep Markdown"
-                      action="keep-markdown"
-                      conflictId={review.id}
-                      returnStatus={status}
-                    />
-                    <ConflictActionButton
-                      label="Mark Resolved"
-                      action="mark-resolved"
-                      conflictId={review.id}
-                      returnStatus={status}
-                    />
-                    <ConflictActionButton
-                      label="Ignore Once"
-                      action="ignore-once"
-                      conflictId={review.id}
-                      returnStatus={status}
-                    />
-                    <ConflictActionButton
-                      label="Ignore Always"
-                      action="ignore-always"
-                      conflictId={review.id}
-                      returnStatus={status}
-                    />
-                  </div>
+                  <>
+                    <p className="sync-conflict-decision-note">
+                      These actions record an audit decision only. They do not import markdown or rewrite vault
+                      files yet.
+                    </p>
+                    <div className="sync-conflict-actions" aria-label="Record sync conflict decision">
+                      <ConflictActionButton
+                        label="Record: Keep Noosphere"
+                        action="keep-noosphere"
+                        conflictId={review.id}
+                        returnStatus={status}
+                      />
+                      <ConflictActionButton
+                        label="Record: Keep Markdown"
+                        action="keep-markdown"
+                        conflictId={review.id}
+                        returnStatus={status}
+                      />
+                      <ConflictActionButton
+                        label="Record: Resolved"
+                        action="mark-resolved"
+                        conflictId={review.id}
+                        returnStatus={status}
+                      />
+                      <ConflictActionButton
+                        label="Ignore Once"
+                        action="ignore-once"
+                        conflictId={review.id}
+                        returnStatus={status}
+                      />
+                      <ConflictActionButton
+                        label="Ignore Always"
+                        action="ignore-always"
+                        conflictId={review.id}
+                        returnStatus={status}
+                      />
+                    </div>
+                  </>
                 )}
               </article>
             );
