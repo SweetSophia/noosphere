@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 import { apiError } from "@/lib/api/errors";
 import { getRedisClient } from "@/lib/cache/redis";
 
@@ -37,7 +38,7 @@ export async function rateLimit(
 
     pipeline.zremrangebyscore(key, "-inf", windowStart.toString());
     pipeline.zcard(key);
-    const member = `${now}:${crypto.randomUUID()}`;
+    const member = `${now}:${randomUUID()}`;
     pipeline.zadd(key, now, member);
     pipeline.expire(key, Math.ceil(options.windowMs / 1000) + 1);
 
