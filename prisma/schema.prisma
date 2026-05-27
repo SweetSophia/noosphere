@@ -53,6 +53,7 @@ model Article {
 
   tags      ArticleTag[]
   revisions ArticleRevision[]
+  syncConflictReviews SyncConflictReview[]
 
   // Source tracking — where this article's content originated
   sourceUrl  String?
@@ -294,4 +295,47 @@ model SyncConflictPreferences {
   vaultToNoosphere String @default("manual-review")
 
   updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────
+// Sync Conflict Reviews — admin queue for markdown sync conflicts
+// ─────────────────────────────────────────────
+model SyncConflictReview {
+  id        String   @id @default(cuid())
+
+  articleId String?
+  article   Article? @relation(fields: [articleId], references: [id], onDelete: SetNull)
+
+  // Direction values match public sync preference directions:
+  // "noosphere-to-vault" and "vault-to-noosphere".
+  direction String
+
+  // Status values: "open" | "resolved" | "ignored-once" | "ignored-always"
+  status String @default("open")
+
+  // Resolution/action values: "keep-noosphere" | "keep-markdown" |
+  // "mark-resolved" | "ignore-once" | "ignore-always".
+  resolution String?
+
+  relativePath String
+  archivePath  String @unique
+
+  noosphereHash String?
+  markdownHash  String?
+
+  noosphereUpdatedAt DateTime?
+  markdownUpdatedAt  DateTime?
+
+  summary Json @default("{}")
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+  resolvedAt DateTime?
+  resolvedBy String?
+
+  @@index([articleId])
+  @@index([status])
+  @@index([direction])
+  @@index([articleId, relativePath, direction, status])
+  @@index([createdAt])
 }

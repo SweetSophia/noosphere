@@ -18,6 +18,14 @@ import {
   renderNoosphereMarkdown,
   type NoosphereMarkdownArticle,
 } from "@/lib/markdown/noosphere-markdown";
+import {
+  buildSyncConflictReviewCreateInput,
+  hashMarkdownContent,
+} from "@/lib/markdown-sync/conflict-review";
+import {
+  findIgnoredAlwaysSyncConflictReview,
+  recordSyncConflictReview,
+} from "@/lib/markdown-sync/api/conflict-review";
 
 // ─────────────────────────────────────────────
 // Types
@@ -565,23 +573,58 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
         // sentinel fallback and must be treated as invalid so we archive before
         // rewriting rather than silently blessing the current disk state.
         if (existsSync(safe) && existingEntry) {
+          let diskBuffer: Buffer | null = null;
           try {
-            const diskBuffer = readFileSync(safe);
+            diskBuffer = readFileSync(safe);
+          } catch {
+            // File deleted or unreadable between existsSync and readFileSync —
+            // skip conflict detection and proceed to write (re-creating the file).
+          }
+          if (diskBuffer) {
             const diskHash = createHash("sha256").update(diskBuffer).digest("hex");
             const baseline = existingEntry.writtenHash ?? diskHash;
             if (diskHash !== baseline) {
               // File on disk differs from what we last wrote — genuine local modification.
               stats.conflictsDetected++;
               if (config.preserveLocalChanges) {
-                const backupRel = archiveConflict(vaultPath, relativePath, diskBuffer.toString("utf-8"));
-                warnings.push(`Local modification preserved: ${relativePath} → ${backupRel}`);
+                const diskContent = diskBuffer.toString("utf-8");
+                const ignoredReview = await findIgnoredAlwaysSyncConflictReview({
+                  articleId: article.id,
+                  direction: "vault-to-noosphere",
+                  relativePath,
+                  markdownHash: hashMarkdownContent(diskContent),
+                });
+                if (ignoredReview) {
+                  warnings.push(`Local modification ignored by prior decision: ${relativePath}`);
+                } else {
+                  const backupRel = archiveConflict(vaultPath, relativePath, diskContent);
+                  try {
+                    const review = await recordSyncConflictReview(
+                      buildSyncConflictReviewCreateInput({
+                        article,
+                        direction: "vault-to-noosphere",
+                        relativePath,
+                        archivePath: backupRel,
+                        noosphereHash: canonicalHash,
+                        markdownContent: diskContent,
+                      })
+                    );
+                    if (review.status === "ignored-always") {
+                      warnings.push(`Local modification ignored by prior decision: ${relativePath}`);
+                    } else {
+                      warnings.push(`Local modification preserved: ${relativePath} → ${backupRel}`);
+                    }
+                  } catch (error) {
+                    warnings.push(`Conflict review record failed; sync skipped for ${relativePath}`);
+                    console.error("[obsidian-sync] Failed to record conflict review", error);
+                    stats.skipped++;
+                    continue;
+                  }
+                }
               } else {
                 warnings.push(`Local modification overwritten by database: ${relativePath}`);
               }
             }
-          } catch {
-            // File deleted or unreadable between existsSync and readFileSync —
-            // skip conflict detection and proceed to write (re-creating the file).
           }
         }
 

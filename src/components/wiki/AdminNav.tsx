@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { href: "/wiki/admin/topics", label: "Topics", key: "topics" },
   { href: "/wiki/admin/tags", label: "Tags", key: "tags" },
   { href: "/wiki/admin/settings", label: "Recall Settings", key: "settings" },
+  { href: "/wiki/admin/sync-conflicts", label: "Sync Conflicts", key: "sync-conflicts" },
   { href: "/wiki/admin/trash", label: "Trash", key: "trash" },
 ];
 

@@ -1763,6 +1763,89 @@ h2.activity-title {
   background: var(--surface-color);
 }
 
+.sync-conflict-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.sync-conflict-card {
+  display: grid;
+  --activity-color: var(--accent-color);
+  gap: 1.15rem;
+}
+
+.sync-conflict-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.sync-conflict-diff-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.sync-conflict-side {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--surface-inset);
+}
+
+.sync-conflict-side h3 {
+  margin: 0 0 0.85rem;
+  font-size: 0.95rem;
+}
+
+.sync-conflict-side dl {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.sync-conflict-field {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.sync-conflict-field dt {
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.sync-conflict-field dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.sync-conflict-actions {
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  align-items: center;
+  padding-top: 0.25rem;
+}
+
+.sync-conflict-decision-note {
+  margin: 0;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
 @media (max-width: 960px) {
   .wiki-header-top,
   .wiki-header-bottom,
@@ -1791,8 +1874,14 @@ h2.activity-title {
   .recent-updates-shell,
   .article-detail-grid,
   .topic-tree-card,
-  .topic-subtopic-card {
+  .topic-subtopic-card,
+  .sync-conflict-diff-grid {
     grid-template-columns: 1fr;
+  }
+
+  .sync-conflict-field {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
   }
 
   .secret-box-row,
