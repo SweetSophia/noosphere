@@ -132,6 +132,7 @@ Frontpage | Logging
 - **Scoped API keys** — assign per-key allowed scopes (e.g. `financial`, `health`) that control access to restricted articles.
 - **Restricted articles** — tag articles with scopes to restrict access; unauthenticated web users and scoped API keys see only allowed content.
 - **Sync/export** content for Obsidian and Markdown workflows.
+- **Reverse Markdown scan** — inspect vault-side Markdown edits before later import/apply phases.
 - **Images Support** you can add images to articles
 
 ## Getting Started
@@ -279,11 +280,20 @@ GET /api/export
 # Import from a Markdown vault zip
 POST /api/import
 # multipart form fields: file, defaultTopicSlug?, overwrite?
+
+# Scan the configured Obsidian vault for reverse-import candidates.
+# Read-only; requires ADMIN.
+POST /api/sync/import-scan
+# JSON body: includeUntracked?, maxFiles?
 ```
 
 Export, import, and Obsidian sync share the same versioned frontmatter codec in
 `src/lib/markdown/noosphere-markdown.ts`, including `noosphere.schemaVersion`,
 `noosphere.contentHash`, topic metadata, tags, and restricted scopes.
+The reverse import scanner compares tracked vault files against
+`.noosphere-sync/manifest.json` and reports `modified`, `missing`,
+`baseline-missing`, and `untracked` candidates without writing to the database
+or filesystem.
 
 ## Memory Module API
 
