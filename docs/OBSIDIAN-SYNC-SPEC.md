@@ -692,8 +692,10 @@ Recommended sequence:
 1. Run `POST /api/sync/import-scan` with `includeUntracked` and `maxFiles`
    appropriate for the vault.
 2. Select candidate `relativePath` values from the scan response.
-3. Run `GET /api/sync/import-apply/preview?candidateIds=<comma-list>` to get a
-   dry-run result from a fresh server-side scan.
+3. Run `GET /api/sync/import-apply/preview?candidateIds=<path>&candidateIds=<path>`
+   to get a dry-run result from a fresh server-side scan. The preview endpoint
+   also accepts `includeUntracked` and `maxFiles` query parameters so agents can
+   use the same scan controls for preview and apply.
 4. Run `POST /api/sync/import-apply` with `candidateIds`, `mode`,
    `forceOverwrite`, and optional scan controls.
 5. Inspect `notFound`, conflicts, warnings, and per-candidate results. A

@@ -28,6 +28,7 @@ import {
 import {
   parseMarkdownImportCandidateIds,
   selectMarkdownImportCandidatesById,
+  validateMarkdownImportCandidates,
 } from "@/lib/markdown-sync/import-workflow";
 import type { MarkdownImportCandidate } from "@/lib/markdown-sync/import-scanner";
 
@@ -91,15 +92,16 @@ export async function POST(request: NextRequest) {
   try {
     config = getObsidianSyncConfig();
   } catch (err) {
+    console.error("[import-apply] Obsidian sync configuration error:", err);
     return NextResponse.json(
-      { success: false, error: `Configuration error: ${(err as Error).message}` },
-      { status: 400 }
+      { success: false, error: "Obsidian sync configuration error." },
+      { status: 500 }
     );
   }
   if (!config) {
     return NextResponse.json(
       { success: false, error: "Obsidian sync is not enabled. Set OBSIDIAN_SYNC_ENABLED and OBSIDIAN_SYNC_VAULT_PATH." },
-      { status: 400 }
+      { status: 503 }
     );
   }
 
@@ -107,7 +109,7 @@ export async function POST(request: NextRequest) {
   const manifest = loadManifest(config.vaultPath, config.manifestPath);
   if (!manifest) {
     return NextResponse.json(
-      { success: false, error: "Manifest not found. Run POST /api/sync/obsidian first." },
+      { success: false, error: "Manifest missing or invalid. Ensure the vault has been synced with POST /api/sync/obsidian." },
       { status: 400 }
     );
   }
@@ -145,7 +147,7 @@ export async function POST(request: NextRequest) {
       }
       console.error("[import-apply] Error scanning candidates:", err);
       return NextResponse.json(
-        { success: false, error: "Failed to scan markdown import candidates.", detail: String(err) },
+        { success: false, error: "Failed to scan markdown import candidates." },
         { status: 503 }
       );
     }
@@ -161,7 +163,11 @@ export async function POST(request: NextRequest) {
       );
     }
   } else {
-    candidates = body.candidates as MarkdownImportCandidate[];
+    const candidatesValidation = validateMarkdownImportCandidates(body.candidates);
+    if (!candidatesValidation.ok) {
+      return NextResponse.json({ success: false, error: candidatesValidation.error }, { status: 400 });
+    }
+    candidates = candidatesValidation.candidates;
   }
 
   // ── Apply imports ────────────────────────────────────────────────────────
@@ -189,7 +195,7 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     console.error("[import-apply] Error applying imports:", err);
     return NextResponse.json(
-      { success: false, error: "Internal error during import.", detail: String(err) },
+      { success: false, error: "Internal error during import." },
       { status: 500 }
     );
   }

@@ -1,4 +1,9 @@
-import type { MarkdownImportCandidate } from "@/lib/markdown-sync/import-scanner";
+import {
+  MARKDOWN_IMPORT_CANDIDATE_KINDS,
+  type MarkdownImportCandidate,
+} from "@/lib/markdown-sync/import-scanner";
+
+const MARKDOWN_IMPORT_CANDIDATE_KIND_SET = new Set<string>(MARKDOWN_IMPORT_CANDIDATE_KINDS);
 
 export type CandidateIdParseResult =
   | { ok: true; candidateIds: string[] }
@@ -8,6 +13,10 @@ export interface CandidateSelectionResult {
   candidates: MarkdownImportCandidate[];
   notFound: string[];
 }
+
+export type CandidateValidationResult =
+  | { ok: true; candidates: MarkdownImportCandidate[] }
+  | { ok: false; error: string };
 
 /**
  * Normalize candidate IDs passed by agents.
@@ -24,14 +33,20 @@ export function parseMarkdownImportCandidateIds(input: unknown): CandidateIdPars
       : null;
 
   if (!rawIds) {
-    return { ok: false, error: "candidateIds must be a non-empty string array or comma-separated string." };
+    return {
+      ok: false,
+      error: `candidateIds must be a non-empty string array or comma-separated string; received ${describeInputType(input)}.`,
+    };
   }
 
   const candidateIds: string[] = [];
   const seen = new Set<string>();
-  for (const rawId of rawIds) {
+  for (const [index, rawId] of rawIds.entries()) {
     if (typeof rawId !== "string") {
-      return { ok: false, error: "candidateIds must contain only strings." };
+      return {
+        ok: false,
+        error: `candidateIds[${index}] must be a string; received ${describeInputType(rawId)}.`,
+      };
     }
 
     const candidateId = rawId.trim();
@@ -46,6 +61,47 @@ export function parseMarkdownImportCandidateIds(input: unknown): CandidateIdPars
   }
 
   return { ok: true, candidateIds };
+}
+
+export function validateMarkdownImportCandidates(input: unknown): CandidateValidationResult {
+  if (!Array.isArray(input) || input.length === 0) {
+    return { ok: false, error: "candidates must be a non-empty array." };
+  }
+
+  for (const [index, candidate] of input.entries()) {
+    if (!isPlainObject(candidate)) {
+      return { ok: false, error: `candidates[${index}] must be an object.` };
+    }
+    if (typeof candidate["relativePath"] !== "string" || candidate["relativePath"].trim() === "") {
+      return { ok: false, error: `candidates[${index}].relativePath must be a non-empty string.` };
+    }
+    if (typeof candidate["kind"] !== "string" || !MARKDOWN_IMPORT_CANDIDATE_KIND_SET.has(candidate["kind"])) {
+      return {
+        ok: false,
+        error:
+          `candidates[${index}].kind must be one of ${MARKDOWN_IMPORT_CANDIDATE_KINDS.join(", ")}; ` +
+          `received ${describeInvalidValue(candidate["kind"])}.`,
+      };
+    }
+    const nullableStringFields = ["articleId", "manifestPath", "baselineHash", "markdownHash", "parseError"];
+    for (const field of nullableStringFields) {
+      const value = candidate[field];
+      if (value !== undefined && value !== null && typeof value !== "string") {
+        return { ok: false, error: `candidates[${index}].${field} must be a string or null.` };
+      }
+    }
+    const sizeBytes = candidate["sizeBytes"];
+    if (sizeBytes !== undefined && sizeBytes !== null) {
+      if (typeof sizeBytes !== "number" || !Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
+        return { ok: false, error: `candidates[${index}].sizeBytes must be a non-negative integer or null.` };
+      }
+    }
+    if (candidate["metadata"] !== undefined && candidate["metadata"] !== null && !isPlainObject(candidate["metadata"])) {
+      return { ok: false, error: `candidates[${index}].metadata must be an object or null.` };
+    }
+  }
+
+  return { ok: true, candidates: input as MarkdownImportCandidate[] };
 }
 
 export function selectMarkdownImportCandidatesById(
@@ -66,4 +122,18 @@ export function selectMarkdownImportCandidatesById(
   }
 
   return { candidates: selected, notFound };
+}
+
+function describeInputType(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function describeInvalidValue(value: unknown): string {
+  return typeof value === "string" ? JSON.stringify(value) : describeInputType(value);
 }

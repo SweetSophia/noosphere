@@ -288,7 +288,8 @@ POST /api/sync/import-scan
 
 # Preview applying scan candidates by vault-relative path.
 # Read-only dry run; requires ADMIN.
-GET /api/sync/import-apply/preview?candidateIds=path/a.md,path/b.md&mode=upsert
+GET /api/sync/import-apply/preview?candidateIds=path/a.md&candidateIds=path/b.md&mode=upsert
+# Query params: candidateIds (repeatable), mode?, forceOverwrite?, includeUntracked?, maxFiles?
 
 # Apply scan candidates by vault-relative path. The server re-scans before
 # applying so agents do not need to submit full candidate objects.

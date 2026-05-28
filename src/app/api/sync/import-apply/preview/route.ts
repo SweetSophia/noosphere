@@ -19,7 +19,11 @@ import {
   applyMarkdownImports,
   MARKDOWN_IMPORT_APPLY_PERMISSIONS,
 } from "@/lib/markdown-sync/import-applier";
-import { scanMarkdownImportCandidates, MarkdownImportScanLimitError } from "@/lib/markdown-sync/import-scanner";
+import {
+  scanMarkdownImportCandidates,
+  MarkdownImportScanLimitError,
+  validateMarkdownImportScanRequestBody,
+} from "@/lib/markdown-sync/import-scanner";
 import {
   parseMarkdownImportCandidateIds,
   selectMarkdownImportCandidatesById,
@@ -40,16 +44,16 @@ export async function GET(request: NextRequest) {
 
   // ── Parse query parameters ─────────────────────────────────────────────────
   const searchParams = request.nextUrl.searchParams;
-  const candidateIdsParam = searchParams.get("candidateIds");
+  const candidateIdsParams = searchParams.getAll("candidateIds");
   const mode = (searchParams.get("mode") ?? "upsert") as "create" | "update" | "upsert";
   const forceOverwrite = searchParams.get("forceOverwrite") === "true";
 
-  if (!candidateIdsParam) {
+  if (candidateIdsParams.length === 0) {
     return NextResponse.json(
       {
         success: false,
         error:
-          "Missing 'candidateIds' query parameter (comma-separated list of relative paths). " +
+          "Missing 'candidateIds' query parameter. Repeat candidateIds for multiple relative paths. " +
           "Run POST /api/sync/import-scan first to get candidates.",
       },
       { status: 400 }
@@ -63,26 +67,37 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const candidateIdsResult = parseMarkdownImportCandidateIds(candidateIdsParam);
+  const candidateIdsResult = parseMarkdownImportCandidateIds(candidateIdsParams);
   if (!candidateIdsResult.ok) {
     return NextResponse.json({ success: false, error: candidateIdsResult.error }, { status: 400 });
   }
   const candidateIds = candidateIdsResult.candidateIds;
+
+  const scanOptions = parseScanOptions(searchParams);
+  if (!scanOptions.ok) {
+    return NextResponse.json({ success: false, error: scanOptions.error }, { status: 400 });
+  }
+
+  const scanValidation = validateMarkdownImportScanRequestBody(scanOptions.options);
+  if ("errors" in scanValidation) {
+    return NextResponse.json({ success: false, error: scanValidation.errors.join("; ") }, { status: 400 });
+  }
 
   // ── Load vault config ─────────────────────────────────────────────────────
   let config;
   try {
     config = getObsidianSyncConfig();
   } catch (err) {
+    console.error("[import-apply-preview] Obsidian sync configuration error:", err);
     return NextResponse.json(
-      { success: false, error: `Configuration error: ${(err as Error).message}` },
-      { status: 400 }
+      { success: false, error: "Obsidian sync configuration error." },
+      { status: 500 }
     );
   }
   if (!config) {
     return NextResponse.json(
       { success: false, error: "Obsidian sync is not enabled. Set OBSIDIAN_SYNC_ENABLED and OBSIDIAN_SYNC_VAULT_PATH." },
-      { status: 400 }
+      { status: 503 }
     );
   }
 
@@ -90,7 +105,7 @@ export async function GET(request: NextRequest) {
   const manifest = loadManifest(config.vaultPath, config.manifestPath);
   if (!manifest) {
     return NextResponse.json(
-      { success: false, error: "Manifest not found. Run POST /api/sync/obsidian first." },
+      { success: false, error: "Manifest missing or invalid. Ensure the vault has been synced with POST /api/sync/obsidian." },
       { status: 400 }
     );
   }
@@ -103,8 +118,8 @@ export async function GET(request: NextRequest) {
     const scanResult = scanMarkdownImportCandidates({
       vaultPath: config.vaultPath,
       manifestPath: config.manifestPath,
-      includeUntracked: true,
-      maxFiles: 5_000,
+      includeUntracked: scanValidation.includeUntracked,
+      maxFiles: scanValidation.maxFiles,
     });
 
     // Filter to only the requested candidate IDs.
@@ -145,8 +160,34 @@ export async function GET(request: NextRequest) {
     }
     console.error("[import-apply-preview] Error running preview:", err);
     return NextResponse.json(
-      { success: false, error: "Internal error during preview.", detail: String(err) },
+      { success: false, error: "Internal error during preview." },
       { status: 500 }
     );
   }
+}
+
+type PreviewScanOptionsParseResult =
+  | { ok: true; options: Record<string, unknown> }
+  | { ok: false; error: string };
+
+function parseScanOptions(searchParams: URLSearchParams): PreviewScanOptionsParseResult {
+  const options: Record<string, unknown> = {};
+
+  const includeUntracked = searchParams.get("includeUntracked");
+  if (includeUntracked !== null) {
+    if (includeUntracked !== "true" && includeUntracked !== "false") {
+      return { ok: false, error: 'includeUntracked must be "true" or "false" when provided.' };
+    }
+    options.includeUntracked = includeUntracked === "true";
+  }
+
+  const maxFiles = searchParams.get("maxFiles");
+  if (maxFiles !== null) {
+    if (!/^\d+$/.test(maxFiles)) {
+      return { ok: false, error: "maxFiles must be an integer between 1 and 50000." };
+    }
+    options.maxFiles = Number(maxFiles);
+  }
+
+  return { ok: true, options };
 }
