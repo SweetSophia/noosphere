@@ -9,6 +9,7 @@ import {
 import {
   DEFAULT_RECALL_SETTINGS,
   normalizeRecallSettings,
+  toBudgetConfig,
   toConflictConfig,
   type RecallSettings,
 } from "@/lib/memory/settings";
@@ -201,7 +202,7 @@ export async function executeMemoryRecallRequest(
   );
   const controller = new AbortController();
 
-  try {
+    try {
     const orchestrator = createRecallOrchestrator({
       providers: weightedProviders,
       globalResultCap: effectiveResultCap,
@@ -211,6 +212,8 @@ export async function executeMemoryRecallRequest(
         providerPriority: settings.enabledProviders,
       },
       conflict: toConflictConfig(settings),
+      budget: toBudgetConfig(settings),
+      providerPriorityWeights: settings.providerPriorityWeights,
     });
 
     const response = await withTimeout(

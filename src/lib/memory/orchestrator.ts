@@ -3,7 +3,7 @@ import type {
   MemoryProviderConfig,
   MemoryProviderSearchOptions,
 } from "./provider";
-import { ContextBudgetManager } from "./budget";
+import { ContextBudgetManager, type ContextBudgetConfig } from "./budget";
 import {
   CrossProviderDeduplicator,
   createDeduplicator,
@@ -52,6 +52,12 @@ export interface RecallOrchestratorOptions {
 
   /** Cross-provider conflict resolution configuration. */
   conflict?: ConflictConfig;
+
+  /** Context budget configuration for auto-recall output formatting. */
+  budget?: ContextBudgetConfig;
+
+  /** Per-provider priority weights for orchestrator ranking (provider ID → weight). */
+  providerPriorityWeights?: Record<string, number>;
 }
 
 export interface RecallQuery {
@@ -144,6 +150,7 @@ export class RecallOrchestrator {
   private readonly concurrency: number;
   private readonly deduplicator: CrossProviderDeduplicator;
   private readonly conflictConfig: ConflictConfig;
+  private readonly budgetConfig: ContextBudgetConfig;
 
   constructor(options: RecallOrchestratorOptions) {
     if (!options.providers || options.providers.length === 0) {
@@ -153,7 +160,10 @@ export class RecallOrchestrator {
     assertUniqueProviderIds(options.providers);
 
     this.providers = options.providers;
-    this.providerWeights = buildProviderWeightMap(options.providers);
+    this.providerWeights = buildProviderWeightMap(
+      options.providers,
+      options.providerPriorityWeights,
+    );
     this.globalResultCap =
       options.globalResultCap ?? DEFAULT_GLOBAL_RESULT_CAP;
     this.autoRecallTokenBudget =
@@ -164,6 +174,7 @@ export class RecallOrchestrator {
     );
     this.deduplicator = createDeduplicator(options.deduplication);
     this.conflictConfig = options.conflict ?? {};
+    this.budgetConfig = options.budget ?? {};
   }
 
   async recall(query: RecallQuery): Promise<RecallResponse> {
@@ -188,7 +199,7 @@ export class RecallOrchestrator {
 
     const budgeted =
       query.mode === "auto" && effectiveBudget !== undefined
-        ? applyRecallBudget(conflictResolved, effectiveCap, effectiveBudget)
+        ? applyRecallBudget(conflictResolved, effectiveCap, effectiveBudget, this.budgetConfig)
         : { results: conflictResolved.slice(0, effectiveCap), tokenBudgetUsed: undefined };
 
     // Build prompt injection text for auto mode.
@@ -509,6 +520,7 @@ function assertUniqueProviderIds(
 
 function buildProviderWeightMap(
   providers: RecallOrchestratorProviderEntry[],
+  overrideWeights?: Record<string, number>,
 ): Map<string, number> {
   return new Map(
     providers.map((entry) => {
@@ -516,7 +528,9 @@ function buildProviderWeightMap(
         ...entry.provider.descriptor.defaultConfig,
         ...entry.config,
       });
-      return [entry.provider.descriptor.id, config.priorityWeight];
+      const providerId = entry.provider.descriptor.id;
+      const weight = overrideWeights?.[providerId] ?? config.priorityWeight;
+      return [providerId, weight];
     }),
   );
 }
@@ -568,8 +582,9 @@ function applyRecallBudget(
   results: RecallResultRanked[],
   maxResults: number,
   maxTokens: number,
+  budgetConfig?: ContextBudgetConfig,
 ): { results: RecallResultRanked[]; tokenBudgetUsed: number } {
-  const budget = new ContextBudgetManager({ maxResults, maxTokens });
+  const budget = new ContextBudgetManager({ maxResults, maxTokens, ...budgetConfig });
   const budgeted = budget.apply(results);
 
   return {
