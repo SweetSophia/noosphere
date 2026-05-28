@@ -10,36 +10,19 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { existsSync, readFileSync } from "fs";
-import { resolve } from "path";
 import { requirePermission } from "@/lib/api/auth";
 import { getObsidianSyncConfig } from "@/lib/obsidian-sync/config";
 import { rateLimit } from "@/lib/rate-limit";
 import { prisma } from "@/lib/prisma";
+import { loadManifest } from "@/lib/markdown-sync/manifest";
 import {
   applyMarkdownImports,
   MARKDOWN_IMPORT_APPLY_PERMISSIONS,
 } from "@/lib/markdown-sync/import-applier";
 import { scanMarkdownImportCandidates, MarkdownImportScanLimitError } from "@/lib/markdown-sync/import-scanner";
-import type { Manifest } from "@/lib/obsidian-sync";
 import type { MarkdownImportCandidate } from "@/lib/markdown-sync/import-scanner";
 
 const PREVIEW_RATE_LIMIT = { windowMs: 60_000, maxRequests: 10, keyPrefix: "sync-import-apply-preview" };
-
-/**
- * Load and validate a manifest from the vault.
- */
-function loadManifest(vaultPath: string, manifestRelPath: string): Manifest | null {
-  const manifestAbsPath = resolve(vaultPath, manifestRelPath);
-  if (!existsSync(manifestAbsPath)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(manifestAbsPath, "utf-8")) as Manifest;
-    if (parsed.version !== 1) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
 
 export async function GET(request: NextRequest) {
   // ── Rate Limiting (ADMIN only, 10/min) ──────────────────────────────────
