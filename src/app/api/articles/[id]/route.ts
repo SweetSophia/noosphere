@@ -3,6 +3,7 @@ import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, canAccessScopes } from "@/lib/api/auth";
 import { buildTagConnections } from "@/lib/wiki";
+import { syncArticleRelations } from "@/lib/articles/relations";
 import {
   ARTICLE_LIMITS,
   deriveExcerpt,
@@ -248,16 +249,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         }
       }
 
-      // Sync related articles via ArticleRelation table
-      await tx.articleRelation.deleteMany({ where: { sourceId: id } });
-      if (relatedArticleIds !== undefined && relatedArticleIds.length > 0) {
-        await tx.articleRelation.createMany({
-          data: relatedArticleIds
-            .filter((targetId: string) => targetId !== id) // prevent self-reference
-            .map((targetId: string) => ({ sourceId: id, targetId })),
-          skipDuplicates: true,
-        });
-      }
+      await syncArticleRelations(tx, id, relatedArticleIds);
 
       // Return updated article with relations
       return tx.article.findUnique({
