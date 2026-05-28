@@ -26,7 +26,7 @@ import {
 } from "@/lib/markdown-sync/import-scanner";
 import {
   parseMarkdownImportCandidateIds,
-  selectMarkdownImportCandidatesById,
+  selectMarkdownImportCandidatesByQueryIds,
 } from "@/lib/markdown-sync/import-workflow";
 
 const PREVIEW_RATE_LIMIT = { windowMs: 60_000, maxRequests: 10, keyPrefix: "sync-import-apply-preview" };
@@ -68,15 +68,10 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Support both repeated query params and single comma-separated list for backward compatibility.
-  const candidateIdsInput = candidateIdsParams.length === 1 && candidateIdsParams[0].includes(",")
-    ? candidateIdsParams[0]
-    : candidateIdsParams;
-  const candidateIdsResult = parseMarkdownImportCandidateIds(candidateIdsInput);
+  const candidateIdsResult = parseMarkdownImportCandidateIds(candidateIdsParams);
   if (!candidateIdsResult.ok) {
     return NextResponse.json({ success: false, error: candidateIdsResult.error }, { status: 400 });
   }
-  const candidateIds = candidateIdsResult.candidateIds;
 
   const scanOptions = parseScanOptions(searchParams);
   if (!scanOptions.ok) {
@@ -127,8 +122,10 @@ export async function GET(request: NextRequest) {
       maxFiles: scanValidation.maxFiles,
     });
 
-    // Filter to only the requested candidate IDs.
-    const selection = selectMarkdownImportCandidatesById(scanResult.candidates, candidateIds);
+    // Filter to only the requested candidate IDs. Exact query values win first so
+    // vault paths containing commas are preserved; legacy comma-list parsing is
+    // only used if a single exact value matches nothing.
+    const selection = selectMarkdownImportCandidatesByQueryIds(scanResult.candidates, candidateIdsParams);
 
     if (selection.candidates.length === 0) {
       return NextResponse.json(

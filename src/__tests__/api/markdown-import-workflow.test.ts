@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   parseMarkdownImportCandidateIds,
   selectMarkdownImportCandidatesById,
+  selectMarkdownImportCandidatesByQueryIds,
   validateMarkdownImportCandidates,
 } from "@/lib/markdown-sync/import-workflow";
 import type { MarkdownImportCandidate } from "@/lib/markdown-sync/import-scanner";
@@ -105,6 +106,32 @@ test("selectMarkdownImportCandidatesById preserves requested order and reports m
 
   assert.deepEqual(result.candidates.map((item) => item.relativePath), ["projects/c.md", "projects/a.md"]);
   assert.deepEqual(result.notFound, ["projects/missing.md"]);
+});
+
+test("selectMarkdownImportCandidatesByQueryIds preserves single comma-bearing paths", () => {
+  const candidates = [
+    candidate("notes/a, b.md"),
+    candidate("notes/c.md"),
+  ];
+
+  const result = selectMarkdownImportCandidatesByQueryIds(candidates, ["notes/a, b.md"]);
+
+  assert.deepEqual(result.candidateIds, ["notes/a, b.md"]);
+  assert.deepEqual(result.candidates.map((item) => item.relativePath), ["notes/a, b.md"]);
+  assert.deepEqual(result.notFound, []);
+});
+
+test("selectMarkdownImportCandidatesByQueryIds falls back to legacy comma lists", () => {
+  const candidates = [
+    candidate("projects/a.md"),
+    candidate("projects/b.md"),
+  ];
+
+  const result = selectMarkdownImportCandidatesByQueryIds(candidates, ["projects/a.md, projects/b.md"]);
+
+  assert.deepEqual(result.candidateIds, ["projects/a.md", "projects/b.md"]);
+  assert.deepEqual(result.candidates.map((item) => item.relativePath), ["projects/a.md", "projects/b.md"]);
+  assert.deepEqual(result.notFound, []);
 });
 
 function candidate(relativePath: string): MarkdownImportCandidate {
