@@ -176,23 +176,6 @@ export async function executeMemoryRecallRequest(
     return { status: 400, body: { error: providers.error } };
   }
 
-  // Apply provider priority weights from settings (DB settings override static config)
-  const weightedProviders: RecallOrchestratorProviderEntry[] = providers.entries.map(
-    (entry) => {
-      const weight = settings.providerPriorityWeights[entry.provider.descriptor.id];
-      if (weight !== undefined) {
-        return {
-          ...entry,
-          config: {
-            ...entry.config,
-            priorityWeight: weight,
-          },
-        };
-      }
-      return entry;
-    },
-  );
-
   const timeoutMs = clampPositiveInteger(
     options.timeoutMs,
     MEMORY_RECALL_LIMITS.timeoutMs,
@@ -210,7 +193,7 @@ export async function executeMemoryRecallRequest(
 
   try {
     const orchestrator = createRecallOrchestrator({
-      providers: weightedProviders,
+      providers: providers.entries,
       globalResultCap: effectiveResultCap,
       autoRecallTokenBudget: effectiveTokenBudget,
       deduplication: {
