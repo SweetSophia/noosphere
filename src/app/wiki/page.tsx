@@ -1,18 +1,15 @@
 import Link from "next/link";
 import { getServerSession } from "next-auth";
+import type { Prisma } from "@prisma/client";
 import { EmptyState } from "@/components/wiki/EmptyState";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
-import { buildScopeFilter } from "@/lib/api/auth";
+import { loadWikiHomeData, type WikiHomeDb, type WikiHomeTopic } from "@/lib/wiki-home";
 
 export const dynamic = "force-dynamic";
 
-interface TopicNode {
-  id: string;
-  name: string;
-  slug: string;
-  description: string | null;
+interface TopicNode extends Omit<WikiHomeTopic, "parentId"> {
   children: TopicNode[];
 }
 
@@ -26,6 +23,13 @@ interface TopicRenderNode {
   descendantCount: number;
   children: TopicRenderNode[];
 }
+
+type WikiHomeArticle = Prisma.ArticleGetPayload<{
+  include: {
+    topic: true;
+    tags: { include: { tag: true } };
+  };
+}>;
 
 function buildTopicRenderNode(node: TopicNode, countMap: ArticleCountMap): TopicRenderNode {
   const children = node.children.map((child) => buildTopicRenderNode(child, countMap));
@@ -86,25 +90,10 @@ export default async function WikiHomePage() {
   // Unauthenticated users only see unrestricted articles.
   // Human sessions always have full access — they bypass restrictions.
   const allowedScopes = session ? ["*"] : undefined;
-  const scopeWhere = buildScopeFilter(allowedScopes, { deletedAt: null });
-
-  const [allTopics, topicCounts, recentArticles] = await Promise.all([
-    prisma.topic.findMany({ orderBy: { name: "asc" } }),
-    prisma.article.groupBy({
-      by: ["topicId"],
-      where: { deletedAt: null },
-      _count: { topicId: true },
-    }),
-    prisma.article.findMany({
-      where: scopeWhere,
-      include: {
-        topic: true,
-        tags: { include: { tag: true } },
-      },
-      orderBy: { updatedAt: "desc" },
-      take: 8,
-    }),
-  ]);
+  const { allTopics, topicCounts, recentArticles } = await loadWikiHomeData<WikiHomeArticle>(
+    prisma as unknown as WikiHomeDb<WikiHomeArticle>,
+    allowedScopes,
+  );
 
   const countMap: ArticleCountMap = Object.fromEntries(topicCounts.map((t) => [t.topicId, t._count.topicId]));
 
