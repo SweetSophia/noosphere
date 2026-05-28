@@ -23,8 +23,6 @@ export const MEMORY_RECALL_LIMITS = {
   maxQueryLength: 1000,
 } as const;
 
-export const MEMORY_RECALL_DEFAULT_AUTO_PROVIDERS = ["noosphere"] as const;
-
 export interface MemoryRecallRequest {
   query: string;
   mode?: RecallMode;
