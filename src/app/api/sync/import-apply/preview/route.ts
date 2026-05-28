@@ -26,7 +26,7 @@ import {
 } from "@/lib/markdown-sync/import-scanner";
 import {
   parseMarkdownImportCandidateIds,
-  selectMarkdownImportCandidatesById,
+  selectMarkdownImportCandidatesByQueryIds,
 } from "@/lib/markdown-sync/import-workflow";
 
 const PREVIEW_RATE_LIMIT = { windowMs: 60_000, maxRequests: 10, keyPrefix: "sync-import-apply-preview" };
@@ -53,7 +53,8 @@ export async function GET(request: NextRequest) {
       {
         success: false,
         error:
-          "Missing 'candidateIds' query parameter. Repeat candidateIds for multiple relative paths. " +
+          "Missing 'candidateIds' query parameter. Use repeated candidateIds for multiple paths " +
+          "(e.g. ?candidateIds=a.md&candidateIds=b.md) or a single comma-separated list for backwards compatibility. " +
           "Run POST /api/sync/import-scan first to get candidates.",
       },
       { status: 400 }
@@ -71,7 +72,6 @@ export async function GET(request: NextRequest) {
   if (!candidateIdsResult.ok) {
     return NextResponse.json({ success: false, error: candidateIdsResult.error }, { status: 400 });
   }
-  const candidateIds = candidateIdsResult.candidateIds;
 
   const scanOptions = parseScanOptions(searchParams);
   if (!scanOptions.ok) {
@@ -122,8 +122,10 @@ export async function GET(request: NextRequest) {
       maxFiles: scanValidation.maxFiles,
     });
 
-    // Filter to only the requested candidate IDs.
-    const selection = selectMarkdownImportCandidatesById(scanResult.candidates, candidateIds);
+    // Filter to only the requested candidate IDs. Exact query values win first so
+    // vault paths containing commas are preserved; legacy comma-list parsing is
+    // only used if a single exact value matches nothing.
+    const selection = selectMarkdownImportCandidatesByQueryIds(scanResult.candidates, candidateIdsParams);
 
     if (selection.candidates.length === 0) {
       return NextResponse.json(
@@ -183,7 +185,7 @@ function parseScanOptions(searchParams: URLSearchParams): PreviewScanOptionsPars
 
   const maxFiles = searchParams.get("maxFiles");
   if (maxFiles !== null) {
-    if (!/^\d+$/.test(maxFiles)) {
+    if (!/^[1-9]\d*$/.test(maxFiles)) {
       return { ok: false, error: "maxFiles must be an integer between 1 and 50000." };
     }
     options.maxFiles = Number(maxFiles);

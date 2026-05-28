@@ -14,6 +14,10 @@ export interface CandidateSelectionResult {
   notFound: string[];
 }
 
+export interface CandidateQuerySelectionResult extends CandidateSelectionResult {
+  candidateIds: string[];
+}
+
 export type CandidateValidationResult =
   | { ok: true; candidates: MarkdownImportCandidate[] }
   | { ok: false; error: string };
@@ -122,6 +126,36 @@ export function selectMarkdownImportCandidatesById(
   }
 
   return { candidates: selected, notFound };
+}
+
+export function selectMarkdownImportCandidatesByQueryIds(
+  candidates: MarkdownImportCandidate[],
+  candidateIdsParams: string[],
+): CandidateQuerySelectionResult {
+  const exactCandidateIds = parseMarkdownImportCandidateIds(candidateIdsParams);
+  if (!exactCandidateIds.ok) {
+    return { candidates: [], notFound: candidateIdsParams, candidateIds: [] };
+  }
+
+  const exactSelection = selectMarkdownImportCandidatesById(candidates, exactCandidateIds.candidateIds);
+  if (
+    exactSelection.candidates.length > 0 ||
+    candidateIdsParams.length !== 1 ||
+    !candidateIdsParams[0].includes(",")
+  ) {
+    return { ...exactSelection, candidateIds: exactCandidateIds.candidateIds };
+  }
+
+  const legacyCandidateIds = parseMarkdownImportCandidateIds(candidateIdsParams[0]);
+  if (!legacyCandidateIds.ok) {
+    return { ...exactSelection, candidateIds: exactCandidateIds.candidateIds };
+  }
+
+  const legacySelection = selectMarkdownImportCandidatesById(candidates, legacyCandidateIds.candidateIds);
+  if (legacySelection.candidates.length > 0) {
+    return { ...legacySelection, candidateIds: legacyCandidateIds.candidateIds };
+  }
+  return { ...exactSelection, candidateIds: exactCandidateIds.candidateIds };
 }
 
 function describeInputType(value: unknown): string {
