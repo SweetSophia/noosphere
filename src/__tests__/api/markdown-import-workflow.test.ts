@@ -134,6 +134,16 @@ test("selectMarkdownImportCandidatesByQueryIds falls back to legacy comma lists"
   assert.deepEqual(result.notFound, []);
 });
 
+test("selectMarkdownImportCandidatesByQueryIds does not split non-existent comma-bearing paths", () => {
+  const candidates = [candidate("notes/c.md")];
+
+  const result = selectMarkdownImportCandidatesByQueryIds(candidates, ["notes/a, b.md"]);
+
+  assert.deepEqual(result.candidateIds, ["notes/a, b.md"]);
+  assert.deepEqual(result.candidates, []);
+  assert.deepEqual(result.notFound, ["notes/a, b.md"]);
+});
+
 function candidate(relativePath: string): MarkdownImportCandidate {
   return {
     kind: "modified",

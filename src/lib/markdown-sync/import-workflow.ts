@@ -152,7 +152,10 @@ export function selectMarkdownImportCandidatesByQueryIds(
   }
 
   const legacySelection = selectMarkdownImportCandidatesById(candidates, legacyCandidateIds.candidateIds);
-  return { ...legacySelection, candidateIds: legacyCandidateIds.candidateIds };
+  if (legacySelection.candidates.length > 0) {
+    return { ...legacySelection, candidateIds: legacyCandidateIds.candidateIds };
+  }
+  return { ...exactSelection, candidateIds: exactCandidateIds.candidateIds };
 }
 
 function describeInputType(value: unknown): string {
