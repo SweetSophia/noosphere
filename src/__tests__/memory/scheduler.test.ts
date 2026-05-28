@@ -300,7 +300,83 @@ describe("local memory scheduler", () => {
     assert.equal(scheduler.getStatus().jobs[0].runCount, 1);
   });
 
-  test("[13] timeout schedules exactly at nextRunAt after completion", async () => {
+  test("[13] concurrent runDueJobs calls do not duplicate job execution", async () => {
+    let calls = 0;
+    let resolveRun: (() => void) | undefined;
+    const scheduler = createLocalMemoryScheduler(
+      [
+        makeJob({
+          id: "job.concurrent",
+          intervalMs: 1_000,
+          run: () => {
+            calls += 1;
+            return new Promise<void>((resolve) => {
+              resolveRun = resolve;
+            });
+          },
+        }),
+      ],
+      {
+        now: fixedClock("2026-04-28T00:00:00.000Z"),
+      },
+    );
+
+    const first = scheduler.runDueJobs(new Date("2026-04-28T00:00:01.000Z"));
+    await flushMicrotasks();
+    const second = scheduler.runDueJobs(new Date("2026-04-28T00:00:01.000Z"));
+    await flushMicrotasks();
+
+    assert.equal(calls, 1);
+    resolveRun?.();
+
+    const [firstSnapshots, secondSnapshots] = await Promise.all([first, second]);
+    assert.equal(firstSnapshots.length, 1);
+    assert.deepEqual(secondSnapshots, firstSnapshots);
+    assert.equal(scheduler.getStatus().jobs[0].runCount, 1);
+  });
+
+  test("[14] concurrent runJob and runDueJobs returns same promise", async () => {
+    let resolveRun: (() => void) | undefined;
+    let runCount = 0;
+    const scheduler = createLocalMemoryScheduler(
+      [
+        makeJob({
+          id: "job.concurrent2",
+          intervalMs: 1_000,
+          run: () => {
+            runCount += 1;
+            return new Promise<void>((resolve) => {
+              resolveRun = resolve;
+            });
+          },
+        }),
+      ],
+      {
+        now: fixedClock("2026-04-28T00:00:00.000Z"),
+      },
+    );
+
+    const runJobPromise = scheduler.runJob("job.concurrent2");
+    await flushMicrotasks();
+    const runDueJobsPromise = scheduler.runDueJobs(
+      new Date("2026-04-28T00:00:01.000Z"),
+    );
+    await flushMicrotasks();
+
+    assert.equal(runCount, 1);
+
+    resolveRun?.();
+
+    const [runJobSnapshot, runDueJobsSnapshots] = await Promise.all([
+      runJobPromise,
+      runDueJobsPromise,
+    ]);
+    assert.equal(runJobSnapshot.status, "succeeded");
+    assert.equal(runDueJobsSnapshots.length, 1);
+    assert.deepEqual(runDueJobsSnapshots[0], runJobSnapshot);
+  });
+
+  test("[15] timeout schedules exactly at nextRunAt after completion", async () => {
     const scheduledDelays: number[] = [];
     const callbacks: (() => void)[] = [];
     let calls = 0;

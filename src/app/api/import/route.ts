@@ -43,7 +43,7 @@ interface ImportArticle {
 
 // GET /api/import — Return import format documentation
 export async function GET(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "import-get" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "import-get" });
   if (!rl.allowed) return rl.response;
 
   return NextResponse.json({
@@ -93,7 +93,7 @@ noosphere:
 
 // POST /api/import — Import articles from a markdown zip
 export async function POST(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "import" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "import" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [Permissions.WRITE]);

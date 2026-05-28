@@ -7,7 +7,7 @@ import { rateLimit } from "@/lib/rate-limit";
 // GET /api/scopes — List all available restricted scopes
 // Auth: Any valid API key (READ minimum)
 export async function GET(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "scopes-get" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "scopes-get" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [Permissions.READ]);
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
 // POST /api/scopes — Register a new custom scope
 // Auth: ADMIN only
 export async function POST(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "scopes-post" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "scopes-post" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [Permissions.ADMIN]);

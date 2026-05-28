@@ -16,7 +16,7 @@ const SETTINGS_MAX_BODY_BYTES = 64 * 1024; // 64 KiB
  * Merges with defaults for any missing fields.
  */
 export async function GET(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "memory-settings-get" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "memory-settings-get" });
   if (!rl.allowed) return rl.response;
 
   // Read-only endpoint — READ is sufficient.
@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
  * Accepts partial settings and merges with existing values.
  */
 export async function POST(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "memory-settings-post" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "memory-settings-post" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [Permissions.ADMIN]);

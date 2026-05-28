@@ -36,7 +36,7 @@ export async function proxy(request: NextRequest) {
 
   // Rate-limit authentication endpoints
   if (path.startsWith("/api/auth") || path === "/wiki/login") {
-    const result = rateLimit(request, {
+    const result = await rateLimit(request, {
       windowMs: 60_000,
       maxRequests: 10,
       keyPrefix: "auth",
@@ -60,7 +60,7 @@ export async function proxy(request: NextRequest) {
     path === "/api/sync/obsidian";
 
   if (isWriteMethod && isWriteEndpoint) {
-    const result = rateLimit(request, {
+    const result = await rateLimit(request, {
       windowMs: 60_000,
       maxRequests: 30,
       keyPrefix: "api-write",

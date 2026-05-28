@@ -10,7 +10,7 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const rl = rateLimit(_request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-get-id" });
+  const rl = await rateLimit(_request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-get-id" });
   if (!rl.allowed) return rl.response;
 
   const { id } = await params;
@@ -45,7 +45,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-patch" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-patch" });
   if (!rl.allowed) return rl.response;
 
   const { id } = await params;
@@ -137,7 +137,7 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const rl = rateLimit(_request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-delete" });
+  const rl = await rateLimit(_request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-delete" });
   if (!rl.allowed) return rl.response;
 
   const { id } = await params;

@@ -7,7 +7,7 @@ import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/topics — List all topics (existing)
 export async function GET(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "topics-get" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "topics-get" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [Permissions.READ]);
@@ -96,7 +96,7 @@ function collectVisibleTopicIds(
 
 // POST /api/topics — Create a topic or subtopic
 export async function POST(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "topics-post" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "topics-post" });
   if (!rl.allowed) return rl.response;
 
   const auth = await checkRouteAuth(request);

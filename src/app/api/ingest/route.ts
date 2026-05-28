@@ -44,7 +44,7 @@ interface IngestArticle {
 }
 
 export async function POST(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "ingest" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "ingest" });
   if (!rl.allowed) return rl.response;
 
   // --- Auth ---

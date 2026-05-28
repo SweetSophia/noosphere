@@ -24,7 +24,7 @@ import {
 import { rateLimit } from "@/lib/rate-limit";
 
 export async function GET(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "sync-conflict-preferences-get" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "sync-conflict-preferences-get" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [...SYNC_CONFLICT_PREFERENCES_READ_PERMISSIONS]);
@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "sync-conflict-preferences-post" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "sync-conflict-preferences-post" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [...SYNC_CONFLICT_PREFERENCES_WRITE_PERMISSIONS]);

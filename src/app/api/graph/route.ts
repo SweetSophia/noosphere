@@ -30,7 +30,7 @@ import {
 //   }
 
 export async function GET(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "graph" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "graph" });
   if (!rl.allowed) return rl.response;
 
   // Auth: API key (any permission) or session — empty array = any authenticated caller

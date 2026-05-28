@@ -17,7 +17,7 @@ import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/sync/obsidian — return status / config visibility
 export async function GET(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "obsidian-get" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "obsidian-get" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [Permissions.ADMIN]);
@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
 
 // POST /api/sync/obsidian — trigger a sync run
 export async function POST(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 5, keyPrefix: "obsidian-post" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 5, keyPrefix: "obsidian-post" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [Permissions.ADMIN]);

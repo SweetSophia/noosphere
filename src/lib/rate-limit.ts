@@ -1,30 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apiError } from "@/lib/api/errors";
+import { getRedisClient } from "@/lib/cache/redis";
 
-interface RateLimitEntry {
-  count: number;
-  resetAt: number;
-}
-
-const store = new Map<string, RateLimitEntry>();
-let lastCleanup = 0;
-
-function cleanupExpired() {
-  const now = Date.now();
-  // Throttle cleanup to once per minute to avoid O(N) scan on every request
-  if (now - lastCleanup < 60_000) return;
-  lastCleanup = now;
-  for (const [key, entry] of store) {
-    if (entry.resetAt <= now) {
-      store.delete(key);
-    }
-  }
+interface RateLimitOptions {
+  windowMs: number;
+  maxRequests: number;
+  keyPrefix?: string;
 }
 
 function getClientIdentifier(request: NextRequest): string {
-  // NextRequest no longer exposes a typed `ip` property in this Next.js version.
-  // In production, these headers must be set/sanitized by the trusted reverse
-  // proxy/CDN; direct client-supplied forwarding headers are not trustworthy.
   return (
     request.headers.get("x-real-ip") ??
     request.headers.get("cf-connecting-ip") ??
@@ -33,42 +17,47 @@ function getClientIdentifier(request: NextRequest): string {
   );
 }
 
-export interface RateLimitOptions {
-  windowMs: number;
-  maxRequests: number;
-  keyPrefix?: string;
-}
-
-/**
- * Simple in-memory fixed-window rate limiter.
- * For production scale, replace with Redis-backed limiter.
- */
-export function rateLimit(
+export async function rateLimit(
   request: NextRequest,
   options: RateLimitOptions
-): { allowed: true } | { allowed: false; response: NextResponse } {
-  cleanupExpired();
-
+): Promise<{ allowed: true } | { allowed: false; response: NextResponse }> {
   const clientId = getClientIdentifier(request);
-  const key = `${options.keyPrefix ?? "rl"}:${clientId}`;
+  const key = `ratelimit:${options.keyPrefix ?? "default"}:${clientId}`;
   const now = Date.now();
+  const windowStart = now - options.windowMs;
 
-  const entry = store.get(key);
-  if (!entry || entry.resetAt <= now) {
-    store.set(key, {
-      count: 1,
-      resetAt: now + options.windowMs,
-    });
+  const redis = getRedisClient();
+
+  if (!redis) {
     return { allowed: true };
   }
 
-  if (entry.count >= options.maxRequests) {
-    return {
-      allowed: false,
-      response: apiError("Too many requests", 429),
-    };
-  }
+  try {
+    const pipeline = redis.pipeline();
+    pipeline.zremrangebyscore(key, "-inf", windowStart.toString());
+    pipeline.zcard(key);
+    pipeline.zadd(key, now, `${now}:${crypto.randomUUID()}`);
+    pipeline.expire(key, Math.ceil(options.windowMs / 1000) + 1);
 
-  entry.count += 1;
-  return { allowed: true };
+    const results = await pipeline.exec();
+    if (!results) {
+      return { allowed: true };
+    }
+
+    // results[1] is [error, zcard result] — index 1 is the count from zcard
+    const countResult = results[1];
+    const count = (countResult[1] as number) ?? 0;
+
+    if (count >= options.maxRequests) {
+      return {
+        allowed: false,
+        response: apiError("Too many requests", 429),
+      };
+    }
+
+    return { allowed: true };
+  } catch (error) {
+    console.error("Rate limiter error:", error);
+    return { allowed: true };
+  }
 }

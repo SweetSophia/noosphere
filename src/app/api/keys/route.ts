@@ -8,7 +8,7 @@ import { rateLimit } from "@/lib/rate-limit";
 // GET /api/keys — List all API keys (metadata only)
 // Auth: ADMIN only
 export async function GET(_request: NextRequest) {
-  const rl = rateLimit(_request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-get" });
+  const rl = await rateLimit(_request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-get" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(_request, [Permissions.ADMIN]);
@@ -36,7 +36,7 @@ export async function GET(_request: NextRequest) {
 // POST /api/keys — Create a new API key
 // Auth: ADMIN only
 export async function POST(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-post" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-post" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [Permissions.ADMIN]);
