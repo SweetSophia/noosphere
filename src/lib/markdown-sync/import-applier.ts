@@ -66,6 +66,7 @@ export interface ImportApplyCandidateResult {
   articleId: string | null;
   conflictReason: string | null;
   warning: string | null;
+  updatedAtIso?: string;
 }
 
 /**
@@ -255,47 +256,40 @@ async function applySingleCandidate(
       });
 
       if (existingArticle) {
-        // Conflict check: if the article was updated in DB AFTER the markdown file
-        // was last modified (according to the manifest's baseline hash), skip.
+        // Conflict check: compare DB modification time with manifest's last update time.
+        // If DB was updated AFTER manifest's updatedAt, the article was modified in DB
+        // after Noosphere last synced, so we should not overwrite without forceOverwrite.
         if (!forceOverwrite && candidate.baselineHash) {
-          // We use the markdown file's mtime as a proxy for when it was last changed.
-          // If we have a manifest entry with writtenHash, we compare.
           const manifestEntry = findManifestEntry(manifest, candidate.relativePath);
           if (manifestEntry) {
-            // The file has been modified since Noosphere last wrote it.
-            // Check if DB is newer than the file change.
-            // Since we don't have the exact file mtime in the candidate, we use
-            // the markdownHash comparison as a proxy.
-            // If markdownHash !== baselineHash, the file was modified.
-            if (candidate.markdownHash !== candidate.baselineHash) {
-              // File has been modified since baseline. This is expected for "modified" candidates.
-              // For baseline-missing, we don't have a baseline, so we can't do this check.
-              // We only conflict if forceOverwrite is false.
-              if (!forceOverwrite) {
-                // In update/upsert mode without force, we skip if there's an existing article
-                // to avoid accidentally overwriting newer DB content.
-                await recordAudit(prisma, {
-                  articleId: candidate.articleId,
-                  relativePath: candidate.relativePath,
-                  action: "conflict",
-                  kind: candidate.kind,
-                  dryRun,
-                  mode,
-                  forceOverwrite,
-                  markdownHash: candidate.markdownHash ?? null,
-                  noosphereHash: candidate.baselineHash ?? null,
-                  conflictReason: "Article exists in DB and forceOverwrite is false. Skipped to preserve DB state.",
-                  performedBy,
-                });
+            // Compare DB updatedAt with manifest updatedAt to detect DB-side changes
+            const dbUpdatedAtMs = existingArticle.updatedAt.getTime();
+            const manifestUpdatedAtMs = new Date(manifestEntry.updatedAt).getTime();
+            const dbWasUpdated = dbUpdatedAtMs > manifestUpdatedAtMs;
 
-                return {
-                  candidate,
-                  action: "conflict",
-                  articleId: candidate.articleId,
-                  conflictReason: "Article exists in DB and forceOverwrite is false. Skipped to preserve DB state.",
-                  warning: null,
-                };
-              }
+            // Only conflict if DB was updated AND file was modified since baseline
+            if (dbWasUpdated && candidate.markdownHash !== candidate.baselineHash) {
+              await recordAudit(prisma, {
+                articleId: candidate.articleId,
+                relativePath: candidate.relativePath,
+                action: "conflict",
+                kind: candidate.kind,
+                dryRun,
+                mode,
+                forceOverwrite,
+                markdownHash: candidate.markdownHash ?? null,
+                noosphereHash: candidate.baselineHash ?? null,
+                conflictReason: "Article was modified in DB after last sync. Skipped to preserve DB state.",
+                performedBy,
+              });
+
+              return {
+                candidate,
+                action: "conflict",
+                articleId: candidate.articleId,
+                conflictReason: "Article was modified in DB after last sync. Skipped to preserve DB state.",
+                warning: null,
+              };
             }
           }
         }
@@ -513,15 +507,16 @@ async function applyCreateOrUpdate(
 
   let articleId: string;
   let action: ImportApplyAction;
+  let updatedAtIso: string | undefined;
 
   if (existingArticle) {
-    if (!forceOverwrite && (mode === "update" || mode === "upsert")) {
+    if (!forceOverwrite && (mode === "update" || mode === "upsert") && candidate.kind === "baseline-missing") {
       // Guard against overwriting existing articles without explicit forceOverwrite
       return {
         candidate,
         action: "conflict",
         articleId: existingArticle.id,
-        conflictReason: "Existing article found and forceOverwrite is false.",
+        conflictReason: "Article was modified in DB after last sync. Skipped to preserve DB state.",
         warning: null,
       };
     }
@@ -540,6 +535,7 @@ async function applyCreateOrUpdate(
 
       articleId = updated.id;
       action = "updated";
+      updatedAtIso = updated.updatedAt.toISOString();
 
       // Record audit
       await recordAudit(prisma, {
@@ -567,6 +563,7 @@ async function applyCreateOrUpdate(
 
       articleId = created.id;
       action = "created";
+      updatedAtIso = created.updatedAt.toISOString();
 
       // Record audit
       await recordAudit(prisma, {
@@ -597,13 +594,20 @@ async function applyCreateOrUpdate(
     seenSlugs.add(tagSlug);
     validTags.push(tag);
   }
-  if (!dryRun && articleId && validTags.length > 0) {
+  if (!dryRun && articleId) {
     await syncArticleTags(prisma, articleId, validTags);
   }
 
-  // ── Update manifest with new written hash ──────────────────────────────────
+  // ── Update manifest entry ─────────────────────────────────────────────────────
   if (!dryRun && articleId && candidate.markdownHash) {
-    updateManifestHash(manifest, vaultPath, candidate.relativePath, candidate.markdownHash);
+    updateManifestEntry(
+      manifest,
+      articleId,
+      candidate.relativePath,
+      updatedAtIso ?? new Date().toISOString(),
+      candidate.markdownHash,
+      candidate.markdownHash
+    );
   }
 
   return {
@@ -612,6 +616,7 @@ async function applyCreateOrUpdate(
     articleId,
     conflictReason: null,
     warning: null,
+    updatedAtIso,
   };
 }
 
@@ -688,22 +693,35 @@ function findManifestEntry(manifest: Manifest, relativePath: string): ManifestEn
 }
 
 /**
- * Update the writtenHash for a manifest entry identified by its relative path.
+ * Add or update a manifest entry for an article.
+ * - Removes any stale entries for the same relativePath with a different articleId.
+ * - Creates or updates the entry with all required fields.
  * Note: The manifest file itself should be written back by the caller
  * after all candidates are processed.
  */
-function updateManifestHash(
+function updateManifestEntry(
   manifest: Manifest,
-  _vaultPath: string,
+  articleId: string,
   relativePath: string,
-  newHash: string
+  updatedAt: string,
+  contentHash: string,
+  writtenHash: string
 ): void {
-  for (const entry of Object.values(manifest.articles)) {
-    if (entry.path === relativePath) {
-      entry.writtenHash = newHash;
-      break;
+  // Clean up stale entries for the same path (different articleId)
+  for (const [id, entry] of Object.entries(manifest.articles)) {
+    if (entry.path === relativePath && id !== articleId) {
+      delete manifest.articles[id];
     }
   }
+
+  // Create or update the manifest entry
+  manifest.articles[articleId] = {
+    path: relativePath,
+    updatedAt,
+    contentHash,
+    writtenHash,
+    deletedAt: null,
+  };
 }
 
 function deriveSlugFromTitle(title: string): string {
