@@ -232,7 +232,7 @@ export function toConflictConfig(settings: RecallSettings): import("./conflict")
  */
 export function toBudgetConfig(settings: RecallSettings): import("./budget").ContextBudgetConfig {
   return {
-    verbosity: settings.recallVerbosity,
-    summaryFirst: settings.summaryFirst,
+    verbosity: settings.recallVerbosity ?? DEFAULT_RECALL_SETTINGS.recallVerbosity,
+    summaryFirst: settings.summaryFirst ?? DEFAULT_RECALL_SETTINGS.summaryFirst,
   };
 }

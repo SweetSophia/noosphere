@@ -156,13 +156,21 @@ export async function executeMemoryRecallRequest(
   const settings = normalizeRecallSettings(options.settings);
   const providerEntries =
     options.providers ?? await getDefaultMemoryRecallProviders(options.allowedScopes);
+
+  // Apply enabledProviders allow-list from settings when no explicit providers requested
+  const useEnabledFilter = validation.request.providers === undefined;
+  const allowedProviderEntries = useEnabledFilter && settings.enabledProviders.length > 0
+    ? providerEntries.filter((entry) =>
+        settings.enabledProviders.includes(entry.provider.descriptor.id))
+    : providerEntries;
+
   const requestedProviders =
     validation.request.providers ??
     (validation.request.mode === "auto"
-      ? [...MEMORY_RECALL_DEFAULT_AUTO_PROVIDERS]
+      ? [...settings.enabledProviders]
       : undefined);
   const providers = filterProviders(
-    providerEntries,
+    allowedProviderEntries,
     requestedProviders,
   );
 
@@ -202,7 +210,7 @@ export async function executeMemoryRecallRequest(
   );
   const controller = new AbortController();
 
-    try {
+  try {
     const orchestrator = createRecallOrchestrator({
       providers: weightedProviders,
       globalResultCap: effectiveResultCap,

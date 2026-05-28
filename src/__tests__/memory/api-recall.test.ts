@@ -219,6 +219,7 @@ test("memory recall preserves provider errors as metadata", async () => {
   const response = await executeMemoryRecallRequest(
     { query: "memory", mode: "inspection" },
     {
+      settings: { enabledProviders: ["broken"] },
       providers: [
         {
           provider: mockProvider("broken", [], {
@@ -318,6 +319,7 @@ test("memory recall settings providerPriorityWeights flows to orchestrator", asy
     { query: "test", mode: "inspection" },
     {
       settings: {
+        enabledProviders: ["low-priority", "high-priority"],
         providerPriorityWeights: {
           "low-priority": 0.5,
           "high-priority": 2.0,
@@ -352,4 +354,58 @@ test("memory recall settings providerPriorityWeights flows to orchestrator", asy
   assert.ok("results" in response.body);
   if (!("results" in response.body)) return;
   assert.equal(response.body.results[0]?.providerId, "high-priority");
+});
+
+test("memory recall enabledProviders filters default providers", async () => {
+  const response = await executeMemoryRecallRequest(
+    { query: "memory", mode: "inspection" },
+    {
+      settings: { enabledProviders: ["alpha"] },
+      providers: [
+        {
+          provider: mockProvider("alpha", [
+            mockResult({ id: "a1", provider: "alpha", content: "Alpha" }),
+          ]),
+        },
+        {
+          provider: mockProvider("beta", [
+            mockResult({ id: "b1", provider: "beta", content: "Beta" }),
+          ]),
+        },
+      ],
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.ok("results" in response.body);
+  if (!("results" in response.body)) return;
+  assert.equal(response.body.results.length, 1);
+  assert.equal(response.body.results[0]?.providerId, "alpha");
+});
+
+test("memory recall explicit providers bypass enabledProviders filter", async () => {
+  const response = await executeMemoryRecallRequest(
+    { query: "memory", mode: "inspection", providers: ["beta"] },
+    {
+      settings: { enabledProviders: ["alpha"] },
+      providers: [
+        {
+          provider: mockProvider("alpha", [
+            mockResult({ id: "a1", provider: "alpha", content: "Alpha" }),
+          ]),
+        },
+        {
+          provider: mockProvider("beta", [
+            mockResult({ id: "b1", provider: "beta", content: "Beta" }),
+          ]),
+        },
+      ],
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.ok("results" in response.body);
+  if (!("results" in response.body)) return;
+  assert.equal(response.body.results.length, 1);
+  assert.equal(response.body.results[0]?.providerId, "beta");
 });

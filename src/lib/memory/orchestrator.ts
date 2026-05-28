@@ -584,7 +584,7 @@ function applyRecallBudget(
   maxTokens: number,
   budgetConfig?: ContextBudgetConfig,
 ): { results: RecallResultRanked[]; tokenBudgetUsed: number } {
-  const budget = new ContextBudgetManager({ maxResults, maxTokens, ...budgetConfig });
+  const budget = new ContextBudgetManager({ ...budgetConfig, maxResults, maxTokens });
   const budgeted = budget.apply(results);
 
   return {
