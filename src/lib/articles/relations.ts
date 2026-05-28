@@ -19,7 +19,7 @@ export async function syncArticleRelations(
 
   await tx.articleRelation.deleteMany({ where: { sourceId } });
 
-  const relationRows = relatedArticleIds
+  const relationRows = Array.from(new Set(relatedArticleIds))
     .filter((targetId) => targetId !== sourceId)
     .map((targetId) => ({ sourceId, targetId }));
 
