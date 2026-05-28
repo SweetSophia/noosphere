@@ -19,7 +19,10 @@ import type { PrismaClient } from "@prisma/client";
 import type {
   MarkdownImportCandidate,
 } from "@/lib/markdown-sync/import-scanner";
+import { resolveExistingVaultFilePath } from "@/lib/markdown-sync/import-scanner";
 import { parseNoosphereMarkdown } from "@/lib/markdown/noosphere-markdown";
+import { invalidateSearchCache } from "@/lib/cache/search-cache";
+import { isValidConfidence, isValidStatus } from "@/lib/validation";
 import type { Manifest, ManifestEntry } from "@/lib/obsidian-sync";
 import type { ObsidianSyncConfig } from "@/lib/obsidian-sync/config";
 
@@ -114,6 +117,11 @@ export async function applyMarkdownImports(
     }
   }
 
+  // Invalidate search cache if any articles were created or updated
+  if (!dryRun && (created > 0 || updated > 0)) {
+    await invalidateSearchCache();
+  }
+
   // Persist manifest to disk after all candidates have been processed
   // (only in real mode, not dry-run)
   if (!dryRun) {
@@ -152,7 +160,9 @@ async function applySingleCandidate(
   options: ApplySingleOptions
 ): Promise<ImportApplyCandidateResult> {
   const { candidate, vaultPath, manifest, mode, forceOverwrite, dryRun, performedBy } = options;
-  const absolutePath = join(vaultPath, candidate.relativePath);
+
+  // ── Validate path to prevent directory traversal ────────────────────────
+  const absolutePath = resolveExistingVaultFilePath(vaultPath, candidate.relativePath);
 
   // ── Handle `missing` candidates ──────────────────────────────────────────
   // A "missing" candidate means the file existed before but is now gone.
@@ -177,6 +187,31 @@ async function applySingleCandidate(
       action: "skipped",
       articleId: candidate.articleId,
       conflictReason: "File is missing from vault — DB article untouched.",
+      warning: null,
+    };
+  }
+
+  // ── Reject candidates with invalid paths (traversal, symlinks, etc.) ────
+  if (!absolutePath) {
+    await recordAudit(prisma, {
+      articleId: candidate.articleId ?? null,
+      relativePath: candidate.relativePath,
+      action: "skipped",
+      kind: candidate.kind,
+      dryRun,
+      mode,
+      forceOverwrite,
+      markdownHash: candidate.markdownHash ?? null,
+      noosphereHash: null,
+      conflictReason: "Path traversal rejected: file is outside the vault, is a symlink, or does not exist.",
+      performedBy,
+    });
+
+    return {
+      candidate,
+      action: "skipped",
+      articleId: candidate.articleId ?? null,
+      conflictReason: "Path traversal rejected: file is outside the vault, is a symlink, or does not exist.",
       warning: null,
     };
   }
@@ -235,9 +270,9 @@ async function applySingleCandidate(
             if (candidate.markdownHash !== candidate.baselineHash) {
               // File has been modified since baseline. This is expected for "modified" candidates.
               // For baseline-missing, we don't have a baseline, so we can't do this check.
-              // We only conflict if forceOverwrite is false and mode is "update".
-              if (!forceOverwrite && mode === "update") {
-                // In update mode without force, we skip if there's an existing article
+              // We only conflict if forceOverwrite is false.
+              if (!forceOverwrite) {
+                // In update/upsert mode without force, we skip if there's an existing article
                 // to avoid accidentally overwriting newer DB content.
                 await recordAudit(prisma, {
                   articleId: candidate.articleId,
@@ -249,7 +284,7 @@ async function applySingleCandidate(
                   forceOverwrite,
                   markdownHash: candidate.markdownHash ?? null,
                   noosphereHash: candidate.baselineHash ?? null,
-                  conflictReason: "Article exists in DB and mode is 'update' without forceOverwrite. Skipped to preserve DB state.",
+                  conflictReason: "Article exists in DB and forceOverwrite is false. Skipped to preserve DB state.",
                   performedBy,
                 });
 
@@ -257,7 +292,7 @@ async function applySingleCandidate(
                   candidate,
                   action: "conflict",
                   articleId: candidate.articleId,
-                  conflictReason: "Article exists in DB and mode is 'update' without forceOverwrite. Skipped to preserve DB state.",
+                  conflictReason: "Article exists in DB and forceOverwrite is false. Skipped to preserve DB state.",
                   warning: null,
                 };
               }
@@ -455,6 +490,12 @@ async function applyCreateOrUpdate(
     };
   }
 
+  // ── Validate confidence and status ───────────────────────────────────────
+  const rawConfidence = typeof frontmatter.confidence === "string" ? frontmatter.confidence : null;
+  const rawStatus = typeof frontmatter.status === "string" ? frontmatter.status : null;
+  const confidence = rawConfidence && isValidConfidence(rawConfidence) ? rawConfidence : "medium";
+  const status = rawStatus && isValidStatus(rawStatus) ? rawStatus : "published";
+
   // ── Build article data ─────────────────────────────────────────────────────
   const articleData = {
     title: (frontmatter.title as string | null) ?? metadata?.title ?? slug,
@@ -465,8 +506,8 @@ async function applyCreateOrUpdate(
     topicId: topic.id,
     sourceType: "markdown-import" as const,
     sourceUrl: null,
-    confidence: ((frontmatter.confidence as string) ?? "medium") as "low" | "medium" | "high",
-    status: ((frontmatter.status as string) ?? "published") as "draft" | "reviewed" | "published",
+    confidence,
+    status,
     restrictedTags: (frontmatter.restrictedTags as string[] | undefined) ?? metadata?.restrictedTags ?? [],
   };
 
@@ -474,13 +515,13 @@ async function applyCreateOrUpdate(
   let action: ImportApplyAction;
 
   if (existingArticle) {
-    if (!forceOverwrite && mode === "update") {
-      // Already checked above, but double-check
+    if (!forceOverwrite && (mode === "update" || mode === "upsert")) {
+      // Guard against overwriting existing articles without explicit forceOverwrite
       return {
         candidate,
         action: "conflict",
         articleId: existingArticle.id,
-        conflictReason: "Existing article found and mode is 'update' without forceOverwrite.",
+        conflictReason: "Existing article found and forceOverwrite is false.",
         warning: null,
       };
     }
@@ -545,14 +586,24 @@ async function applyCreateOrUpdate(
   }
 
   // ── Handle tags ────────────────────────────────────────────────────────────
-  const tags = (frontmatter.tags as string[] | undefined) ?? metadata?.tags ?? [];
-  if (!dryRun && articleId && tags.length > 0) {
-    await syncArticleTags(prisma, articleId, tags);
+  const rawTags = (frontmatter.tags as unknown[] | undefined) ?? metadata?.tags ?? [];
+  // Validate: keep only non-empty strings, then deduplicate by slug
+  const validTags: string[] = [];
+  const seenSlugs = new Set<string>();
+  for (const tag of rawTags) {
+    if (typeof tag !== "string" || tag.trim().length === 0) continue;
+    const tagSlug = slugify(tag);
+    if (tagSlug.length === 0 || seenSlugs.has(tagSlug)) continue;
+    seenSlugs.add(tagSlug);
+    validTags.push(tag);
+  }
+  if (!dryRun && articleId && validTags.length > 0) {
+    await syncArticleTags(prisma, articleId, validTags);
   }
 
   // ── Update manifest with new written hash ──────────────────────────────────
   if (!dryRun && articleId && candidate.markdownHash) {
-    await updateManifestHash(manifest, vaultPath, candidate.relativePath, candidate.markdownHash);
+    updateManifestHash(manifest, vaultPath, candidate.relativePath, candidate.markdownHash);
   }
 
   return {

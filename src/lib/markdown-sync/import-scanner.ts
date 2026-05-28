@@ -482,7 +482,7 @@ function resolveVaultPath(vaultPath: string, relativePath: string): string | nul
   return absolutePath;
 }
 
-function resolveExistingVaultFilePath(vaultPath: string, relativePath: string): string | null {
+export function resolveExistingVaultFilePath(vaultPath: string, relativePath: string): string | null {
   const absolutePath = resolveVaultPath(vaultPath, relativePath);
   if (!absolutePath) return null;
 

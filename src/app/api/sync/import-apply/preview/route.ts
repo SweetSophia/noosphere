@@ -20,7 +20,7 @@ import {
   applyMarkdownImports,
   MARKDOWN_IMPORT_APPLY_PERMISSIONS,
 } from "@/lib/markdown-sync/import-applier";
-import { scanMarkdownImportCandidates } from "@/lib/markdown-sync/import-scanner";
+import { scanMarkdownImportCandidates, MarkdownImportScanLimitError } from "@/lib/markdown-sync/import-scanner";
 import type { Manifest } from "@/lib/obsidian-sync";
 import type { MarkdownImportCandidate } from "@/lib/markdown-sync/import-scanner";
 
@@ -83,7 +83,15 @@ export async function GET(request: NextRequest) {
   }
 
   // ── Load vault config ─────────────────────────────────────────────────────
-  const config = getObsidianSyncConfig();
+  let config;
+  try {
+    config = getObsidianSyncConfig();
+  } catch (err) {
+    return NextResponse.json(
+      { success: false, error: `Configuration error: ${(err as Error).message}` },
+      { status: 400 }
+    );
+  }
   if (!config) {
     return NextResponse.json(
       { success: false, error: "Obsidian sync is not enabled. Set OBSIDIAN_SYNC_ENABLED and OBSIDIAN_SYNC_VAULT_PATH." },
@@ -100,45 +108,42 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // ── Run full scan to get fresh candidate data ─────────────────────────────
-  // Note: scanMarkdownImportCandidates returns MarkdownImportScanResult with success: true.
-  // If it fails, it throws an exception (e.g., MarkdownImportScanLimitError).
-  // The try-catch below handles this.
-  const scanResult = scanMarkdownImportCandidates({
-    vaultPath: config.vaultPath,
-    manifestPath: config.manifestPath,
-    includeUntracked: true,
-    maxFiles: 5_000,
-  });
-
-  // Filter to only the requested candidate IDs
-  const requestedCandidates: MarkdownImportCandidate[] = [];
-  const notFound: string[] = [];
-
-  for (const candidateId of candidateIds) {
-    const candidate = scanResult.candidates.find((c) => c.relativePath === candidateId);
-    if (candidate) {
-      requestedCandidates.push(candidate);
-    } else {
-      notFound.push(candidateId);
-    }
-  }
-
-  if (requestedCandidates.length === 0) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "None of the specified candidate IDs were found in the current scan.",
-        notFound,
-      },
-      { status: 404 }
-    );
-  }
-
   // ── Preview apply (dry-run) ──────────────────────────────────────────────
   const performedBy = auth.auth.name ?? auth.auth.keyId ?? auth.auth.userId ?? "system";
 
   try {
+    // ── Run full scan to get fresh candidate data ─────────────────────────────
+    const scanResult = scanMarkdownImportCandidates({
+      vaultPath: config.vaultPath,
+      manifestPath: config.manifestPath,
+      includeUntracked: true,
+      maxFiles: 5_000,
+    });
+
+    // Filter to only the requested candidate IDs
+    const requestedCandidates: MarkdownImportCandidate[] = [];
+    const notFound: string[] = [];
+
+    for (const candidateId of candidateIds) {
+      const candidate = scanResult.candidates.find((c) => c.relativePath === candidateId);
+      if (candidate) {
+        requestedCandidates.push(candidate);
+      } else {
+        notFound.push(candidateId);
+      }
+    }
+
+    if (requestedCandidates.length === 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "None of the specified candidate IDs were found in the current scan.",
+          notFound,
+        },
+        { status: 404 }
+      );
+    }
+
     const result = await applyMarkdownImports(prisma, {
       vaultPath: config.vaultPath,
       manifest,
@@ -155,6 +160,12 @@ export async function GET(request: NextRequest) {
       notFound: notFound.length > 0 ? notFound : undefined,
     });
   } catch (err) {
+    if (err instanceof MarkdownImportScanLimitError) {
+      return NextResponse.json(
+        { success: false, error: err.message },
+        { status: 413 }
+      );
+    }
     console.error("[import-apply-preview] Error running preview:", err);
     return NextResponse.json(
       { success: false, error: "Internal error during preview.", detail: String(err) },

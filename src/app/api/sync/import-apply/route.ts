@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
   let body: ImportApplyRequestBody;
   try {
     const rawBody = await request.text();
-    if (rawBody.length > MARKDOWN_IMPORT_APPLY_MAX_BODY_BYTES) {
+    if (Buffer.byteLength(rawBody, "utf-8") > MARKDOWN_IMPORT_APPLY_MAX_BODY_BYTES) {
       return NextResponse.json(
         { success: false, error: "Request body too large." },
         { status: 413 }
@@ -86,7 +86,15 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Load vault config ─────────────────────────────────────────────────────
-  const config = getObsidianSyncConfig();
+  let config;
+  try {
+    config = getObsidianSyncConfig();
+  } catch (err) {
+    return NextResponse.json(
+      { success: false, error: `Configuration error: ${(err as Error).message}` },
+      { status: 400 }
+    );
+  }
   if (!config) {
     return NextResponse.json(
       { success: false, error: "Obsidian sync is not enabled. Set OBSIDIAN_SYNC_ENABLED and OBSIDIAN_SYNC_VAULT_PATH." },
