@@ -6,7 +6,7 @@ import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/tags — List all tags with article counts
 export async function GET(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "tags-get" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "tags-get" });
   if (!rl.allowed) return rl.response;
 
   try {
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
 
 // POST /api/tags — Create a tag
 export async function POST(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "tags-post" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "tags-post" });
   if (!rl.allowed) return rl.response;
 
   const auth = await checkRouteAuth(request);

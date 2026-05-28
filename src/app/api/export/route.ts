@@ -29,7 +29,7 @@ function buildExportTopicPath(topicMap: Map<string, ExportTopicNode>, topicId: s
 // GET /api/export — Export all articles as a zip of markdown files
 // Auth: API key (READ/WRITE/ADMIN) or session (human)
 export async function GET(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "export" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "export" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [Permissions.READ]);

@@ -34,7 +34,7 @@ import { invalidateSearchCache } from "@/lib/cache/search-cache";
 //   { article: {id, title, slug, topic, tags}, answerId }
 
 export async function POST(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "answer" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "answer" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [Permissions.WRITE]);

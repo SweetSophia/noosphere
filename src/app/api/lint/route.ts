@@ -34,7 +34,7 @@ interface LintIssue {
 }
 
 export async function POST(request: NextRequest) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "lint" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "lint" });
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [Permissions.WRITE]);

@@ -26,7 +26,7 @@ async function getDescendantIds(topicId: string): Promise<string[]> {
 
 // PATCH /api/topics/[id] — Update a topic
 export async function PATCH(request: NextRequest, { params }: Props) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "topics-patch" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "topics-patch" });
   if (!rl.allowed) return rl.response;
 
   const auth = await checkRouteAuth(request);
@@ -106,7 +106,7 @@ export async function PATCH(request: NextRequest, { params }: Props) {
 
 // DELETE /api/topics/[id] — Delete a topic
 export async function DELETE(request: NextRequest, { params }: Props) {
-  const rl = rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "topics-delete" });
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "topics-delete" });
   if (!rl.allowed) return rl.response;
 
   const auth = await checkRouteAuth(request);

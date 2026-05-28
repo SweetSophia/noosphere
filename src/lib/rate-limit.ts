@@ -17,10 +17,10 @@ function getClientIdentifier(request: NextRequest): string {
   );
 }
 
-export function rateLimit(
+export async function rateLimit(
   request: NextRequest,
   options: RateLimitOptions
-): { allowed: true } | { allowed: false; response: NextResponse } {
+): Promise<{ allowed: true } | { allowed: false; response: NextResponse }> {
   const clientId = getClientIdentifier(request);
   const key = `ratelimit:${options.keyPrefix ?? "default"}:${clientId}`;
   const now = Date.now();
@@ -33,11 +33,20 @@ export function rateLimit(
   }
 
   try {
-    redis.zremrangebyscore(key, "-inf", windowStart.toString());
-    const count = redis.zcard(key);
-    const member = `${now}:${crypto.randomUUID()}`;
-    redis.zadd(key, now, member);
-    redis.expire(key, Math.ceil(options.windowMs / 1000) + 1);
+    const pipeline = redis.pipeline();
+    pipeline.zremrangebyscore(key, "-inf", windowStart.toString());
+    pipeline.zcard(key);
+    pipeline.zadd(key, now, `${now}:${crypto.randomUUID()}`);
+    pipeline.expire(key, Math.ceil(options.windowMs / 1000) + 1);
+
+    const results = await pipeline.exec();
+    if (!results) {
+      return { allowed: true };
+    }
+
+    // results[1] is [error, zcard result] — index 1 is the count from zcard
+    const countResult = results[1];
+    const count = (countResult[1] as number) ?? 0;
 
     if (count >= options.maxRequests) {
       return {
