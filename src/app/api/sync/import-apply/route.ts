@@ -20,6 +20,15 @@ import {
   MARKDOWN_IMPORT_APPLY_MAX_BODY_BYTES,
   MARKDOWN_IMPORT_APPLY_PERMISSIONS,
 } from "@/lib/markdown-sync/import-applier";
+import {
+  MarkdownImportScanLimitError,
+  scanMarkdownImportCandidates,
+  validateMarkdownImportScanRequestBody,
+} from "@/lib/markdown-sync/import-scanner";
+import {
+  parseMarkdownImportCandidateIds,
+  selectMarkdownImportCandidatesById,
+} from "@/lib/markdown-sync/import-workflow";
 import type { MarkdownImportCandidate } from "@/lib/markdown-sync/import-scanner";
 
 const IMPORT_APPLY_RATE_LIMIT = { windowMs: 60_000, maxRequests: 5, keyPrefix: "sync-import-apply-post" };
@@ -54,9 +63,18 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Validate request body ─────────────────────────────────────────────────
-  if (!body.candidates || !Array.isArray(body.candidates) || body.candidates.length === 0) {
+  const hasCandidates = Array.isArray(body.candidates) && body.candidates.length > 0;
+  const hasCandidateIds = body.candidateIds !== undefined;
+  if (!hasCandidates && !hasCandidateIds) {
     return NextResponse.json(
-      { success: false, error: "Missing or empty 'candidates' array." },
+      { success: false, error: "Provide either a non-empty 'candidates' array or 'candidateIds'." },
+      { status: 400 }
+    );
+  }
+
+  if (hasCandidates && hasCandidateIds) {
+    return NextResponse.json(
+      { success: false, error: "Provide either 'candidates' or 'candidateIds', not both." },
       { status: 400 }
     );
   }
@@ -81,7 +99,7 @@ export async function POST(request: NextRequest) {
   if (!config) {
     return NextResponse.json(
       { success: false, error: "Obsidian sync is not enabled. Set OBSIDIAN_SYNC_ENABLED and OBSIDIAN_SYNC_VAULT_PATH." },
-      { status: 500 }
+      { status: 400 }
     );
   }
 
@@ -94,6 +112,58 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // ── Resolve candidates ───────────────────────────────────────────────────
+  let candidates: MarkdownImportCandidate[];
+  let notFound: string[] = [];
+  if (hasCandidateIds) {
+    const candidateIdsResult = parseMarkdownImportCandidateIds(body.candidateIds);
+    if (!candidateIdsResult.ok) {
+      return NextResponse.json({ success: false, error: candidateIdsResult.error }, { status: 400 });
+    }
+
+    const scanValidation = validateMarkdownImportScanRequestBody({
+      includeUntracked: body.includeUntracked,
+      maxFiles: body.maxFiles,
+    });
+    if ("errors" in scanValidation) {
+      return NextResponse.json({ success: false, error: scanValidation.errors.join("; ") }, { status: 400 });
+    }
+
+    try {
+      const scanResult = scanMarkdownImportCandidates({
+        vaultPath: config.vaultPath,
+        manifestPath: config.manifestPath,
+        includeUntracked: scanValidation.includeUntracked,
+        maxFiles: scanValidation.maxFiles,
+      });
+      const selection = selectMarkdownImportCandidatesById(scanResult.candidates, candidateIdsResult.candidateIds);
+      candidates = selection.candidates;
+      notFound = selection.notFound;
+    } catch (err) {
+      if (err instanceof MarkdownImportScanLimitError) {
+        return NextResponse.json({ success: false, error: err.message }, { status: 413 });
+      }
+      console.error("[import-apply] Error scanning candidates:", err);
+      return NextResponse.json(
+        { success: false, error: "Failed to scan markdown import candidates.", detail: String(err) },
+        { status: 503 }
+      );
+    }
+
+    if (candidates.length === 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "None of the specified candidate IDs were found in the current scan.",
+          notFound,
+        },
+        { status: 404 }
+      );
+    }
+  } else {
+    candidates = body.candidates as MarkdownImportCandidate[];
+  }
+
   // ── Apply imports ────────────────────────────────────────────────────────
   const performedBy = auth.auth.name ?? auth.auth.keyId ?? auth.auth.userId ?? "system";
 
@@ -102,14 +172,20 @@ export async function POST(request: NextRequest) {
       vaultPath: config.vaultPath,
       manifest,
       config,
-      candidates: body.candidates as MarkdownImportCandidate[],
+      candidates,
       mode: body.mode,
       forceOverwrite: body.forceOverwrite ?? false,
       dryRun: body.dryRun ?? false,
       performedBy,
     });
 
-    return NextResponse.json(result, { status: result.success ? 200 : 500 });
+    return NextResponse.json(
+      {
+        ...result,
+        notFound: notFound.length > 0 ? notFound : undefined,
+      },
+      { status: result.success ? 200 : 500 }
+    );
   } catch (err) {
     console.error("[import-apply] Error applying imports:", err);
     return NextResponse.json(
@@ -120,8 +196,11 @@ export async function POST(request: NextRequest) {
 }
 
 interface ImportApplyRequestBody {
-  candidates: unknown;
+  candidates?: unknown;
+  candidateIds?: unknown;
   mode: "create" | "update" | "upsert";
   forceOverwrite?: boolean;
   dryRun?: boolean;
+  includeUntracked?: unknown;
+  maxFiles?: unknown;
 }

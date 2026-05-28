@@ -680,3 +680,26 @@ Scanner behavior:
 
 This gives agents and admins a deterministic inventory of possible vault-side
 changes before later phases implement apply/reconciliation behavior.
+
+## 11. Agent Markdown Import Workflow
+
+Agents can now run the reverse-import flow without resubmitting bulky scan
+candidate objects. The stable identifier for a candidate is its vault-relative
+`relativePath` from `POST /api/sync/import-scan`.
+
+Recommended sequence:
+
+1. Run `POST /api/sync/import-scan` with `includeUntracked` and `maxFiles`
+   appropriate for the vault.
+2. Select candidate `relativePath` values from the scan response.
+3. Run `GET /api/sync/import-apply/preview?candidateIds=<comma-list>` to get a
+   dry-run result from a fresh server-side scan.
+4. Run `POST /api/sync/import-apply` with `candidateIds`, `mode`,
+   `forceOverwrite`, and optional scan controls.
+5. Inspect `notFound`, conflicts, warnings, and per-candidate results. A
+   `notFound` entry means the file changed state between scan and apply and
+   should be re-scanned before retrying.
+
+The apply endpoint still accepts the Phase 5 `candidates` array for backwards
+compatibility, but new agent integrations should prefer `candidateIds` so the
+server always applies candidates from the current vault state.

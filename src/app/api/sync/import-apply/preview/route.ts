@@ -20,7 +20,10 @@ import {
   MARKDOWN_IMPORT_APPLY_PERMISSIONS,
 } from "@/lib/markdown-sync/import-applier";
 import { scanMarkdownImportCandidates, MarkdownImportScanLimitError } from "@/lib/markdown-sync/import-scanner";
-import type { MarkdownImportCandidate } from "@/lib/markdown-sync/import-scanner";
+import {
+  parseMarkdownImportCandidateIds,
+  selectMarkdownImportCandidatesById,
+} from "@/lib/markdown-sync/import-workflow";
 
 const PREVIEW_RATE_LIMIT = { windowMs: 60_000, maxRequests: 10, keyPrefix: "sync-import-apply-preview" };
 
@@ -60,10 +63,11 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const candidateIds = candidateIdsParam.split(",").map((id) => id.trim()).filter(Boolean);
-  if (candidateIds.length === 0) {
-    return NextResponse.json({ success: false, error: "Empty 'candidateIds'." }, { status: 400 });
+  const candidateIdsResult = parseMarkdownImportCandidateIds(candidateIdsParam);
+  if (!candidateIdsResult.ok) {
+    return NextResponse.json({ success: false, error: candidateIdsResult.error }, { status: 400 });
   }
+  const candidateIds = candidateIdsResult.candidateIds;
 
   // ── Load vault config ─────────────────────────────────────────────────────
   let config;
@@ -78,7 +82,7 @@ export async function GET(request: NextRequest) {
   if (!config) {
     return NextResponse.json(
       { success: false, error: "Obsidian sync is not enabled. Set OBSIDIAN_SYNC_ENABLED and OBSIDIAN_SYNC_VAULT_PATH." },
-      { status: 500 }
+      { status: 400 }
     );
   }
 
@@ -103,25 +107,15 @@ export async function GET(request: NextRequest) {
       maxFiles: 5_000,
     });
 
-    // Filter to only the requested candidate IDs
-    const requestedCandidates: MarkdownImportCandidate[] = [];
-    const notFound: string[] = [];
+    // Filter to only the requested candidate IDs.
+    const selection = selectMarkdownImportCandidatesById(scanResult.candidates, candidateIds);
 
-    for (const candidateId of candidateIds) {
-      const candidate = scanResult.candidates.find((c) => c.relativePath === candidateId);
-      if (candidate) {
-        requestedCandidates.push(candidate);
-      } else {
-        notFound.push(candidateId);
-      }
-    }
-
-    if (requestedCandidates.length === 0) {
+    if (selection.candidates.length === 0) {
       return NextResponse.json(
         {
           success: false,
           error: "None of the specified candidate IDs were found in the current scan.",
-          notFound,
+          notFound: selection.notFound,
         },
         { status: 404 }
       );
@@ -131,7 +125,7 @@ export async function GET(request: NextRequest) {
       vaultPath: config.vaultPath,
       manifest,
       config,
-      candidates: requestedCandidates,
+      candidates: selection.candidates,
       mode,
       forceOverwrite,
       dryRun: true,
@@ -140,7 +134,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       ...result,
-      notFound: notFound.length > 0 ? notFound : undefined,
+      notFound: selection.notFound.length > 0 ? selection.notFound : undefined,
     });
   } catch (err) {
     if (err instanceof MarkdownImportScanLimitError) {

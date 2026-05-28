@@ -285,6 +285,16 @@ POST /api/import
 # Read-only; requires ADMIN.
 POST /api/sync/import-scan
 # JSON body: includeUntracked?, maxFiles?
+
+# Preview applying scan candidates by vault-relative path.
+# Read-only dry run; requires ADMIN.
+GET /api/sync/import-apply/preview?candidateIds=path/a.md,path/b.md&mode=upsert
+
+# Apply scan candidates by vault-relative path. The server re-scans before
+# applying so agents do not need to submit full candidate objects.
+# Requires ADMIN.
+POST /api/sync/import-apply
+# JSON body: candidateIds, mode, forceOverwrite?, dryRun?, includeUntracked?, maxFiles?
 ```
 
 Export, import, and Obsidian sync share the same versioned frontmatter codec in
@@ -293,7 +303,9 @@ Export, import, and Obsidian sync share the same versioned frontmatter codec in
 The reverse import scanner compares tracked vault files against
 `.noosphere-sync/manifest.json` and reports `modified`, `missing`,
 `baseline-missing`, and `untracked` candidates without writing to the database
-or filesystem.
+or filesystem. Agents should use the returned `relativePath` values as
+`candidateIds` for preview/apply calls, then inspect `notFound`, `conflicts`,
+and per-candidate results before considering the workflow complete.
 
 ## Memory Module API
 
