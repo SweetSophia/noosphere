@@ -13,15 +13,15 @@
  * 5. Return a detailed result object with stats and warnings
  */
 
-import { readFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
 import { join } from "path";
 import type { PrismaClient } from "@prisma/client";
 import type {
   MarkdownImportCandidate,
-  MarkdownImportMetadata,
 } from "@/lib/markdown-sync/import-scanner";
 import { parseNoosphereMarkdown } from "@/lib/markdown/noosphere-markdown";
 import type { Manifest, ManifestEntry } from "@/lib/obsidian-sync";
+import type { ObsidianSyncConfig } from "@/lib/obsidian-sync/config";
 
 export const MARKDOWN_IMPORT_APPLY_MAX_BODY_BYTES = 256 * 1024; // 256KB
 export const MARKDOWN_IMPORT_APPLY_PERMISSIONS = ["ADMIN"] as const;
@@ -32,6 +32,7 @@ export type ImportApplyAction = "created" | "updated" | "skipped" | "conflict";
 export interface ImportApplyOptions {
   vaultPath: string;
   manifest: Manifest;
+  config: ObsidianSyncConfig;
   candidates: MarkdownImportCandidate[];
   mode: ImportApplyMode;
   forceOverwrite: boolean;
@@ -72,7 +73,7 @@ export async function applyMarkdownImports(
   options: ImportApplyOptions
 ): Promise<ImportApplyResult> {
   const startMs = Date.now();
-  const { vaultPath, manifest, candidates, mode, forceOverwrite, dryRun, performedBy } = options;
+  const { vaultPath, manifest, config, candidates, mode, forceOverwrite, dryRun, performedBy } = options;
 
   const results: ImportApplyCandidateResult[] = [];
   let created = 0;
@@ -111,6 +112,12 @@ export async function applyMarkdownImports(
     if (result.warning) {
       warnings.push(result.warning);
     }
+  }
+
+  // Persist manifest to disk after all candidates have been processed
+  // (only in real mode, not dry-run)
+  if (!dryRun) {
+    writeManifest(vaultPath, config, manifest);
   }
 
   return {
@@ -216,7 +223,6 @@ async function applySingleCandidate(
         // Conflict check: if the article was updated in DB AFTER the markdown file
         // was last modified (according to the manifest's baseline hash), skip.
         if (!forceOverwrite && candidate.baselineHash) {
-          const dbUpdatedAt = existingArticle.updatedAt.getTime();
           // We use the markdown file's mtime as a proxy for when it was last changed.
           // If we have a manifest entry with writtenHash, we compare.
           const manifestEntry = findManifestEntry(manifest, candidate.relativePath);
@@ -676,4 +682,21 @@ function hashContent(content: string): string {
     hash = hash & hash;
   }
   return Math.abs(hash).toString(16);
+}
+
+/**
+ * Write the manifest to disk using an atomic write (write to temp, then rename).
+ * This mirrors the writeManifest function in src/lib/obsidian-sync/index.ts.
+ */
+function writeManifest(
+  vaultPath: string,
+  config: ObsidianSyncConfig,
+  manifest: Manifest
+): void {
+  const dir = join(vaultPath, ".noosphere-sync");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const manifestFile = join(vaultPath, config.manifestPath);
+  const tmp = `${manifestFile}.tmp.${Date.now()}`;
+  writeFileSync(tmp, JSON.stringify(manifest, null, 2), "utf-8");
+  renameSync(tmp, manifestFile);
 }

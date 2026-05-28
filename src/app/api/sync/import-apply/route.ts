@@ -110,6 +110,7 @@ export async function POST(request: NextRequest) {
     const result = await applyMarkdownImports(prisma, {
       vaultPath: config.vaultPath,
       manifest,
+      config,
       candidates: body.candidates as MarkdownImportCandidate[],
       mode: body.mode,
       forceOverwrite: body.forceOverwrite ?? false,

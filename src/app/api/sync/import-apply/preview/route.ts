@@ -142,6 +142,7 @@ export async function GET(request: NextRequest) {
     const result = await applyMarkdownImports(prisma, {
       vaultPath: config.vaultPath,
       manifest,
+      config,
       candidates: requestedCandidates,
       mode,
       forceOverwrite,
