@@ -22,16 +22,23 @@ export async function rateLimit(
   request: NextRequest,
   options: RateLimitOptions
 ): Promise<{ allowed: true } | { allowed: false; response: NextResponse }> {
-  return rateLimitIdentifier(getClientIdentifier(request), options);
+  return rateLimitInternal(getClientIdentifier(request), options);
 }
 
-export async function rateLimitIdentifier(
+/**
+ * Internal rate limiter using an atomic Lua script.
+ * All operations (trim, add, count, expire, conditional remove) execute
+ * atomically on the Redis server, eliminating pipeline race conditions.
+ */
+async function rateLimitInternal(
   clientId: string,
   options: RateLimitOptions
 ): Promise<{ allowed: true } | { allowed: false; response: NextResponse }> {
   const key = `ratelimit:${options.keyPrefix ?? "default"}:${clientId}`;
   const now = Date.now();
   const windowStart = now - options.windowMs;
+  const member = `${now}:${randomUUID()}`;
+  const ttlSeconds = Math.ceil(options.windowMs / 1000) + 1;
 
   const redis = getRedisClient();
 
@@ -39,31 +46,44 @@ export async function rateLimitIdentifier(
     return { allowed: true };
   }
 
+  // Atomic Lua script:
+  // 1. Trim expired entries
+  // 2. Add current request
+  // 3. Count entries
+  // 4. Set TTL
+  // 5. If over limit, remove the entry we just added and return blocked
+  const luaScript = `
+    redis.call('zremrangebyscore', KEYS[1], '-inf', ARGV[1])
+    redis.call('zadd', KEYS[1], ARGV[2], ARGV[3])
+    local count = redis.call('zcard', KEYS[1])
+    redis.call('expire', KEYS[1], ARGV[4])
+    if count > tonumber(ARGV[5]) then
+      redis.call('zrem', KEYS[1], ARGV[3])
+      return {0, count}
+    end
+    return {1, count}
+  `;
+
   try {
-    const pipeline = redis.pipeline();
+    const result = (await redis.eval(
+      luaScript,
+      1,
+      key,
+      windowStart.toString(),
+      now.toString(),
+      member,
+      ttlSeconds.toString(),
+      options.maxRequests.toString()
+    )) as [number, number];
 
-    const member = `${now}:${randomUUID()}`;
-
-    pipeline.zremrangebyscore(key, "-inf", windowStart.toString());
-    pipeline.zadd(key, now, member);
-    pipeline.zcard(key);
-    pipeline.expire(key, Math.ceil(options.windowMs / 1000) + 1);
-
-    const results = await pipeline.exec();
-
-    if (!results) {
+    if (!Array.isArray(result) || result.length < 2) {
+      console.error("Rate limiter: unexpected Lua response", result);
       return { allowed: true };
     }
 
-    const countResult = results[2];
-    if (countResult[0]) {
-      return { allowed: true };
-    }
+    const allowed = result[0] === 1;
 
-    const currentCount = countResult[1] as number;
-
-    if (currentCount > options.maxRequests) {
-      await redis.zrem(key, member);
+    if (!allowed) {
       return {
         allowed: false,
         response: apiError("Too many requests", 429),
@@ -75,4 +95,15 @@ export async function rateLimitIdentifier(
     console.error("Rate limiter error:", error);
     return { allowed: true };
   }
+}
+
+/**
+ * Rate-limit by raw client identifier (for contexts without a NextRequest,
+ * such as NextAuth credentials authorization).
+ */
+export async function rateLimitIdentifier(
+  clientId: string,
+  options: RateLimitOptions
+): Promise<{ allowed: true } | { allowed: false; response: NextResponse }> {
+  return rateLimitInternal(clientId, options);
 }

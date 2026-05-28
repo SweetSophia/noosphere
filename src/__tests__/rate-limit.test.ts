@@ -78,9 +78,54 @@ class FakeRedisClient {
     return arr.length - filtered.length;
   }
 
-  expire(_key: string, _seconds: number): number {
+  expire(key: string, seconds: number): number {
     this.assertReady();
+    this.expires.set(key, Date.now() + seconds * 1000);
     return 1;
+  }
+
+  /**
+   * Simplified Lua eval that handles only the rate-limiter script.
+   * Supports: zremrangebyscore, zadd, zcard, expire, zrem
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  eval(script: string, _numKeys: number, key: string, ...args: any[]): [number, number] {
+    this.assertReady();
+    const windowStart = args[0] as string;
+    const now = args[1] as string;
+    const member = args[2] as string;
+    const ttlSeconds = parseInt(args[3] as string, 10);
+    const maxRequests = parseInt(args[4] as string, 10);
+
+    // 1. zremrangebyscore(key, "-inf", windowStart)
+    const setKey = `zset:${key}`;
+    const arr: Array<{ member: string; score: number }> = JSON.parse(
+      this.store.get(setKey) ?? "[]"
+    );
+    const minNum = parseFloat(windowStart);
+    const filtered = arr.filter((item) => item.score > minNum);
+
+    // 2. zadd(key, now, member)
+    const existing = filtered.findIndex((item) => item.member === member);
+    if (existing === -1) {
+      filtered.push({ member, score: parseFloat(now) });
+    }
+
+    // 3. count = zcard(key)
+    const count = filtered.length;
+
+    // 4. expire(key, ttlSeconds)
+    this.expires.set(setKey, Date.now() + ttlSeconds * 1000);
+
+    // 5. If over limit, zrem(key, member)
+    if (count > maxRequests) {
+      const afterRem = filtered.filter((item) => item.member !== member);
+      this.store.set(setKey, JSON.stringify(afterRem));
+      return [0, count];
+    }
+
+    this.store.set(setKey, JSON.stringify(filtered));
+    return [1, count];
   }
 
   private assertReady() {

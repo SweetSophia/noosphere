@@ -347,7 +347,9 @@ export class LocalMemoryScheduler {
         return;
       }
 
-      void this.runJob(jobId);
+      this.runJob(jobId).catch((err) => {
+        this.onError?.(jobId, err instanceof Error ? err : new Error(String(err)));
+      });
     }, delayMs);
     this.timers.set(jobId, timer);
   }
