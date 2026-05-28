@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   parseMarkdownImportCandidateIds,
   selectMarkdownImportCandidatesById,
+  validateMarkdownImportCandidates,
 } from "@/lib/markdown-sync/import-workflow";
 import type { MarkdownImportCandidate } from "@/lib/markdown-sync/import-scanner";
 
@@ -10,6 +11,13 @@ test("parseMarkdownImportCandidateIds accepts arrays and removes blank duplicate
   assert.deepEqual(
     parseMarkdownImportCandidateIds(["projects/a.md", " ", "projects/a.md", "projects/b.md"]),
     { ok: true, candidateIds: ["projects/a.md", "projects/b.md"] },
+  );
+});
+
+test("parseMarkdownImportCandidateIds preserves commas in array values", () => {
+  assert.deepEqual(
+    parseMarkdownImportCandidateIds(["notes/a, b.md", "projects/c.md"]),
+    { ok: true, candidateIds: ["notes/a, b.md", "projects/c.md"] },
   );
 });
 
@@ -23,15 +31,62 @@ test("parseMarkdownImportCandidateIds accepts comma-separated strings", () => {
 test("parseMarkdownImportCandidateIds rejects malformed candidate IDs", () => {
   assert.deepEqual(parseMarkdownImportCandidateIds(undefined), {
     ok: false,
-    error: "candidateIds must be a non-empty string array or comma-separated string.",
+    error: "candidateIds must be a non-empty string array or comma-separated string; received undefined.",
+  });
+  assert.deepEqual(parseMarkdownImportCandidateIds(42), {
+    ok: false,
+    error: "candidateIds must be a non-empty string array or comma-separated string; received number.",
+  });
+  assert.deepEqual(parseMarkdownImportCandidateIds({}), {
+    ok: false,
+    error: "candidateIds must be a non-empty string array or comma-separated string; received object.",
   });
   assert.deepEqual(parseMarkdownImportCandidateIds(["projects/a.md", 42]), {
     ok: false,
-    error: "candidateIds must contain only strings.",
+    error: "candidateIds[1] must be a string; received number.",
   });
   assert.deepEqual(parseMarkdownImportCandidateIds(["", "  "]), {
     ok: false,
     error: "candidateIds must include at least one non-empty candidate ID.",
+  });
+});
+
+test("validateMarkdownImportCandidates rejects malformed legacy candidates", () => {
+  assert.deepEqual(validateMarkdownImportCandidates([]), {
+    ok: false,
+    error: "candidates must be a non-empty array.",
+  });
+  assert.deepEqual(validateMarkdownImportCandidates([42]), {
+    ok: false,
+    error: "candidates[0] must be an object.",
+  });
+  assert.deepEqual(validateMarkdownImportCandidates([{ kind: "modified" }]), {
+    ok: false,
+    error: "candidates[0].relativePath must be a non-empty string.",
+  });
+  assert.deepEqual(validateMarkdownImportCandidates([{ relativePath: "projects/a.md", kind: "invalid" }]), {
+    ok: false,
+    error: 'candidates[0].kind must be one of modified, missing, baseline-missing, untracked; received "invalid".',
+  });
+  assert.deepEqual(validateMarkdownImportCandidates([{ ...candidate("projects/a.md"), articleId: 42 }]), {
+    ok: false,
+    error: "candidates[0].articleId must be a string or null.",
+  });
+  assert.deepEqual(validateMarkdownImportCandidates([{ ...candidate("projects/a.md"), sizeBytes: -1 }]), {
+    ok: false,
+    error: "candidates[0].sizeBytes must be a non-negative integer or null.",
+  });
+  assert.deepEqual(validateMarkdownImportCandidates([{ ...candidate("projects/a.md"), metadata: [] }]), {
+    ok: false,
+    error: "candidates[0].metadata must be an object or null.",
+  });
+});
+
+test("validateMarkdownImportCandidates accepts minimal legacy candidates", () => {
+  const candidates = [candidate("projects/a.md")];
+  assert.deepEqual(validateMarkdownImportCandidates(candidates), {
+    ok: true,
+    candidates,
   });
 });
 

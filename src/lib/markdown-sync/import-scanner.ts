@@ -20,11 +20,14 @@ export const MARKDOWN_IMPORT_SCAN_MAX_BODY_BYTES = 32 * 1024;
 export const MARKDOWN_IMPORT_SCAN_DEFAULT_MAX_FILES = 5_000;
 export const MARKDOWN_IMPORT_SCAN_PERMISSIONS = [Permissions.ADMIN] as const;
 
-export type MarkdownImportCandidateKind =
-  | "modified"
-  | "missing"
-  | "baseline-missing"
-  | "untracked";
+export const MARKDOWN_IMPORT_CANDIDATE_KINDS = [
+  "modified",
+  "missing",
+  "baseline-missing",
+  "untracked",
+] as const;
+
+export type MarkdownImportCandidateKind = (typeof MARKDOWN_IMPORT_CANDIDATE_KINDS)[number];
 
 export interface MarkdownImportScanOptions {
   vaultPath: string;
