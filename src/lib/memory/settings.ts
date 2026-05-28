@@ -223,3 +223,16 @@ export function toConflictConfig(settings: RecallSettings): import("./conflict")
     providerPriorityWeights: { ...settings.providerPriorityWeights },
   };
 }
+
+/**
+ * Map user-facing RecallSettings to the programmatic ContextBudgetConfig
+ * consumed by the ContextBudgetManager.
+ *
+ * This is the wiring layer between stored/API settings and the runtime.
+ */
+export function toBudgetConfig(settings: RecallSettings): import("./budget").ContextBudgetConfig {
+  return {
+    verbosity: settings.recallVerbosity ?? DEFAULT_RECALL_SETTINGS.recallVerbosity,
+    summaryFirst: settings.summaryFirst ?? DEFAULT_RECALL_SETTINGS.summaryFirst,
+  };
+}

@@ -538,6 +538,84 @@ async function main() {
     assert(!response.promptInjectionText?.includes("AAAA"), "long content omitted");
   });
 
+  test("budget summaryFirst=false prefers full content over summary", async () => {
+    const results = [
+      mockResult({
+        id: "1",
+        provider: "noosphere",
+        content: "full content here",
+        summary: "short summary",
+        relevanceScore: 1,
+      }),
+    ];
+
+    const orchestrator = new RecallOrchestrator({
+      providers: [{ provider: mockProvider("noosphere", results) }],
+      autoRecallTokenBudget: 200,
+      budget: { summaryFirst: false },
+    });
+
+    const response = await orchestrator.recall({
+      query: "test",
+      mode: "auto",
+    });
+
+    assertEqual(response.results.length, 1, "result kept");
+    assertEqual(response.results[0].content, "full content here", "full content preferred");
+  });
+
+  test("budget verbosity=detailed uses full content even with summaryFirst=true", async () => {
+    const results = [
+      mockResult({
+        id: "1",
+        provider: "noosphere",
+        content: "full content here",
+        summary: "short summary",
+        relevanceScore: 1,
+      }),
+    ];
+
+    const orchestrator = new RecallOrchestrator({
+      providers: [{ provider: mockProvider("noosphere", results) }],
+      autoRecallTokenBudget: 200,
+      budget: { summaryFirst: true, verbosity: "detailed" },
+    });
+
+    const response = await orchestrator.recall({
+      query: "test",
+      mode: "auto",
+    });
+
+    assertEqual(response.results.length, 1, "result kept");
+    assertEqual(response.results[0].content, "full content here", "detailed verbosity uses full content");
+  });
+
+  test("budget verbosity=minimal truncates to summary", async () => {
+    const results = [
+      mockResult({
+        id: "1",
+        provider: "noosphere",
+        content: "this is a very long piece of content that would normally take up many tokens and should be summarized when minimal verbosity is requested",
+        summary: "short",
+        relevanceScore: 1,
+      }),
+    ];
+
+    const orchestrator = new RecallOrchestrator({
+      providers: [{ provider: mockProvider("noosphere", results) }],
+      autoRecallTokenBudget: 200,
+      budget: { verbosity: "minimal" },
+    });
+
+    const response = await orchestrator.recall({
+      query: "test",
+      mode: "auto",
+    });
+
+    assertEqual(response.results.length, 1, "result kept");
+    assertEqual(response.results[0].content, "short", "minimal verbosity uses summary");
+  });
+
   // ─── Prompt injection formatting ────────────────────────────────────────
 
   test("auto mode generates prompt injection XML", async () => {
@@ -683,6 +761,54 @@ async function main() {
       response.results[0].providerId,
       "high-priority",
       "high priority wins",
+    );
+  });
+
+  test("providerPriorityWeights option overrides per-provider config weights", async () => {
+    const lowResults = [
+      mockResult({
+        id: "low",
+        provider: "low-priority",
+        content: "low priority content",
+        relevanceScore: 0.9,
+      }),
+    ];
+    const highResults = [
+      mockResult({
+        id: "high",
+        provider: "high-priority",
+        content: "high priority content",
+        relevanceScore: 0.5,
+      }),
+    ];
+
+    const orchestrator = new RecallOrchestrator({
+      providers: [
+        {
+          provider: mockProvider("low-priority", lowResults),
+          config: { priorityWeight: 2.0 },
+        },
+        {
+          provider: mockProvider("high-priority", highResults),
+          config: { priorityWeight: 0.5 },
+        },
+      ],
+      providerPriorityWeights: {
+        "low-priority": 0.5,
+        "high-priority": 2.0,
+      },
+    });
+
+    const response = await orchestrator.recall({
+      query: "test",
+      mode: "inspection",
+    });
+
+    // providerPriorityWeights should override per-provider config.
+    assertEqual(
+      response.results[0].providerId,
+      "high-priority",
+      "high priority wins via option override",
     );
   });
 

@@ -219,6 +219,7 @@ test("memory recall preserves provider errors as metadata", async () => {
   const response = await executeMemoryRecallRequest(
     { query: "memory", mode: "inspection" },
     {
+      settings: { enabledProviders: ["broken"] },
       providers: [
         {
           provider: mockProvider("broken", [], {
@@ -259,4 +260,152 @@ test("memory recall timeout fails open with provider metadata", async () => {
   assert.equal(response.body.mode, "auto");
   assert.equal(response.body.promptInjectionText, "");
   assert.equal(response.body.providerMeta[0]?.error, "Memory recall timed out");
+});
+
+test("memory recall settings summaryFirst flows to budget", async () => {
+  const response = await executeMemoryRecallRequest(
+    { query: "test", mode: "auto", tokenBudget: 200 },
+    {
+      settings: { summaryFirst: false },
+      providers: [
+        {
+          provider: mockProvider("noosphere", [
+            mockResult({
+              id: "1",
+              provider: "noosphere",
+              content: "full content here",
+              summary: "short summary",
+            }),
+          ]),
+        },
+      ],
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.ok("results" in response.body);
+  if (!("results" in response.body)) return;
+  assert.equal(response.body.results[0]?.content, "full content here");
+});
+
+test("memory recall settings recallVerbosity flows to budget", async () => {
+  const response = await executeMemoryRecallRequest(
+    { query: "test", mode: "auto", tokenBudget: 200 },
+    {
+      settings: { recallVerbosity: "detailed" },
+      providers: [
+        {
+          provider: mockProvider("noosphere", [
+            mockResult({
+              id: "1",
+              provider: "noosphere",
+              content: "full content here",
+              summary: "short summary",
+            }),
+          ]),
+        },
+      ],
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.ok("results" in response.body);
+  if (!("results" in response.body)) return;
+  assert.equal(response.body.results[0]?.content, "full content here");
+});
+
+test("memory recall settings providerPriorityWeights flows to orchestrator", async () => {
+  const response = await executeMemoryRecallRequest(
+    { query: "test", mode: "inspection" },
+    {
+      settings: {
+        enabledProviders: ["low-priority", "high-priority"],
+        providerPriorityWeights: {
+          "low-priority": 0.5,
+          "high-priority": 2.0,
+        },
+      },
+      providers: [
+        {
+          provider: mockProvider("low-priority", [
+            mockResult({
+              id: "low",
+              provider: "low-priority",
+              content: "low content",
+              relevanceScore: 0.9,
+            }),
+          ]),
+        },
+        {
+          provider: mockProvider("high-priority", [
+            mockResult({
+              id: "high",
+              provider: "high-priority",
+              content: "high content",
+              relevanceScore: 0.5,
+            }),
+          ]),
+        },
+      ],
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.ok("results" in response.body);
+  if (!("results" in response.body)) return;
+  assert.equal(response.body.results[0]?.providerId, "high-priority");
+});
+
+test("memory recall enabledProviders filters default providers", async () => {
+  const response = await executeMemoryRecallRequest(
+    { query: "memory", mode: "inspection" },
+    {
+      settings: { enabledProviders: ["alpha"] },
+      providers: [
+        {
+          provider: mockProvider("alpha", [
+            mockResult({ id: "a1", provider: "alpha", content: "Alpha" }),
+          ]),
+        },
+        {
+          provider: mockProvider("beta", [
+            mockResult({ id: "b1", provider: "beta", content: "Beta" }),
+          ]),
+        },
+      ],
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.ok("results" in response.body);
+  if (!("results" in response.body)) return;
+  assert.equal(response.body.results.length, 1);
+  assert.equal(response.body.results[0]?.providerId, "alpha");
+});
+
+test("memory recall explicit providers bypass enabledProviders filter", async () => {
+  const response = await executeMemoryRecallRequest(
+    { query: "memory", mode: "inspection", providers: ["beta"] },
+    {
+      settings: { enabledProviders: ["alpha"] },
+      providers: [
+        {
+          provider: mockProvider("alpha", [
+            mockResult({ id: "a1", provider: "alpha", content: "Alpha" }),
+          ]),
+        },
+        {
+          provider: mockProvider("beta", [
+            mockResult({ id: "b1", provider: "beta", content: "Beta" }),
+          ]),
+        },
+      ],
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.ok("results" in response.body);
+  if (!("results" in response.body)) return;
+  assert.equal(response.body.results.length, 1);
+  assert.equal(response.body.results[0]?.providerId, "beta");
 });

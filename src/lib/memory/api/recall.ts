@@ -9,6 +9,7 @@ import {
 import {
   DEFAULT_RECALL_SETTINGS,
   normalizeRecallSettings,
+  toBudgetConfig,
   toConflictConfig,
   type RecallSettings,
 } from "@/lib/memory/settings";
@@ -21,8 +22,6 @@ export const MEMORY_RECALL_LIMITS = {
   timeoutMs: 5000,
   maxQueryLength: 1000,
 } as const;
-
-export const MEMORY_RECALL_DEFAULT_AUTO_PROVIDERS = ["noosphere"] as const;
 
 export interface MemoryRecallRequest {
   query: string;
@@ -155,36 +154,27 @@ export async function executeMemoryRecallRequest(
   const settings = normalizeRecallSettings(options.settings);
   const providerEntries =
     options.providers ?? await getDefaultMemoryRecallProviders(options.allowedScopes);
+
+  // Apply enabledProviders allow-list from settings when no explicit providers requested
+  const useEnabledFilter = validation.request.providers === undefined;
+  const allowedProviderEntries = useEnabledFilter && settings.enabledProviders.length > 0
+    ? providerEntries.filter((entry) =>
+        settings.enabledProviders.includes(entry.provider.descriptor.id))
+    : providerEntries;
+
   const requestedProviders =
     validation.request.providers ??
     (validation.request.mode === "auto"
-      ? [...MEMORY_RECALL_DEFAULT_AUTO_PROVIDERS]
+      ? [...settings.enabledProviders]
       : undefined);
   const providers = filterProviders(
-    providerEntries,
+    allowedProviderEntries,
     requestedProviders,
   );
 
   if (!providers.ok) {
     return { status: 400, body: { error: providers.error } };
   }
-
-  // Apply provider priority weights from settings (DB settings override static config)
-  const weightedProviders: RecallOrchestratorProviderEntry[] = providers.entries.map(
-    (entry) => {
-      const weight = settings.providerPriorityWeights[entry.provider.descriptor.id];
-      if (weight !== undefined) {
-        return {
-          ...entry,
-          config: {
-            ...entry.config,
-            priorityWeight: weight,
-          },
-        };
-      }
-      return entry;
-    },
-  );
 
   const timeoutMs = clampPositiveInteger(
     options.timeoutMs,
@@ -203,7 +193,7 @@ export async function executeMemoryRecallRequest(
 
   try {
     const orchestrator = createRecallOrchestrator({
-      providers: weightedProviders,
+      providers: providers.entries,
       globalResultCap: effectiveResultCap,
       autoRecallTokenBudget: effectiveTokenBudget,
       deduplication: {
@@ -211,6 +201,8 @@ export async function executeMemoryRecallRequest(
         providerPriority: settings.enabledProviders,
       },
       conflict: toConflictConfig(settings),
+      budget: toBudgetConfig(settings),
+      providerPriorityWeights: settings.providerPriorityWeights,
     });
 
     const response = await withTimeout(

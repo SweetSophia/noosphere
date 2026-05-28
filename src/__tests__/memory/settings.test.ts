@@ -16,6 +16,7 @@ import {
   DEFAULT_RECALL_SETTINGS,
   mergeRecallSettings,
   normalizeRecallSettings,
+  toBudgetConfig,
   toConflictConfig,
 } from "@/lib/memory/settings";
 import type { RecallSettings } from "@/lib/memory/settings";
@@ -321,6 +322,25 @@ async function main() {
     assertEqual(config.strategy, "surface", "default strategy");
     assertEqual(config.includeConflictMetadata, true, "default metadata");
     assertEqual(Object.keys(config.providerPriorityWeights || {}).length, 0, "default weights empty");
+  });
+
+  // ─── toBudgetConfig mapping ────────────────────────────────────────────
+
+  test("toBudgetConfig maps RecallSettings to ContextBudgetConfig", () => {
+    const settings = normalizeRecallSettings({
+      recallVerbosity: "detailed",
+      summaryFirst: false,
+    });
+    const config = toBudgetConfig(settings);
+    assertEqual(config.verbosity, "detailed", "verbosity mapped");
+    assertEqual(config.summaryFirst, false, "summaryFirst mapped");
+  });
+
+  test("toBudgetConfig uses defaults when settings are default", () => {
+    const settings = normalizeRecallSettings();
+    const config = toBudgetConfig(settings);
+    assertEqual(config.verbosity, "standard", "default verbosity");
+    assertEqual(config.summaryFirst, true, "default summaryFirst");
   });
 
   // ─── Wait for all async tests ──────────────────────────────────────────
