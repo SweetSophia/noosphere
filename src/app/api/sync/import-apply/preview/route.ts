@@ -53,7 +53,8 @@ export async function GET(request: NextRequest) {
       {
         success: false,
         error:
-          "Missing 'candidateIds' query parameter. Repeat candidateIds for multiple relative paths. " +
+          "Missing 'candidateIds' query parameter. Use repeated candidateIds for multiple paths " +
+          "(e.g. ?candidateIds=a.md&candidateIds=b.md) or a single comma-separated list for backwards compatibility. " +
           "Run POST /api/sync/import-scan first to get candidates.",
       },
       { status: 400 }
@@ -67,7 +68,11 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const candidateIdsResult = parseMarkdownImportCandidateIds(candidateIdsParams);
+  // Support both repeated query params and single comma-separated list for backward compatibility.
+  const candidateIdsInput = candidateIdsParams.length === 1 && candidateIdsParams[0].includes(",")
+    ? candidateIdsParams[0]
+    : candidateIdsParams;
+  const candidateIdsResult = parseMarkdownImportCandidateIds(candidateIdsInput);
   if (!candidateIdsResult.ok) {
     return NextResponse.json({ success: false, error: candidateIdsResult.error }, { status: 400 });
   }
@@ -183,7 +188,7 @@ function parseScanOptions(searchParams: URLSearchParams): PreviewScanOptionsPars
 
   const maxFiles = searchParams.get("maxFiles");
   if (maxFiles !== null) {
-    if (!/^\d+$/.test(maxFiles)) {
+    if (!/^[1-9]\d*$/.test(maxFiles)) {
       return { ok: false, error: "maxFiles must be an integer between 1 and 50000." };
     }
     options.maxFiles = Number(maxFiles);
