@@ -54,6 +54,7 @@ model Article {
   tags      ArticleTag[]
   revisions ArticleRevision[]
   syncConflictReviews SyncConflictReview[]
+  syncImportAudits SyncImportAudit[]
 
   // Source tracking — where this article's content originated
   sourceUrl  String?
@@ -338,4 +339,55 @@ model SyncConflictReview {
   @@index([direction])
   @@index([articleId, relativePath, direction, status])
   @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────
+// Sync Import Audit — records every vault-to-noosphere import action
+// ─────────────────────────────────────────────
+model SyncImportAudit {
+  id        String   @id @default(cuid())
+
+  // The article that was created/updated. Null if the import created no article
+  // (e.g., skipped or conflict).
+  articleId String?
+  article   Article? @relation(fields: [articleId], references: [id], onDelete: SetNull)
+
+  // Which vault file was imported.
+  relativePath String
+
+  // What action was taken.
+  // "created"  — new article written to DB
+  // "updated"  — existing article overwritten
+  // "skipped"  — no DB write (validation failure, not a Noosphere article, etc.)
+  // "conflict" — skipped due to a conflict (DB newer than vault or parse error)
+  action String
+
+  // The candidate kind that triggered this audit entry.
+  // "modified" | "missing" | "baseline-missing" | "untracked"
+  kind String
+
+  // Import parameters used.
+  dryRun         Boolean
+  forceOverwrite Boolean @default(false)
+  // "create" | "update" | "upsert"
+  mode String
+
+  // Hashes for verification.
+  markdownHash String?
+  noosphereHash String?  // hash of DB state before import (for updates)
+
+  // For conflicts: why the import was skipped.
+  conflictReason String?
+
+  // Who performed the import. "system" for automated, API key name or session for admin.
+  performedBy String
+
+  createdAt DateTime @default(now())
+
+  @@index([articleId])
+  @@index([action])
+  @@index([kind])
+  @@index([createdAt])
+  @@index([relativePath])
+  @@index([performedBy])
 }
