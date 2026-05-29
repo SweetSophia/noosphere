@@ -10,6 +10,11 @@ export type ValidStatus = (typeof VALID_STATUSES)[number];
 export const VALID_CONFIDENCES = ["low", "medium", "high"] as const;
 export type ValidConfidence = (typeof VALID_CONFIDENCES)[number];
 
+export const QUERY_LIMITS = {
+  maxSearchLength: 256,
+  maxAuthorLength: 100,
+} as const;
+
 /**
  * Shared security limits for article content.
  * Defined before sanitizeAuthorName so it can be used as a default param.
@@ -67,4 +72,22 @@ export function sanitizeAuthorName(
     .replace(/<[^>]*>/g, "")
     .trim()
     .slice(0, maxLength);
+}
+
+/**
+ * Validate and normalize a search query string.
+ * Trims whitespace and enforces max length to prevent oversized FTS queries.
+ */
+export function validateSearchQuery(
+  q: string | null
+): { ok: true; query: string } | { ok: false; error: string } {
+  if (!q) return { ok: true, query: "" };
+  const trimmed = q.trim();
+  if (trimmed.length > QUERY_LIMITS.maxSearchLength) {
+    return {
+      ok: false,
+      error: `Query exceeds maximum length of ${QUERY_LIMITS.maxSearchLength} characters`,
+    };
+  }
+  return { ok: true, query: trimmed };
 }

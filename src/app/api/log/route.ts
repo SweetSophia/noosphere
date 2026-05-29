@@ -3,6 +3,7 @@ import { Prisma, Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/rate-limit";
+import { sanitizeAuthorName } from "@/lib/validation";
 
 // GET /api/log — Query the activity log
 //
@@ -30,7 +31,8 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
 
   const type = searchParams.get("type");
-  const author = searchParams.get("author");
+  const rawAuthor = searchParams.get("author");
+  const author = sanitizeAuthorName(rawAuthor);
   const from = searchParams.get("from");
   const to = searchParams.get("to");
   const limit = Math.min(parseInt(searchParams.get("limit") ?? "50", 10), 200);
@@ -50,10 +52,18 @@ export async function GET(request: NextRequest) {
   if (from || to) {
     const createdAt: Prisma.DateTimeFilter = {};
     if (from) {
-      createdAt.gte = new Date(from);
+      try {
+        createdAt.gte = new Date(from);
+      } catch {
+        return NextResponse.json({ error: "Invalid 'from' date format" }, { status: 400 });
+      }
     }
     if (to) {
-      createdAt.lt = new Date(to);
+      try {
+        createdAt.lt = new Date(to);
+      } catch {
+        return NextResponse.json({ error: "Invalid 'to' date format" }, { status: 400 });
+      }
     }
     where.createdAt = createdAt;
   }

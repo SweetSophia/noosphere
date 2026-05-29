@@ -6,6 +6,10 @@ import { rateLimit } from "@/lib/rate-limit";
 
 const LINT_MAX_ARTICLES_DEFAULT = 500;
 const LINT_MAX_ARTICLES_HARD_LIMIT = 2000;
+const LINT_STALE_DAYS_MIN = 1;
+const LINT_STALE_DAYS_MAX = 3650;
+const LINT_TAG_MIN_MIN = 1;
+const LINT_TAG_MIN_MAX = 100;
 
 // POST /api/lint — Wiki health check
 //
@@ -52,8 +56,21 @@ export async function POST(request: NextRequest) {
     // No body — use defaults
   }
 
-  const staleDays = body.staleDays ?? 90;
-  const tagMin = body.tagMin ?? 2;
+  const rawStaleDays = body.staleDays;
+  if (rawStaleDays !== undefined && typeof rawStaleDays !== "number") {
+    return NextResponse.json({ error: "staleDays must be a number" }, { status: 400 });
+  }
+  const staleDays = rawStaleDays !== undefined
+    ? Math.min(Math.max(LINT_STALE_DAYS_MIN, Math.floor(rawStaleDays)), LINT_STALE_DAYS_MAX)
+    : 90;
+
+  const rawTagMin = body.tagMin;
+  if (rawTagMin !== undefined && typeof rawTagMin !== "number") {
+    return NextResponse.json({ error: "tagMin must be a number" }, { status: 400 });
+  }
+  const tagMin = rawTagMin !== undefined
+    ? Math.min(Math.max(LINT_TAG_MIN_MIN, Math.floor(rawTagMin)), LINT_TAG_MIN_MAX)
+    : 2;
   const parsedMaxArticles = Number(body.maxArticles);
   const maxArticles = Number.isNaN(parsedMaxArticles)
     ? LINT_MAX_ARTICLES_DEFAULT

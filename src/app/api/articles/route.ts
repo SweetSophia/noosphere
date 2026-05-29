@@ -12,6 +12,7 @@ import {
   isValidConfidence,
   isValidStatus,
   sanitizeAuthorName,
+  validateSearchQuery,
   validateSlug,
 } from "@/lib/validation";
 import { parsePagination } from "@/lib/pagination";
@@ -31,7 +32,12 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const topicSlug = searchParams.get("topic");
   const tag = searchParams.get("tag");
-  const q = searchParams.get("q"); // full-text search
+  const rawQ = searchParams.get("q");
+  const qValidation = validateSearchQuery(rawQ);
+  if (!qValidation.ok) {
+    return NextResponse.json({ error: qValidation.error }, { status: 400 });
+  }
+  const q = qValidation.query;
   const { page, limit, offset } = parsePagination(searchParams);
   const status = searchParams.get("status");
   const confidence = searchParams.get("confidence");

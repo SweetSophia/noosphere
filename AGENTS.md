@@ -28,7 +28,7 @@ cp .env.example .env
 docker compose up -d
 
 # Local development
-npm run dev          # Next.js dev server on port 6578
+npm run dev          # Next.js dev server (container port 3000, host port 6578)
 npm run db:migrate   # Run Prisma migrations (dev)
 npm run db:seed      # Seed initial topics
 
@@ -40,15 +40,23 @@ docker compose -f docker-compose.yml up -d --build
 npm run db:push      # Push schema without migration history
 npm run db:studio    # Prisma Studio GUI
 
+# Lint + typecheck (CI order: lint -> typecheck -> test)
+npm run lint
+npm run typecheck    # tsc --noEmit
+
 # Testing
 npm run test          # All tests (memory + cache + api + security)
 npm run test:memory   # Memory layer tests only
 npm run test:cache    # Redis cache tests only
 npm run test:api      # API endpoint tests only
 npm run test:security # Security tests (uploads, proxy)
+npm run test:scheduler # Scheduler tests only
 
-# Linting
-npm run lint
+# Deployment verification
+npm run deploy:verify # Verifies health, DB volume identity, and non-empty wiki data
+
+# Scheduler
+npm run memory:scheduler # Run local memory maintenance jobs
 ```
 
 ## Data Model
@@ -66,8 +74,9 @@ npm run lint
 - `status` — draft | reviewed | published
 
 ### ApiKey
-- `keyHash` — SHA-256, raw key never stored
-- `keyPrefix` — first 8 chars for identification
+- Raw key format: `noo_<base64url-random-32-bytes>` — shown once at creation, never stored
+- `keyHash` — SHA-256 of raw key, stored in DB
+- `keyPrefix` — first 8 chars of raw key for identification
 - `permissions` — READ | WRITE | ADMIN
 - `allowedScopes` — empty = only unrestricted articles; `["*"]` = admin access to all restricted
 
