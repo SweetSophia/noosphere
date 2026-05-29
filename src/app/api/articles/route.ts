@@ -30,14 +30,28 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const topicSlug = searchParams.get("topic");
-  const tag = searchParams.get("tag");
+  const rawTopicSlug = searchParams.get("topic");
+  const rawTag = searchParams.get("tag");
   const rawQ = searchParams.get("q");
+
+  // Validate query string length
   const qValidation = validateSearchQuery(rawQ);
   if (!qValidation.ok) {
     return NextResponse.json({ error: qValidation.error }, { status: 400 });
   }
   const q = qValidation.query;
+
+  // Validate topic and tag slug length (prevent DoS via oversized query params)
+  const MAX_SLUG_PARAM_LENGTH = 100;
+  if (rawTopicSlug && rawTopicSlug.length > MAX_SLUG_PARAM_LENGTH) {
+    return NextResponse.json({ error: "topic parameter too long" }, { status: 400 });
+  }
+  if (rawTag && rawTag.length > MAX_SLUG_PARAM_LENGTH) {
+    return NextResponse.json({ error: "tag parameter too long" }, { status: 400 });
+  }
+
+  const topicSlug = rawTopicSlug;
+  const tag = rawTag;
   const { page, limit, offset } = parsePagination(searchParams);
   const status = searchParams.get("status");
   const confidence = searchParams.get("confidence");

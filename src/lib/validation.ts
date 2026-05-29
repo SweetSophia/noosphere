@@ -12,7 +12,6 @@ export type ValidConfidence = (typeof VALID_CONFIDENCES)[number];
 
 export const QUERY_LIMITS = {
   maxSearchLength: 256,
-  maxAuthorLength: 100,
 } as const;
 
 /**

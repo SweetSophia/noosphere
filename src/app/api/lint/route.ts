@@ -57,16 +57,16 @@ export async function POST(request: NextRequest) {
   }
 
   const rawStaleDays = body.staleDays;
-  if (rawStaleDays !== undefined && typeof rawStaleDays !== "number") {
-    return NextResponse.json({ error: "staleDays must be a number" }, { status: 400 });
+  if (rawStaleDays !== undefined && (typeof rawStaleDays !== "number" || !Number.isFinite(rawStaleDays))) {
+    return NextResponse.json({ error: "staleDays must be a finite number" }, { status: 400 });
   }
   const staleDays = rawStaleDays !== undefined
     ? Math.min(Math.max(LINT_STALE_DAYS_MIN, Math.floor(rawStaleDays)), LINT_STALE_DAYS_MAX)
     : 90;
 
   const rawTagMin = body.tagMin;
-  if (rawTagMin !== undefined && typeof rawTagMin !== "number") {
-    return NextResponse.json({ error: "tagMin must be a number" }, { status: 400 });
+  if (rawTagMin !== undefined && (typeof rawTagMin !== "number" || !Number.isFinite(rawTagMin))) {
+    return NextResponse.json({ error: "tagMin must be a finite number" }, { status: 400 });
   }
   const tagMin = rawTagMin !== undefined
     ? Math.min(Math.max(LINT_TAG_MIN_MIN, Math.floor(rawTagMin)), LINT_TAG_MIN_MAX)
