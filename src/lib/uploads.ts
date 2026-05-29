@@ -214,7 +214,7 @@ function sanitizeSvg(rawSvg: string): string {
       // Images
       "image",
       // Presentation
-      "style", "a", "switch",
+      "a", "switch",
     ],
     // Allow all SVG attribute namespaces (xlink, etc.) but sanitize their values
     ALLOWED_ATTR: [
@@ -245,7 +245,6 @@ function sanitizeSvg(rawSvg: string): string {
       "ondrag", "ondragend", "ondragenter", "ondragleave", "ondragover",
       "ondrop", "onscroll", "onwheel", "oncopy", "oncut", "onpaste",
     ],
-    // Allow data: URIs in href/src but NOT with script MIME types
     ALLOW_DATA_ATTR: false,
     // Do not add ns to elements
     ADD_ATTR: [],

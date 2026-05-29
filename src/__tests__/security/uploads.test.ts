@@ -102,20 +102,23 @@ test("saveUploadedImage sanitizes foreignObject elements in SVG", async () => {
   });
 });
 
-test("saveUploadedImage rejects SVG with CSS expression (IE XSS vector)", async () => {
-  // CSS expression() is an IE-only XSS vector. DOMPurify does not strip it
-  // from <style> content by default, so we reject SVGs containing it.
+test("saveUploadedImage sanitizes SVG with CSS expression by stripping style element", async () => {
+  // CSS expression() is an IE-only XSS vector. Since we removed <style> from
+  // ALLOWED_TAGS, DOMPurify strips the entire <style> element (including the
+  // expression()) from the SVG. The rest of the SVG is preserved.
   await withTempUploadDir(async () => {
-    await assert.rejects(
-      () =>
-        saveUploadedImage(
-          "style-expr.svg",
-          svgBytes(
-            '<svg xmlns="http://www.w3.org/2000/svg"><style>*{width:expression(alert(1))}</style><circle cx="5" cy="5" r="4" /></svg>',
-          ),
-        ),
-      /SVG contains disallowed content/,
+    const saved = await saveUploadedImage(
+      "style-expr.svg",
+      svgBytes(
+        '<svg xmlns="http://www.w3.org/2000/svg"><style>*{width:expression(alert(1))}</style><circle cx="5" cy="5" r="4" /></svg>',
+      ),
     );
+
+    const stored = await readStoredSvg(saved.filename);
+    assert.equal(stored.includes("expression("), false, "expression() must be removed with style element");
+    assert.equal(stored.includes("<style>"), false, "style element must be stripped");
+    assert.match(stored, /<svg/i, "svg element must remain after sanitization");
+    assert.match(stored, /<circle/i, "circle element must be preserved");
   });
 });
 
