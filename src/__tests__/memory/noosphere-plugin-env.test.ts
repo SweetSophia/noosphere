@@ -14,7 +14,7 @@ describe("Noosphere plugin environment isolation", () => {
       NOOSPHERE_API_KEY: "noo_generic",
       OPENCODE_NOOSPHERE_AUTO_SAVE_TOPIC_ID: "  topic-opencode  ",
       NOOSPHERE_AUTO_SAVE_TOPIC_ID: "topic-generic",
-    } as NodeJS.ProcessEnv);
+    } as unknown as NodeJS.ProcessEnv);
 
     assert.equal(config.baseUrl, "https://opencode.example.test");
     assert.equal(config.apiKey, "noo_opencode");
@@ -29,7 +29,7 @@ describe("Noosphere plugin environment isolation", () => {
       new URL("../../../opencode-noosphere-memory/dist/config.js", import.meta.url).href
     );
 
-    const client = new NoosphereClient(resolveConfig(undefined, {} as NodeJS.ProcessEnv));
+    const client = new NoosphereClient(resolveConfig(undefined, {} as unknown as NodeJS.ProcessEnv));
 
     await assert.rejects(() => client.status(), (error) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -51,7 +51,7 @@ describe("Noosphere plugin environment isolation", () => {
       NOOSPHERE_API_KEY: "noo_generic",
       KILOCODE_NOOSPHERE_AUTO_SAVE_TOPIC_ID: "  topic-kilo  ",
       NOOSPHERE_AUTO_SAVE_TOPIC_ID: "topic-generic",
-    } as NodeJS.ProcessEnv);
+    } as unknown as NodeJS.ProcessEnv);
 
     assert.equal(config.baseUrl, "https://kilo.example.test");
     assert.equal(config.apiKey, "noo_kilo");
@@ -66,7 +66,7 @@ describe("Noosphere plugin environment isolation", () => {
       new URL("../../../kilocode-noosphere-memory/dist/config.js", import.meta.url).href
     );
 
-    const client = new NoosphereClient(resolveConfig(undefined, {} as NodeJS.ProcessEnv));
+    const client = new NoosphereClient(resolveConfig(undefined, {} as unknown as NodeJS.ProcessEnv));
 
     await assert.rejects(() => client.status(), (error) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -85,7 +85,7 @@ describe("Noosphere plugin environment isolation", () => {
     );
 
     const client = new NoosphereMemoryClient(
-      resolveNoosphereMemoryConfig({}, {} as NodeJS.ProcessEnv),
+      resolveNoosphereMemoryConfig({}, {} as unknown as NodeJS.ProcessEnv),
     );
 
     await assert.rejects(() => client.status(), (error) => {

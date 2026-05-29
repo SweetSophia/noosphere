@@ -222,24 +222,17 @@ test("runObsidianSync keeps local markdown visible when conflict review persiste
       tags: [],
     };
 
-    const client = prisma as unknown as { $queryRaw: () => Promise<unknown> };
-    const originalQueryRaw = client.$queryRaw;
-    const originalTopicFindMany = prisma.topic.findMany;
-    const originalArticleFindMany = prisma.article.findMany;
-    const originalConflictFindFirst = prisma.syncConflictReview.findFirst;
-    const originalConflictCreate = prisma.syncConflictReview.create;
-    const originalActivityLogCreate = prisma.activityLog.create;
-    const originalConsoleError = console.error;
+    const { mock } = await import("node:test");
 
-    client.$queryRaw = async () => [{ acquire: true }];
-    prisma.topic.findMany = async () => [topic];
-    prisma.article.findMany = async () => [syncArticle];
-    prisma.syncConflictReview.findFirst = async () => null;
-    prisma.syncConflictReview.create = async () => {
+    mock.method(prisma, "$queryRaw", async () => [{ acquire: true }]);
+    mock.method(prisma.topic, "findMany", async () => [topic]);
+    mock.method(prisma.article, "findMany", async () => [syncArticle]);
+    mock.method(prisma.syncConflictReview, "findFirst", async () => null);
+    mock.method(prisma.syncConflictReview, "create", async () => {
       throw new Error("database unavailable");
-    };
-    prisma.activityLog.create = async () => ({});
-    console.error = () => {};
+    });
+    mock.method(prisma.activityLog, "create", async () => ({}));
+    mock.method(console, "error", () => {});
 
     try {
       const result = await runObsidianSync({ mode: "full", clean: false, git: false, dryRun: false });
@@ -253,13 +246,7 @@ test("runObsidianSync keeps local markdown visible when conflict review persiste
       );
       assert.equal(existsSync(join(vaultPath, ".noosphere-sync", "conflicts")), true);
     } finally {
-      client.$queryRaw = originalQueryRaw;
-      prisma.topic.findMany = originalTopicFindMany;
-      prisma.article.findMany = originalArticleFindMany;
-      prisma.syncConflictReview.findFirst = originalConflictFindFirst;
-      prisma.syncConflictReview.create = originalConflictCreate;
-      prisma.activityLog.create = originalActivityLogCreate;
-      console.error = originalConsoleError;
+      mock.restoreAll();
     }
   } finally {
     if (oldEnabled === undefined) delete process.env.OBSIDIAN_SYNC_ENABLED;

@@ -155,7 +155,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
       NOOSPHERE_API_KEY: "noo_generic",
       OPENCLAW_NOOSPHERE_TIMEOUT_MS: "1234",
       NOOSPHERE_TIMEOUT_MS: "9999",
-    } as NodeJS.ProcessEnv;
+    } as unknown as NodeJS.ProcessEnv;
 
     const config = resolveNoosphereMemoryConfig({}, env);
 
@@ -169,7 +169,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
       NOOSPHERE_API_KEY_CYLENA: "noo_cylena",
       OPENCLAW_NOOSPHERE_API_KEY: "noo_openclaw",
       NOOSPHERE_API_KEY: "noo_generic",
-    } as NodeJS.ProcessEnv;
+    } as unknown as NodeJS.ProcessEnv;
 
     assert.equal(resolveApiKeyForAgent({}, env, undefined, "cylena"), "noo_cylena");
     assert.equal(resolveApiKeyForAgent({}, env, undefined, "other"), "noo_openclaw");
