@@ -326,16 +326,20 @@ describe("local memory scheduler", () => {
     const second = scheduler.runDueJobs(new Date("2026-04-28T00:00:01.000Z"));
     await flushMicrotasks();
 
+    // Only the first call starts the job — second call finds it already locked and skips
     assert.equal(calls, 1);
     resolveRun?.();
 
     const [firstSnapshots, secondSnapshots] = await Promise.all([first, second]);
+    // First call started the job, so it gets the result
     assert.equal(firstSnapshots.length, 1);
-    assert.deepEqual(secondSnapshots, firstSnapshots);
+    // Second call found job already running, so it returns nothing (skipped)
+    assert.equal(secondSnapshots.length, 0);
+    // But the job only ran ONCE (no duplicate execution)
     assert.equal(scheduler.getStatus().jobs[0].runCount, 1);
   });
 
-  test("[14] concurrent runJob and runDueJobs returns same promise", async () => {
+  test("[14] concurrent runJob and runDueJobs — runDueJobs skips already-locked job", async () => {
     let resolveRun: (() => void) | undefined;
     let runCount = 0;
     const scheduler = createLocalMemoryScheduler(
@@ -356,8 +360,10 @@ describe("local memory scheduler", () => {
       },
     );
 
+    // runJob acquires lock first
     const runJobPromise = scheduler.runJob("job.concurrent2");
     await flushMicrotasks();
+    // runDueJobs finds job already locked — skips it
     const runDueJobsPromise = scheduler.runDueJobs(
       new Date("2026-04-28T00:00:01.000Z"),
     );
@@ -371,9 +377,12 @@ describe("local memory scheduler", () => {
       runJobPromise,
       runDueJobsPromise,
     ]);
+    // runJob started the job and completes successfully
     assert.equal(runJobSnapshot.status, "succeeded");
-    assert.equal(runDueJobsSnapshots.length, 1);
-    assert.deepEqual(runDueJobsSnapshots[0], runJobSnapshot);
+    // runDueJobs found job already locked, so it returns nothing (skipped)
+    assert.equal(runDueJobsSnapshots.length, 0);
+    // But the job only ran ONCE (no duplicate execution)
+    assert.equal(scheduler.getStatus().jobs[0].runCount, 1);
   });
 
   test("[15] timeout schedules exactly at nextRunAt after completion", async () => {

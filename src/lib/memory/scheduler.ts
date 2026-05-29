@@ -259,7 +259,11 @@ export class LocalMemoryScheduler {
   }
 
   async runDueJobs(now: Date = this.now()): Promise<SchedulerJobSnapshot[]> {
-    const due: Promise<SchedulerJobSnapshot>[] = [];
+    // Acquire locks BEFORE executing — prevents duplicate concurrent execution
+    // that was possible with the previous collect-then-lock pattern where
+    // multiple concurrent runDueJobs calls could both collect the same job.
+    // This is the fix for https://github.com/SweetSophia/noosphere/issues/138
+    const results: Promise<SchedulerJobSnapshot>[] = [];
 
     for (const job of this.jobs.values()) {
       if (!job.enabled) {
@@ -267,11 +271,21 @@ export class LocalMemoryScheduler {
       }
 
       if (Date.parse(job.nextRunAt ?? "0") <= now.getTime()) {
-        due.push(this.runJob(job.id));
+        if (this.tryAcquireJobLock(job.id)) {
+          this.clearJobTimer(job.id);
+          const run = this.executeJob(job);
+          this.inFlight.set(job.id, run);
+          results.push(run);
+          run.then((result) => this.releaseJobLock(job.id, result)).catch(() => {});
+        }
+        // If lock not acquired, job is already running from another call.
+        // The running job's snapshot will be returned to that caller only.
+        // This is intentional: each runDueJobs call returns only the jobs
+        // it personally started, not jobs already started by other calls.
       }
     }
 
-    return Promise.all(due);
+    return Promise.all(results);
   }
 
   getStatus(): SchedulerStatusSnapshot {
