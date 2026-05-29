@@ -17,6 +17,8 @@ function createSecureSvgResponse(bytes: Uint8Array, filename: string): NextRespo
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "strict-origin-when-cross-origin",
+    // Mirrors the normal uploads route caching for these content-addressed filenames
+    "Cache-Control": "public, max-age=31536000, immutable",
   });
 
   return new NextResponse(bytes as BodyInit, { status: 200, headers });
@@ -107,13 +109,23 @@ export async function proxy(request: NextRequest) {
 
   // SVG uploads get special hardening even after DOMPurify sanitization at write time.
   // This is defense-in-depth against parser differentials and future bypasses.
-  if (path.startsWith("/uploads/images/") && path.endsWith(".svg")) {
+  // Case-insensitive extension check prevents .SVG uppercase bypass (fixes gemini review).
+  const lowerPath = path.toLowerCase();
+  if (lowerPath.startsWith("/uploads/images/") && lowerPath.endsWith(".svg")) {
     try {
-      const filename = path.split("/").pop()!;
-      const imageData = await readUploadedImage([filename]);
-      return createSecureSvgResponse(imageData.bytes, filename);
+      // Extract relative path under /uploads/images/ to preserve nested directory
+      // structure. Fixes sourcery review: previous .pop() only got filename, losing
+      // nested path segments and causing silent fallthrough to 200 on deep paths.
+      const relative = lowerPath.replace(/^\/uploads\/images\//, "");
+      const parts = relative.split("/").filter(Boolean);
+      const imageData = await readUploadedImage(parts);
+      // Derive display filename from the last path segment for Content-Disposition
+      const displayName = parts[parts.length - 1];
+      return createSecureSvgResponse(imageData.bytes, displayName);
     } catch {
-      // File not found or invalid path → fall through to Next.js static handler
+      // File not found or invalid path → return 404 explicitly
+      // (do NOT fall through to NextResponse.next() which returns HTTP 200)
+      return new NextResponse(null, { status: 404 });
     }
   }
 

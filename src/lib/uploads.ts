@@ -266,8 +266,10 @@ function sanitizeSvg(rawSvg: string): string {
 
   // CSS `expression()` is a legacy IE XSS vector that DOMPurify does not
   // strip by default (even though we forbid <style>). We reject the whole
-  // upload if any remains.
-  if (/expression\s*\(/i.test(clean)) {
+  // upload if any <style> block contains an expression(). We intentionally
+  // do NOT match expression() in text content (e.g. <text>gene expression (x)</text>)
+  // to avoid false positives on legitimate SVG text.
+  if (/<style[^>]*>[\s\S]*?expression\s*\([\s\S]*?<\/style>/i.test(clean)) {
     throw new Error("SVG contains disallowed content");
   }
 
