@@ -3,6 +3,25 @@ import { getToken } from "next-auth/jwt";
 import { rateLimit } from "@/lib/rate-limit";
 import { readUploadedImage } from "@/lib/uploads";
 
+// ─── SVG Response Helper ────────────────────────────────────────────────────
+
+/**
+ * Creates a hardened response for SVG files.
+ * Forces download + sandbox to prevent any active content execution.
+ */
+function createSecureSvgResponse(bytes: Uint8Array, filename: string): NextResponse {
+  const headers = new Headers({
+    "Content-Type": "image/svg+xml",
+    "Content-Disposition": `attachment; filename="${filename}"`,
+    "Content-Security-Policy": "sandbox",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+  });
+
+  return new NextResponse(bytes as BodyInit, { status: 200, headers });
+}
+
 function isAdminPath(path: string) {
   return path === "/wiki/admin" || path.startsWith("/wiki/admin/");
 }
@@ -86,23 +105,15 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  // Intercept SVG uploads to force download (prevents SVG-script XSS)
-  // Even with DOMPurify sanitization at upload time, serving SVGs as attachments
-  // is defense-in-depth against browser mutation XSS and parser differentials.
+  // SVG uploads get special hardening even after DOMPurify sanitization at write time.
+  // This is defense-in-depth against parser differentials and future bypasses.
   if (path.startsWith("/uploads/images/") && path.endsWith(".svg")) {
     try {
       const filename = path.split("/").pop()!;
       const imageData = await readUploadedImage([filename]);
-      const headers = new Headers();
-      headers.set("Content-Type", "image/svg+xml");
-      headers.set("Content-Disposition", `attachment; filename="${filename}"`);
-      headers.set("Content-Security-Policy", "sandbox");
-      headers.set("X-Content-Type-Options", "nosniff");
-      headers.set("X-Frame-Options", "DENY");
-      headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-      return new NextResponse(imageData.bytes, { status: 200, headers });
+      return createSecureSvgResponse(imageData.bytes, filename);
     } catch {
-      // File not found — fall through to Next.js static handler, which will return 404
+      // File not found or invalid path → fall through to Next.js static handler
     }
   }
 

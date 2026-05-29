@@ -189,77 +189,84 @@ export async function readUploadedImage(parts: string[]) {
 // ─── SVG Sanitization ──────────────────────────────────────────────────────
 
 /**
- * Sanitize SVG content using DOMPurify.
- * Strips script tags, event handlers, javascript: URIs, and other XSS vectors
- * while preserving safe SVG structure and presentation attributes.
- * The sanitized output is safe to serve from the same origin.
+ * SVG elements we are willing to accept after sanitization.
+ * We deliberately exclude <style> to reduce CSS attack surface.
+ */
+const SVG_ALLOWED_TAGS = [
+  // Structural
+  "svg", "g", "defs", "use", "symbol", "desc", "title", "metadata",
+  // Shapes
+  "rect", "circle", "ellipse", "line", "polyline", "polygon", "path",
+  // Text
+  "text", "tspan", "textPath",
+  // Gradients & effects
+  "linearGradient", "radialGradient", "stop", "pattern",
+  "clipPath", "mask", "filter", "marker",
+  // Images (href is sanitized by DOMPurify)
+  "image",
+  // Presentation containers only (no <style>)
+  "a", "switch",
+] as string[];
+
+/** Attributes we allow on the above elements. */
+const SVG_ALLOWED_ATTRS = [
+  // Core
+  "id", "class", "xmlns", "viewBox", "preserveAspectRatio",
+  // Geometry
+  "x", "y", "width", "height", "cx", "cy", "r", "rx", "ry",
+  "x1", "y1", "x2", "y2", "points", "d",
+  // Text
+  "font-family", "font-size", "font-weight", "text-anchor", "dx", "dy",
+  // Gradients
+  "offset", "stop-color", "stop-opacity", "gradientTransform", "gradientUnits",
+  // Links (DOMPurify will sanitize the URI values)
+  "href", "xlink:href", "xlink:title",
+  // Presentation / styling
+  "fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity",
+  "opacity", "visibility", "display", "clip-path", "clipRule",
+  "mask", "filter", "transform", "transform-origin", "pointer-events",
+  "cursor", "marker-start", "marker-end", "marker-mid",
+] as string[];
+
+/** Attributes that are always dangerous in SVG context. */
+const SVG_FORBIDDEN_ATTRS = [
+  // All event handlers
+  "onload", "onerror", "onclick", "onmouseover", "onmouseout",
+  "onfocus", "onblur", "onchange", "onsubmit", "onkeydown",
+  "onkeyup", "onkeypress", "ondblclick", "oncontextmenu",
+  "ondrag", "ondragend", "ondragenter", "ondragleave", "ondragover",
+  "ondrop", "onscroll", "onwheel", "oncopy", "oncut", "onpaste",
+] as string[];
+
+/** Elements we explicitly never want, even if DOMPurify would allow them. */
+const SVG_FORBIDDEN_TAGS = ["script", "iframe", "foreignObject", "math"] as string[];
+
+/**
+ * Sanitize raw SVG markup using DOMPurify with a strict allowlist.
+ *
+ * We use an explicit allowlist rather than a profile because we want
+ * fine-grained, auditable control over what is permitted.
  */
 function sanitizeSvg(rawSvg: string): string {
-  const dirty = rawSvg;
-
-  const clean = DOMPurify.sanitize(dirty, {
-    // Only allow SVG elements and attributes
-    FORBID_TAGS: ["script", "iframe", "foreignObject", "math"],
-    // Allow SVG-specific elements that are safe
-    ALLOWED_TAGS: [
-      // SVG structural
-      "svg", "g", "defs", "use", "symbol", "desc", "title", "metadata",
-      // Shapes
-      "rect", "circle", "ellipse", "line", "polyline", "polygon", "path",
-      // Text
-      "text", "tspan", "textPath",
-      // Gradients and patterns
-      "linearGradient", "radialGradient", "stop", "pattern",
-      "clipPath", "mask", "filter", "marker",
-      // Images
-      "image",
-      // Presentation
-      "a", "switch",
-    ],
-    // Allow all SVG attribute namespaces (xlink, etc.) but sanitize their values
-    ALLOWED_ATTR: [
-      // SVG structural
-      "id", "class", "style", "xmlns", "viewBox", "preserveAspectRatio",
-      // Dimensions and positioning
-      "x", "y", "width", "height", "cx", "cy", "r", "rx", "ry",
-      "x1", "y1", "x2", "y2", "points", "d",
-      // Text
-      "font-family", "font-size", "font-weight", "text-anchor", "dx", "dy",
-      // Gradients
-      "offset", "stop-color", "stop-opacity", "gradientTransform", "gradientUnits",
-      //href
-      "href", "xlink:href", "xlink:title",
-      // Presentation
-      "fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity",
-      "opacity", "visibility", "display", "clip-path", "clipRule",
-      "mask", "filter", "transform", "transform-origin", "pointer-events",
-      "cursor", "marker-start", "marker-end", "marker-mid",
-      // ForeignObject is FORBIDDEN but we list it so it's explicit
-      // xlink with javascript: is handled by FORBID_ATTR below
-    ],
-    FORBID_ATTR: [
-      // Event handlers - these are the primary XSS vector
-      "onload", "onerror", "onclick", "onmouseover", "onmouseout",
-      "onfocus", "onblur", "onchange", "onsubmit", "onkeydown",
-      "onkeyup", "onkeypress", "ondblclick", "oncontextmenu",
-      "ondrag", "ondragend", "ondragenter", "ondragleave", "ondragover",
-      "ondrop", "onscroll", "onwheel", "oncopy", "oncut", "onpaste",
-    ],
+  const clean = DOMPurify.sanitize(rawSvg, {
+    FORBID_TAGS: SVG_FORBIDDEN_TAGS,
+    ALLOWED_TAGS: SVG_ALLOWED_TAGS,
+    ALLOWED_ATTR: SVG_ALLOWED_ATTRS,
+    FORBID_ATTR: SVG_FORBIDDEN_ATTRS,
     ALLOW_DATA_ATTR: false,
-    // Do not add ns to elements
     ADD_ATTR: [],
   });
 
-  // DOMPurify sanitizes but may leave the content empty or transform it.
-  // Ensure the sanitized content still parses as SVG (defense-in-depth)
+  // Defense-in-depth: reject anything that no longer looks like an SVG
+  // after sanitization. This catches both malicious input and bugs in
+  // our allowlist configuration.
   if (!/<svg\b/i.test(clean)) {
     throw new Error("SVG contains disallowed content");
   }
 
-  // CSS expression() is an IE-only XSS vector. DOMPurify does not strip it by
-  // default since it's not supported in modern browsers, but we remove it
-  // defensively to prevent accidental reliance on IE behavior and to satisfy
-  // the security test expectation that "expression(" is not present after save.
+  // CSS `expression()` is a legacy IE XSS vector that DOMPurify does not
+  // strip by default (even though we forbid <style>). We reject the whole
+  // upload if any remains.
   if (/expression\s*\(/i.test(clean)) {
     throw new Error("SVG contains disallowed content");
   }
