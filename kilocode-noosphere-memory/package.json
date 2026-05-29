@@ -1,6 +1,6 @@
 {
   "name": "@sweetsophia/kilocode-noosphere-memory",
-  "version": "1.6.7",
+  "version": "1.6.8",
   "private": false,
   "description": "Kilo Code plugin for Noosphere memory: prompt-time auto-recall, optional idle auto-save, and explicit memory tools.",
   "type": "module",
