@@ -102,7 +102,7 @@ export async function proxy(request: NextRequest) {
       headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
       return new NextResponse(imageData.bytes, { status: 200, headers });
     } catch {
-      // File not found or path traversal attempt — fall through to static handler
+      // File not found — fall through to Next.js static handler, which will return 404
     }
   }
 
