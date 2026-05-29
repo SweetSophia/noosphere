@@ -821,6 +821,29 @@ no topics, articles, or API keys. This catches the empty-volume failure mode
 where `/api/health` can pass while authenticated Noosphere tools return
 Unauthorized because the API key table is empty.
 
+If `deploy:verify` fails with a volume mismatch, inspect the actual volume
+before taking action:
+
+```bash
+docker inspect noosphere-db \
+  --format '{{range .Mounts}}{{.Name}}{{end}}'
+```
+
+To recover data from an old volume, use `pg_dump`/`pg_restore` or copy the
+volume contents with a temporary container:
+
+```bash
+# Inspect old volume data first
+docker run --rm -v old_volume_name:/data busybox ls -la /data
+
+# Migrate via pg_dump (recommended)
+docker exec noosphere-db pg_dump -U noosphere noosphere > noosphere-backup.sql
+# After attaching the correct volume, restore:
+docker exec -i noosphere-db psql -U noosphere noosphere < noosphere-backup.sql
+```
+
+Never delete a volume until you have confirmed it contains no needed data.
+
 ## Documentation
 
 - [`docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md`](docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md) — official OpenClaw install, operations, upgrade, and troubleshooting guide

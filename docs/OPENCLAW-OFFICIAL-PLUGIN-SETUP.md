@@ -392,7 +392,7 @@ openclaw noosphere doctor
 ```
 
 The Compose `init` service runs migration/bootstrap logic before app startup, and `docker compose up -d` is preferred over app-only recreation when upgrading to versions that add services such as Redis. Bootstrap is repeatable and preserves article/topic content, but it reconciles the bootstrap admin account: it may reset that account's name/password to the values in `.env`, and `NOOSPHERE_FORCE_ADMIN=true` can force its role back to ADMIN.
-After an upgrade, verify the database volume identity before treating API-key errors as key rotation:
+After an upgrade, verify the database volume identity before treating API key errors as key rotation:
 
 ```bash
 docker inspect noosphere-openclaw-db \
