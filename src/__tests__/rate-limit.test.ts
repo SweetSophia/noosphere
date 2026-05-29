@@ -101,7 +101,7 @@ class FakeRedisClient {
         const results: Array<[Error | null, unknown]> = [];
         for (const cmd of commands) {
           try {
-            const result = (this as Record<string, (...args: unknown[]) => unknown>)[cmd.method](...cmd.args);
+            const result = (this as unknown as Record<string, (...args: unknown[]) => unknown>)[cmd.method](...cmd.args);
             results.push([null, result]);
           } catch (err) {
             results.push([err as Error, null]);
@@ -147,8 +147,10 @@ describe("Redis Rate Limiter", () => {
     await rateLimit(request, options);
     const result = await rateLimit(request, options);
 
-    assert.deepStrictEqual(result, { allowed: false });
-    assert.equal(result.response.status, 429);
+    assert.equal(result.allowed, false);
+    if (!result.allowed) {
+      assert.equal(result.response.status, 429);
+    }
   });
 
   it("uses unique keys per client IP", async () => {
@@ -236,7 +238,9 @@ describe("Rate Limiter Edge Cases", () => {
     const result = await rateLimit(request, options);
 
     assert.equal(result.allowed, false);
-    assert.equal(result.response.status, 429);
+    if (!result.allowed) {
+      assert.equal(result.response.status, 429);
+    }
   });
 
   it("handles concurrent requests from same IP", async () => {

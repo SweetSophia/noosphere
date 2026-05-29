@@ -12,6 +12,7 @@
     "test:api": "node --import tsx --test 'src/__tests__/api/**/*.test.ts'",
     "test:security": "node --import tsx --test src/__tests__/security/uploads.test.ts src/__tests__/security/proxy.test.ts",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "tsx scripts/seed-topics.ts",
