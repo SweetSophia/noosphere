@@ -27,6 +27,7 @@ require_non_negative_int "NOOSPHERE_MIN_TOPICS" "$MIN_TOPICS"
 require_non_negative_int "NOOSPHERE_MIN_ARTICLES" "$MIN_ARTICLES"
 require_non_negative_int "NOOSPHERE_MIN_API_KEYS" "$MIN_API_KEYS"
 require_non_negative_int "NOOSPHERE_HEALTH_RETRIES" "$HEALTH_RETRIES"
+require_non_negative_int "NOOSPHERE_HEALTH_RETRY_DELAY" "$HEALTH_RETRY_DELAY"
 
 docker inspect "$DB_CONTAINER" >/dev/null 2>&1 || fail "database container '$DB_CONTAINER' does not exist"
 
@@ -45,19 +46,22 @@ fi
 
 # Retry health check to tolerate app startup race conditions.
 health_ok=false
+last_curl_err=0
 for ((i = 1; i <= HEALTH_RETRIES; i++)); do
   if curl -fsS --connect-timeout 5 --max-time 10 "$APP_URL/api/health" >/dev/null 2>&1; then
     health_ok=true
     break
   fi
-  sleep "$HEALTH_RETRY_DELAY"
+  last_curl_err=$?
+  if (( i < HEALTH_RETRIES )); then
+    sleep "$HEALTH_RETRY_DELAY"
+  fi
 done
-[[ "$health_ok" == "true" ]] || fail "health check failed at $APP_URL/api/health"
+[[ "$health_ok" == "true" ]] || fail "health check failed at $APP_URL/api/health (last curl exit code: $last_curl_err)"
 
 counts="$(
   docker exec "$DB_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -Atc \
-    'select (select count(*) from "Topic"), (select count(*) from "Article" where "deletedAt" is null), (select count(*) from "ApiKey");' \
-    2>/dev/null
+    'select (select count(*) from "Topic"), (select count(*) from "Article" where "deletedAt" is null), (select count(*) from "ApiKey");'
 )" || fail "failed to query database counts from '$DB_CONTAINER' (is PostgreSQL ready?)"
 
 IFS='|' read -r topics articles api_keys <<< "$counts"
