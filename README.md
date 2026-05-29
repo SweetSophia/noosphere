@@ -821,6 +821,42 @@ no topics, articles, or API keys. This catches the empty-volume failure mode
 where `/api/health` can pass while authenticated Noosphere tools return
 Unauthorized because the API key table is empty.
 
+If `deploy:verify` fails with a volume mismatch, inspect the actual volume
+before taking action:
+
+```bash
+docker inspect noosphere-db \
+  --format '{{range .Mounts}}{{.Name}}{{end}}'
+```
+
+To recover data from an old volume, first identify which volume has your data:
+
+```bash
+# List all volumes to find the old one
+docker volume ls
+# Inspect a specific volume
+docker run --rm -v old_volume_name:/data busybox ls -la /data
+```
+
+If the old volume is still mounted to a running container, dump from that
+container. If it is detached, create a temporary container to access it:
+
+```bash
+# Dump from the old volume (run this BEFORE switching the compose file)
+docker exec noosphere-db pg_dump -U noosphere noosphere > noosphere-backup.sql
+
+# OR, if the old volume is detached, mount it temporarily:
+docker run --rm -v noosphere_postgres_data:/var/lib/postgresql/data \
+  -e POSTGRES_PASSWORD=temp postgres:16-alpine \
+  pg_dump -U noosphere noosphere > noosphere-backup.sql
+
+# After correcting the compose/volume configuration and recreating the DB
+# container, restore the backup:
+docker exec -i noosphere-db psql -U noosphere -d noosphere < noosphere-backup.sql
+```
+
+Never delete a volume until you have confirmed it contains no needed data.
+
 ## Documentation
 
 - [`docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md`](docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md) — official OpenClaw install, operations, upgrade, and troubleshooting guide
