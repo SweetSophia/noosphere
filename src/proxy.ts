@@ -1,6 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { rateLimit } from "@/lib/rate-limit";
+import { readUploadedImage } from "@/lib/uploads";
+
+// ─── SVG Response Helper ────────────────────────────────────────────────────
+
+/**
+ * Creates a hardened response for SVG files.
+ * Forces download + sandbox to prevent any active content execution.
+ */
+function createSecureSvgResponse(bytes: Uint8Array, filename: string): NextResponse {
+  const headers = new Headers({
+    "Content-Type": "image/svg+xml",
+    "Content-Disposition": `attachment; filename="${filename}"`,
+    "Content-Security-Policy": "sandbox",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    // Mirrors the normal uploads route caching for these content-addressed filenames
+    "Cache-Control": "public, max-age=31536000, immutable",
+  });
+
+  return new NextResponse(bytes as BodyInit, { status: 200, headers });
+}
 
 function isAdminPath(path: string) {
   return path === "/wiki/admin" || path.startsWith("/wiki/admin/");
@@ -82,6 +104,28 @@ export async function proxy(request: NextRequest) {
 
     if (token.role !== "ADMIN") {
       return addSecurityHeaders(NextResponse.redirect(new URL("/wiki", request.url)));
+    }
+  }
+
+  // SVG uploads get special hardening even after DOMPurify sanitization at write time.
+  // This is defense-in-depth against parser differentials and future bypasses.
+  // Case-insensitive extension check prevents .SVG uppercase bypass (fixes gemini review).
+  const lowerPath = path.toLowerCase();
+  if (lowerPath.startsWith("/uploads/images/") && lowerPath.endsWith(".svg")) {
+    try {
+      // Extract relative path under /uploads/images/ to preserve nested directory
+      // structure. Fixes sourcery review: previous .pop() only got filename, losing
+      // nested path segments and causing silent fallthrough to 200 on deep paths.
+      const relative = lowerPath.replace(/^\/uploads\/images\//, "");
+      const parts = relative.split("/").filter(Boolean);
+      const imageData = await readUploadedImage(parts);
+      // Derive display filename from the last path segment for Content-Disposition
+      const displayName = parts[parts.length - 1];
+      return createSecureSvgResponse(imageData.bytes, displayName);
+    } catch {
+      // File not found or invalid path → return 404 explicitly
+      // (do NOT fall through to NextResponse.next() which returns HTTP 200)
+      return new NextResponse(null, { status: 404 });
     }
   }
 

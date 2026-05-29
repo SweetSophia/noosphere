@@ -1,6 +1,7 @@
 import path from "path";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import crypto from "crypto";
+import DOMPurify from "isomorphic-dompurify";
 
 const MIME_TYPES: Record<string, string> = {
   ".png": "image/png",
@@ -120,12 +121,12 @@ export async function saveUploadedImage(filename: string, bytes: Uint8Array) {
     throw new Error("Image type mismatch or unrecognized format");
   }
 
-  // SVG XSS prevention: reject files with dangerous SVG features
+  // SVG sanitization: use DOMPurify to strip dangerous content before writing
   if (ext === ".svg") {
-    const content = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-    if (containsDangerousSvg(content)) {
-      throw new Error("SVG contains disallowed content");
-    }
+    const rawContent = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    const sanitized = sanitizeSvg(rawContent);
+    // Re-encode sanitized content back to bytes for storage
+    bytes = new TextEncoder().encode(sanitized);
   }
 
   const base = sanitizeFilename(path.basename(filename, ext));
@@ -187,77 +188,90 @@ export async function readUploadedImage(parts: string[]) {
 
 // ─── SVG Sanitization ──────────────────────────────────────────────────────
 
-const SVG_DANGEROUS_PATTERNS = [
-  // Script tags (with whitespace variations)
-  /\u003cs\s*c\s*r\s*i\s*p\s*t\b/i,
-  // Event handlers: onload, onclick, onerror, etc.
-  /\s+o\s*n\w+\s*=/i,
-  // javascript: URIs
-  /j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t\s*:/i,
-  // data: URIs with script mime types
-  /d\s*a\s*t\s*a\s*:\s*t\s*e\s*x\s*t\s*\/\s*j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t/i,
-  // foreignObject can embed HTML/JS
-  /\u003cf\s*o\s*r\s*e\s*i\s*g\s*n\s*O\s*b\s*j\s*e\s*c\s*t\b/i,
-  // XLink with javascript
-  /x\s*l\s*i\s*n\s*k\s*:?\s*h\s*r\s*e\s*f\s*=\s*["']?\s*j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t\s*:/i,
-  // ECMAScript in SVG
-  /e\s*c\s*m\s*a\s*s\s*c\s*r\s*i\s*p\s*t/i,
-  // VBScript
-  /v\s*b\s*s\s*c\s*r\s*i\s*p\s*t/i,
-  // iframe / embed / object
-  /\u003ci\s*f\s*r\s*a\s*m\s*e\b/i,
-  /\u003ce\s*m\s*b\s*e\s*d\b/i,
-  /\u003co\s*b\s*j\s*e\s*c\s*t\b/i,
-  // CSS expression (legacy IE)
-  /e\s*x\s*p\s*r\s*e\s*s\s*s\s*i\s*o\s*n\s*\(/i,
-  // Block CSS @import: SVG styles can import attacker-controlled external
-  // resources, and imported CSS can reintroduce script-capable constructs.
-  /@\s*i\s*m\s*p\s*o\s*r\s*t\b/i,
-];
+/**
+ * SVG elements we are willing to accept after sanitization.
+ * We deliberately exclude <style> to reduce CSS attack surface.
+ */
+const SVG_ALLOWED_TAGS = [
+  // Structural
+  "svg", "g", "defs", "use", "symbol", "desc", "title", "metadata",
+  // Shapes
+  "rect", "circle", "ellipse", "line", "polyline", "polygon", "path",
+  // Text
+  "text", "tspan", "textPath",
+  // Gradients & effects
+  "linearGradient", "radialGradient", "stop", "pattern",
+  "clipPath", "mask", "filter", "marker",
+  // Images (href is sanitized by DOMPurify)
+  "image",
+  // Presentation containers only (no <style>)
+  "a", "switch",
+] as string[];
+
+/** Attributes we allow on the above elements. */
+const SVG_ALLOWED_ATTRS = [
+  // Core
+  "id", "class", "xmlns", "viewBox", "preserveAspectRatio",
+  // Geometry
+  "x", "y", "width", "height", "cx", "cy", "r", "rx", "ry",
+  "x1", "y1", "x2", "y2", "points", "d",
+  // Text
+  "font-family", "font-size", "font-weight", "text-anchor", "dx", "dy",
+  // Gradients
+  "offset", "stop-color", "stop-opacity", "gradientTransform", "gradientUnits",
+  // Links (DOMPurify will sanitize the URI values)
+  "href", "xlink:href", "xlink:title",
+  // Presentation / styling
+  "fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity",
+  "opacity", "visibility", "display", "clip-path", "clipRule",
+  "mask", "filter", "transform", "transform-origin", "pointer-events",
+  "cursor", "marker-start", "marker-end", "marker-mid",
+] as string[];
+
+/** Attributes that are always dangerous in SVG context. */
+const SVG_FORBIDDEN_ATTRS = [
+  // All event handlers
+  "onload", "onerror", "onclick", "onmouseover", "onmouseout",
+  "onfocus", "onblur", "onchange", "onsubmit", "onkeydown",
+  "onkeyup", "onkeypress", "ondblclick", "oncontextmenu",
+  "ondrag", "ondragend", "ondragenter", "ondragleave", "ondragover",
+  "ondrop", "onscroll", "onwheel", "oncopy", "oncut", "onpaste",
+] as string[];
+
+/** Elements we explicitly never want, even if DOMPurify would allow them. */
+const SVG_FORBIDDEN_TAGS = ["script", "iframe", "foreignObject", "math"] as string[];
 
 /**
- * Decode common HTML entities that attackers use to bypass filters.
+ * Sanitize raw SVG markup using DOMPurify with a strict allowlist.
+ *
+ * We use an explicit allowlist rather than a profile because we want
+ * fine-grained, auditable control over what is permitted.
  */
-function decodeEntityCodePoint(value: string, radix: number, fallback: string): string {
-  const codePoint = Number.parseInt(value, radix);
-  if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
-    return fallback;
+function sanitizeSvg(rawSvg: string): string {
+  const clean = DOMPurify.sanitize(rawSvg, {
+    FORBID_TAGS: SVG_FORBIDDEN_TAGS,
+    ALLOWED_TAGS: SVG_ALLOWED_TAGS,
+    ALLOWED_ATTR: SVG_ALLOWED_ATTRS,
+    FORBID_ATTR: SVG_FORBIDDEN_ATTRS,
+    ALLOW_DATA_ATTR: false,
+    ADD_ATTR: [],
+  });
+
+  // Defense-in-depth: reject anything that no longer looks like an SVG
+  // after sanitization. This catches both malicious input and bugs in
+  // our allowlist configuration.
+  if (!/<svg\b/i.test(clean)) {
+    throw new Error("SVG contains disallowed content");
   }
 
-  try {
-    return String.fromCodePoint(codePoint);
-  } catch {
-    return fallback;
+  // CSS `expression()` is a legacy IE XSS vector that DOMPurify does not
+  // strip by default (even though we forbid <style>). We reject the whole
+  // upload if any <style> block contains an expression(). We intentionally
+  // do NOT match expression() in text content (e.g. <text>gene expression (x)</text>)
+  // to avoid false positives on legitimate SVG text.
+  if (/<style[^>]*>[\s\S]*?expression\s*\([\s\S]*?<\/style>/i.test(clean)) {
+    throw new Error("SVG contains disallowed content");
   }
-}
 
-function decodeHtmlEntities(input: string): string {
-  return input
-    .replace(/&#x([0-9a-f]+);?/gi, (match, hex) => decodeEntityCodePoint(hex, 16, match))
-    .replace(/&#(\d+);?/g, (match, dec) => decodeEntityCodePoint(dec, 10, match))
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&amp;/gi, "&")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#x27;/gi, "'")
-    .replace(/&#x2f;/gi, "/");
-}
-
-/**
- * Check if SVG content contains dangerous patterns after decoding entities.
- * This is a defense-in-depth measure; for stronger guarantees consider
- * using a dedicated SVG sanitization library (e.g. DOMPurify).
- */
-function containsDangerousSvg(content: string): boolean {
-  const decoded = decodeHtmlEntities(content);
-  const normalized = decoded
-    .toLowerCase()
-    .replace(/\s+/g, " "); // collapse whitespace for pattern matching
-
-  for (const pattern of SVG_DANGEROUS_PATTERNS) {
-    if (pattern.test(decoded) || pattern.test(normalized)) {
-      return true;
-    }
-  }
-  return false;
+  return clean;
 }
