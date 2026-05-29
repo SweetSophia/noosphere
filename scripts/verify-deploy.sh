@@ -28,6 +28,7 @@ require_non_negative_int "NOOSPHERE_MIN_ARTICLES" "$MIN_ARTICLES"
 require_non_negative_int "NOOSPHERE_MIN_API_KEYS" "$MIN_API_KEYS"
 require_non_negative_int "NOOSPHERE_HEALTH_RETRIES" "$HEALTH_RETRIES"
 require_non_negative_int "NOOSPHERE_HEALTH_RETRY_DELAY" "$HEALTH_RETRY_DELAY"
+(( HEALTH_RETRIES >= 1 )) || fail "NOOSPHERE_HEALTH_RETRIES must be at least 1, got '$HEALTH_RETRIES'"
 
 docker inspect "$DB_CONTAINER" >/dev/null 2>&1 || fail "database container '$DB_CONTAINER' does not exist"
 
