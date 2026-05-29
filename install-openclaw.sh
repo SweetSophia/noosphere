@@ -407,6 +407,8 @@ export NOOSPHERE_BOOTSTRAP_API_KEY="$API_KEY"
 write_runtime_env
 
 cat > "$NOOSPHERE_HOME/docker-compose.yml" <<YAML
+name: noosphere
+
 services:
   init:
     image: ${NOOSPHERE_IMAGE}
@@ -494,10 +496,13 @@ services:
 
 volumes:
   noosphere_postgres_data:
+    name: noosphere_postgres_data
     driver: local
   noosphere_uploads:
+    name: noosphere_uploads
     driver: local
   noosphere_redis_data:
+    name: noosphere_redis_data
     driver: local
 YAML
 

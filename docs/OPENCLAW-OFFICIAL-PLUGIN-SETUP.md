@@ -170,6 +170,7 @@ done
 
 The production Compose template includes a one-shot `init` service. It waits for PostgreSQL, applies migrations, runs bootstrap, then allows the app service to start.
 It also starts a Redis service for recall/search caching; if Redis is unavailable, Noosphere fails open and continues serving search from PostgreSQL.
+The template pins the Compose project and persistent volume names (`noosphere_postgres_data`, `noosphere_uploads`, and `noosphere_redis_data`) so moving the Compose file between directories does not silently create a second empty database.
 
 ## Manual OpenClaw plugin install
 
@@ -391,6 +392,14 @@ openclaw noosphere doctor
 ```
 
 The Compose `init` service runs migration/bootstrap logic before app startup, and `docker compose up -d` is preferred over app-only recreation when upgrading to versions that add services such as Redis. Bootstrap is repeatable and preserves article/topic content, but it reconciles the bootstrap admin account: it may reset that account's name/password to the values in `.env`, and `NOOSPHERE_FORCE_ADMIN=true` can force its role back to ADMIN.
+After an upgrade, verify the database volume identity before treating API-key errors as key rotation:
+
+```bash
+docker inspect noosphere-openclaw-db \
+  --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}'
+```
+
+The expected value is `noosphere_postgres_data`.
 
 ## Uninstall
 

@@ -15,6 +15,7 @@
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "tsx scripts/seed-topics.ts",
+    "deploy:verify": "bash scripts/verify-deploy.sh",
     "memory:scheduler": "tsx scripts/memory-scheduler.ts",
     "db:studio": "prisma studio",
     "version:sync": "node scripts/sync-version.mjs",

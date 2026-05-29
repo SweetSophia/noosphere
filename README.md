@@ -796,21 +796,30 @@ Live verification from the Noosphere deployment on 2026-05-21:
 # 1. Sync latest code
 git pull origin master
 
-# 2. Build (pass ~/.noosphere/.env to ensure correct secrets are baked in)
-docker compose -f docker-compose.yml --env-file ~/.noosphere/.env build app
+# 2. Build with the canonical Compose file and project identity.
+# The Compose file pins the live data volumes to noosphere_postgres_data
+# and noosphere_redis_data so deploys do not drift onto a fresh DB volume.
+docker compose --env-file ~/.noosphere/.env build app
 
 # 3. Recreate app container with fresh image and ensure Redis exists
-docker compose -f docker-compose.yml --env-file ~/.noosphere/.env up -d redis app
+docker compose --env-file ~/.noosphere/.env up -d redis app
 
-# 4. Verify
+# 4. Verify health, DB volume identity, and non-empty wiki data
 curl http://127.0.0.1:6578/api/health
+npm run deploy:verify
 
 # Run production migrations after first deploy or schema changes
-docker compose -f docker-compose.yml --env-file ~/.noosphere/.env exec app node node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma
+docker compose --env-file ~/.noosphere/.env exec app node node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma
 
 # View logs
 docker compose logs -f app
 ```
+
+The post-deploy guard intentionally fails if `noosphere-db` is mounted to any
+Postgres data volume other than `noosphere_postgres_data`, or if the live DB has
+no topics, articles, or API keys. This catches the empty-volume failure mode
+where `/api/health` can pass while authenticated Noosphere tools return
+Unauthorized because the API key table is empty.
 
 ## Documentation
 
