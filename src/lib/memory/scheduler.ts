@@ -276,6 +276,9 @@ export class LocalMemoryScheduler {
           const run = this.executeJob(job);
           this.inFlight.set(job.id, run);
           results.push(run);
+          run.finally(() => {
+            this.inFlight.delete(job.id);
+          });
           run.then((result) => this.releaseJobLock(job.id, result)).catch(() => {});
         }
         // If lock not acquired, job is already running from another call.
