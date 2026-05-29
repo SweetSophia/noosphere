@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
+import { Prisma, Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/rate-limit";
@@ -21,8 +21,8 @@ export async function GET(request: NextRequest) {
   const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "log-get" });
   if (!rl.allowed) return rl.response;
 
-  // Auth: API key (any permission) or session
-  const auth = await requirePermission(request, []);
+  // Auth: API key (ADMIN) or admin session
+  const auth = await requirePermission(request, [Permissions.ADMIN]);
   if (!auth.success) {
     return auth.response;
   }
