@@ -12,11 +12,10 @@
  * 6. Descriptor metadata
  */
 
-// Provide a dummy DATABASE_URL so the default Prisma client import doesn't crash.
+// Set DATABASE_URL before importing modules that may create Prisma client at load time.
+// Static imports are evaluated before module body code, so we must set this first.
 // Tests inject their own mock Prisma, so this connection string is never used.
-if (!process.env.DATABASE_URL) {
-  process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
-}
+process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
 
 import type { PrismaClient } from "@prisma/client";
 import {
