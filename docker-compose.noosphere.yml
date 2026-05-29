@@ -1,6 +1,8 @@
 # Noosphere production Compose template for OpenClaw users.
 # Defaults are intentionally localhost-only. Override BIND_ADDRESS,
 # NOOSPHERE_PORT, or APP_URL in .env if needed.
+name: noosphere
+
 services:
   init:
     image: ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION:-latest}
@@ -94,8 +96,11 @@ services:
 
 volumes:
   noosphere_postgres_data:
+    name: noosphere_postgres_data
     driver: local
   noosphere_uploads:
+    name: noosphere_uploads
     driver: local
   noosphere_redis_data:
+    name: noosphere_redis_data
     driver: local

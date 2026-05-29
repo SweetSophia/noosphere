@@ -1,3 +1,5 @@
+name: noosphere
+
 services:
   app:
     build:
@@ -83,8 +85,10 @@ services:
 
 volumes:
   postgres_data:
+    name: noosphere_postgres_data
     driver: local
   redis_data:
+    name: noosphere_redis_data
     driver: local
 
 networks:
