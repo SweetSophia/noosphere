@@ -204,23 +204,20 @@ export class LocalMemoryScheduler {
       return snapshotJob(job);
     }
 
-    if (!this.tryAcquireJobLock(jobId)) {
-      const deferred = this._jobLocks.get(jobId);
-      if (deferred) {
-        return deferred.promise;
-      }
+    // Try to acquire lock and execute; if already locked, wait for the running job
+    const run = this.tryRunJobLocked(job);
+    if (run) {
+      return run;
     }
 
-    this.clearJobTimer(jobId);
-    const run = this.executeJob(job);
-    this.inFlight.set(jobId, run);
-
-    try {
-      return await run;
-    } finally {
-      this.inFlight.delete(jobId);
-      run.then((result) => this.releaseJobLock(jobId, result)).catch(() => {});
+    // Lock not acquired — job is already running from another call
+    const deferred = this._jobLocks.get(jobId);
+    if (deferred) {
+      return deferred.promise;
     }
+
+    // Should never reach here: if lock not acquired, _jobLocks must have an entry
+    throw new Error(`Scheduler internal error: no lock held for job ${jobId}`);
   }
 
   private async executeJob(
@@ -263,6 +260,11 @@ export class LocalMemoryScheduler {
     // that was possible with the previous collect-then-lock pattern where
     // multiple concurrent runDueJobs calls could both collect the same job.
     // This is the fix for https://github.com/SweetSophia/noosphere/issues/138
+    //
+    // Uses the shared tryRunJobLocked() helper which ensures:
+    // - Lock is acquired before execution
+    // - inFlight is cleaned up via finally()
+    // - Lock is released on both success and failure (defensive)
     const results: Promise<SchedulerJobSnapshot>[] = [];
 
     for (const job of this.jobs.values()) {
@@ -271,15 +273,9 @@ export class LocalMemoryScheduler {
       }
 
       if (Date.parse(job.nextRunAt ?? "0") <= now.getTime()) {
-        if (this.tryAcquireJobLock(job.id)) {
-          this.clearJobTimer(job.id);
-          const run = this.executeJob(job);
-          this.inFlight.set(job.id, run);
+        const run = this.tryRunJobLocked(job);
+        if (run) {
           results.push(run);
-          run.finally(() => {
-            this.inFlight.delete(job.id);
-          });
-          run.then((result) => this.releaseJobLock(job.id, result)).catch(() => {});
         }
         // If lock not acquired, job is already running from another call.
         // The running job's snapshot will be returned to that caller only.
@@ -298,6 +294,43 @@ export class LocalMemoryScheduler {
       generatedAt: this.now().toISOString(),
       jobs: Array.from(this.jobs.values()).map(snapshotJob),
     };
+  }
+
+  /**
+   * Attempts to acquire lock and execute a job.
+   * Returns the job promise if lock acquired, null if job is already locked.
+   *
+   * Lock is always released when the job completes (success or failure).
+   * inFlight is always cleaned up when the job completes.
+   *
+   * This helper unifies the lock-execute-cleanup pattern used by both
+   * runJob() and runDueJobs(), ensuring they stay in sync.
+   */
+  private tryRunJobLocked(
+    job: SchedulerJobState,
+  ): Promise<SchedulerJobSnapshot> | null {
+    if (!this.tryAcquireJobLock(job.id)) {
+      return null;
+    }
+
+    this.clearJobTimer(job.id);
+    const run = this.executeJob(job);
+    this.inFlight.set(job.id, run);
+
+    // Clean up inFlight when job settles (success or failure)
+    // Defensive: .catch() suppresses any unexpected rejection from finally()
+    run.finally(() => {
+      this.inFlight.delete(job.id);
+    }).catch(() => {});
+
+    // Release lock when job completes.
+    // Defensive: .catch() ensures lock is released even if job fails,
+    // by resolving with a snapshot of the failed job state.
+    run
+      .then((result) => this.releaseJobLock(job.id, result))
+      .catch(() => this.releaseJobLock(job.id, snapshotJob(job)));
+
+    return run;
   }
 
   private getJob(jobId: string): SchedulerJobState {

@@ -427,6 +427,97 @@ describe("local memory scheduler", () => {
     assert.equal(calls, 2);
     assert.deepEqual(scheduledDelays, [1_000, 1_000, 1_000]);
   });
+
+  test("[16] stop() awaits jobs started via runDueJobs", async () => {
+    // Mirrors test [10] but uses runDueJobs instead of runJob
+    // to verify that stop() correctly awaits in-flight jobs started
+    // through the runDueJobs path (I-3 coverage).
+    let resolveRun: (() => void) | undefined;
+    const scheduler = new LocalMemoryScheduler(
+      [
+        makeJob({
+          id: "job.stop-via-due",
+          intervalMs: 1_000,
+          run: () =>
+            new Promise<void>((resolve) => {
+              resolveRun = resolve;
+            }),
+        }),
+      ],
+      {
+        now: fixedClock("2026-04-28T00:00:00.000Z"),
+      },
+    );
+
+    // Start scheduler (schedules timers based on fixed clock)
+    scheduler.start();
+
+    // Advance clock past the job's nextRunAt, then call runDueJobs
+    const run = scheduler.runDueJobs(
+      new Date("2026-04-28T00:00:01.500Z"),
+    );
+    await flushMicrotasks();
+    assert.equal(
+      scheduler.getStatus().jobs[0].status,
+      "running",
+      "job should be running after runDueJobs",
+    );
+
+    const stopped = scheduler.stop();
+    let stopCompleted = false;
+    stopped.then(() => {
+      stopCompleted = true;
+    });
+    await flushMicrotasks();
+    assert.equal(
+      stopCompleted,
+      false,
+      "stop() should NOT complete while job is in-flight",
+    );
+
+    resolveRun?.();
+    await run;
+    await stopped;
+    assert.equal(stopCompleted, true, "stop() should complete after job finishes");
+    assert.equal(
+      scheduler.getStatus().jobs[0].status,
+      "succeeded",
+      "job status should be succeeded",
+    );
+  });
+
+  test("[17] runDueJobs handles failing job correctly", async () => {
+    // Mirrors test [3] but uses runDueJobs instead of runJob
+    // to verify that runDueJobs properly handles job failures
+    // and records failure metrics (I-3 coverage).
+    const errors: string[] = [];
+    const scheduler = createLocalMemoryScheduler(
+      [
+        makeJob({
+          id: "job.fail-via-due",
+          intervalMs: 1_000,
+          run: () => {
+            throw new Error("boom from runDueJobs");
+          },
+        }),
+      ],
+      {
+        now: fixedClock("2026-04-28T00:00:00.000Z"),
+        onError: (jobId, error) => errors.push(`${jobId}:${error.message}`),
+      },
+    );
+
+    const snapshots = await scheduler.runDueJobs(
+      new Date("2026-04-28T00:00:01.000Z"),
+    );
+
+    assert.equal(snapshots.length, 1);
+    assert.equal(snapshots[0].status, "failed");
+    assert.equal(snapshots[0].runCount, 1);
+    assert.equal(snapshots[0].failCount, 1);
+    assert.equal(snapshots[0].lastError, "boom from runDueJobs");
+    assert.deepEqual(errors, ["job.fail-via-due:boom from runDueJobs"]);
+  });
 });
 
 function makeJob(
