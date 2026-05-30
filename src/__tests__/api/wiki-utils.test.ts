@@ -1,57 +1,10 @@
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
-
-/**
- * Tests for pure utility functions from src/lib/wiki.ts.
- *
- * The wiki module imports prisma at module level, so we inline the pure
- * functions here to test without a database connection.
- * Keep these in sync with src/lib/wiki.ts.
- */
-
-// ─── Inline copies of pure functions ────────────────────────────────────────
-
-function slugify(text: string): string {
-  return (
-    text
-      .toLowerCase()
-      .replace(/[^a-z0-9 -]/g, "")
-      .replace(/\s+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .trim() || "untitled"
-  );
-}
-
-function parseTagInput(raw: string | null | undefined): string[] {
-  if (!raw) return [];
-  return Array.from(
-    new Set(
-      raw
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-interface NormalizedTagInput {
-  name: string;
-  slug: string;
-}
-
-function normalizeTagInputs(tagNames: string[]): NormalizedTagInput[] {
-  const bySlug = new Map<string, NormalizedTagInput>();
-  for (const name of tagNames) {
-    const trimmed = name.trim();
-    const slug = slugify(trimmed);
-    if (!slug || bySlug.has(slug)) continue;
-    bySlug.set(slug, { name: trimmed, slug });
-  }
-  return Array.from(bySlug.values());
-}
-
-// ─── slugify ────────────────────────────────────────────────────────────────
+import {
+  slugify,
+  parseTagInput,
+  normalizeTagInputs,
+} from "@/lib/wiki-utils";
 
 describe("slugify", () => {
   test("lowercases text", () => {
@@ -103,8 +56,6 @@ describe("slugify", () => {
   });
 });
 
-// ─── parseTagInput ──────────────────────────────────────────────────────────
-
 describe("parseTagInput", () => {
   test("returns empty array for null", () => {
     assert.deepEqual(parseTagInput(null), []);
@@ -154,8 +105,6 @@ describe("parseTagInput", () => {
     assert.deepEqual(parseTagInput("   "), []);
   });
 });
-
-// ─── normalizeTagInputs ────────────────────────────────────────────────────
 
 describe("normalizeTagInputs", () => {
   test("normalizes tag names to slugs", () => {
