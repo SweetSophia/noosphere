@@ -1,50 +1,9 @@
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
-
-/**
- * Tests for buildScopeFilter and canAccessScopes from src/lib/api/auth.ts.
- *
- * These functions are pure but live in a module that transitively imports prisma,
- * so we inline the logic here to test without a database. This mirrors the
- * actual implementation and catches regressions in the scope-filtering logic.
- */
-
-// ─── Inline copies of the pure functions for isolated testing ───────────────
-// Keep these in sync with src/lib/api/auth.ts
-
-function buildScopeFilter(
-  allowedScopes: string[] | undefined,
-  extraWhere: Record<string, unknown> = {},
-): Record<string, unknown> {
-  if (allowedScopes?.includes("*")) {
-    return extraWhere;
-  }
-  if (!allowedScopes || allowedScopes.length === 0) {
-    return {
-      ...extraWhere,
-      restrictedTags: { isEmpty: true },
-    };
-  }
-  return {
-    ...extraWhere,
-    OR: [
-      { restrictedTags: { isEmpty: true } },
-      { restrictedTags: { hasSome: allowedScopes } },
-    ],
-  };
-}
-
-function canAccessScopes(
-  articleScopes: string[],
-  allowedScopes: string[] | undefined,
-): boolean {
-  if (articleScopes.length === 0) return true;
-  if (allowedScopes?.includes("*")) return true;
-  if (!allowedScopes || allowedScopes.length === 0) return false;
-  return articleScopes.some((s) => allowedScopes.includes(s));
-}
-
-// ─── buildScopeFilter ──────────────────────────────────────────────────────
+import {
+  buildScopeFilter,
+  canAccessScopes,
+} from "@/lib/api/scope-filter";
 
 describe("buildScopeFilter", () => {
   test("admin scope (*) returns only extraWhere", () => {
@@ -75,6 +34,14 @@ describe("buildScopeFilter", () => {
     });
   });
 
+  test("empty scopes preserves extraWhere restrictedTags with AND", () => {
+    const extraWhere = { restrictedTags: { hasSome: ["existing"] } };
+    const filter = buildScopeFilter([], extraWhere);
+    assert.deepEqual(filter, {
+      AND: [extraWhere, { restrictedTags: { isEmpty: true } }],
+    });
+  });
+
   test("specific scopes creates OR filter", () => {
     const filter = buildScopeFilter(["scope-a", "scope-b"]);
     assert.deepEqual(filter, {
@@ -95,9 +62,41 @@ describe("buildScopeFilter", () => {
       ],
     });
   });
-});
 
-// ─── canAccessScopes ────────────────────────────────────────────────────────
+  test("specific scopes preserves extraWhere OR with AND", () => {
+    const extraWhere = {
+      OR: [{ status: "published" }, { status: "reviewed" }],
+    };
+    const filter = buildScopeFilter(["scope-a"], extraWhere);
+    assert.deepEqual(filter, {
+      AND: [
+        extraWhere,
+        {
+          OR: [
+            { restrictedTags: { isEmpty: true } },
+            { restrictedTags: { hasSome: ["scope-a"] } },
+          ],
+        },
+      ],
+    });
+  });
+
+  test("specific scopes preserves extraWhere restrictedTags with AND", () => {
+    const extraWhere = { restrictedTags: { hasSome: ["existing"] } };
+    const filter = buildScopeFilter(["scope-a"], extraWhere);
+    assert.deepEqual(filter, {
+      AND: [
+        extraWhere,
+        {
+          OR: [
+            { restrictedTags: { isEmpty: true } },
+            { restrictedTags: { hasSome: ["scope-a"] } },
+          ],
+        },
+      ],
+    });
+  });
+});
 
 describe("canAccessScopes", () => {
   test("unrestricted articles are always accessible", () => {
