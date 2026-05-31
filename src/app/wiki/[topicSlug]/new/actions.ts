@@ -6,7 +6,6 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildTagConnections, parseTagInput, slugify } from "@/lib/wiki";
-import { isValidConfidence, isValidStatus } from "@/lib/validation";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
 
 async function requireEditorSession() {
@@ -44,7 +43,7 @@ export async function createArticle(
   const topic = await prisma.topic.findUnique({ where: { slug: topicSlug } });
   if (!topic) throw new Error("Topic not found.");
 
-  let slug = slugify(title);
+  let slug = slugify(title) || "untitled";
   const existing = await prisma.article.findFirst({
     where: { topicId: topic.id, slug, deletedAt: null },
   });

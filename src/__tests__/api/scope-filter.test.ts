@@ -34,6 +34,14 @@ describe("buildScopeFilter", () => {
     });
   });
 
+  test("empty scopes preserves extraWhere restrictedTags with AND", () => {
+    const extraWhere = { restrictedTags: { hasSome: ["existing"] } };
+    const filter = buildScopeFilter([], extraWhere);
+    assert.deepEqual(filter, {
+      AND: [extraWhere, { restrictedTags: { isEmpty: true } }],
+    });
+  });
+
   test("specific scopes creates OR filter", () => {
     const filter = buildScopeFilter(["scope-a", "scope-b"]);
     assert.deepEqual(filter, {
@@ -51,6 +59,40 @@ describe("buildScopeFilter", () => {
       OR: [
         { restrictedTags: { isEmpty: true } },
         { restrictedTags: { hasSome: ["scope-a"] } },
+      ],
+    });
+  });
+
+  test("specific scopes preserves extraWhere OR with AND", () => {
+    const extraWhere = {
+      OR: [{ status: "published" }, { status: "reviewed" }],
+    };
+    const filter = buildScopeFilter(["scope-a"], extraWhere);
+    assert.deepEqual(filter, {
+      AND: [
+        extraWhere,
+        {
+          OR: [
+            { restrictedTags: { isEmpty: true } },
+            { restrictedTags: { hasSome: ["scope-a"] } },
+          ],
+        },
+      ],
+    });
+  });
+
+  test("specific scopes preserves extraWhere restrictedTags with AND", () => {
+    const extraWhere = { restrictedTags: { hasSome: ["existing"] } };
+    const filter = buildScopeFilter(["scope-a"], extraWhere);
+    assert.deepEqual(filter, {
+      AND: [
+        extraWhere,
+        {
+          OR: [
+            { restrictedTags: { isEmpty: true } },
+            { restrictedTags: { hasSome: ["scope-a"] } },
+          ],
+        },
       ],
     });
   });

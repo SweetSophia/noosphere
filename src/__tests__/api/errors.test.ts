@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
+import { NextResponse } from "next/server";
 import { apiError, withRequestId } from "@/lib/api/errors";
 
 // ─── apiError ───────────────────────────────────────────────────────────────
@@ -48,7 +49,6 @@ describe("apiError", () => {
 
 describe("withRequestId", () => {
   test("attaches x-request-id header to response", () => {
-    const { NextResponse } = require("next/server");
     const response = new NextResponse(JSON.stringify({ ok: true }), {
       status: 200,
     });
@@ -59,7 +59,6 @@ describe("withRequestId", () => {
   });
 
   test("generates unique IDs across calls", () => {
-    const { NextResponse } = require("next/server");
     const r1 = withRequestId(new NextResponse(null, { status: 200 }));
     const r2 = withRequestId(new NextResponse(null, { status: 200 }));
     assert.notEqual(

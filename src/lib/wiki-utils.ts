@@ -8,15 +8,21 @@
  */
 
 export function slugify(text: string): string {
-  return (
-    text
-      .toLowerCase()
-      .replace(/[^a-z0-9 -]/g, "")
-      .replace(/\s+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .trim() || "untitled"
-  );
+  let slug = "";
+
+  for (const char of text.toLowerCase()) {
+    const code = char.charCodeAt(0);
+    const isAsciiLetter = code >= 97 && code <= 122;
+    const isDigit = code >= 48 && code <= 57;
+
+    if (isAsciiLetter || isDigit) {
+      slug += char;
+    } else if ((char === " " || char === "-") && slug && !slug.endsWith("-")) {
+      slug += "-";
+    }
+  }
+
+  return slug.endsWith("-") ? slug.slice(0, -1) : slug;
 }
 
 export function parseTagInput(raw: string | null | undefined): string[] {
