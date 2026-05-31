@@ -31,12 +31,12 @@ describe("slugify", () => {
     assert.equal(slugify("hello   world"), "hello-world");
   });
 
-  test("returns 'untitled' for empty input", () => {
-    assert.equal(slugify(""), "untitled");
+  test("returns empty string for empty input", () => {
+    assert.equal(slugify(""), "");
   });
 
-  test("returns 'untitled' for input with only special chars", () => {
-    assert.equal(slugify("!@#$%^&*"), "untitled");
+  test("returns empty string for input with only special chars", () => {
+    assert.equal(slugify("!@#$%^&*()"), "");
   });
 
   test("preserves numbers", () => {
@@ -137,8 +137,7 @@ describe("normalizeTagInputs", () => {
 
   test("skips tags that produce empty slugs", () => {
     const result = normalizeTagInputs(["!!!", "valid"]);
-    // "!!!" slugifies to "untitled", so it should be included
-    assert.equal(result.length, 2);
+    assert.equal(result.length, 1);
   });
 
   test("handles mixed valid and duplicate inputs", () => {

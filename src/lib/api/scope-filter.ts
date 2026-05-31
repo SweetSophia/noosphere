@@ -27,6 +27,11 @@ export function buildScopeFilter(
 
   // No scopes at all (undefined or empty): can only access unrestricted articles
   if (!allowedScopes || allowedScopes.length === 0) {
+    if ("restrictedTags" in extraWhere) {
+      return {
+        AND: [extraWhere, { restrictedTags: { isEmpty: true } }],
+      };
+    }
     return {
       ...extraWhere,
       restrictedTags: { isEmpty: true },
@@ -34,6 +39,19 @@ export function buildScopeFilter(
   }
 
   // Non-admin key with scopes: unrestricted OR at least one matching scope
+  if ("OR" in extraWhere || "restrictedTags" in extraWhere) {
+    return {
+      AND: [
+        extraWhere,
+        {
+          OR: [
+            { restrictedTags: { isEmpty: true } },
+            { restrictedTags: { hasSome: allowedScopes } },
+          ],
+        },
+      ],
+    };
+  }
   return {
     ...extraWhere,
     OR: [
