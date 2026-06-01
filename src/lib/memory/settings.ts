@@ -55,12 +55,14 @@ export interface RecallSettings {
   enabledProviders: string[];
 
   /**
-   * Per-provider priority weights (provider ID → weight) for scoring/ranking.
+   * Per-provider priority weights (provider ID → weight) for scoring/ranking
+   * and conflict resolution.
    *
    * NOTE: This is distinct from enabledProviders (string[]). providerPriorityWeights
-   * is used for weighted scoring in the orchestrator, while enabledProviders is
-   * the ordered list for deduplication strategy ordering. They serve different
-   * purposes despite similar naming.
+   * is used for weighted scoring in the orchestrator and provider ranking in
+   * conflict resolution, while enabledProviders is the ordered list for
+   * deduplication strategy ordering. They serve different purposes despite
+   * similar naming.
    */
   providerPriorityWeights: Record<string, number>;
 

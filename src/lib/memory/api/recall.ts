@@ -192,11 +192,9 @@ export async function executeMemoryRecallRequest(
   const controller = new AbortController();
 
   try {
-    // NOTE: Two separate priority mechanisms exist here with distinct purposes:
-    // deduplication.providerPriority (string[]) — ordered provider IDs for the
-    // "provider-priority" deduplication strategy.
-    // providerPriorityWeights (Record<string, number>) — per-provider scoring
-    // weights. See RecallSettings for details on the distinction.
+    // NOTE: deduplication.providerPriority (string[]) uses enabledProviders,
+    // while providerPriorityWeights (Record<string, number>) is separate — see
+    // RecallSettings.enabledProviders and providerPriorityWeights for details.
     const orchestrator = createRecallOrchestrator({
       providers: providers.entries,
       globalResultCap: effectiveResultCap,
