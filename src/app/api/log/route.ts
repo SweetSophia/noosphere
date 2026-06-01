@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/rate-limit";
 import { sanitizeAuthorName } from "@/lib/validation";
+import { parseDateFilter } from "@/lib/log-validation";
 
 // GET /api/log — Query the activity log
 //
@@ -31,7 +32,6 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
 
   const MAX_TYPE_LENGTH = 50;
-  const MAX_DATE_STRING_LENGTH = 100;
 
   const type = searchParams.get("type");
   if (type && type.length > MAX_TYPE_LENGTH) {
@@ -43,11 +43,10 @@ export async function GET(request: NextRequest) {
 
   const from = searchParams.get("from");
   const to = searchParams.get("to");
-  if (from && from.length > MAX_DATE_STRING_LENGTH) {
-    return NextResponse.json({ error: "from date string too long" }, { status: 400 });
-  }
-  if (to && to.length > MAX_DATE_STRING_LENGTH) {
-    return NextResponse.json({ error: "to date string too long" }, { status: 400 });
+
+  const dateFilter = parseDateFilter(from, to);
+  if (!dateFilter.ok) {
+    return NextResponse.json({ error: dateFilter.error }, { status: 400 });
   }
 
   const limit = Math.min(parseInt(searchParams.get("limit") ?? "50", 10), 200);
@@ -64,21 +63,13 @@ export async function GET(request: NextRequest) {
     where.authorName = { equals: author, mode: "insensitive" };
   }
 
-  if (from || to) {
+  if (dateFilter.from || dateFilter.to) {
     const createdAt: Prisma.DateTimeFilter = {};
-    if (from) {
-      const parsed = new Date(from);
-      if (isNaN(parsed.getTime())) {
-        return NextResponse.json({ error: "Invalid 'from' date format" }, { status: 400 });
-      }
-      createdAt.gte = parsed;
+    if (dateFilter.from) {
+      createdAt.gte = dateFilter.from;
     }
-    if (to) {
-      const parsed = new Date(to);
-      if (isNaN(parsed.getTime())) {
-        return NextResponse.json({ error: "Invalid 'to' date format" }, { status: 400 });
-      }
-      createdAt.lt = parsed;
+    if (dateFilter.to) {
+      createdAt.lt = dateFilter.to;
     }
     where.createdAt = createdAt;
   }
