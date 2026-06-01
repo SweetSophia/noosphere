@@ -12,6 +12,7 @@ export type ValidConfidence = (typeof VALID_CONFIDENCES)[number];
 
 export const QUERY_LIMITS = {
   maxSearchLength: 256,
+  maxSlugLength: 100,
 } as const;
 
 /**
@@ -52,6 +53,9 @@ export function validateSlug(slug: string): { ok: true; slug: string } | { ok: f
   const trimmed = slug.trim();
   if (!trimmed) {
     return { ok: false, error: "Slug is required" };
+  }
+  if (trimmed.length > QUERY_LIMITS.maxSlugLength) {
+    return { ok: false, error: `Slug exceeds maximum length of ${QUERY_LIMITS.maxSlugLength} characters` };
   }
   if (!SLUG_REGEX.test(trimmed)) {
     return { ok: false, error: "Slug must be lowercase alphanumeric with hyphens only" };

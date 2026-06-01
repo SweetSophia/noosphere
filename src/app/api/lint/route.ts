@@ -3,13 +3,7 @@ import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, buildScopeFilter } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/rate-limit";
-
-const LINT_MAX_ARTICLES_DEFAULT = 500;
-const LINT_MAX_ARTICLES_HARD_LIMIT = 2000;
-const LINT_STALE_DAYS_MIN = 1;
-const LINT_STALE_DAYS_MAX = 3650;
-const LINT_TAG_MIN_MIN = 1;
-const LINT_TAG_MIN_MAX = 100;
+import { parseLintOptions } from "@/lib/lint-options";
 
 // POST /api/lint — Wiki health check
 //
@@ -49,32 +43,18 @@ export async function POST(request: NextRequest) {
   const scopeWhere = buildScopeFilter(auth.auth.allowedScopes, { deletedAt: null });
 
   // --- Parse options ---
-  let body: { staleDays?: number; tagMin?: number; maxArticles?: unknown } = {};
+  let body: { staleDays?: unknown; tagMin?: unknown; maxArticles?: unknown } = {};
   try {
     body = await request.json();
   } catch {
     // No body — use defaults
   }
 
-  const rawStaleDays = body.staleDays;
-  if (rawStaleDays !== undefined && (typeof rawStaleDays !== "number" || !Number.isFinite(rawStaleDays))) {
-    return NextResponse.json({ error: "staleDays must be a finite number" }, { status: 400 });
+  const lintOptions = parseLintOptions(body);
+  if (!lintOptions.ok) {
+    return NextResponse.json({ error: lintOptions.error }, { status: 400 });
   }
-  const staleDays = rawStaleDays !== undefined
-    ? Math.min(Math.max(LINT_STALE_DAYS_MIN, Math.floor(rawStaleDays)), LINT_STALE_DAYS_MAX)
-    : 90;
-
-  const rawTagMin = body.tagMin;
-  if (rawTagMin !== undefined && (typeof rawTagMin !== "number" || !Number.isFinite(rawTagMin))) {
-    return NextResponse.json({ error: "tagMin must be a finite number" }, { status: 400 });
-  }
-  const tagMin = rawTagMin !== undefined
-    ? Math.min(Math.max(LINT_TAG_MIN_MIN, Math.floor(rawTagMin)), LINT_TAG_MIN_MAX)
-    : 2;
-  const parsedMaxArticles = Number(body.maxArticles);
-  const maxArticles = Number.isNaN(parsedMaxArticles)
-    ? LINT_MAX_ARTICLES_DEFAULT
-    : Math.min(Math.max(1, parsedMaxArticles), LINT_MAX_ARTICLES_HARD_LIMIT);
+  const { staleDays, tagMin, maxArticles } = lintOptions.options;
   const staleThreshold = new Date(Date.now() - staleDays * 24 * 60 * 60 * 1000);
 
   const issues: LintIssue[] = [];

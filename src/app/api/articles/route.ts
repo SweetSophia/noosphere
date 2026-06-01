@@ -8,6 +8,7 @@ import { detectSecretInInputs } from "@/lib/memory/api/save";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
 import {
   ARTICLE_LIMITS,
+  QUERY_LIMITS,
   deriveExcerpt,
   isValidConfidence,
   isValidStatus,
@@ -42,11 +43,10 @@ export async function GET(request: NextRequest) {
   const q = qValidation.query;
 
   // Validate topic and tag slug length (prevent DoS via oversized query params)
-  const MAX_SLUG_PARAM_LENGTH = 100;
-  if (rawTopicSlug && rawTopicSlug.length > MAX_SLUG_PARAM_LENGTH) {
+  if (rawTopicSlug && rawTopicSlug.length > QUERY_LIMITS.maxSlugLength) {
     return NextResponse.json({ error: "topic parameter too long" }, { status: 400 });
   }
-  if (rawTag && rawTag.length > MAX_SLUG_PARAM_LENGTH) {
+  if (rawTag && rawTag.length > QUERY_LIMITS.maxSlugLength) {
     return NextResponse.json({ error: "tag parameter too long" }, { status: 400 });
   }
 

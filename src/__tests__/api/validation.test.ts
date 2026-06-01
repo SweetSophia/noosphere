@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ARTICLE_LIMITS,
+  QUERY_LIMITS,
   deriveExcerpt,
   isValidConfidence,
   isValidStatus,
   sanitizeAuthorName,
+  validateSearchQuery,
   validateSlug,
 } from "@/lib/validation";
 
@@ -34,6 +36,43 @@ test("validateSlug rejects invalid characters", () => {
   assert.equal(result.ok, false);
   if (result.ok) return;
   assert.equal(result.error, "Slug must be lowercase alphanumeric with hyphens only");
+});
+
+test("validateSlug rejects oversized slugs", () => {
+  const result = validateSlug("a".repeat(QUERY_LIMITS.maxSlugLength + 1));
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(
+    result.error,
+    `Slug exceeds maximum length of ${QUERY_LIMITS.maxSlugLength} characters`
+  );
+});
+
+test("validateSearchQuery normalizes absent and blank queries", () => {
+  assert.deepEqual(validateSearchQuery(null), { ok: true, query: "" });
+  assert.deepEqual(validateSearchQuery("   "), { ok: true, query: "" });
+});
+
+test("validateSearchQuery trims valid queries", () => {
+  assert.deepEqual(validateSearchQuery("  neural archive  "), {
+    ok: true,
+    query: "neural archive",
+  });
+});
+
+test("validateSearchQuery accepts boundary length", () => {
+  const query = "a".repeat(QUERY_LIMITS.maxSearchLength);
+  assert.deepEqual(validateSearchQuery(query), { ok: true, query });
+});
+
+test("validateSearchQuery rejects oversized queries", () => {
+  const result = validateSearchQuery("a".repeat(QUERY_LIMITS.maxSearchLength + 1));
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(
+    result.error,
+    `Query exceeds maximum length of ${QUERY_LIMITS.maxSearchLength} characters`
+  );
 });
 
 test("isValidStatus accepts known statuses", () => {
