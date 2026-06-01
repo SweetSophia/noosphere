@@ -35,22 +35,19 @@ export function parseDateFilter(
     return { ok: false, error: "to date string too long" };
   }
 
-  if (fromVal) {
-    const parsed = new Date(fromVal);
-    if (isNaN(parsed.getTime())) {
-      return { ok: false, error: "Invalid 'from' date format" };
-    }
+  // Parse once and reuse — avoids duplicate Date construction (sourcery-ai, gemini-code-assist)
+  const fromDate = fromVal ? new Date(fromVal) : null;
+  if (fromDate && isNaN(fromDate.getTime())) {
+    return { ok: false, error: "Invalid 'from' date format" };
   }
-  if (toVal) {
-    const parsed = new Date(toVal);
-    if (isNaN(parsed.getTime())) {
-      return { ok: false, error: "Invalid 'to' date format" };
-    }
+  const toDate = toVal ? new Date(toVal) : null;
+  if (toDate && isNaN(toDate.getTime())) {
+    return { ok: false, error: "Invalid 'to' date format" };
   }
 
   return {
     ok: true,
-    from: fromVal ? new Date(fromVal) : undefined,
-    to: toVal ? new Date(toVal) : undefined,
+    from: fromDate ?? undefined,
+    to: toDate ?? undefined,
   };
 }
