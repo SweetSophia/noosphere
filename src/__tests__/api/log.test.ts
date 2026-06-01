@@ -13,9 +13,9 @@ test.describe("parseDateFilter", () => {
     assert.equal(result.to, undefined);
   });
 
-  test("returns ok with no dates when both params are undefined-equivalent (null)", () => {
-    // Explicit null: no date filter
-    const r = parseDateFilter(null, null);
+  test("returns ok with no dates when from is null and to is empty string", () => {
+    // Mixed: from=null, to="" (both treated as missing)
+    const r = parseDateFilter(null, "");
     assert.equal(r.ok, true);
     if (!r.ok) return;
     assert.equal(r.from, undefined);
@@ -146,7 +146,7 @@ test.describe("parseDateFilter", () => {
     assert.equal(r2.error, "to date string too long");
   });
 
-  test("accepts exactly 100-character string (boundary)", () => {
+  test("rejects 100-char invalid string at length boundary (not length error)", () => {
     const maxString = "a".repeat(100);
     const r = parseDateFilter(maxString, null);
     // 'aaaaa...' (100 chars) is not a valid date, but should NOT fail length check

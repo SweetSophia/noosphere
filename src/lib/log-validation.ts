@@ -17,7 +17,7 @@ export type DateFilterResult =
  * - Both params are optional; omitting both is valid (no date filter applied)
  * - Empty string "" is treated as missing (not an error)
  * - ISO 8601 strings are parsed; invalid strings return an error
- * - Unix epoch (0) is accepted as a valid date (1970-01-01T00:00:00Z)
+ * - Unix epoch 1970-01-01T00:00:00.000Z is accepted as a valid date
  * - Strings exceeding MAX_DATE_STRING_LENGTH return an error
  */
 export function parseDateFilter(
