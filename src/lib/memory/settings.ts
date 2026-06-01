@@ -40,10 +40,28 @@ export interface RecallSettings {
   /** Strategy for cross-provider deduplication. */
   deduplicationStrategy: DeduplicationStrategy;
 
-  /** Ordered list of enabled provider IDs. Disabled providers are excluded. */
+  /**
+   * Ordered list of enabled provider IDs. Disabled providers are excluded.
+   *
+   * NOTE: This is used for two distinct purposes in the orchestrator:
+   *   1. As deduplication.providerPriority (string[]) — ordered provider list for the
+   *      "provider-priority" deduplication strategy, controlling which provider wins
+   *      when duplicates are found.
+   *   2. As the default provider filter when no explicit providers are requested.
+   *
+   * This is NOT the same as providerPriorityWeights (Record<string, number>),
+   * which is a weighted scoring map used for result ranking.
+   */
   enabledProviders: string[];
 
-  /** Per-provider priority weights (provider ID → weight). */
+  /**
+   * Per-provider priority weights (provider ID → weight) for scoring/ranking.
+   *
+   * NOTE: This is distinct from enabledProviders (string[]). providerPriorityWeights
+   * is used for weighted scoring in the orchestrator, while enabledProviders is
+   * the ordered list for deduplication strategy ordering. They serve different
+   * purposes despite similar naming.
+   */
   providerPriorityWeights: Record<string, number>;
 
   /**
