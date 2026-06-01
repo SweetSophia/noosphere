@@ -1,17 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
-// Test the same parsing logic used in the lint route
-// Constants must match src/app/api/lint/route.ts
-const LINT_MAX_ARTICLES_DEFAULT = 500;
-const LINT_MAX_ARTICLES_HARD_LIMIT = 2000;
+import {
+  LINT_MAX_ARTICLES_DEFAULT,
+  LINT_MAX_ARTICLES_HARD_LIMIT,
+  LINT_STALE_DAYS_MAX,
+  LINT_STALE_DAYS_MIN,
+  LINT_TAG_MIN_MAX,
+  LINT_TAG_MIN_MIN,
+  parseLintOptions,
+} from "@/lib/lint-options";
 
 function parseMaxArticles(value: unknown): number {
-  const parsed = Number(value);
-  if (Number.isNaN(parsed)) {
-    return LINT_MAX_ARTICLES_DEFAULT;
-  }
-  return Math.min(Math.max(1, parsed), LINT_MAX_ARTICLES_HARD_LIMIT);
+  const result = parseLintOptions({ maxArticles: value });
+  assert.equal(result.ok, true);
+  if (!result.ok) return 0;
+  return result.options.maxArticles;
 }
 
 test.describe("maxArticles parsing logic", () => {
@@ -100,5 +103,61 @@ test.describe("LINT_MAX_ARTICLES constants", () => {
     assert.ok(Number.isInteger(LINT_MAX_ARTICLES_HARD_LIMIT));
     assert.ok(LINT_MAX_ARTICLES_DEFAULT > 0);
     assert.ok(LINT_MAX_ARTICLES_HARD_LIMIT > 0);
+  });
+});
+
+test.describe("staleDays and tagMin parsing logic", () => {
+  test("uses defaults when values are undefined", () => {
+    const result = parseLintOptions({});
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.options.staleDays, 90);
+    assert.equal(result.options.tagMin, 2);
+  });
+
+  test("floors decimals before clamping", () => {
+    const result = parseLintOptions({ staleDays: 10.9, tagMin: 4.8 });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.options.staleDays, 10);
+    assert.equal(result.options.tagMin, 4);
+  });
+
+  test("clamps staleDays and tagMin to safe ranges", () => {
+    const low = parseLintOptions({ staleDays: -10, tagMin: 0 });
+    assert.equal(low.ok, true);
+    if (!low.ok) return;
+    assert.equal(low.options.staleDays, LINT_STALE_DAYS_MIN);
+    assert.equal(low.options.tagMin, LINT_TAG_MIN_MIN);
+
+    const high = parseLintOptions({ staleDays: 99999, tagMin: 999 });
+    assert.equal(high.ok, true);
+    if (!high.ok) return;
+    assert.equal(high.options.staleDays, LINT_STALE_DAYS_MAX);
+    assert.equal(high.options.tagMin, LINT_TAG_MIN_MAX);
+  });
+
+  test("rejects non-number staleDays and tagMin", () => {
+    const staleDays = parseLintOptions({ staleDays: "90" });
+    assert.equal(staleDays.ok, false);
+    if (staleDays.ok) return;
+    assert.equal(staleDays.error, "staleDays must be a finite number");
+
+    const tagMin = parseLintOptions({ tagMin: "2" });
+    assert.equal(tagMin.ok, false);
+    if (tagMin.ok) return;
+    assert.equal(tagMin.error, "tagMin must be a finite number");
+  });
+
+  test("rejects NaN and non-finite staleDays and tagMin", () => {
+    const staleDays = parseLintOptions({ staleDays: Number.NaN });
+    assert.equal(staleDays.ok, false);
+    if (staleDays.ok) return;
+    assert.equal(staleDays.error, "staleDays must be a finite number");
+
+    const tagMin = parseLintOptions({ tagMin: Infinity });
+    assert.equal(tagMin.ok, false);
+    if (tagMin.ok) return;
+    assert.equal(tagMin.error, "tagMin must be a finite number");
   });
 });

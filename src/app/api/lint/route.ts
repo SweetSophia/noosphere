@@ -3,9 +3,7 @@ import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, buildScopeFilter } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/rate-limit";
-
-const LINT_MAX_ARTICLES_DEFAULT = 500;
-const LINT_MAX_ARTICLES_HARD_LIMIT = 2000;
+import { parseLintOptions } from "@/lib/lint-options";
 
 // POST /api/lint — Wiki health check
 //
@@ -45,19 +43,18 @@ export async function POST(request: NextRequest) {
   const scopeWhere = buildScopeFilter(auth.auth.allowedScopes, { deletedAt: null });
 
   // --- Parse options ---
-  let body: { staleDays?: number; tagMin?: number; maxArticles?: unknown } = {};
+  let body: { staleDays?: unknown; tagMin?: unknown; maxArticles?: unknown } = {};
   try {
     body = await request.json();
   } catch {
     // No body — use defaults
   }
 
-  const staleDays = body.staleDays ?? 90;
-  const tagMin = body.tagMin ?? 2;
-  const parsedMaxArticles = Number(body.maxArticles);
-  const maxArticles = Number.isNaN(parsedMaxArticles)
-    ? LINT_MAX_ARTICLES_DEFAULT
-    : Math.min(Math.max(1, parsedMaxArticles), LINT_MAX_ARTICLES_HARD_LIMIT);
+  const lintOptions = parseLintOptions(body);
+  if (!lintOptions.ok) {
+    return NextResponse.json({ error: lintOptions.error }, { status: 400 });
+  }
+  const { staleDays, tagMin, maxArticles } = lintOptions.options;
   const staleThreshold = new Date(Date.now() - staleDays * 24 * 60 * 60 * 1000);
 
   const issues: LintIssue[] = [];

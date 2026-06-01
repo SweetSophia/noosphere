@@ -3,6 +3,7 @@ import { Prisma, Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/rate-limit";
+import { sanitizeAuthorName } from "@/lib/validation";
 
 // GET /api/log — Query the activity log
 //
@@ -29,10 +30,26 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
 
+  const MAX_TYPE_LENGTH = 50;
+  const MAX_DATE_STRING_LENGTH = 100;
+
   const type = searchParams.get("type");
-  const author = searchParams.get("author");
+  if (type && type.length > MAX_TYPE_LENGTH) {
+    return NextResponse.json({ error: "type parameter too long" }, { status: 400 });
+  }
+
+  const rawAuthor = searchParams.get("author");
+  const author = sanitizeAuthorName(rawAuthor);
+
   const from = searchParams.get("from");
   const to = searchParams.get("to");
+  if (from && from.length > MAX_DATE_STRING_LENGTH) {
+    return NextResponse.json({ error: "from date string too long" }, { status: 400 });
+  }
+  if (to && to.length > MAX_DATE_STRING_LENGTH) {
+    return NextResponse.json({ error: "to date string too long" }, { status: 400 });
+  }
+
   const limit = Math.min(parseInt(searchParams.get("limit") ?? "50", 10), 200);
   const offset = parseInt(searchParams.get("offset") ?? "0", 10);
 
@@ -50,10 +67,18 @@ export async function GET(request: NextRequest) {
   if (from || to) {
     const createdAt: Prisma.DateTimeFilter = {};
     if (from) {
-      createdAt.gte = new Date(from);
+      const parsed = new Date(from);
+      if (isNaN(parsed.getTime())) {
+        return NextResponse.json({ error: "Invalid 'from' date format" }, { status: 400 });
+      }
+      createdAt.gte = parsed;
     }
     if (to) {
-      createdAt.lt = new Date(to);
+      const parsed = new Date(to);
+      if (isNaN(parsed.getTime())) {
+        return NextResponse.json({ error: "Invalid 'to' date format" }, { status: 400 });
+      }
+      createdAt.lt = parsed;
     }
     where.createdAt = createdAt;
   }
