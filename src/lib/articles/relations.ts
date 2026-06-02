@@ -69,3 +69,25 @@ export async function filterAccessibleRelatedTargets(
     .filter((article) => canAccessScopes(article.restrictedTags, allowedScopes))
     .map((article) => article.id);
 }
+
+/**
+ * Predicate for the read-side filter on an already-loaded related-article
+ * relation. A relation is kept only if the target (a) is not soft-deleted
+ * and (b) the caller's allowedScopes can see its restrictedTags. Use this
+ * wherever a `relatedTo` include is formatted into a response, so the
+ * soft-delete hide and the scope hide are enforced by a single source
+ * of truth rather than copy-pasted at every read site.
+ *
+ * The generic requires `target.deletedAt` to be selected (not optional),
+ * so the type system rejects a future call site that forgets to fetch
+ * the field — otherwise a missing `deletedAt` would silently be treated
+ * as "not deleted" and the soft-delete hide would be a no-op.
+ */
+export function isAccessibleRelatedArticle<
+  R extends {
+    target: { deletedAt: Date | null; restrictedTags: string[] };
+  },
+>(relation: R, allowedScopes: string[] | undefined): boolean {
+  if (relation.target.deletedAt != null) return false;
+  return canAccessScopes(relation.target.restrictedTags, allowedScopes);
+}

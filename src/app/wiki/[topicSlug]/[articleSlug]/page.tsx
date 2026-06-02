@@ -5,7 +5,7 @@ import { getServerSession } from "next-auth";
 import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
-import { canAccessScopes } from "@/lib/api/auth";
+import { isAccessibleRelatedArticle } from "@/lib/articles/relations";
 import { DeleteArticleForm } from "@/components/wiki/DeleteArticleForm";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import ReactMarkdown from "react-markdown";
@@ -54,7 +54,7 @@ export default async function ArticlePage({ params }: Props) {
       relatedTo: {
         include: {
           target: {
-            select: { id: true, title: true, slug: true, topic: { select: { slug: true } }, restrictedTags: true },
+            select: { id: true, title: true, slug: true, topic: { select: { slug: true } }, restrictedTags: true, deletedAt: true },
           },
         },
       },
@@ -180,7 +180,7 @@ export default async function ArticlePage({ params }: Props) {
             <p className="article-detail-label">Connected pages</p>
             {(() => {
               const accessibleRelated = article.relatedTo.filter((rel) =>
-                canAccessScopes(rel.target.restrictedTags ?? [], session ? ["*"] : undefined)
+                isAccessibleRelatedArticle(rel, session ? ["*"] : undefined)
               );
               return accessibleRelated.length > 0 ? (
                 <div className="article-link-list">

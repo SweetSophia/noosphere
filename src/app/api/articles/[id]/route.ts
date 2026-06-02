@@ -3,7 +3,11 @@ import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, canAccessScopes } from "@/lib/api/auth";
 import { buildTagConnections } from "@/lib/wiki";
-import { syncArticleRelations, filterAccessibleRelatedTargets } from "@/lib/articles/relations";
+import {
+  syncArticleRelations,
+  filterAccessibleRelatedTargets,
+  isAccessibleRelatedArticle,
+} from "@/lib/articles/relations";
 import {
   ARTICLE_LIMITS,
   deriveExcerpt,
@@ -249,8 +253,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         }
       }
 
-      // Filter against the caller's scopes so a scoped key cannot replace
-      // existing relations with links to restricted articles it cannot see.
+      // Filter against the caller's scopes (and skip non-existent /
+      // soft-deleted targets) so a scoped key cannot replace existing
+      // relations with links to restricted articles it cannot see.
       const safeRelatedArticleIds =
         relatedArticleIds === undefined
           ? undefined
@@ -270,7 +275,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           tags: { include: { tag: true } },
           relatedTo: {
             include: {
-              target: { select: { id: true, title: true, slug: true, topic: true, restrictedTags: true } },
+              target: { select: { id: true, title: true, slug: true, topic: true, restrictedTags: true, deletedAt: true } },
             },
           },
         },
@@ -291,7 +296,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       restrictedTags: updatedArticle!.restrictedTags ?? [],
       lastReviewed: updatedArticle!.lastReviewed,
       relatedArticles: updatedArticle!.relatedTo
-        .filter((r) => canAccessScopes(r.target.restrictedTags ?? [], auth.auth.allowedScopes))
+        .filter((r) => isAccessibleRelatedArticle(r, auth.auth.allowedScopes))
         .map((r) => ({
           id: r.target.id,
           title: r.target.title,

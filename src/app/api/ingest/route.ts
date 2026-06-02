@@ -210,7 +210,7 @@ export async function POST(request: NextRequest) {
       // Filter against the caller's scopes (and skip non-existent /
       // soft-deleted targets) so a scoped key cannot link an unrestricted
       // source to a restricted target the caller cannot see — which would
-      // otherwise leak the target's title/slug in the related-articles
+      // otherwise leak the target's title/slug/topic in the related-articles
       // panel of the source's GET response.
       if (article.relatedArticleIds && article.relatedArticleIds.length > 0) {
         const accessibleTargetIds = await filterAccessibleRelatedTargets(
