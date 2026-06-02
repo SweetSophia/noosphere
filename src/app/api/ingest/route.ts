@@ -6,6 +6,7 @@ import { apiError } from "@/lib/api/errors";
 import { ARTICLE_LIMITS, deriveExcerpt, sanitizeAuthorName } from "@/lib/validation";
 import { rateLimit } from "@/lib/rate-limit";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
+import { filterAccessibleRelatedTargets } from "@/lib/articles/relations";
 
 // POST /api/ingest — Process a source into multiple wiki articles
 // Auth: API key (WRITE/ADMIN) or session (EDITOR/ADMIN)
@@ -206,14 +207,29 @@ export async function POST(request: NextRequest) {
         topic: topic.name,
       });
 
-      // Create ArticleRelation records for related articles
+      // Filter against the caller's scopes (and skip non-existent /
+      // soft-deleted targets) so a scoped key cannot link an unrestricted
+      // source to a restricted target the caller cannot see — which would
+      // otherwise leak the target's title/slug in the related-articles
+      // panel of the source's GET response.
       if (article.relatedArticleIds && article.relatedArticleIds.length > 0) {
-        await tx.articleRelation.createMany({
-          data: article.relatedArticleIds
-            .filter((targetId: string) => targetId !== created.id)
-            .map((targetId: string) => ({ sourceId: created.id, targetId })),
-          skipDuplicates: true,
-        });
+        const accessibleTargetIds = await filterAccessibleRelatedTargets(
+          tx,
+          article.relatedArticleIds.filter(
+            (targetId: string) => targetId !== created.id,
+          ),
+          auth.auth.allowedScopes,
+        );
+
+        if (accessibleTargetIds.length > 0) {
+          await tx.articleRelation.createMany({
+            data: accessibleTargetIds.map((targetId) => ({
+              sourceId: created.id,
+              targetId,
+            })),
+            skipDuplicates: true,
+          });
+        }
       }
     }
 

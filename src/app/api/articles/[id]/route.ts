@@ -3,7 +3,7 @@ import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, canAccessScopes } from "@/lib/api/auth";
 import { buildTagConnections } from "@/lib/wiki";
-import { syncArticleRelations } from "@/lib/articles/relations";
+import { syncArticleRelations, filterAccessibleRelatedTargets } from "@/lib/articles/relations";
 import {
   ARTICLE_LIMITS,
   deriveExcerpt,
@@ -249,7 +249,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         }
       }
 
-      await syncArticleRelations(tx, id, relatedArticleIds);
+      // Filter against the caller's scopes so a scoped key cannot replace
+      // existing relations with links to restricted articles it cannot see.
+      const safeRelatedArticleIds =
+        relatedArticleIds === undefined
+          ? undefined
+          : await filterAccessibleRelatedTargets(
+              tx,
+              relatedArticleIds,
+              auth.auth.allowedScopes,
+            );
+
+      await syncArticleRelations(tx, id, safeRelatedArticleIds);
 
       // Return updated article with relations
       return tx.article.findUnique({
