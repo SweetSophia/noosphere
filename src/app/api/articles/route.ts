@@ -6,6 +6,7 @@ import { resolveRestrictedTagsForCaller } from "@/lib/api/restricted-scopes";
 import { buildTagConnections, countSearchArticles, searchArticleIds } from "@/lib/wiki";
 import { detectSecretInInputs } from "@/lib/memory/api/save";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
+import { filterAccessibleRelatedTargets } from "@/lib/articles/relations";
 import {
   ARTICLE_LIMITS,
   QUERY_LIMITS,
@@ -350,14 +351,26 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      // Create ArticleRelation records for related articles
+      // Filter against the caller's scopes so a scoped key cannot link an
+      // unrestricted source to a restricted target the caller cannot see —
+      // which would otherwise leak the target's title/slug in the
+      // related-articles panel of the source's GET response.
       if (relatedArticleIds && relatedArticleIds.length > 0) {
-        await tx.articleRelation.createMany({
-          data: relatedArticleIds
-            .filter((id: string) => id !== created.id) // prevent self-reference
-            .map((targetId: string) => ({ sourceId: created.id, targetId })),
-          skipDuplicates: true,
-        });
+        const accessibleTargetIds = await filterAccessibleRelatedTargets(
+          tx,
+          relatedArticleIds.filter((id: string) => id !== created.id),
+          auth.auth.allowedScopes,
+        );
+
+        if (accessibleTargetIds.length > 0) {
+          await tx.articleRelation.createMany({
+            data: accessibleTargetIds.map((targetId) => ({
+              sourceId: created.id,
+              targetId,
+            })),
+            skipDuplicates: true,
+          });
+        }
       }
 
       return created;
