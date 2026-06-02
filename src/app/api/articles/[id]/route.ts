@@ -3,7 +3,11 @@ import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, canAccessScopes } from "@/lib/api/auth";
 import { buildTagConnections } from "@/lib/wiki";
-import { syncArticleRelations, filterAccessibleRelatedTargets } from "@/lib/articles/relations";
+import {
+  syncArticleRelations,
+  filterAccessibleRelatedTargets,
+  filterVisibleRelatedArticleRows,
+} from "@/lib/articles/relations";
 import {
   ARTICLE_LIMITS,
   deriveExcerpt,
@@ -270,7 +274,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           tags: { include: { tag: true } },
           relatedTo: {
             include: {
-              target: { select: { id: true, title: true, slug: true, topic: true, restrictedTags: true } },
+              target: { select: { id: true, title: true, slug: true, topic: true, restrictedTags: true, deletedAt: true } },
             },
           },
         },
@@ -290,8 +294,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       status: updatedArticle!.status,
       restrictedTags: updatedArticle!.restrictedTags ?? [],
       lastReviewed: updatedArticle!.lastReviewed,
-      relatedArticles: updatedArticle!.relatedTo
-        .filter((r) => canAccessScopes(r.target.restrictedTags ?? [], auth.auth.allowedScopes))
+      relatedArticles: filterVisibleRelatedArticleRows(updatedArticle!.relatedTo, auth.auth.allowedScopes)
         .map((r) => ({
           id: r.target.id,
           title: r.target.title,

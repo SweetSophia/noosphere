@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   filterAccessibleRelatedTargets,
+  filterVisibleRelatedArticleRows,
   type ArticleRelationReader,
 } from "@/lib/articles/relations";
 
@@ -164,4 +165,36 @@ test("filterAccessibleRelatedTargets drops soft-deleted candidates", async () =>
   );
 
   assert.deepEqual(result, ["a-1"]);
+});
+
+test("filterVisibleRelatedArticleRows drops soft-deleted targets before rendering", () => {
+  const visible = {
+    target: { id: "a-visible", restrictedTags: [], deletedAt: null },
+  };
+  const deleted = {
+    target: { id: "a-deleted", restrictedTags: [], deletedAt: new Date("2024-01-01") },
+  };
+
+  const result = filterVisibleRelatedArticleRows([visible, deleted], ["*"]);
+
+  assert.deepEqual(result, [visible]);
+});
+
+test("filterVisibleRelatedArticleRows keeps existing scope filtering for live targets", () => {
+  const unrestricted = {
+    target: { id: "a-open", restrictedTags: [], deletedAt: null },
+  };
+  const allowed = {
+    target: { id: "a-health", restrictedTags: ["health"], deletedAt: null },
+  };
+  const forbidden = {
+    target: { id: "a-finance", restrictedTags: ["finance"], deletedAt: null },
+  };
+
+  const result = filterVisibleRelatedArticleRows(
+    [unrestricted, allowed, forbidden],
+    ["health"],
+  );
+
+  assert.deepEqual(result, [unrestricted, allowed]);
 });

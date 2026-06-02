@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requirePermission, buildScopeFilter, canAccessScopes } from "@/lib/api/auth";
+import { requirePermission, buildScopeFilter } from "@/lib/api/auth";
 import { resolveRestrictedTagsForCaller } from "@/lib/api/restricted-scopes";
 import { buildTagConnections, countSearchArticles, searchArticleIds } from "@/lib/wiki";
 import { detectSecretInInputs } from "@/lib/memory/api/save";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
-import { filterAccessibleRelatedTargets } from "@/lib/articles/relations";
+import { filterAccessibleRelatedTargets, filterVisibleRelatedArticleRows } from "@/lib/articles/relations";
 import {
   ARTICLE_LIMITS,
   QUERY_LIMITS,
@@ -108,7 +108,7 @@ export async function GET(request: NextRequest) {
               author: { select: { id: true, name: true } },
               relatedTo: {
                 include: {
-                  target: { select: { id: true, title: true, slug: true, topic: true, restrictedTags: true } },
+                  target: { select: { id: true, title: true, slug: true, topic: true, restrictedTags: true, deletedAt: true } },
                 },
               },
             },
@@ -127,7 +127,7 @@ export async function GET(request: NextRequest) {
             author: { select: { id: true, name: true } },
             relatedTo: {
               include: {
-                target: { select: { id: true, title: true, slug: true, topic: true, restrictedTags: true } },
+                target: { select: { id: true, title: true, slug: true, topic: true, restrictedTags: true, deletedAt: true } },
               },
             },
           },
@@ -158,8 +158,7 @@ export async function GET(request: NextRequest) {
       status: a.status,
       restrictedTags: a.restrictedTags ?? [],
       lastReviewed: a.lastReviewed,
-      relatedArticles: a.relatedTo
-        .filter((r) => canAccessScopes(r.target.restrictedTags ?? [], auth.auth.allowedScopes))
+      relatedArticles: filterVisibleRelatedArticleRows(a.relatedTo, auth.auth.allowedScopes)
         .map((r) => ({
           id: r.target.id,
           title: r.target.title,

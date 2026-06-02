@@ -19,6 +19,13 @@ export interface ArticleRelationReader {
   };
 }
 
+export type RelatedArticleRow = {
+  target: {
+    deletedAt: Date | null;
+    restrictedTags: string[] | null;
+  };
+};
+
 export async function syncArticleRelations(
   tx: ArticleRelationWriter,
   sourceId: string,
@@ -68,4 +75,20 @@ export async function filterAccessibleRelatedTargets(
   return existing
     .filter((article) => canAccessScopes(article.restrictedTags, allowedScopes))
     .map((article) => article.id);
+}
+
+/**
+ * Keep related-article render paths aligned with write-time relation filtering.
+ * Old relation rows can outlive a later soft-delete, so read projections must
+ * still suppress deleted targets before serializing or rendering link metadata.
+ */
+export function filterVisibleRelatedArticleRows<T extends RelatedArticleRow>(
+  relations: T[],
+  allowedScopes: string[] | undefined,
+): T[] {
+  return relations.filter(
+    (relation) =>
+      relation.target.deletedAt === null &&
+      canAccessScopes(relation.target.restrictedTags ?? [], allowedScopes),
+  );
 }
