@@ -192,6 +192,9 @@ export async function executeMemoryRecallRequest(
   const controller = new AbortController();
 
   try {
+    // NOTE: deduplication.providerPriority (string[]) uses enabledProviders,
+    // while providerPriorityWeights (Record<string, number>) is separate — see
+    // RecallSettings.enabledProviders and providerPriorityWeights for details.
     const orchestrator = createRecallOrchestrator({
       providers: providers.entries,
       globalResultCap: effectiveResultCap,

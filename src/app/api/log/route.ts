@@ -3,6 +3,8 @@ import { Prisma, Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/rate-limit";
+import { sanitizeAuthorName } from "@/lib/validation";
+import { parseDateFilter } from "@/lib/log-validation";
 
 // GET /api/log — Query the activity log
 //
@@ -29,10 +31,24 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
 
+  const MAX_TYPE_LENGTH = 50;
+
   const type = searchParams.get("type");
-  const author = searchParams.get("author");
+  if (type && type.length > MAX_TYPE_LENGTH) {
+    return NextResponse.json({ error: "type parameter too long" }, { status: 400 });
+  }
+
+  const rawAuthor = searchParams.get("author");
+  const author = sanitizeAuthorName(rawAuthor);
+
   const from = searchParams.get("from");
   const to = searchParams.get("to");
+
+  const dateFilter = parseDateFilter(from, to);
+  if (!dateFilter.ok) {
+    return NextResponse.json({ error: dateFilter.error }, { status: 400 });
+  }
+
   const limit = Math.min(parseInt(searchParams.get("limit") ?? "50", 10), 200);
   const offset = parseInt(searchParams.get("offset") ?? "0", 10);
 
@@ -47,13 +63,13 @@ export async function GET(request: NextRequest) {
     where.authorName = { equals: author, mode: "insensitive" };
   }
 
-  if (from || to) {
+  if (dateFilter.from || dateFilter.to) {
     const createdAt: Prisma.DateTimeFilter = {};
-    if (from) {
-      createdAt.gte = new Date(from);
+    if (dateFilter.from) {
+      createdAt.gte = dateFilter.from;
     }
-    if (to) {
-      createdAt.lt = new Date(to);
+    if (dateFilter.to) {
+      createdAt.lt = dateFilter.to;
     }
     where.createdAt = createdAt;
   }

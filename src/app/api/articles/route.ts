@@ -8,10 +8,12 @@ import { detectSecretInInputs } from "@/lib/memory/api/save";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
 import {
   ARTICLE_LIMITS,
+  QUERY_LIMITS,
   deriveExcerpt,
   isValidConfidence,
   isValidStatus,
   sanitizeAuthorName,
+  validateSearchQuery,
   validateSlug,
 } from "@/lib/validation";
 import { parsePagination } from "@/lib/pagination";
@@ -29,9 +31,27 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const topicSlug = searchParams.get("topic");
-  const tag = searchParams.get("tag");
-  const q = searchParams.get("q"); // full-text search
+  const rawTopicSlug = searchParams.get("topic");
+  const rawTag = searchParams.get("tag");
+  const rawQ = searchParams.get("q");
+
+  // Validate query string length
+  const qValidation = validateSearchQuery(rawQ);
+  if (!qValidation.ok) {
+    return NextResponse.json({ error: qValidation.error }, { status: 400 });
+  }
+  const q = qValidation.query;
+
+  // Validate topic and tag slug length (prevent DoS via oversized query params)
+  if (rawTopicSlug && rawTopicSlug.length > QUERY_LIMITS.maxSlugLength) {
+    return NextResponse.json({ error: "topic parameter too long" }, { status: 400 });
+  }
+  if (rawTag && rawTag.length > QUERY_LIMITS.maxSlugLength) {
+    return NextResponse.json({ error: "tag parameter too long" }, { status: 400 });
+  }
+
+  const topicSlug = rawTopicSlug;
+  const tag = rawTag;
   const { page, limit, offset } = parsePagination(searchParams);
   const status = searchParams.get("status");
   const confidence = searchParams.get("confidence");

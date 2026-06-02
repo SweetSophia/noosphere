@@ -12,6 +12,9 @@ import {
 } from "@/lib/validation";
 import { rateLimit } from "@/lib/rate-limit";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
+import { slugify } from "@/lib/wiki";
+
+const ANSWER_SLUG_MAX_LENGTH = 80;
 
 // POST /api/answer — Save a synthesized answer as a new wiki article
 // Auth: API key (WRITE/ADMIN) or session (EDITOR/ADMIN)
@@ -88,15 +91,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Derive slug from title
-  const slug = validateSlug(
-    title
-      .toLowerCase()
-      .replace(/[^a-z0-9 -]/g, "")
-      .replace(/\s+/g, "-")
-      .replace(/-+/g, "-")
-      .trim()
-      .slice(0, 80)
-  );
+  const slug = validateSlug(slugify(title).slice(0, ANSWER_SLUG_MAX_LENGTH));
   if (!slug.ok) {
     return NextResponse.json({ error: slug.error }, { status: 400 });
   }

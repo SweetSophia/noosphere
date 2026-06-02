@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, buildScopeFilter } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/rate-limit";
+import { validateSlug } from "@/lib/validation";
 import {
   buildArticleLookupMaps,
   isContentWithinByteLimit,
@@ -41,7 +42,15 @@ export async function GET(request: NextRequest) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const topicSlug = searchParams.get("topic");
+    const rawTopicSlug = searchParams.get("topic");
+    let topicSlug: string | undefined = undefined;
+    if (rawTopicSlug) {
+      const topicValidation = validateSlug(rawTopicSlug);
+      if (!topicValidation.ok) {
+        return NextResponse.json({ error: topicValidation.error }, { status: 400 });
+      }
+      topicSlug = topicValidation.slug;
+    }
     const { limit, contentLimit, contentMaxBytes } =
       parseGraphQueryParams(searchParams);
 
