@@ -243,6 +243,7 @@ class NoosphereMemoryProvider(MemoryProvider):
         self._agent_context = ""
         self._write_enabled = True
         self._active = False
+        self._inactive_reason = ""
         self._client: Optional[NoosphereClient] = None
         self._save_queue: queue.Queue[Dict[str, Any]] = queue.Queue(maxsize=_SAVE_QUEUE_MAXSIZE)
         self._save_worker: Optional[threading.Thread] = None
@@ -286,24 +287,30 @@ class NoosphereMemoryProvider(MemoryProvider):
         self._platform = _as_string(kwargs.get("platform"))
         self._agent_identity = _as_string(kwargs.get("agent_identity"), "default") or "default"
         self._agent_context = _as_string(kwargs.get("agent_context"))
+        self._inactive_reason = ""
 
         try:
             self._config = _load_noosphere_config(self._hermes_home)
-        except ValueError:
+        except ValueError as error:
             self._active = False
             self._client = None
+            self._inactive_reason = f"Noosphere is disabled because noosphere.json is invalid: {error}"
             return
         env_base_url = _env_first("HERMES_NOOSPHERE_BASE_URL", "NOOSPHERE_BASE_URL")
         if env_base_url:
             try:
                 self._config["base_url"] = normalize_base_url(env_base_url)
-            except ValueError:
+            except ValueError as error:
                 logger.warning(
                     "Unsafe Hermes Noosphere base URL ignored; Noosphere disabled",
                     exc_info=True,
                 )
                 self._active = False
                 self._client = None
+                self._inactive_reason = (
+                    "Noosphere is disabled because HERMES_NOOSPHERE_BASE_URL "
+                    f"or NOOSPHERE_BASE_URL is invalid: {error}"
+                )
                 return
 
         self._api_key = _env_first("HERMES_NOOSPHERE_API_KEY", "NOOSPHERE_API_KEY")
@@ -356,7 +363,7 @@ class NoosphereMemoryProvider(MemoryProvider):
 
     def handle_tool_call(self, tool_name: str, args: Dict[str, Any], **kwargs: Any) -> str:
         if not self._active or not self._client:
-            error = (
+            error = self._inactive_reason or (
                 "Noosphere is not configured. Set HERMES_NOOSPHERE_API_KEY, "
                 "or NOOSPHERE_API_KEY as a compatibility fallback."
             )

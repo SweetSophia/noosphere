@@ -247,6 +247,24 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
         self.assertIsNone(provider._client)
         self.assertIn("Unsafe Noosphere config", "\n".join(logs.output))
 
+    def test_status_reports_config_error_after_failed_initialize(self):
+        module = load_plugin()
+        provider = module.NoosphereMemoryProvider()
+
+        with tempfile.TemporaryDirectory() as hermes_home:
+            path = Path(hermes_home) / "noosphere.json"
+            path.write_text(json.dumps({"base_url": "http://100.111.85.48:6578"}), encoding="utf-8")
+
+            with mock.patch.dict(os.environ, {"NOOSPHERE_API_KEY": "noo_test"}, clear=True):
+                with self.assertLogs(module.logger, level="WARNING"):
+                    provider.initialize("session-1", hermes_home=hermes_home)
+
+        result = json.loads(provider.handle_tool_call("noosphere_status", {}))
+
+        self.assertIn("noosphere.json", result["error"])
+        self.assertIn("loopback", result["error"])
+        self.assertNotIn("HERMES_NOOSPHERE_API_KEY", result["error"])
+
     def test_register_adds_memory_provider(self):
         module = load_plugin()
         registered = []
