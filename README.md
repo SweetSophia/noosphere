@@ -1,9 +1,13 @@
 # Noosphere
 
-Noosphere is a self-hosted knowledge and memory layer for AI agents and humans.
-Agents use it to recall, save, and organize durable project knowledge; humans use
+Noosphere is a self-hosted knowledge and memory layer for AI agents and humans.  
+Agents use it to recall, save, and organize durable and detailed project knowledge; humans use
 the same data as a browsable Markdown wiki with topics, revisions, scoped access,
-and Obsidian-friendly export/import.
+and Obsidian-friendly export/import.  
+
+**All agent systems and humans access the same memory data. You can start in Openclaw and continue in OpenCode and add new data yourself via web browser.** 
+The system is database PostgreSQL based with Redis for fast recall. Markdown import and export is possible by the user and agents.
+ 
 
 It sits between a chat transcript and a full documentation site:
 
@@ -115,6 +119,42 @@ full restricted-content access and should be reserved for admin workflows.
 Noosphere can export/import Markdown vault archives and supports an Obsidian
 sync workflow through a versioned frontmatter codec. The sync design lives in
 [docs/OBSIDIAN-SYNC-SPEC.md](docs/OBSIDIAN-SYNC-SPEC.md).
+
+## Core Memory Features
+
+| Feature | **Noosphere** | **Hindsight** | **QMD** | **memU** | **mem0** | **LanceDB Pro** |
+|---|---|---|---|---|---|---|
+| **Auto-Capture** | ✅ Bundled capture guidance + ingest API + backfill | ✅ Every turn | ❌ Manual indexing | ✅ Continuous learning | ✅ `memory.add()` | ✅ Smart extraction |
+| **Auto-Recall** | ✅ Hook injection with dual-block (memory capture guidance + recall results) | ✅ Before each turn | ✅ Keyword search only | ✅ Proactive context loading | ✅ `memory.search()` | ✅ Before prompt build |
+| **Manual Recall** | ✅ REST API + tools | ✅ MCP tools | ✅ CLI / tool query | ✅ REST API | ✅ SDK + REST | ✅ CLI + MCP tools |
+| **Semantic Search** | ✅ PostgreSQL FTS (live) + vector (planned) | ✅ Vector + biomimetic | ⚠️ Keyword + pending vector | ✅ pgvector | ✅ Semantic + BM25 + entity fusion | ✅ Vector + BM25 hybrid |
+| **Keyword Search** | ✅ PostgreSQL full-text | ✅ | ✅ Primary mode | ✅ | ✅ BM25 | ✅ BM25 |
+| **Cross-Encoder Rerank** | ❌ (planned) | ❌ | ❌ | ❌ | ❌ | ✅ Cross-encoder |
+| **Memory Types** | Articles (wiki) | world / experience / observation | Markdown files | Categories / Items / Resources | Facts (ADD-only v3) | 6-category classification |
+| **Curation Levels** | ✅ ephemeral → managed → curated | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Confidence Scoring** | ✅ low / medium / high | ❌ | ❌ | ❌ | ❌ | ❌ (decay model) |
+| **Status Lifecycle** | ✅ draft → reviewed → published | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+---
+
+## Advanced Memory Features
+
+| Feature | **Noosphere** | **Hindsight** | **QMD** | **memU** | **mem0** | **LanceDB Pro** |
+|---|---|---|---|---|---|---|
+| **Multi-Provider Recall** | ✅ Noosphere + Hindsight + extensible | ❌ (single provider) | ❌ (single store) | ❌ (single provider) | ❌ (single provider) | ❌ (single store) |
+| **Recall Orchestration** | ✅ Concurrent fan-out + ranking | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Cross-Provider Dedup** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Conflict Detection** | ✅ Configurable strategies | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Token Budget Manager** | ✅ Prompt-safe recall blocks | ✅ `recallMaxTokens` | ❌ | ❌ | ❌ | ❌ |
+| **Promotion (ephemeral → curated)** | ✅ Scheduled + manual threshold triggers | ❌ | ❌ | ❌ | ❌ | ⚠️ Decay model (Weibull) |
+| **Backfill / Synthesis** | ✅ Job lifecycle with retry | ✅ Historical backfill CLI | ❌ | ❌ | ❌ | ❌ |
+| **Local Scheduler** | ✅ Built-in memory job runner | ❌ | ❌ | ✅ Continuous sync loop | ❌ | ❌ |
+| **Revision History** | ✅ Per-article | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Topic Hierarchy** | ✅ Unlimited depth | ❌ | ❌ | ✅ Category hierarchy | ❌ | ❌ |
+| **Tags / Relations** | ✅ Tags + article edges | ❌ | ❌ | ✅ Cross-references | ✅ Entity linking (v3) | ❌ |
+| **Soft Delete / Trash** | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+
+---
 
 ## API Snapshot
 
