@@ -50,8 +50,8 @@ Those are intentionally left for later PRs so each step stays reviewable.
 
 ## Install From a Cloned Repository
 
-Use this path when you have a local checkout of Noosphere and want the helper
-script to copy the Hermes plugin and setup skill into the active Hermes profile:
+Use this path to clone the Noosphere repository and run the helper script that
+copies the Hermes plugin and setup skill into the active Hermes profile:
 
 ```bash
 git clone https://github.com/SweetSophia/noosphere.git
@@ -67,6 +67,7 @@ The installer uses `$HERMES_HOME` when it is set, otherwise it installs into
 
 Use this fallback when you need to copy the plugin files yourself:
 
+    export HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
     mkdir -p "$HERMES_HOME/plugins"
     cp -R plugins/memory/noosphere "$HERMES_HOME/plugins/noosphere"
     hermes config set memory.provider noosphere
