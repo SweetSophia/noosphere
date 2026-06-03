@@ -198,3 +198,20 @@ test("filterVisibleRelatedArticleRows keeps existing scope filtering for live ta
 
   assert.deepEqual(result, [unrestricted, allowed]);
 });
+
+test("filterVisibleRelatedArticleRows short-circuits: soft-deleted targets are hidden from admin callers", () => {
+  // Even an admin ('*') cannot surface a soft-deleted target through the
+  // related-articles panel — soft-delete is an unconditional hide, matching
+  // the DELETE handler's 404-on-deleted contract.
+  const trashed = {
+    target: {
+      id: "a-trashed",
+      restrictedTags: ["financial"],
+      deletedAt: new Date("2024-01-01"),
+    },
+  };
+
+  const result = filterVisibleRelatedArticleRows([trashed], ["*"]);
+
+  assert.deepEqual(result, []);
+});

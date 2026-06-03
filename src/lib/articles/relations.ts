@@ -22,7 +22,7 @@ export interface ArticleRelationReader {
 export type RelatedArticleRow = {
   target: {
     deletedAt: Date | null;
-    restrictedTags: string[] | null;
+    restrictedTags: string[];
   };
 };
 
@@ -89,6 +89,6 @@ export function filterVisibleRelatedArticleRows<T extends RelatedArticleRow>(
   return relations.filter(
     (relation) =>
       relation.target.deletedAt === null &&
-      canAccessScopes(relation.target.restrictedTags ?? [], allowedScopes),
+      canAccessScopes(relation.target.restrictedTags, allowedScopes),
   );
 }
