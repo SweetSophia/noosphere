@@ -48,9 +48,26 @@ Not implemented yet:
 
 Those are intentionally left for later PRs so each step stays reviewable.
 
-## Manual Install During Development
-Manual setup looks like this:
+## Install From a Cloned Repository
 
+Use this path to clone the Noosphere repository and run the helper script that
+copies the Hermes plugin and setup skill into the active Hermes profile:
+
+```bash
+git clone https://github.com/SweetSophia/noosphere.git
+cd noosphere/hermes-noosphere-memory
+./install-hermes.sh
+```
+
+The installer uses `$HERMES_HOME` when it is set, otherwise it installs into
+`~/.hermes`. If the `hermes` CLI is available, it offers to run
+`hermes memory setup`; otherwise it prints the manual setup commands.
+
+## Manual Install During Development
+
+Use this fallback when you need to copy the plugin files yourself:
+
+    export HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
     mkdir -p "$HERMES_HOME/plugins"
     cp -R plugins/memory/noosphere "$HERMES_HOME/plugins/noosphere"
     hermes config set memory.provider noosphere
