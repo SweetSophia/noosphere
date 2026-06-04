@@ -13,8 +13,6 @@
  * 5. Return a detailed result object with stats and warnings
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
-import { join } from "path";
 import type { PrismaClient } from "@prisma/client";
 import type {
   MarkdownImportCandidate,
@@ -25,6 +23,14 @@ import { invalidateSearchCache } from "@/lib/cache/search-cache";
 import { isValidConfidence, isValidStatus } from "@/lib/validation";
 import type { Manifest, ManifestEntry } from "@/lib/obsidian-sync";
 import type { ObsidianSyncConfig } from "@/lib/obsidian-sync/config";
+import {
+  runtimeExists,
+  runtimeJoin,
+  runtimeMkdir,
+  runtimeReadFile,
+  runtimeRename,
+  runtimeWriteTextFile,
+} from "@/lib/runtime-fs";
 
 export const MARKDOWN_IMPORT_APPLY_MAX_BODY_BYTES = 256 * 1024; // 256KB
 export const MARKDOWN_IMPORT_APPLY_PERMISSIONS = ["ADMIN"] as const;
@@ -354,7 +360,7 @@ async function applyCreateOrUpdate(
   // ── Read and parse the markdown file ─────────────────────────────────────
   let markdownContent: string;
   try {
-    markdownContent = readFileSync(absolutePath, "utf-8");
+    markdownContent = runtimeReadFile(absolutePath, "utf-8");
   } catch {
     await recordAudit(prisma, {
       articleId: candidate.articleId ?? null,
@@ -762,10 +768,10 @@ function writeManifest(
   config: ObsidianSyncConfig,
   manifest: Manifest
 ): void {
-  const dir = join(vaultPath, ".noosphere-sync");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const manifestFile = join(vaultPath, config.manifestPath);
+  const dir = runtimeJoin(vaultPath, ".noosphere-sync");
+  if (!runtimeExists(dir)) runtimeMkdir(dir);
+  const manifestFile = runtimeJoin(vaultPath, config.manifestPath);
   const tmp = `${manifestFile}.tmp.${Date.now()}`;
-  writeFileSync(tmp, JSON.stringify(manifest, null, 2), "utf-8");
-  renameSync(tmp, manifestFile);
+  runtimeWriteTextFile(tmp, JSON.stringify(manifest, null, 2));
+  runtimeRename(tmp, manifestFile);
 }

@@ -6,8 +6,7 @@
  */
 
 import { createHash } from "crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
-import { join, resolve, relative as pathRelative } from "path";
+import { relative as pathRelative } from "path";
 import { spawn } from "child_process";
 import type { ObsidianSyncConfig } from "./config";
 import { getObsidianSyncConfig } from "./config";
@@ -26,6 +25,17 @@ import {
   findIgnoredAlwaysSyncConflictReview,
   recordSyncConflictReview,
 } from "@/lib/markdown-sync/api/conflict-review";
+import {
+  runtimeExists,
+  runtimeJoin,
+  runtimeMkdir,
+  runtimeReadFile,
+  runtimeRename,
+  runtimeResolve,
+  runtimeUnlink,
+  runtimeWriteFile,
+  runtimeWriteTextFile,
+} from "@/lib/runtime-fs";
 
 // ─────────────────────────────────────────────
 // Types
@@ -314,10 +324,10 @@ function computeContentHash(article: ArticleForSync, topicPath: string[]): strin
 // ─────────────────────────────────────────────
 
 function readManifest(vaultPath: string, config: ObsidianSyncConfig): Manifest | null {
-  const manifestFile = join(vaultPath, config.manifestPath);
-  if (!existsSync(manifestFile)) return null;
+  const manifestFile = runtimeJoin(vaultPath, config.manifestPath);
+  if (!runtimeExists(manifestFile)) return null;
   try {
-    const raw = readFileSync(manifestFile, "utf-8");
+    const raw = runtimeReadFile(manifestFile, "utf-8");
     const m = JSON.parse(raw) as Manifest;
     if (m.version !== 1) return null;
     return m;
@@ -327,18 +337,18 @@ function readManifest(vaultPath: string, config: ObsidianSyncConfig): Manifest |
 }
 
 function writeManifest(vaultPath: string, config: ObsidianSyncConfig, manifest: Manifest): void {
-  const dir = join(vaultPath, ".noosphere-sync");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const manifestFile = join(vaultPath, config.manifestPath);
+  const dir = runtimeJoin(vaultPath, ".noosphere-sync");
+  if (!runtimeExists(dir)) runtimeMkdir(dir);
+  const manifestFile = runtimeJoin(vaultPath, config.manifestPath);
   const tmp = `${manifestFile}.tmp.${Date.now()}`;
-  writeFileSync(tmp, JSON.stringify(manifest, null, 2), "utf-8");
-  renameSync(tmp, manifestFile);
+  runtimeWriteTextFile(tmp, JSON.stringify(manifest, null, 2));
+  runtimeRename(tmp, manifestFile);
 }
 
 function writeLastRun(vaultPath: string, config: ObsidianSyncConfig, result: SyncResult): void {
-  const dir = join(vaultPath, ".noosphere-sync");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const lastRunFile = join(vaultPath, config.lastRunPath);
+  const dir = runtimeJoin(vaultPath, ".noosphere-sync");
+  if (!runtimeExists(dir)) runtimeMkdir(dir);
+  const lastRunFile = runtimeJoin(vaultPath, config.lastRunPath);
   const summary = {
     lastRunAt: new Date().toISOString(),
     mode: result.mode,
@@ -349,8 +359,8 @@ function writeLastRun(vaultPath: string, config: ObsidianSyncConfig, result: Syn
     success: result.success,
   };
   const tmp = `${lastRunFile}.tmp.${Date.now()}`;
-  writeFileSync(tmp, JSON.stringify(summary, null, 2), "utf-8");
-  renameSync(tmp, lastRunFile);
+  runtimeWriteTextFile(tmp, JSON.stringify(summary, null, 2));
+  runtimeRename(tmp, lastRunFile);
 }
 
 // ─────────────────────────────────────────────
@@ -361,7 +371,7 @@ function safePath(vaultPath: string, relativePath: string): string | null {
   // Normalize vaultPath: strip trailing separators so the startsWith boundary check
   // is not bypassed by resolve("/data/vault/", "../etc/passwd") → /data/etc/passwd
   const normalizedVault = vaultPath.replace(/[/\\]+$/, "").replace(/\\/g, "/");
-  const resolved = resolve(vaultPath.replace(/[/\\]+$/, ""), relativePath).replace(/\\/g, "/");
+  const resolved = runtimeResolve(vaultPath.replace(/[/\\]+$/, ""), relativePath).replace(/\\/g, "/");
   if (!resolved.startsWith(normalizedVault + "/")) return null; // path traversal
   return resolved;
 }
@@ -376,11 +386,11 @@ function archiveConflict(
   diskContent: string
 ): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const conflictDir = join(vaultPath, ".noosphere-sync", "conflicts");
-  if (!existsSync(conflictDir)) mkdirSync(conflictDir, { recursive: true });
+  const conflictDir = runtimeJoin(vaultPath, ".noosphere-sync", "conflicts");
+  if (!runtimeExists(conflictDir)) runtimeMkdir(conflictDir);
   const safeName = relativePath.replace(/\//g, "---");
-  const conflictFile = join(conflictDir, `${timestamp}-${safeName}`);
-  writeFileSync(conflictFile, diskContent, "utf-8");
+  const conflictFile = runtimeJoin(conflictDir, `${timestamp}-${safeName}`);
+  runtimeWriteTextFile(conflictFile, diskContent);
   return `.noosphere-sync/conflicts/${timestamp}-${safeName}`;
 }
 
@@ -390,17 +400,17 @@ function archiveConflict(
 
 function trashFile(vaultPath: string, absolutePath: string): void {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const trashDir = join(vaultPath, ".noosphere-sync", "trash");
-  if (!existsSync(trashDir)) mkdirSync(trashDir, { recursive: true });
+  const trashDir = runtimeJoin(vaultPath, ".noosphere-sync", "trash");
+  if (!runtimeExists(trashDir)) runtimeMkdir(trashDir);
   const rel = pathRelative(vaultPath, absolutePath);
-  const trashPath = join(trashDir, `${timestamp}-${rel.replace(/\//g, "---")}`);
+  const trashPath = runtimeJoin(trashDir, `${timestamp}-${rel.replace(/\//g, "---")}`);
   try {
-    renameSync(absolutePath, trashPath);
+    runtimeRename(absolutePath, trashPath);
   } catch {
     // Cross-device: copy then delete
     try {
-      writeFileSync(trashPath, readFileSync(absolutePath));
-      unlinkSync(absolutePath);
+      runtimeWriteFile(trashPath, runtimeReadFile(absolutePath));
+      runtimeUnlink(absolutePath);
     } catch (e) {
       console.error("[obsidian-sync] Failed to trash file:", absolutePath, e);
     }
@@ -413,10 +423,10 @@ function trashFile(vaultPath: string, absolutePath: string): void {
 
 function writeFileAtomic(absolutePath: string, content: string): void {
   const dir = absolutePath.slice(0, absolutePath.lastIndexOf("/"));
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  if (!runtimeExists(dir)) runtimeMkdir(dir);
   const tmp = `${absolutePath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2)}`;
-  writeFileSync(tmp, content, "utf-8");
-  renameSync(tmp, absolutePath);
+  runtimeWriteTextFile(tmp, content);
+  runtimeRename(tmp, absolutePath);
 }
 
 // ─────────────────────────────────────────────
@@ -469,8 +479,8 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
 
   try {
     // ── Ensure vault root exists ─────────────────────────────────────────
-    if (!options.dryRun && !existsSync(vaultPath)) {
-      mkdirSync(vaultPath, { recursive: true });
+    if (!options.dryRun && !runtimeExists(vaultPath)) {
+      runtimeMkdir(vaultPath);
     }
 
     // ── Read manifest ──────────────────────────────────────────────────────
@@ -572,10 +582,10 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
         // A persisted empty string is different: it came from the short-lived
         // sentinel fallback and must be treated as invalid so we archive before
         // rewriting rather than silently blessing the current disk state.
-        if (existsSync(safe) && existingEntry) {
+        if (runtimeExists(safe) && existingEntry) {
           let diskBuffer: Buffer | null = null;
           try {
-            diskBuffer = readFileSync(safe);
+            diskBuffer = runtimeReadFile(safe);
           } catch {
             // File deleted or unreadable between existsSync and readFileSync —
             // skip conflict detection and proceed to write (re-creating the file).
@@ -681,11 +691,11 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
           delete manifest.articles[articleId];
           continue;
         }
-        if (existsSync(safeAbsPath)) {
+        if (runtimeExists(safeAbsPath)) {
           if (config.trashDeletions) {
             trashFile(vaultPath, safeAbsPath);
           } else {
-            unlinkSync(safeAbsPath);
+            runtimeUnlink(safeAbsPath);
           }
           stats.deleted++;
           warnings.push(`Removed soft-deleted mirror: ${entry.path}`);
@@ -711,7 +721,7 @@ export async function runObsidianSync(options: SyncOptions): Promise<SyncResult>
       stats,
       manifest: {
         updated: true,
-        path: join(vaultPath, config.manifestPath),
+        path: runtimeJoin(vaultPath, config.manifestPath),
       },
       warnings,
     };

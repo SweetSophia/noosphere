@@ -6,8 +6,7 @@
  */
 
 import { createHash } from "crypto";
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "fs";
-import { join, relative, resolve } from "path";
+import { relative } from "path";
 import { Permissions } from "@prisma/client";
 import {
   parseNoosphereMarkdown,
@@ -15,6 +14,15 @@ import {
   readMarkdownStringArray,
 } from "@/lib/markdown/noosphere-markdown";
 import type { Manifest, ManifestEntry } from "@/lib/obsidian-sync";
+import {
+  runtimeExists,
+  runtimeJoin,
+  runtimeLstat,
+  runtimeReadDir,
+  runtimeReadFile,
+  runtimeRealpath,
+  runtimeResolve,
+} from "@/lib/runtime-fs";
 
 export const MARKDOWN_IMPORT_SCAN_MAX_BODY_BYTES = 32 * 1024;
 export const MARKDOWN_IMPORT_SCAN_DEFAULT_MAX_FILES = 5_000;
@@ -293,7 +301,7 @@ function scanTrackedEntry(
   }
 
   const baselineHash = entry.writtenHash ?? null;
-  if (!existsSync(absolutePath)) {
+  if (!runtimeExists(absolutePath)) {
     return {
       kind: "missing",
       relativePath,
@@ -360,10 +368,10 @@ function readManifest(vaultPath: string, manifestPath: string, warnings: string[
     return null;
   }
 
-  if (!existsSync(absolutePath)) return null;
+  if (!runtimeExists(absolutePath)) return null;
 
   try {
-    const parsed = JSON.parse(readFileSync(absolutePath, "utf-8")) as Manifest;
+    const parsed = JSON.parse(runtimeReadFile(absolutePath, "utf-8")) as Manifest;
     if (parsed.version !== 1 || !isManifestArticles(parsed.articles)) {
       warnings.push(`Unsupported manifest format: ${manifestPath}`);
       return null;
@@ -380,7 +388,7 @@ function loadMarkdownFile(vaultPath: string, relativePath: string): LoadedMarkdo
   if (!absolutePath) {
     throw new Error("File path escapes vault root, is a symlink, or is not a regular file");
   }
-  const content = readFileSync(absolutePath, "utf-8");
+  const content = runtimeReadFile(absolutePath, "utf-8");
   const parsed = parseNoosphereMarkdown(content);
   const markdownHash = hashMarkdownContent(content);
   const sizeBytes = Buffer.byteLength(content, "utf-8");
@@ -428,9 +436,9 @@ function listMarkdownFiles(
   warnings: string[],
   ignoredPaths: Set<string>,
 ): string[] {
-  if (!existsSync(vaultPath)) return [];
+  if (!runtimeExists(vaultPath)) return [];
 
-  const root = resolve(vaultPath);
+  const root = runtimeResolve(vaultPath);
   const files: string[] = [];
   walk(root);
   return files.sort();
@@ -438,7 +446,7 @@ function listMarkdownFiles(
   function walk(directory: string) {
     let entries;
     try {
-      entries = readdirSync(directory, { withFileTypes: true });
+      entries = runtimeReadDir(directory);
     } catch (error) {
       warnings.push(`Failed to read directory ${directory}: ${errorMessage(error)}`);
       return;
@@ -447,7 +455,7 @@ function listMarkdownFiles(
     entries.sort((a, b) => a.name.localeCompare(b.name));
 
     for (const entry of entries) {
-      const absolutePath = join(directory, entry.name);
+      const absolutePath = runtimeJoin(directory, entry.name);
       const relativePath = normalizeRelativePath(relative(root, absolutePath));
 
       if (entry.isDirectory()) {
@@ -479,8 +487,8 @@ function incrementCandidateStats(stats: MarkdownImportScanStats, candidate: Mark
 }
 
 function resolveVaultPath(vaultPath: string, relativePath: string): string | null {
-  const root = resolve(vaultPath).replace(/[/\\]+$/, "").replace(/\\/g, "/");
-  const absolutePath = resolve(vaultPath, relativePath).replace(/\\/g, "/");
+  const root = runtimeResolve(vaultPath).replace(/[/\\]+$/, "").replace(/\\/g, "/");
+  const absolutePath = runtimeResolve(vaultPath, relativePath).replace(/\\/g, "/");
   if (!absolutePath.startsWith(`${root}/`)) return null;
   return absolutePath;
 }
@@ -489,11 +497,11 @@ export function resolveExistingVaultFilePath(vaultPath: string, relativePath: st
   const absolutePath = resolveVaultPath(vaultPath, relativePath);
   if (!absolutePath) return null;
 
-  const stat = lstatSync(absolutePath);
+  const stat = runtimeLstat(absolutePath);
   if (stat.isSymbolicLink() || !stat.isFile()) return null;
 
-  const root = realpathSync(vaultPath).replace(/[/\\]+$/, "").replace(/\\/g, "/");
-  const realPath = realpathSync(absolutePath).replace(/\\/g, "/");
+  const root = runtimeRealpath(vaultPath).replace(/[/\\]+$/, "").replace(/\\/g, "/");
+  const realPath = runtimeRealpath(absolutePath).replace(/\\/g, "/");
   if (!realPath.startsWith(`${root}/`)) return null;
 
   return absolutePath;
