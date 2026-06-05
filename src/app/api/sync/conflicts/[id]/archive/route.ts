@@ -6,7 +6,6 @@
 
 export const dynamic = "force-dynamic";
 
-import { readFile } from "fs/promises";
 import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -14,6 +13,7 @@ import { requirePermission } from "@/lib/api/auth";
 import { getObsidianSyncConfig } from "@/lib/obsidian-sync/config";
 import { resolveVaultArchivePath } from "@/lib/markdown-sync/conflict-review";
 import { rateLimit } from "@/lib/rate-limit";
+import { runtimeReadTextFileAsync } from "@/lib/runtime-fs";
 
 export async function GET(
   request: NextRequest,
@@ -48,7 +48,7 @@ export async function GET(
   }
 
   try {
-    const content = await readFile(absolutePath, "utf-8");
+    const content = await runtimeReadTextFileAsync(absolutePath);
     const filename = (review.relativePath.split("/").pop() ?? "conflict.md").replace(/[^\w.-]/g, "_");
     return new NextResponse(content, {
       status: 200,

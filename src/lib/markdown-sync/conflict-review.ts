@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
-import { resolve } from "path";
 import { parseNoosphereMarkdown, readMarkdownString, readMarkdownStringArray } from "@/lib/markdown/noosphere-markdown";
+import { runtimeResolve } from "@/lib/runtime-fs";
 
 export const SYNC_CONFLICT_REVIEW_STATUSES = ["open", "resolved", "ignored-once", "ignored-always"] as const;
 export type SyncConflictReviewStatus = (typeof SYNC_CONFLICT_REVIEW_STATUSES)[number];
@@ -150,8 +150,8 @@ export function buildSyncConflictReviewCreateInput(args: {
 
 export function resolveVaultArchivePath(vaultPath: string, archivePath: string): string | null {
   const normalizedVault = vaultPath.replace(/[/\\]+$/, "");
-  const conflictRoot = resolve(normalizedVault, ".noosphere-sync", "conflicts").replace(/\\/g, "/");
-  const absolutePath = resolve(normalizedVault, archivePath).replace(/\\/g, "/");
+  const conflictRoot = runtimeResolve(normalizedVault, ".noosphere-sync", "conflicts").replace(/\\/g, "/");
+  const absolutePath = runtimeResolve(normalizedVault, archivePath).replace(/\\/g, "/");
 
   if (!absolutePath.startsWith(`${conflictRoot}/`)) return null;
   return absolutePath;
