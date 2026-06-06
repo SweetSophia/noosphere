@@ -67,6 +67,30 @@ export async function resolveRestrictedTagsForCaller(
   return validateRestrictedTagsExist(normalized.value, lookup);
 }
 
+/**
+ * Validates restrictedTags coming from a markdown import file.
+ *
+ * Unlike `resolveRestrictedTagsForCaller` (used by POST /api/articles), this
+ * does NOT default missing tags to the caller's scopes. Import files must
+ * explicitly declare their restricted tags; an omitted/empty value means
+ * "no restricted tags" regardless of the caller's scopes.
+ *
+ * Otherwise, scope assignment and existence checks are identical.
+ */
+export async function resolveImportRestrictedTags(
+  value: unknown,
+  allowedScopes: string[] | undefined,
+  lookup: RestrictedScopeLookup = findExistingRestrictedScopes,
+): Promise<RestrictedTagsResult> {
+  if (value === undefined || value === null) {
+    return { ok: true, value: [] };
+  }
+  if (Array.isArray(value) && value.length === 0) {
+    return { ok: true, value: [] };
+  }
+  return resolveRestrictedTagsForCaller(value, allowedScopes, lookup);
+}
+
 export async function validateRestrictedTagsExist(
   tags: string[],
   lookup: RestrictedScopeLookup = findExistingRestrictedScopes,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, canAccessScopes } from "@/lib/api/auth";
+import { resolveImportRestrictedTags } from "@/lib/api/restricted-scopes";
 import JSZip from "jszip";
 import { isValidConfidence, isValidStatus } from "@/lib/validation";
 import { rateLimit } from "@/lib/rate-limit";
@@ -245,6 +246,22 @@ export async function POST(request: NextRequest) {
   for (const article of toImport) {
     if (!article.error && !topicBySlug.has(article.topicSlug)) {
       article.error = `Topic "${article.topicSlug}" not found`;
+    }
+  }
+
+  // Validate that the caller is allowed to assign the requested restrictedTags.
+  // Without this check, a scoped WRITE key could craft an import to add restricted
+  // tags the caller does not have on existing or new articles. See issue #136.
+  for (const article of toImport) {
+    if (article.error) continue;
+    const requested = article.restrictedTags ?? [];
+    if (requested.length === 0) continue;
+    const result = await resolveImportRestrictedTags(
+      requested,
+      allowedScopes,
+    );
+    if (!result.ok) {
+      article.error = result.error;
     }
   }
 
