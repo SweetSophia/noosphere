@@ -256,6 +256,10 @@ Add `restrictedTags` to request body and response:
 - If an agent passes a tag not in `RestrictedScope`, return 400 with helpful message listing valid tags
 - Sophie can set any tags she pre-approved; agents are encouraged to suggest tags and let Sophie add them to the scope registry first
 
+#### `POST /api/import` — Bulk article import
+
+Import files declare `restrictedTags` in each article's frontmatter. The route applies the same caller-can-assign and tag-must-exist checks as `POST /api/articles`, but with one contract difference: an omitted or empty `restrictedTags` value means "no restricted tags" and is **not** auto-assigned to the caller's scopes (the import file is the source of truth, not the caller's existing scopes). Validation lives in `resolveImportRestrictedTags` in `src/lib/api/restricted-scopes.ts`. Articles whose `restrictedTags` fail validation are recorded with an error message in the import summary and skipped without aborting the batch. See issue #136 for the original report.
+
 #### `PATCH /api/articles/:id` — Article update
 
 Add `restrictedTags` to updatable fields:

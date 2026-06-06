@@ -76,6 +76,12 @@ export async function resolveRestrictedTagsForCaller(
  * "no restricted tags" regardless of the caller's scopes.
  *
  * Otherwise, scope assignment and existence checks are identical.
+ *
+ * Design note: a flag parameter on `resolveRestrictedTagsForCaller` was
+ * considered and rejected. The two callers have different contracts
+ * (auto-assign vs. explicit) and conflating them behind a boolean makes
+ * both call sites harder to read. A named function keeps each contract
+ * visible at the call site.
  */
 export async function resolveImportRestrictedTags(
   value: unknown,
