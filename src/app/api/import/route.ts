@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Role } from "@prisma/client";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, canAccessScopes } from "@/lib/api/auth";
+import { resolveImportRestrictedTags } from "@/lib/api/restricted-scopes";
 import JSZip from "jszip";
 import { isValidConfidence, isValidStatus } from "@/lib/validation";
 import { rateLimit } from "@/lib/rate-limit";
@@ -25,6 +27,48 @@ function validatedStatus(v: string | undefined, fallback: string): string {
   return v && isValidStatus(v) ? v : fallback;
 }
 
+function hasRestrictedTagsField(frontmatter: Record<string, unknown>): boolean {
+  return Object.prototype.hasOwnProperty.call(frontmatter, "restrictedTags");
+}
+
+export function sameRestrictedTags(a: string[], b: string[]): boolean {
+  // Compare as sets, not sequences: order-insensitive, duplicate-tolerant.
+  // The duplicate-tolerance is defence-in-depth: `resolveImportRestrictedTags`
+  // and `readMarkdownStringArray` already dedupe their inputs, but the
+  // comparison should not silently treat a de-duped set as equal to a
+  // superset just because both inputs happen to share the same length.
+  const aSet = new Set(a);
+  const bSet = new Set(b);
+  if (aSet.size !== bSet.size) return false;
+  for (const tag of aSet) {
+    if (!bSet.has(tag)) return false;
+  }
+  return true;
+}
+
+export function canChangeExistingRestrictedTags(auth: {
+  allowedScopes?: string[];
+  keyId?: string;
+  permissions?: Permissions;
+  role?: Role;
+}): boolean {
+  // Sessions and ADMIN permission both carry the full-access signal we care
+  // about here. Sessions (humans) get `allowedScopes: ["*"]` from
+  // checkRouteAuth and never set `keyId`; the previous API-key-only branch
+  // therefore blocked EDITOR sessions from reclassifying on overwrite even
+  // though they can already read every restricted article.
+  if (auth.permissions === Permissions.ADMIN || auth.role === "ADMIN") return true;
+  return Boolean(auth.allowedScopes?.includes("*"));
+}
+
+function restrictedTagsCallerCannotAssign(
+  restrictedTags: string[],
+  allowedScopes: string[] | undefined,
+): string[] {
+  if (allowedScopes?.includes("*")) return [];
+  return restrictedTags.filter((tag) => !(allowedScopes ?? []).includes(tag));
+}
+
 interface ImportArticle {
   filename: string;
   title: string;
@@ -38,6 +82,8 @@ interface ImportArticle {
   sourceUrl?: string;
   sourceType?: string;
   restrictedTags?: string[];
+  restrictedTagsInput?: unknown;
+  hasRestrictedTagsField: boolean;
   error?: string;
 }
 
@@ -180,7 +226,7 @@ export async function POST(request: NextRequest) {
     try {
       content = await entry.async("string");
     } catch {
-      toImport.push({ filename: entry.name, title: "", slug: "", topicSlug: "", content: "", tags: [], error: "Failed to read file" });
+      toImport.push({ filename: entry.name, title: "", slug: "", topicSlug: "", content: "", tags: [], hasRestrictedTagsField: false, error: "Failed to read file" });
       continue;
     }
 
@@ -189,7 +235,7 @@ export async function POST(request: NextRequest) {
 
     const parsed = parseNoosphereMarkdown(content);
     if (!parsed.ok) {
-      toImport.push({ filename: entry.name, title: "", slug: "", topicSlug: "", content: "", tags: [], error: parsed.error });
+      toImport.push({ filename: entry.name, title: "", slug: "", topicSlug: "", content: "", tags: [], hasRestrictedTagsField: false, error: parsed.error });
       continue;
     }
 
@@ -199,12 +245,12 @@ export async function POST(request: NextRequest) {
     const topicSlug = readMarkdownString(frontmatter, "topic") ?? topicPath.at(-1) ?? defaultTopicSlug ?? "";
 
     if (!title || !articleContent.trim()) {
-      toImport.push({ filename: entry.name, title, slug: "", topicSlug, content: articleContent, tags: [], error: "Missing required field: title or content" });
+      toImport.push({ filename: entry.name, title, slug: "", topicSlug, content: articleContent, tags: [], hasRestrictedTagsField: false, error: "Missing required field: title or content" });
       continue;
     }
 
     if (!topicSlug) {
-      toImport.push({ filename: entry.name, title, slug: "", topicSlug: "", content: articleContent, tags: [], error: "Missing required field: topic" });
+      toImport.push({ filename: entry.name, title, slug: "", topicSlug: "", content: articleContent, tags: [], hasRestrictedTagsField: false, error: "Missing required field: topic" });
       continue;
     }
 
@@ -218,12 +264,16 @@ export async function POST(request: NextRequest) {
       .slice(0, 80);
 
     if (!slug) {
-      toImport.push({ filename: entry.name, title, slug: "", topicSlug, content: articleContent, tags: [], error: "Could not derive valid slug from filename" });
+      toImport.push({ filename: entry.name, title, slug: "", topicSlug, content: articleContent, tags: [], hasRestrictedTagsField: false, error: "Could not derive valid slug from filename" });
       continue;
     }
 
     const tags = readMarkdownStringArray(frontmatter, "tags");
-    const restrictedTags = readMarkdownStringArray(frontmatter, "restrictedTags");
+    const hasRestrictedTags = hasRestrictedTagsField(frontmatter);
+    const restrictedTagsInput = hasRestrictedTags ? frontmatter.restrictedTags : undefined;
+    const restrictedTags = hasRestrictedTags
+      ? readMarkdownStringArray(frontmatter, "restrictedTags")
+      : undefined;
 
     toImport.push({
       filename: entry.name,
@@ -237,7 +287,9 @@ export async function POST(request: NextRequest) {
       status: readMarkdownString(frontmatter, "status"),
       sourceUrl: readMarkdownString(frontmatter, "sourceUrl"),
       sourceType: readMarkdownString(frontmatter, "sourceType"),
-      restrictedTags: restrictedTags.length > 0 ? restrictedTags : undefined,
+      restrictedTags,
+      restrictedTagsInput,
+      hasRestrictedTagsField: hasRestrictedTags,
     });
   }
 
@@ -248,9 +300,52 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Validate the requested restrictedTags shape and database existence first.
+  // Authorization is decided later with the existing article in hand: an
+  // explicit same-set overwrite is a no-op, even if the caller only has one of
+  // several existing scopes. New articles still need caller-can-assign checks.
+  //
+  // Batch the RestrictedScope existence check: collect every unique requested
+  // tag across the batch and resolve them in a single query, then validate
+  // each article against the in-memory set via the helper's injectable
+  // lookup. Avoids an N+1 query pattern for large imports.
+  const allRequestedTags = new Set<string>();
+  for (const article of toImport) {
+    if (article.error) continue;
+    for (const tag of article.restrictedTags ?? []) {
+      allRequestedTags.add(tag);
+    }
+  }
+  const existingScopes = new Set<string>();
+  if (allRequestedTags.size > 0) {
+    const rows = await prisma.restrictedScope.findMany({
+      where: { tag: { in: Array.from(allRequestedTags) } },
+      select: { tag: true },
+    });
+    for (const row of rows) existingScopes.add(row.tag);
+  }
+  const batchedLookup = async (tags: string[]): Promise<Iterable<string>> =>
+    tags.filter((t) => existingScopes.has(t));
+
+  for (const article of toImport) {
+    if (article.error) continue;
+    if (!article.hasRestrictedTagsField) continue;
+    const result = await resolveImportRestrictedTags(
+      article.restrictedTagsInput,
+      ["*"],
+      batchedLookup,
+    );
+    if (!result.ok) {
+      article.error = result.error;
+    } else {
+      article.restrictedTags = result.value;
+    }
+  }
+
   // Process imports
   const userId = auth.auth.userId ?? null;
   const userName = auth.auth.name ?? "Importer";
+  const canChangeClassification = canChangeExistingRestrictedTags(auth.auth);
 
   const results = { imported: 0, skipped: 0, errors: 0 };
 
@@ -276,6 +371,33 @@ export async function POST(request: NextRequest) {
             results.skipped++;
             continue;
           }
+
+          const existingRestrictedTags = existing.restrictedTags ?? [];
+          let nextRestrictedTags = article.restrictedTags ?? [];
+          if (existingRestrictedTags.length > 0 && !article.hasRestrictedTagsField) {
+            // Omitted frontmatter on an already-restricted article preserves
+            // the existing classification. Explicit values still flow through
+            // the change-check below.
+            nextRestrictedTags = existingRestrictedTags;
+          }
+          const restrictedTagsChanged = !sameRestrictedTags(
+            existingRestrictedTags,
+            nextRestrictedTags,
+          );
+          if (restrictedTagsChanged && !canChangeClassification) {
+            // Classification (unrestricted→restricted), declassification
+            // (restricted→unrestricted), and reclassification (restricted→a
+            // *different* restricted set) are all privileged operations. The
+            // import file is treated as content, not as an authorisation
+            // change, so any classification boundary crossing requires ADMIN
+            // (or session/["*"]) authority regardless of the caller's
+            // allowedScopes on the article.
+            article.error =
+              "Changing restrictedTags on an existing article requires ADMIN access";
+            results.errors++;
+            continue;
+          }
+
           // Update existing article
           await tx.article.update({
             where: { id: existing.id },
@@ -285,14 +407,46 @@ export async function POST(request: NextRequest) {
               excerpt: article.excerpt ?? article.content.slice(0, 160).replace(/[#*`_]/g, ""),
               confidence: validatedConfidence(article.confidence),
               status: validatedStatus(article.status, existing.status),
-              restrictedTags: article.restrictedTags ?? [],
+              restrictedTags: nextRestrictedTags,
               updatedAt: new Date(),
             },
           });
+          if (restrictedTagsChanged) {
+            const wasUnrestricted = existingRestrictedTags.length === 0;
+            const isNowUnrestricted = nextRestrictedTags.length === 0;
+            await tx.activityLog.create({
+              data: {
+                type: "update",
+                title: `Updated restrictedTags via import: ${article.title}`,
+                authorName: userName,
+                details: {
+                  articleId: existing.id,
+                  slug: article.slug,
+                  topicSlug: article.topicSlug,
+                  previousRestrictedTags: existingRestrictedTags,
+                  restrictedTags: nextRestrictedTags,
+                  classified: wasUnrestricted && !isNowUnrestricted,
+                  declassified: !wasUnrestricted && isNowUnrestricted,
+                  reclassified:
+                    !wasUnrestricted && !isNowUnrestricted,
+                },
+              },
+            });
+          }
           results.imported++;
         } else {
           results.skipped++;
         }
+        continue;
+      }
+
+      const unauthorized = restrictedTagsCallerCannotAssign(
+        article.restrictedTags ?? [],
+        allowedScopes,
+      );
+      if (unauthorized.length > 0) {
+        article.error = `Cannot assign scope(s) you don't have: ${unauthorized.join(", ")}`;
+        results.errors++;
         continue;
       }
 
