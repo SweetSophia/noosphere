@@ -260,6 +260,19 @@ Add `restrictedTags` to request body and response:
 
 Import files declare `restrictedTags` in each article's frontmatter. The route applies the same caller-can-assign and tag-must-exist checks as `POST /api/articles`, but with one contract difference: an omitted or empty `restrictedTags` value means "no restricted tags" and is **not** auto-assigned to the caller's scopes (the import file is the source of truth, not the caller's existing scopes). Validation lives in `resolveImportRestrictedTags` in `src/lib/api/restricted-scopes.ts`. Articles whose `restrictedTags` fail validation are recorded with an error message in the import summary and skipped without aborting the batch. See issue #136 for the original report.
 
+**Overwrite semantics (`overwrite=true`):** the import route is a content channel, not an authorisation channel. The frontmatter `restrictedTags` is the **new desired state**, but the route enforces a stricter rule on top of the create-path checks:
+
+- **New article:** importer may create public content if `restrictedTags` is omitted or `[]`. Not declassification because there is no prior protected state.
+- **Overwrite an unrestricted article:** importer may keep it public, or classify it to scopes they are allowed to assign — *only if* the caller has ADMIN (or session `["*"]`) authority. The import file is content, so a non-ADMIN caller cannot use overwrite to *narrow* who can read existing content.
+- **Overwrite a restricted article:**
+  - omitted `restrictedTags` ⇒ preserve the existing classification (no-op, allowed for any caller who can already read it);
+  - same `restrictedTags` as the existing set ⇒ no-op, allowed;
+  - `[]` (explicit) ⇒ declassification, requires ADMIN;
+  - different set ⇒ reclassification, requires ADMIN.
+- Only ADMIN, an API key with `allowedScopes: ["*"]`, or a session caller (any role) may cross a classification boundary on overwrite. Scoped WRITE keys can still edit the *content* of articles they can read, but cannot make restricted content more public or change its access boundary.
+
+Validation rejects any boundary-crossing attempt with a 400 and an article-level error message; the row is skipped, the rest of the batch proceeds.
+
 #### `PATCH /api/articles/:id` — Article update
 
 Add `restrictedTags` to updatable fields:

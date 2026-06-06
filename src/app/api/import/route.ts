@@ -31,10 +31,19 @@ function hasRestrictedTagsField(frontmatter: Record<string, unknown>): boolean {
   return Object.prototype.hasOwnProperty.call(frontmatter, "restrictedTags");
 }
 
-function sameRestrictedTags(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
+export function sameRestrictedTags(a: string[], b: string[]): boolean {
+  // Compare as sets, not sequences: order-insensitive, duplicate-tolerant.
+  // The duplicate-tolerance is defence-in-depth: `resolveImportRestrictedTags`
+  // and `readMarkdownStringArray` already dedupe their inputs, but the
+  // comparison should not silently treat a de-duped set as equal to a
+  // superset just because both inputs happen to share the same length.
+  const aSet = new Set(a);
   const bSet = new Set(b);
-  return a.every((tag) => bSet.has(tag));
+  if (aSet.size !== bSet.size) return false;
+  for (const tag of aSet) {
+    if (!bSet.has(tag)) return false;
+  }
+  return true;
 }
 
 export function canChangeExistingRestrictedTags(auth: {
@@ -356,16 +365,29 @@ export async function POST(request: NextRequest) {
 
           const existingRestrictedTags = existing.restrictedTags ?? [];
           let nextRestrictedTags = article.restrictedTags ?? [];
-          if (existingRestrictedTags.length > 0) {
-            if (!article.hasRestrictedTagsField) {
-              nextRestrictedTags = existingRestrictedTags;
-            } else if (!sameRestrictedTags(existingRestrictedTags, nextRestrictedTags) && !canChangeClassification) {
-              article.error = "Changing restrictedTags on an existing restricted article requires ADMIN access";
-              results.errors++;
-              continue;
-            }
+          if (existingRestrictedTags.length > 0 && !article.hasRestrictedTagsField) {
+            // Omitted frontmatter on an already-restricted article preserves
+            // the existing classification. Explicit values still flow through
+            // the change-check below.
+            nextRestrictedTags = existingRestrictedTags;
           }
-          const restrictedTagsChanged = !sameRestrictedTags(existingRestrictedTags, nextRestrictedTags);
+          const restrictedTagsChanged = !sameRestrictedTags(
+            existingRestrictedTags,
+            nextRestrictedTags,
+          );
+          if (restrictedTagsChanged && !canChangeClassification) {
+            // Classification (unrestricted→restricted), declassification
+            // (restricted→unrestricted), and reclassification (restricted→a
+            // *different* restricted set) are all privileged operations. The
+            // import file is treated as content, not as an authorisation
+            // change, so any classification boundary crossing requires ADMIN
+            // (or session/["*"]) authority regardless of the caller's
+            // allowedScopes on the article.
+            article.error =
+              "Changing restrictedTags on an existing article requires ADMIN access";
+            results.errors++;
+            continue;
+          }
 
           // Update existing article
           await tx.article.update({
@@ -381,6 +403,8 @@ export async function POST(request: NextRequest) {
             },
           });
           if (restrictedTagsChanged) {
+            const wasUnrestricted = existingRestrictedTags.length === 0;
+            const isNowUnrestricted = nextRestrictedTags.length === 0;
             await tx.activityLog.create({
               data: {
                 type: "update",
@@ -392,7 +416,10 @@ export async function POST(request: NextRequest) {
                   topicSlug: article.topicSlug,
                   previousRestrictedTags: existingRestrictedTags,
                   restrictedTags: nextRestrictedTags,
-                  declassified: existingRestrictedTags.length > 0 && nextRestrictedTags.length === 0,
+                  classified: wasUnrestricted && !isNowUnrestricted,
+                  declassified: !wasUnrestricted && isNowUnrestricted,
+                  reclassified:
+                    !wasUnrestricted && !isNowUnrestricted,
                 },
               },
             });
