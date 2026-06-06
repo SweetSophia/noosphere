@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Role } from "@prisma/client";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, canAccessScopes } from "@/lib/api/auth";
@@ -26,6 +27,26 @@ function validatedStatus(v: string | undefined, fallback: string): string {
   return v && isValidStatus(v) ? v : fallback;
 }
 
+function hasRestrictedTagsField(frontmatter: Record<string, unknown>): boolean {
+  return Object.prototype.hasOwnProperty.call(frontmatter, "restrictedTags");
+}
+
+function sameRestrictedTags(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const bSet = new Set(b);
+  return a.every((tag) => bSet.has(tag));
+}
+
+function canChangeExistingRestrictedTags(auth: {
+  allowedScopes?: string[];
+  keyId?: string;
+  permissions?: Permissions;
+  role?: Role;
+}): boolean {
+  if (auth.permissions === Permissions.ADMIN || auth.role === "ADMIN") return true;
+  return Boolean(auth.keyId && auth.allowedScopes?.includes("*"));
+}
+
 interface ImportArticle {
   filename: string;
   title: string;
@@ -39,6 +60,8 @@ interface ImportArticle {
   sourceUrl?: string;
   sourceType?: string;
   restrictedTags?: string[];
+  restrictedTagsInput?: unknown;
+  hasRestrictedTagsField: boolean;
   error?: string;
 }
 
@@ -181,7 +204,7 @@ export async function POST(request: NextRequest) {
     try {
       content = await entry.async("string");
     } catch {
-      toImport.push({ filename: entry.name, title: "", slug: "", topicSlug: "", content: "", tags: [], error: "Failed to read file" });
+      toImport.push({ filename: entry.name, title: "", slug: "", topicSlug: "", content: "", tags: [], hasRestrictedTagsField: false, error: "Failed to read file" });
       continue;
     }
 
@@ -190,7 +213,7 @@ export async function POST(request: NextRequest) {
 
     const parsed = parseNoosphereMarkdown(content);
     if (!parsed.ok) {
-      toImport.push({ filename: entry.name, title: "", slug: "", topicSlug: "", content: "", tags: [], error: parsed.error });
+      toImport.push({ filename: entry.name, title: "", slug: "", topicSlug: "", content: "", tags: [], hasRestrictedTagsField: false, error: parsed.error });
       continue;
     }
 
@@ -200,12 +223,12 @@ export async function POST(request: NextRequest) {
     const topicSlug = readMarkdownString(frontmatter, "topic") ?? topicPath.at(-1) ?? defaultTopicSlug ?? "";
 
     if (!title || !articleContent.trim()) {
-      toImport.push({ filename: entry.name, title, slug: "", topicSlug, content: articleContent, tags: [], error: "Missing required field: title or content" });
+      toImport.push({ filename: entry.name, title, slug: "", topicSlug, content: articleContent, tags: [], hasRestrictedTagsField: false, error: "Missing required field: title or content" });
       continue;
     }
 
     if (!topicSlug) {
-      toImport.push({ filename: entry.name, title, slug: "", topicSlug: "", content: articleContent, tags: [], error: "Missing required field: topic" });
+      toImport.push({ filename: entry.name, title, slug: "", topicSlug: "", content: articleContent, tags: [], hasRestrictedTagsField: false, error: "Missing required field: topic" });
       continue;
     }
 
@@ -219,12 +242,16 @@ export async function POST(request: NextRequest) {
       .slice(0, 80);
 
     if (!slug) {
-      toImport.push({ filename: entry.name, title, slug: "", topicSlug, content: articleContent, tags: [], error: "Could not derive valid slug from filename" });
+      toImport.push({ filename: entry.name, title, slug: "", topicSlug, content: articleContent, tags: [], hasRestrictedTagsField: false, error: "Could not derive valid slug from filename" });
       continue;
     }
 
     const tags = readMarkdownStringArray(frontmatter, "tags");
-    const restrictedTags = readMarkdownStringArray(frontmatter, "restrictedTags");
+    const hasRestrictedTags = hasRestrictedTagsField(frontmatter);
+    const restrictedTagsInput = hasRestrictedTags ? frontmatter.restrictedTags : undefined;
+    const restrictedTags = hasRestrictedTags
+      ? readMarkdownStringArray(frontmatter, "restrictedTags")
+      : undefined;
 
     toImport.push({
       filename: entry.name,
@@ -238,7 +265,9 @@ export async function POST(request: NextRequest) {
       status: readMarkdownString(frontmatter, "status"),
       sourceUrl: readMarkdownString(frontmatter, "sourceUrl"),
       sourceType: readMarkdownString(frontmatter, "sourceType"),
-      restrictedTags: restrictedTags.length > 0 ? restrictedTags : undefined,
+      restrictedTags,
+      restrictedTagsInput,
+      hasRestrictedTagsField: hasRestrictedTags,
     });
   }
 
@@ -277,21 +306,23 @@ export async function POST(request: NextRequest) {
 
   for (const article of toImport) {
     if (article.error) continue;
-    const requested = article.restrictedTags ?? [];
-    if (requested.length === 0) continue;
+    if (!article.hasRestrictedTagsField) continue;
     const result = await resolveImportRestrictedTags(
-      requested,
+      article.restrictedTagsInput,
       allowedScopes,
       batchedLookup,
     );
     if (!result.ok) {
       article.error = result.error;
+    } else {
+      article.restrictedTags = result.value;
     }
   }
 
   // Process imports
   const userId = auth.auth.userId ?? null;
   const userName = auth.auth.name ?? "Importer";
+  const canChangeClassification = canChangeExistingRestrictedTags(auth.auth);
 
   const results = { imported: 0, skipped: 0, errors: 0 };
 
@@ -317,6 +348,20 @@ export async function POST(request: NextRequest) {
             results.skipped++;
             continue;
           }
+
+          const existingRestrictedTags = existing.restrictedTags ?? [];
+          let nextRestrictedTags = article.restrictedTags ?? [];
+          if (existingRestrictedTags.length > 0) {
+            if (!article.hasRestrictedTagsField) {
+              nextRestrictedTags = existingRestrictedTags;
+            } else if (!sameRestrictedTags(existingRestrictedTags, nextRestrictedTags) && !canChangeClassification) {
+              article.error = "Changing restrictedTags on an existing restricted article requires ADMIN access";
+              results.errors++;
+              continue;
+            }
+          }
+          const restrictedTagsChanged = !sameRestrictedTags(existingRestrictedTags, nextRestrictedTags);
+
           // Update existing article
           await tx.article.update({
             where: { id: existing.id },
@@ -326,10 +371,27 @@ export async function POST(request: NextRequest) {
               excerpt: article.excerpt ?? article.content.slice(0, 160).replace(/[#*`_]/g, ""),
               confidence: validatedConfidence(article.confidence),
               status: validatedStatus(article.status, existing.status),
-              restrictedTags: article.restrictedTags ?? [],
+              restrictedTags: nextRestrictedTags,
               updatedAt: new Date(),
             },
           });
+          if (restrictedTagsChanged) {
+            await tx.activityLog.create({
+              data: {
+                type: "update",
+                title: `Updated restrictedTags via import: ${article.title}`,
+                authorName: userName,
+                details: {
+                  articleId: existing.id,
+                  slug: article.slug,
+                  topicSlug: article.topicSlug,
+                  previousRestrictedTags: existingRestrictedTags,
+                  restrictedTags: nextRestrictedTags,
+                  declassified: existingRestrictedTags.length > 0 && nextRestrictedTags.length === 0,
+                },
+              },
+            });
+          }
           results.imported++;
         } else {
           results.skipped++;

@@ -3,6 +3,7 @@ import test from "node:test";
 import crypto from "node:crypto";
 import JSZip from "jszip";
 import type { NextRequest } from "next/server";
+import type { PrismaClient } from "@prisma/client";
 
 // Connect to dev DB before any module that reads it loads.
 // This test requires the local dev stack: `docker compose up -d db redis`.
@@ -48,6 +49,35 @@ function buildImportRequest(
     body: formData,
   });
   return request as unknown as NextRequest;
+}
+
+async function upsertImportApiKey(
+  prisma: PrismaClient,
+  rawKey: string,
+  allowedScopes: string[],
+  permissions: "WRITE" | "ADMIN" = "WRITE",
+): Promise<void> {
+  const keyHash = crypto.createHash("sha256").update(rawKey).digest("hex");
+  const keyPrefix = rawKey.slice(0, 8);
+  const existingKey = await prisma.apiKey.findFirst({
+    where: { name: TEST_KEY_NAME },
+  });
+  if (existingKey) {
+    await prisma.apiKey.update({
+      where: { id: existingKey.id },
+      data: { keyHash, keyPrefix, permissions, allowedScopes },
+    });
+  } else {
+    await prisma.apiKey.create({
+      data: {
+        name: TEST_KEY_NAME,
+        keyHash,
+        keyPrefix,
+        permissions,
+        allowedScopes,
+      },
+    });
+  }
 }
 
 // ─── Issue #136: Import must validate caller can assign restrictedTags ─────
@@ -238,6 +268,260 @@ This assigns a scope the caller has.`,
     });
     await prisma.restrictedScope.deleteMany({
       where: { tag: { in: [TEST_SCOPE_OWNED, TEST_SCOPE_FORBIDDEN] } },
+    });
+  }
+});
+
+test("POST /api/import preserves existing restrictedTags when scoped overwrite omits them", async () => {
+  const { prisma } = await import("@/lib/prisma");
+  const { POST } = await import("@/app/api/import/route");
+
+  await prisma.restrictedScope.upsert({
+    where: { tag: TEST_SCOPE_OWNED },
+    create: { tag: TEST_SCOPE_OWNED, description: "Test owned scope" },
+    update: {},
+  });
+  const topic = await prisma.topic.upsert({
+    where: { slug: TEST_TOPIC_SLUG },
+    create: { name: "Test Import Validation", slug: TEST_TOPIC_SLUG },
+    update: {},
+  });
+
+  const rawKey = `noo_${crypto.randomBytes(32).toString("base64url")}`;
+  await upsertImportApiKey(prisma, rawKey, [TEST_SCOPE_OWNED]);
+
+  try {
+    await prisma.article.deleteMany({
+      where: { slug: "classified-article", topicId: topic.id },
+    });
+    await prisma.article.create({
+      data: {
+        title: "Classified Article",
+        slug: "classified-article",
+        topicId: topic.id,
+        content: "Old restricted content",
+        restrictedTags: [TEST_SCOPE_OWNED],
+      },
+    });
+
+    const zipBuffer = await buildZip([
+      {
+        filename: "classified-article.md",
+        content: `---
+title: Classified Article
+topic: ${TEST_TOPIC_SLUG}
+slug: classified-article
+---
+
+# Classified Article
+
+Updated content without restrictedTags frontmatter.`,
+      },
+    ]);
+
+    const request = buildImportRequest(zipBuffer, rawKey, "true");
+    const response = await POST(request);
+    const body = (await response.json()) as {
+      summary: { imported: number; errors: number };
+    };
+
+    assert.equal(body.summary.imported, 1, "article should be overwritten");
+    assert.equal(body.summary.errors, 0, "omitted restrictedTags should preserve, not error");
+
+    const updated = await prisma.article.findFirstOrThrow({
+      where: { slug: "classified-article", topicId: topic.id },
+    });
+    assert.deepEqual(
+      updated.restrictedTags,
+      [TEST_SCOPE_OWNED],
+      "omitted restrictedTags must preserve the existing classification",
+    );
+    assert.ok(updated.content.includes("Updated content"));
+  } finally {
+    await prisma.article.deleteMany({
+      where: { topic: { slug: TEST_TOPIC_SLUG } },
+    });
+    await prisma.topic.deleteMany({
+      where: { slug: TEST_TOPIC_SLUG },
+    });
+    await prisma.apiKey.deleteMany({
+      where: { name: TEST_KEY_NAME },
+    });
+    await prisma.restrictedScope.deleteMany({
+      where: { tag: { in: [TEST_SCOPE_OWNED, TEST_SCOPE_FORBIDDEN] } },
+    });
+  }
+});
+
+test("POST /api/import rejects scoped overwrite that declassifies an existing restricted article", async () => {
+  const { prisma } = await import("@/lib/prisma");
+  const { POST } = await import("@/app/api/import/route");
+
+  await prisma.restrictedScope.upsert({
+    where: { tag: TEST_SCOPE_OWNED },
+    create: { tag: TEST_SCOPE_OWNED, description: "Test owned scope" },
+    update: {},
+  });
+  const topic = await prisma.topic.upsert({
+    where: { slug: TEST_TOPIC_SLUG },
+    create: { name: "Test Import Validation", slug: TEST_TOPIC_SLUG },
+    update: {},
+  });
+
+  const rawKey = `noo_${crypto.randomBytes(32).toString("base64url")}`;
+  await upsertImportApiKey(prisma, rawKey, [TEST_SCOPE_OWNED]);
+
+  try {
+    await prisma.article.deleteMany({
+      where: { slug: "declassify-attempt", topicId: topic.id },
+    });
+    await prisma.article.create({
+      data: {
+        title: "Declassify Attempt",
+        slug: "declassify-attempt",
+        topicId: topic.id,
+        content: "Original restricted content",
+        restrictedTags: [TEST_SCOPE_OWNED],
+      },
+    });
+
+    const zipBuffer = await buildZip([
+      {
+        filename: "declassify-attempt.md",
+        content: `---
+title: Declassify Attempt
+topic: ${TEST_TOPIC_SLUG}
+slug: declassify-attempt
+restrictedTags: []
+---
+
+# Declassify Attempt
+
+This update tries to make restricted content public.`,
+      },
+    ]);
+
+    const request = buildImportRequest(zipBuffer, rawKey, "true");
+    const response = await POST(request);
+    const body = (await response.json()) as {
+      summary: { imported: number; errors: number };
+      articles: Array<{ filename: string; error?: string }>;
+    };
+
+    assert.equal(body.summary.imported, 0, "declassification must not import");
+    assert.equal(body.summary.errors, 1, "declassification should be an article error");
+    assert.match(
+      body.articles[0]?.error ?? "",
+      /requires ADMIN access/,
+      "error should name the required privilege",
+    );
+
+    const unchanged = await prisma.article.findFirstOrThrow({
+      where: { slug: "declassify-attempt", topicId: topic.id },
+    });
+    assert.deepEqual(unchanged.restrictedTags, [TEST_SCOPE_OWNED]);
+    assert.equal(unchanged.content, "Original restricted content");
+  } finally {
+    await prisma.article.deleteMany({
+      where: { topic: { slug: TEST_TOPIC_SLUG } },
+    });
+    await prisma.topic.deleteMany({
+      where: { slug: TEST_TOPIC_SLUG },
+    });
+    await prisma.apiKey.deleteMany({
+      where: { name: TEST_KEY_NAME },
+    });
+    await prisma.restrictedScope.deleteMany({
+      where: { tag: { in: [TEST_SCOPE_OWNED, TEST_SCOPE_FORBIDDEN] } },
+    });
+  }
+});
+
+test("POST /api/import allows ADMIN overwrite to declassify an existing restricted article", async () => {
+  const { prisma } = await import("@/lib/prisma");
+  const { POST } = await import("@/app/api/import/route");
+
+  await prisma.restrictedScope.upsert({
+    where: { tag: TEST_SCOPE_OWNED },
+    create: { tag: TEST_SCOPE_OWNED, description: "Test owned scope" },
+    update: {},
+  });
+  const topic = await prisma.topic.upsert({
+    where: { slug: TEST_TOPIC_SLUG },
+    create: { name: "Test Import Validation", slug: TEST_TOPIC_SLUG },
+    update: {},
+  });
+
+  const rawKey = `noo_${crypto.randomBytes(32).toString("base64url")}`;
+  await upsertImportApiKey(prisma, rawKey, ["*"], "ADMIN");
+
+  try {
+    await prisma.article.deleteMany({
+      where: { slug: "admin-declassify", topicId: topic.id },
+    });
+    await prisma.article.create({
+      data: {
+        title: "Admin Declassify",
+        slug: "admin-declassify",
+        topicId: topic.id,
+        content: "Original restricted content",
+        restrictedTags: [TEST_SCOPE_OWNED],
+      },
+    });
+
+    const zipBuffer = await buildZip([
+      {
+        filename: "admin-declassify.md",
+        content: `---
+title: Admin Declassify
+topic: ${TEST_TOPIC_SLUG}
+slug: admin-declassify
+restrictedTags: []
+---
+
+# Admin Declassify
+
+ADMIN explicitly makes this article public.`,
+      },
+    ]);
+
+    const request = buildImportRequest(zipBuffer, rawKey, "true");
+    const response = await POST(request);
+    const body = (await response.json()) as {
+      summary: { imported: number; errors: number };
+    };
+
+    assert.equal(body.summary.imported, 1, "ADMIN declassification should import");
+    assert.equal(body.summary.errors, 0, "ADMIN declassification should not error");
+
+    const updated = await prisma.article.findFirstOrThrow({
+      where: { slug: "admin-declassify", topicId: topic.id },
+    });
+    assert.deepEqual(updated.restrictedTags, []);
+
+    const logEntry = await prisma.activityLog.findFirst({
+      where: {
+        type: "update",
+        title: "Updated restrictedTags via import: Admin Declassify",
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    assert.ok(logEntry, "classification changes should be audit logged");
+  } finally {
+    await prisma.article.deleteMany({
+      where: { topic: { slug: TEST_TOPIC_SLUG } },
+    });
+    await prisma.topic.deleteMany({
+      where: { slug: TEST_TOPIC_SLUG },
+    });
+    await prisma.apiKey.deleteMany({
+      where: { name: TEST_KEY_NAME },
+    });
+    await prisma.restrictedScope.deleteMany({
+      where: { tag: { in: [TEST_SCOPE_OWNED, TEST_SCOPE_FORBIDDEN] } },
+    });
+    await prisma.activityLog.deleteMany({
+      where: { title: "Updated restrictedTags via import: Admin Declassify" },
     });
   }
 });
