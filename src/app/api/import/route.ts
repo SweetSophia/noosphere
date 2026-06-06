@@ -61,6 +61,14 @@ export function canChangeExistingRestrictedTags(auth: {
   return Boolean(auth.allowedScopes?.includes("*"));
 }
 
+function restrictedTagsCallerCannotAssign(
+  restrictedTags: string[],
+  allowedScopes: string[] | undefined,
+): string[] {
+  if (allowedScopes?.includes("*")) return [];
+  return restrictedTags.filter((tag) => !(allowedScopes ?? []).includes(tag));
+}
+
 interface ImportArticle {
   filename: string;
   title: string;
@@ -292,9 +300,10 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Validate that the caller is allowed to assign the requested restrictedTags.
-  // Without this check, a scoped WRITE key could craft an import to add restricted
-  // tags the caller does not have on existing or new articles. See issue #136.
+  // Validate the requested restrictedTags shape and database existence first.
+  // Authorization is decided later with the existing article in hand: an
+  // explicit same-set overwrite is a no-op, even if the caller only has one of
+  // several existing scopes. New articles still need caller-can-assign checks.
   //
   // Batch the RestrictedScope existence check: collect every unique requested
   // tag across the batch and resolve them in a single query, then validate
@@ -323,7 +332,7 @@ export async function POST(request: NextRequest) {
     if (!article.hasRestrictedTagsField) continue;
     const result = await resolveImportRestrictedTags(
       article.restrictedTagsInput,
-      allowedScopes,
+      ["*"],
       batchedLookup,
     );
     if (!result.ok) {
@@ -428,6 +437,16 @@ export async function POST(request: NextRequest) {
         } else {
           results.skipped++;
         }
+        continue;
+      }
+
+      const unauthorized = restrictedTagsCallerCannotAssign(
+        article.restrictedTags ?? [],
+        allowedScopes,
+      );
+      if (unauthorized.length > 0) {
+        article.error = `Cannot assign scope(s) you don't have: ${unauthorized.join(", ")}`;
+        results.errors++;
         continue;
       }
 

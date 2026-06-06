@@ -271,7 +271,7 @@ Import files declare `restrictedTags` in each article's frontmatter. The route a
   - different set ⇒ reclassification, requires ADMIN.
 - Only ADMIN, an API key with `allowedScopes: ["*"]`, or a session caller (any role) may cross a classification boundary on overwrite. Scoped WRITE keys can still edit the *content* of articles they can read, but cannot make restricted content more public or change its access boundary.
 
-Validation rejects any boundary-crossing attempt with a 400 and an article-level error message; the row is skipped, the rest of the batch proceeds.
+Validation rejects any boundary-crossing attempt with an article-level error message in the import summary; the row is skipped, the rest of the batch proceeds.
 
 #### `PATCH /api/articles/:id` — Article update
 

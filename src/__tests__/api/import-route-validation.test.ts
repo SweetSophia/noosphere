@@ -6,9 +6,10 @@ import type { NextRequest } from "next/server";
 import type { PrismaClient } from "@prisma/client";
 
 // Connect to dev DB before any module that reads it loads.
-// This test requires the local dev stack: `docker compose up -d db redis`.
-process.env.DATABASE_URL ??=
-  "postgresql://noosphere:noosphere_secret@127.0.0.1:5433/noosphere";
+// This test requires the local dev stack and an explicit DATABASE_URL.
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL environment variable must be set for tests");
+}
 
 const TEST_PREFIX = "test-issue136-";
 const TEST_SCOPE_OWNED = `${TEST_PREFIX}owned`;
@@ -906,6 +907,93 @@ the existing set, so the change check should treat it as a no-op.`,
       "duplicate-but-equivalent restrictedTags must be a no-op (C4)",
     );
     assert.equal(body.summary.errors, 0, "no error should be raised for a no-op");
+  } finally {
+    await prisma.article.deleteMany({
+      where: { topic: { slug: TEST_TOPIC_SLUG } },
+    });
+    await prisma.topic.deleteMany({
+      where: { slug: TEST_TOPIC_SLUG },
+    });
+    await prisma.apiKey.deleteMany({
+      where: { name: TEST_KEY_NAME },
+    });
+    await prisma.restrictedScope.deleteMany({
+      where: { tag: { in: [TEST_SCOPE_OWNED, TEST_SCOPE_FORBIDDEN] } },
+    });
+  }
+});
+
+test("POST /api/import allows scoped WRITE explicit no-op on multi-scope restricted article", async () => {
+  const { prisma } = await import("@/lib/prisma");
+  const { POST } = await import("@/app/api/import/route");
+
+  await prisma.restrictedScope.upsert({
+    where: { tag: TEST_SCOPE_OWNED },
+    create: { tag: TEST_SCOPE_OWNED, description: "Test owned scope" },
+    update: {},
+  });
+  await prisma.restrictedScope.upsert({
+    where: { tag: TEST_SCOPE_FORBIDDEN },
+    create: { tag: TEST_SCOPE_FORBIDDEN, description: "Test forbidden scope" },
+    update: {},
+  });
+  const topic = await prisma.topic.upsert({
+    where: { slug: TEST_TOPIC_SLUG },
+    create: { name: "Test Import Validation", slug: TEST_TOPIC_SLUG },
+    update: {},
+  });
+
+  const rawKey = `noo_${crypto.randomBytes(32).toString("base64url")}`;
+  await upsertImportApiKey(prisma, rawKey, [TEST_SCOPE_OWNED]);
+
+  try {
+    await prisma.article.deleteMany({
+      where: { slug: "multi-scope-noop", topicId: topic.id },
+    });
+    await prisma.article.create({
+      data: {
+        title: "Multi Scope Noop",
+        slug: "multi-scope-noop",
+        topicId: topic.id,
+        content: "Original restricted content",
+        restrictedTags: [TEST_SCOPE_OWNED, TEST_SCOPE_FORBIDDEN],
+      },
+    });
+
+    const zipBuffer = await buildZip([
+      {
+        filename: "multi-scope-noop.md",
+        content: `---
+title: Multi Scope Noop
+topic: ${TEST_TOPIC_SLUG}
+slug: multi-scope-noop
+restrictedTags: [${TEST_SCOPE_OWNED}, ${TEST_SCOPE_FORBIDDEN}]
+---
+
+# Multi Scope Noop
+
+The scoped caller can edit because it shares one existing scope. Repeating the
+same full restrictedTags set is a no-op, not a new assignment.`,
+      },
+    ]);
+
+    const request = buildImportRequest(zipBuffer, rawKey, "true");
+    const response = await POST(request);
+    const body = (await response.json()) as {
+      summary: { imported: number; errors: number };
+      articles: Array<{ filename: string; error?: string }>;
+    };
+
+    assert.equal(body.summary.imported, 1, "same-set restrictedTags should import");
+    assert.equal(body.summary.errors, 0, body.articles[0]?.error ?? "no error expected");
+
+    const updated = await prisma.article.findFirstOrThrow({
+      where: { slug: "multi-scope-noop", topicId: topic.id },
+    });
+    assert.deepEqual(updated.restrictedTags, [
+      TEST_SCOPE_OWNED,
+      TEST_SCOPE_FORBIDDEN,
+    ]);
   } finally {
     await prisma.article.deleteMany({
       where: { topic: { slug: TEST_TOPIC_SLUG } },
