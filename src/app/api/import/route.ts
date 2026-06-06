@@ -37,14 +37,19 @@ function sameRestrictedTags(a: string[], b: string[]): boolean {
   return a.every((tag) => bSet.has(tag));
 }
 
-function canChangeExistingRestrictedTags(auth: {
+export function canChangeExistingRestrictedTags(auth: {
   allowedScopes?: string[];
   keyId?: string;
   permissions?: Permissions;
   role?: Role;
 }): boolean {
+  // Sessions and ADMIN permission both carry the full-access signal we care
+  // about here. Sessions (humans) get `allowedScopes: ["*"]` from
+  // checkRouteAuth and never set `keyId`; the previous API-key-only branch
+  // therefore blocked EDITOR sessions from reclassifying on overwrite even
+  // though they can already read every restricted article.
   if (auth.permissions === Permissions.ADMIN || auth.role === "ADMIN") return true;
-  return Boolean(auth.keyId && auth.allowedScopes?.includes("*"));
+  return Boolean(auth.allowedScopes?.includes("*"));
 }
 
 interface ImportArticle {
