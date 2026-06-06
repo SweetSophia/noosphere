@@ -252,6 +252,29 @@ export async function POST(request: NextRequest) {
   // Validate that the caller is allowed to assign the requested restrictedTags.
   // Without this check, a scoped WRITE key could craft an import to add restricted
   // tags the caller does not have on existing or new articles. See issue #136.
+  //
+  // Batch the RestrictedScope existence check: collect every unique requested
+  // tag across the batch and resolve them in a single query, then validate
+  // each article against the in-memory set via the helper's injectable
+  // lookup. Avoids an N+1 query pattern for large imports.
+  const allRequestedTags = new Set<string>();
+  for (const article of toImport) {
+    if (article.error) continue;
+    for (const tag of article.restrictedTags ?? []) {
+      allRequestedTags.add(tag);
+    }
+  }
+  const existingScopes = new Set<string>();
+  if (allRequestedTags.size > 0) {
+    const rows = await prisma.restrictedScope.findMany({
+      where: { tag: { in: Array.from(allRequestedTags) } },
+      select: { tag: true },
+    });
+    for (const row of rows) existingScopes.add(row.tag);
+  }
+  const batchedLookup = async (tags: string[]): Promise<Iterable<string>> =>
+    tags.filter((t) => existingScopes.has(t));
+
   for (const article of toImport) {
     if (article.error) continue;
     const requested = article.restrictedTags ?? [];
@@ -259,6 +282,7 @@ export async function POST(request: NextRequest) {
     const result = await resolveImportRestrictedTags(
       requested,
       allowedScopes,
+      batchedLookup,
     );
     if (!result.ok) {
       article.error = result.error;
