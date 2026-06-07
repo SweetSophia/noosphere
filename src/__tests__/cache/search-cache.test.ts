@@ -2,16 +2,24 @@ import { describe, it } from "node:test";
 import {
   buildSearchCacheKey,
   getCachedSearchResults,
+  getSearchCacheVersion,
   invalidateSearchCache,
   setCachedSearchResults,
 } from "@/lib/cache/search-cache";
 import { getRedisClient, _redisTestHooks } from "@/lib/cache/redis";
 import type { MemoryResult } from "@/lib/memory/types";
+import {
+  createMockPrisma,
+  createSequentialQueryRaw,
+  mockSearchRow,
+} from "../memory/noosphere-provider-helpers";
 import assert from "assert";
 
 class FakeRedisClient {
   status = "wait";
   private readonly store = new Map<string, string>();
+  private setexCalls = 0;
+  private readonly setexWaiters: (() => void)[] = [];
 
   async connect() {
     this.status = "ready";
@@ -29,6 +37,8 @@ class FakeRedisClient {
   async setex(key: string, _ttlSeconds: number, value: string) {
     this.assertReady();
     this.store.set(key, value);
+    this.setexCalls++;
+    this.setexWaiters.shift()?.();
     return "OK";
   }
 
@@ -39,9 +49,32 @@ class FakeRedisClient {
     return value;
   }
 
+  waitForSetexCall(expectedCalls = this.setexCalls + 1) {
+    if (this.setexCalls >= expectedCalls) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      this.setexWaiters.push(resolve);
+    });
+  }
+
   private assertReady() {
     if (this.status !== "ready") {
       throw new Error("Redis command executed before client was ready");
+    }
+  }
+}
+
+async function withRestoredDatabaseUrl<T>(fn: () => Promise<T>): Promise<T> {
+  const previousDatabaseUrl = process.env.DATABASE_URL;
+
+  try {
+    return await fn();
+  } finally {
+    if (previousDatabaseUrl === undefined) {
+      delete process.env.DATABASE_URL;
+    } else {
+      process.env.DATABASE_URL = previousDatabaseUrl;
     }
   }
 }
@@ -128,5 +161,70 @@ describe("Search Cache Redis Operations", () => {
     } finally {
       _redisTestHooks.reset();
     }
+  });
+
+  it("moves recall cache reads to a new key after invalidation", async () => {
+    const redis = new FakeRedisClient();
+    _redisTestHooks.setClientForTesting(redis as never);
+
+    try {
+      const initialVersion = await getSearchCacheVersion();
+      assert.strictEqual(initialVersion, "0");
+
+      const staleCacheKey = buildSearchCacheKey({
+        query: "versioned recall",
+        cacheVersion: initialVersion,
+      });
+      await setCachedSearchResults(staleCacheKey, [cachedResult], initialVersion);
+      assert.deepStrictEqual(await getCachedSearchResults(staleCacheKey), [
+        cachedResult,
+      ]);
+
+      await invalidateSearchCache();
+      const nextVersion = await getSearchCacheVersion();
+      assert.strictEqual(nextVersion, "1");
+
+      const nextCacheKey = buildSearchCacheKey({
+        query: "versioned recall",
+        cacheVersion: nextVersion,
+      });
+      assert.notStrictEqual(nextCacheKey, staleCacheKey);
+      assert.strictEqual(await getCachedSearchResults(nextCacheKey), null);
+    } finally {
+      _redisTestHooks.reset();
+    }
+  });
+
+  it("moves NoosphereProvider recall reads off stale cache entries after invalidation", async () => {
+    await withRestoredDatabaseUrl(async () => {
+      const redis = new FakeRedisClient();
+      _redisTestHooks.setClientForTesting(redis as never);
+
+      try {
+        const { NoosphereProvider } = await import("@/lib/memory/noosphere");
+        const provider = new NoosphereProvider({
+          prisma: createMockPrisma({
+            $queryRaw: createSequentialQueryRaw([
+              [mockSearchRow({ title: "Before invalidation" })],
+              [mockSearchRow({ title: "After invalidation" })],
+            ]),
+          }),
+        });
+
+        const initialResults = await provider.search("versioned recall");
+        assert.strictEqual(initialResults[0]?.title, "Before invalidation");
+        await redis.waitForSetexCall(1);
+
+        const cachedResults = await provider.search("versioned recall");
+        assert.strictEqual(cachedResults[0]?.title, "Before invalidation");
+
+        await invalidateSearchCache();
+        const refreshedResults = await provider.search("versioned recall");
+        assert.strictEqual(refreshedResults[0]?.title, "After invalidation");
+        await redis.waitForSetexCall(2);
+      } finally {
+        _redisTestHooks.reset();
+      }
+    });
   });
 });
