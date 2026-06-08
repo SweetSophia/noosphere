@@ -12,19 +12,15 @@
  * 6. Descriptor metadata
  */
 
-// Set DATABASE_URL before importing modules that may create Prisma client at load time.
-// Static imports are evaluated before module body code, so we must set this first.
-// Tests inject their own mock Prisma, so this connection string is never used.
-process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
-
-import type { PrismaClient } from "@prisma/client";
 import {
   NoosphereProvider,
   createNoosphereProvider,
 } from "@/lib/memory/noosphere";
 import type { MemoryCurationLevel } from "@/lib/memory/types";
-
-// ─── Test helpers ────────────────────────────────────────────────────────────
+import {
+  createMockPrisma,
+  mockArticle,
+} from "./noosphere-provider-helpers";
 
 let testCounter = 0;
 let passCount = 0;
@@ -71,51 +67,6 @@ function assertApprox(
       `${label}: expected ~${expected} (±${tolerance}), got ${actual}`,
     );
   }
-}
-
-// ─── Mock Prisma ─────────────────────────────────────────────────────────────
-
-function createMockPrisma(
-  overrides: Record<string, unknown> = {},
-): PrismaClient {
-  return {
-    article: {
-      findFirst: (() =>
-        Promise.resolve(null)) as unknown as PrismaClient["article"]["findFirst"],
-      findMany: (() =>
-        Promise.resolve(
-          [],
-        )) as unknown as PrismaClient["article"]["findMany"],
-    },
-    $queryRaw: (() =>
-      Promise.resolve([])) as unknown as PrismaClient["$queryRaw"],
-    ...overrides,
-  } as unknown as PrismaClient;
-}
-
-// ─── Shared mock article factory ────────────────────────────────────────────
-
-function mockArticle(overrides: Record<string, unknown> = {}) {
-  return {
-    id: "test-id",
-    title: "Test Article",
-    slug: "test-article",
-    content: "Test content body",
-    excerpt: "Test excerpt",
-    status: "published",
-    confidence: "high",
-    sourceUrl: null,
-    sourceType: null,
-    createdAt: new Date("2026-01-01"),
-    updatedAt: new Date("2026-04-01"),
-    lastReviewed: null,
-    authorId: null,
-    authorName: null,
-    topicId: "topic-1",
-    topic: { id: "topic-1", slug: "engineering", name: "Engineering" },
-    tags: [],
-    ...overrides,
-  };
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
