@@ -84,6 +84,11 @@ model Article {
   @@index([confidence])
   @@index([deletedAt])
   @@index([updatedAt(sort: Desc), id(sort: Asc)])
+  // GIN index for array-containment (`hasSome` / `&&`) queries on restrictedTags.
+  // The live DB index was hand-rolled in 20260514220000_add_restricted_tags_scope;
+  // declaring it here keeps `prisma migrate diff` from wanting to drop it on the
+  // next migration. See issue #143.
+  @@index([restrictedTags(ops: ArrayOps)], type: Gin, name: "Article_restrictedTags_idx")
 }
 
 // ─────────────────────────────────────────────
