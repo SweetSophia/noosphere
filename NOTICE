@@ -1,0 +1,61 @@
+Noosphere
+Copyright 2026 SweetSophia
+
+This product includes software developed at
+SweetSophia (https://github.com/SweetSophia).
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+================================================================================
+ATTRIBUTION
+================================================================================
+
+If you distribute, host, or otherwise make this software (or a Derivative
+Work, as defined in the Apache License 2.0) available to third parties, you
+must preserve the following attribution in a manner that is reasonably
+visible to your end users. Acceptable forms include, but are not limited
+to:
+
+  1. A "Powered by Noosphere" link to https://github.com/SweetSophia/noosphere
+     in the footer of any web-based user interface.
+  2. A NOTICE file (or equivalent) in your distribution that includes the
+     copyright line above and a reference to the source repository.
+  3. A "About" or "Credits" section in any distributed or hosted product
+     that credits "Noosphere by SweetSophia."
+
+If your Derivative Work modifies this software, the Apache License 2.0
+already requires you to mark modified files (Section 4(b)). You must also
+use a name for your Derivative Work that is distinct from "Noosphere" to
+avoid implying endorsement by the copyright holder (Section 6).
+
+================================================================================
+PLUGINS
+================================================================================
+
+This repository distributes four plugins that share the same license and
+attribution requirements as the main project:
+
+  - openclaw-noosphere-memory    (@sweetsophia/openclaw-noosphere-memory)
+  - opencode-noosphere-memory    (@sweetsophia/opencode-noosphere-memory)
+  - kilocode-noosphere-memory    (@sweetsophia/kilocode-noosphere-memory)
+  - hermes-noosphere-memory      (Hermes install bundle, no package.json)
+
+================================================================================
+CONTENT LICENSING
+================================================================================
+
+Note: The Apache License 2.0 governs the source code in this repository. It
+does NOT govern the article content stored in a Noosphere wiki instance by
+default. Content licensing is a separate decision and is intentionally not
+declared in this repository; wiki operators are free to set their own
+content licenses via the application configuration.
