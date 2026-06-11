@@ -59,6 +59,6 @@
   "overrides": {
     "@hono/node-server": "1.19.13",
     "postcss": "8.5.14",
-    "hono": "4.12.18"
+    "hono": "4.12.25"
   }
 }
