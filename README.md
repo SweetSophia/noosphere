@@ -270,4 +270,14 @@ Keep detailed recovery work in deployment/runbook docs rather than this README.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+The Apache License 2.0 applies to all source code in this repository and to
+the four plugins (`openclaw-noosphere-memory`, `opencode-noosphere-memory`,
+`hermes-noosphere-memory`, `kilocode-noosphere-memory`). It does **not**
+govern the article content stored inside a Noosphere wiki instance — content
+licensing is a separate decision left to the wiki operator.
+
+If you distribute or host a Noosphere-based service, the NOTICE file
+specifies the attribution form that must be preserved (e.g. a "Powered by
+Noosphere" link in the UI footer).
