@@ -97,6 +97,35 @@ export async function resolveImportRestrictedTags(
   return resolveRestrictedTagsForCaller(value, allowedScopes, lookup);
 }
 
+/**
+ * Validates restrictedTags on PATCH /api/articles/[id].
+ *
+ * Shares the same "explicit" contract as `resolveImportRestrictedTags`: an
+ * omitted or empty value declassifies (means "no restricted tags") and never
+ * auto-inherits the caller's scopes. Only present tags are type-checked,
+ * existence-checked, and scope-membership-checked — all via the shared
+ * `resolveRestrictedTagsForCaller` core so a fix to the access-control logic
+ * reaches the create, import, and PATCH paths together (see issue #182).
+ *
+ * This is intentionally a separate, PATCH-named entry point rather than a flag
+ * on the create helper: the create path auto-assigns caller scopes on omission,
+ * whereas PATCH must not. Keeping the contracts in named functions makes the
+ * divergence visible at each call site.
+ */
+export async function resolvePatchRestrictedTags(
+  value: unknown,
+  allowedScopes: string[] | undefined,
+  lookup: RestrictedScopeLookup = findExistingRestrictedScopes,
+): Promise<RestrictedTagsResult> {
+  if (value === undefined || value === null) {
+    return { ok: true, value: [] };
+  }
+  if (Array.isArray(value) && value.length === 0) {
+    return { ok: true, value: [] };
+  }
+  return resolveRestrictedTagsForCaller(value, allowedScopes, lookup);
+}
+
 export async function validateRestrictedTagsExist(
   tags: string[],
   lookup: RestrictedScopeLookup = findExistingRestrictedScopes,

@@ -17,6 +17,7 @@ import {
 } from "@/lib/validation";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
 import { rateLimit } from "@/lib/rate-limit";
+import { resolvePatchRestrictedTags } from "@/lib/api/restricted-scopes";
 
 // PATCH /api/articles/[id] — Update article
 // Auth: API key (WRITE/ADMIN) or session (EDITOR/ADMIN)
@@ -173,39 +174,21 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       updateData.lastReviewed = lastReviewed ? new Date(lastReviewed) : null;
     }
 
-    // restrictedTags — validate and apply
+    // restrictedTags — validate via the shared scope helper (issue #182).
+    // PATCH semantics: an explicit [] declassifies and never auto-inherits the
+    // caller's scopes; only present tags are type/existence/membership-checked.
     if (restrictedTags !== undefined) {
-      if (!Array.isArray(restrictedTags) || !(restrictedTags as unknown[]).every((t) => typeof t === "string" && t.length > 0)) {
-        return NextResponse.json({ error: "restrictedTags must be an array of non-empty strings" }, { status: 400 });
+      const restrictedTagsResult = await resolvePatchRestrictedTags(
+        restrictedTags,
+        auth.auth.allowedScopes,
+      );
+      if (!restrictedTagsResult.ok) {
+        return NextResponse.json(
+          { error: restrictedTagsResult.error },
+          { status: restrictedTagsResult.status },
+        );
       }
-      if (restrictedTags.length > 0) {
-        const validScopes = await prisma.restrictedScope.findMany({
-          where: { tag: { in: restrictedTags } },
-          select: { tag: true },
-        });
-        const validSet = new Set(validScopes.map((s) => s.tag));
-        const invalid = (restrictedTags as string[]).filter((t) => !validSet.has(t));
-        if (invalid.length > 0) {
-          return NextResponse.json(
-            { error: `Unknown restricted tag(s): ${invalid.join(", ")}. Valid tags: ${validScopes.map((s) => s.tag).join(", ")}` },
-            { status: 400 }
-          );
-        }
-
-        // Security: WRITE keys can only assign scopes that are in their allowedScopes.
-        // ADMIN (*) bypasses this check.
-        const callerScopes = auth.auth.allowedScopes;
-        if (!callerScopes?.includes("*")) {
-          const unauthorized = (restrictedTags as string[]).filter((t) => !(callerScopes ?? []).includes(t));
-          if (unauthorized.length > 0) {
-            return NextResponse.json(
-              { error: `Cannot assign scope(s) you don't have: ${unauthorized.join(", ")}` },
-              { status: 403 }
-            );
-          }
-        }
-      }
-      updateData.restrictedTags = restrictedTags;
+      updateData.restrictedTags = restrictedTagsResult.value;
     }
 
     // tags — validate early if provided

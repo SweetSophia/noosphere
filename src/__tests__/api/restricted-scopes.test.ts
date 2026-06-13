@@ -3,6 +3,7 @@ import test, { describe } from "node:test";
 import {
   normalizeRestrictedTagsForCaller,
   resolveImportRestrictedTags,
+  resolvePatchRestrictedTags,
   resolveRestrictedTagsForCaller,
   validateRestrictedTagsExist,
   type RestrictedScopeLookup,
@@ -311,6 +312,107 @@ describe("resolveImportRestrictedTags", () => {
 
   test("deduplicates repeated tags", async () => {
     const result = await resolveImportRestrictedTags(
+      ["scope-a", "scope-a", "scope-b"],
+      ["*"],
+      mockLookup,
+    );
+    assert.ok(result.ok);
+    if (!result.ok) return;
+    assert.deepEqual(result.value, ["scope-a", "scope-b"]);
+  });
+});
+
+// ─── resolvePatchRestrictedTags ─────────────────────────────────────────────
+
+describe("resolvePatchRestrictedTags", () => {
+  const mockLookup: RestrictedScopeLookup = async (tags) => {
+    const existing = new Set(["scope-a", "scope-b"]);
+    return tags.filter((t) => existing.has(t));
+  };
+
+  test("returns empty array when value is undefined (no auto-assign)", async () => {
+    const result = await resolvePatchRestrictedTags(undefined, ["scope-a"], mockLookup);
+    assert.ok(result.ok);
+    if (!result.ok) return;
+    assert.deepEqual(result.value, []);
+  });
+
+  test("returns empty array when value is null (no auto-assign)", async () => {
+    const result = await resolvePatchRestrictedTags(null, ["scope-a"], mockLookup);
+    assert.ok(result.ok);
+    if (!result.ok) return;
+    assert.deepEqual(result.value, []);
+  });
+
+  test("returns empty array for empty array value (explicit declassify, no auto-assign)", async () => {
+    const result = await resolvePatchRestrictedTags([], ["scope-a"], mockLookup);
+    assert.ok(result.ok);
+    if (!result.ok) return;
+    assert.deepEqual(result.value, []);
+  });
+
+  test("rejects non-array value", async () => {
+    const result = await resolvePatchRestrictedTags("not-array", ["*"], mockLookup);
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.status, 400);
+  });
+
+  test("rejects array with non-string items", async () => {
+    const result = await resolvePatchRestrictedTags([123], ["*"], mockLookup);
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.status, 400);
+  });
+
+  test("non-admin caller cannot assign scopes they do not have", async () => {
+    const result = await resolvePatchRestrictedTags(
+      ["scope-b"],
+      ["scope-a"],
+      mockLookup,
+    );
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.status, 403);
+    assert.ok(result.error.includes("scope-b"));
+  });
+
+  test("non-admin caller can assign their own scopes", async () => {
+    const result = await resolvePatchRestrictedTags(
+      ["scope-a"],
+      ["scope-a", "scope-b"],
+      mockLookup,
+    );
+    assert.ok(result.ok);
+    if (!result.ok) return;
+    assert.deepEqual(result.value, ["scope-a"]);
+  });
+
+  test("admin scope can assign any existing tag", async () => {
+    const result = await resolvePatchRestrictedTags(
+      ["scope-a", "scope-b"],
+      ["*"],
+      mockLookup,
+    );
+    assert.ok(result.ok);
+    if (!result.ok) return;
+    assert.deepEqual(result.value, ["scope-a", "scope-b"]);
+  });
+
+  test("rejects tags that do not exist in the database", async () => {
+    const result = await resolvePatchRestrictedTags(
+      ["nonexistent"],
+      ["*"],
+      mockLookup,
+    );
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.status, 400);
+    assert.ok(result.error.includes("nonexistent"));
+  });
+
+  test("deduplicates repeated tags", async () => {
+    const result = await resolvePatchRestrictedTags(
       ["scope-a", "scope-a", "scope-b"],
       ["*"],
       mockLookup,
