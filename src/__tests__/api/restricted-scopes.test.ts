@@ -330,18 +330,18 @@ describe("resolvePatchRestrictedTags", () => {
     return tags.filter((t) => existing.has(t));
   };
 
-  test("returns empty array when value is undefined (no auto-assign)", async () => {
+  test("rejects undefined because PATCH only resolves present fields", async () => {
     const result = await resolvePatchRestrictedTags(undefined, ["scope-a"], mockLookup);
-    assert.ok(result.ok);
-    if (!result.ok) return;
-    assert.deepEqual(result.value, []);
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.status, 400);
   });
 
-  test("returns empty array when value is null (no auto-assign)", async () => {
+  test("rejects null to preserve the PATCH API contract", async () => {
     const result = await resolvePatchRestrictedTags(null, ["scope-a"], mockLookup);
-    assert.ok(result.ok);
-    if (!result.ok) return;
-    assert.deepEqual(result.value, []);
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.status, 400);
   });
 
   test("returns empty array for empty array value (explicit declassify, no auto-assign)", async () => {
@@ -408,10 +408,13 @@ describe("resolvePatchRestrictedTags", () => {
     assert.equal(result.ok, false);
     if (result.ok) return;
     assert.equal(result.status, 400);
-    assert.ok(result.error.includes("nonexistent"));
+    assert.equal(
+      result.error,
+      "Unknown restricted tag(s): nonexistent. Valid tags: ",
+    );
   });
 
-  test("deduplicates repeated tags", async () => {
+  test("preserves repeated tags to keep PATCH storage behavior unchanged", async () => {
     const result = await resolvePatchRestrictedTags(
       ["scope-a", "scope-a", "scope-b"],
       ["*"],
@@ -419,6 +422,21 @@ describe("resolvePatchRestrictedTags", () => {
     );
     assert.ok(result.ok);
     if (!result.ok) return;
-    assert.deepEqual(result.value, ["scope-a", "scope-b"]);
+    assert.deepEqual(result.value, ["scope-a", "scope-a", "scope-b"]);
+  });
+
+  test("does not trim whitespace before validating tags", async () => {
+    const result = await resolvePatchRestrictedTags(
+      [" scope-a "],
+      ["*"],
+      mockLookup,
+    );
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.status, 400);
+    assert.equal(
+      result.error,
+      "Unknown restricted tag(s):  scope-a . Valid tags: ",
+    );
   });
 });

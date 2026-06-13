@@ -4,6 +4,32 @@ export type RestrictedTagsResult =
 
 export type RestrictedScopeLookup = (tags: string[]) => Promise<Iterable<string>>;
 
+type UnknownRestrictedTagsError = (
+  invalidTags: string[],
+  validTags: string[],
+) => string;
+
+function authorizeRestrictedTags(
+  tags: string[],
+  allowedScopes: string[] | undefined,
+): RestrictedTagsResult {
+  const callerScopes = allowedScopes ?? [];
+  if (callerScopes.includes("*")) {
+    return { ok: true, value: tags };
+  }
+
+  const unauthorized = tags.filter((tag) => !callerScopes.includes(tag));
+  if (unauthorized.length > 0) {
+    return {
+      ok: false,
+      status: 403,
+      error: `Cannot assign scope(s) you don't have: ${unauthorized.join(", ")}`,
+    };
+  }
+
+  return { ok: true, value: tags };
+}
+
 export function normalizeRestrictedTagsForCaller(
   value: unknown,
   allowedScopes: string[] | undefined,
@@ -42,18 +68,7 @@ export function normalizeRestrictedTagsForCaller(
     requestedTags = [...callerScopes];
   }
 
-  if (!isAdminScope) {
-    const unauthorized = requestedTags.filter((tag) => !callerScopes.includes(tag));
-    if (unauthorized.length > 0) {
-      return {
-        ok: false,
-        status: 403,
-        error: `Cannot assign scope(s) you don't have: ${unauthorized.join(", ")}`,
-      };
-    }
-  }
-
-  return { ok: true, value: requestedTags };
+  return authorizeRestrictedTags(requestedTags, allowedScopes);
 }
 
 export async function resolveRestrictedTagsForCaller(
@@ -100,45 +115,55 @@ export async function resolveImportRestrictedTags(
 /**
  * Validates restrictedTags on PATCH /api/articles/[id].
  *
- * Shares the same "explicit" contract as `resolveImportRestrictedTags`: an
- * omitted or empty value declassifies (means "no restricted tags") and never
- * auto-inherits the caller's scopes. Only present tags are type-checked,
- * existence-checked, and scope-membership-checked — all via the shared
- * `resolveRestrictedTagsForCaller` core so a fix to the access-control logic
- * reaches the create, import, and PATCH paths together (see issue #182).
- *
- * This is intentionally a separate, PATCH-named entry point rather than a flag
- * on the create helper: the create path auto-assigns caller scopes on omission,
- * whereas PATCH must not. Keeping the contracts in named functions makes the
- * divergence visible at each call site.
+ * PATCH only calls this helper when the field is present. Its input and error
+ * behavior intentionally match the previous inline route validation: null and
+ * non-array values are rejected, whitespace and duplicates are not normalized,
+ * and unknown-tag errors retain their legacy response text. The sensitive
+ * scope-membership check is shared with the create/import paths.
  */
 export async function resolvePatchRestrictedTags(
   value: unknown,
   allowedScopes: string[] | undefined,
   lookup: RestrictedScopeLookup = findExistingRestrictedScopes,
 ): Promise<RestrictedTagsResult> {
-  if (value === undefined || value === null) {
-    return { ok: true, value: [] };
+  if (
+    !Array.isArray(value) ||
+    !value.every((tag) => typeof tag === "string" && tag.length > 0)
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      error: "restrictedTags must be an array of non-empty strings",
+    };
   }
-  if (Array.isArray(value) && value.length === 0) {
-    return { ok: true, value: [] };
-  }
-  return resolveRestrictedTagsForCaller(value, allowedScopes, lookup);
+
+  const existing = await validateRestrictedTagsExist(
+    value,
+    lookup,
+    (invalidTags, validTags) =>
+      `Unknown restricted tag(s): ${invalidTags.join(", ")}. Valid tags: ${validTags.join(", ")}`,
+  );
+  if (!existing.ok) return existing;
+
+  return authorizeRestrictedTags(existing.value, allowedScopes);
 }
 
 export async function validateRestrictedTagsExist(
   tags: string[],
   lookup: RestrictedScopeLookup = findExistingRestrictedScopes,
+  formatError: UnknownRestrictedTagsError = (invalidTags) =>
+    `Unknown restricted tag(s): ${invalidTags.join(", ")}`,
 ): Promise<RestrictedTagsResult> {
   if (tags.length === 0) return { ok: true, value: [] };
 
-  const validSet = new Set(await lookup(tags));
+  const validTags = Array.from(await lookup(tags));
+  const validSet = new Set(validTags);
   const invalid = tags.filter((tag) => !validSet.has(tag));
   if (invalid.length > 0) {
     return {
       ok: false,
       status: 400,
-      error: `Unknown restricted tag(s): ${invalid.join(", ")}`,
+      error: formatError(invalid, validTags),
     };
   }
 

@@ -177,6 +177,14 @@ test("PATCH /api/articles/[id] accepts restrictedTags the caller can assign", as
       [TEST_SCOPE_OWNED],
       "restrictedTags should be persisted",
     );
+
+    const after = await prisma.article.findUnique({ where: { id: article.id } });
+    assert.ok(after, "article must still exist");
+    assert.deepEqual(
+      after.restrictedTags,
+      [TEST_SCOPE_OWNED],
+      "authorized PATCH must persist restrictedTags",
+    );
   } finally {
     await cleanupSharedFixtures(prisma);
   }
@@ -206,6 +214,76 @@ test("PATCH /api/articles/[id] declassifies on explicit empty restrictedTags (no
       body.restrictedTags,
       [],
       "empty array must declassify, not auto-inherit the caller's scopes",
+    );
+  } finally {
+    await cleanupSharedFixtures(prisma);
+  }
+});
+
+test("PATCH /api/articles/[id] rejects null restrictedTags without declassifying", async () => {
+  const { prisma } = await import("@/lib/prisma");
+  const { PATCH } = await import("@/app/api/articles/[id]/route");
+
+  await setupSharedFixtures(prisma);
+
+  const rawKey = `noo_${crypto.randomBytes(32).toString("base64url")}`;
+  await upsertScopedWriteKey(prisma, rawKey, [TEST_SCOPE_OWNED]);
+
+  const article = await createArticle(prisma, "patch-null", [TEST_SCOPE_OWNED]);
+
+  try {
+    const response = await PATCH(
+      buildPatchRequest(article.id, { restrictedTags: null }, rawKey),
+      { params: Promise.resolve({ id: article.id }) },
+    );
+    const body = (await response.json()) as { error?: string };
+
+    assert.equal(response.status, 400, "null must retain the previous validation error");
+    assert.equal(
+      body.error,
+      "restrictedTags must be an array of non-empty strings",
+    );
+
+    const after = await prisma.article.findUnique({ where: { id: article.id } });
+    assert.ok(after, "article must still exist");
+    assert.deepEqual(
+      after.restrictedTags,
+      [TEST_SCOPE_OWNED],
+      "invalid null input must not declassify the article",
+    );
+  } finally {
+    await cleanupSharedFixtures(prisma);
+  }
+});
+
+test("PATCH /api/articles/[id] preserves duplicate restrictedTags", async () => {
+  const { prisma } = await import("@/lib/prisma");
+  const { PATCH } = await import("@/app/api/articles/[id]/route");
+
+  await setupSharedFixtures(prisma);
+
+  const rawKey = `noo_${crypto.randomBytes(32).toString("base64url")}`;
+  await upsertScopedWriteKey(prisma, rawKey, [TEST_SCOPE_OWNED]);
+
+  const article = await createArticle(prisma, "patch-duplicates");
+  const duplicateTags = [TEST_SCOPE_OWNED, TEST_SCOPE_OWNED];
+
+  try {
+    const response = await PATCH(
+      buildPatchRequest(article.id, { restrictedTags: duplicateTags }, rawKey),
+      { params: Promise.resolve({ id: article.id }) },
+    );
+    const body = (await response.json()) as { restrictedTags?: string[] };
+
+    assert.equal(response.status, 200, "duplicate tags remain valid PATCH input");
+    assert.deepEqual(body.restrictedTags, duplicateTags);
+
+    const after = await prisma.article.findUnique({ where: { id: article.id } });
+    assert.ok(after, "article must still exist");
+    assert.deepEqual(
+      after.restrictedTags,
+      duplicateTags,
+      "PATCH must not silently normalize stored tags",
     );
   } finally {
     await cleanupSharedFixtures(prisma);
