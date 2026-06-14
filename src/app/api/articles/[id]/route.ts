@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, canAccessScopes } from "@/lib/api/auth";
+import {
+  DEFAULT_JSON_BODY_MAX_BYTES,
+  getJsonBodyError,
+  readBoundedJsonObject,
+} from "@/lib/api/body";
 import { buildTagConnections } from "@/lib/wiki";
 import {
   syncArticleRelations,
@@ -18,6 +23,9 @@ import {
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
 import { rateLimit } from "@/lib/rate-limit";
 import { resolvePatchRestrictedTags } from "@/lib/api/restricted-scopes";
+
+const ARTICLE_JSON_BODY_MAX_BYTES =
+  ARTICLE_LIMITS.maxContentSize + DEFAULT_JSON_BODY_MAX_BYTES;
 
 // PATCH /api/articles/[id] — Update article
 // Auth: API key (WRITE/ADMIN) or session (EDITOR/ADMIN)
@@ -50,7 +58,31 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ error: "Article not found" }, { status: 404 });
     }
 
-    const body = await request.json();
+    let body: {
+      title?: string;
+      slug?: string;
+      content?: string;
+      excerpt?: string | null;
+      topicId?: string;
+      tags?: string[];
+      confidence?: string;
+      status?: string;
+      relatedArticleIds?: string[];
+      lastReviewed?: string | number | null;
+      restrictedTags?: unknown;
+    };
+    try {
+      body = await readBoundedJsonObject<typeof body>(
+        request,
+        ARTICLE_JSON_BODY_MAX_BYTES,
+      );
+    } catch (error) {
+      const bodyError = getJsonBodyError(error);
+      return NextResponse.json(
+        { error: bodyError.message },
+        { status: bodyError.status },
+      );
+    }
     const {
       title,
       slug,

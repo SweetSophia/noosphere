@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { requirePermission } from "@/lib/api/auth";
+import { getJsonBodyError, readBoundedJson } from "@/lib/api/body";
 import { getRecallSettingsFromDB, upsertRecallSettings } from "@/lib/memory/api/settings";
 import type { RecallSettings } from "@/lib/memory/settings";
 import { rateLimit } from "@/lib/rate-limit";
@@ -68,11 +69,12 @@ export async function POST(request: NextRequest) {
 
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
+    body = await readBoundedJson(request, SETTINGS_MAX_BODY_BYTES);
+  } catch (error) {
+    const bodyError = getJsonBodyError(error);
     return NextResponse.json(
-      { error: "Invalid JSON body" },
-      { status: 400 },
+      { error: bodyError.message },
+      { status: bodyError.status },
     );
   }
 

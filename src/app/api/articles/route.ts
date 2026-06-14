@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, buildScopeFilter } from "@/lib/api/auth";
+import {
+  DEFAULT_JSON_BODY_MAX_BYTES,
+  getJsonBodyError,
+  readBoundedJsonObject,
+} from "@/lib/api/body";
 import { resolveRestrictedTagsForCaller } from "@/lib/api/restricted-scopes";
 import { buildTagConnections, countSearchArticles, searchArticleIds } from "@/lib/wiki";
 import { detectSecretInInputs } from "@/lib/memory/api/save";
@@ -19,6 +24,9 @@ import {
 } from "@/lib/validation";
 import { parsePagination } from "@/lib/pagination";
 import { rateLimit } from "@/lib/rate-limit";
+
+const ARTICLE_JSON_BODY_MAX_BYTES =
+  ARTICLE_LIMITS.maxContentSize + DEFAULT_JSON_BODY_MAX_BYTES;
 
 // GET /api/articles — List articles (with filters)
 // Auth: API key (READ/WRITE/ADMIN) or session (human)
@@ -191,7 +199,31 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json();
+    let body: {
+      title?: string;
+      slug?: string;
+      content?: string;
+      topicId?: string;
+      tags?: string[];
+      excerpt?: string | null;
+      authorName?: string;
+      confidence?: string;
+      status?: string;
+      relatedArticleIds?: string[];
+      restrictedTags?: unknown;
+    };
+    try {
+      body = await readBoundedJsonObject<typeof body>(
+        request,
+        ARTICLE_JSON_BODY_MAX_BYTES,
+      );
+    } catch (error) {
+      const bodyError = getJsonBodyError(error);
+      return NextResponse.json(
+        { error: bodyError.message },
+        { status: bodyError.status },
+      );
+    }
     const { title, slug, content, topicId, tags, excerpt, authorName, confidence, status, relatedArticleIds, restrictedTags } = body;
 
     // Validate relatedArticleIds is an array of valid CUIDs
@@ -266,7 +298,7 @@ export async function POST(request: NextRequest) {
     const secretError = detectSecretInInputs([
       { field: "title", value: title },
       { field: "content", value: content },
-      { field: "excerpt", value: excerpt },
+      { field: "excerpt", value: excerpt ?? undefined },
       { field: "authorName", value: authorName },
       ...(Array.isArray(tags)
         ? tags.map((value) => ({ field: "tags", value: typeof value === "string" ? value : undefined }))

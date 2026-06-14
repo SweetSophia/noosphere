@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { requirePermission } from "@/lib/api/auth";
+import { getJsonBodyError, readBoundedJsonObject } from "@/lib/api/body";
 import { getObsidianSyncConfig } from "@/lib/obsidian-sync/config";
 import { runObsidianSync, SyncConflictError } from "@/lib/obsidian-sync";
 import type { SyncOptions } from "@/lib/obsidian-sync";
@@ -77,9 +78,13 @@ export async function POST(request: NextRequest) {
   // Parse request body
   let body: Record<string, unknown>;
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    body = await readBoundedJsonObject(request);
+  } catch (error) {
+    const bodyError = getJsonBodyError(error);
+    return NextResponse.json(
+      { error: bodyError.message },
+      { status: bodyError.status },
+    );
   }
 
   const mode = body["mode"] === "full" || body["full"] === true ? "full" : "incremental";

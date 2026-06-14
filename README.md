@@ -189,6 +189,10 @@ Common endpoints:
 | `POST` | `/api/memory/get` | Fetch one memory by canonical ref or ID |
 | `POST` | `/api/memory/save` | Save a draft memory candidate |
 
+JSON write endpoints reject malformed or excessively nested payloads and return
+`413` when their route-specific body-size limit is exceeded. Most routes allow
+64 KiB; article writes allow approximately 1 MiB, and batch ingest allows 4 MiB.
+
 Example recall request:
 
 ```bash

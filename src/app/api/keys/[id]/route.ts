@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
+import { getJsonBodyError, readBoundedJsonObject } from "@/lib/api/body";
 import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/keys/[id] — Get a single key's metadata
@@ -55,7 +56,16 @@ export async function PATCH(
   }
 
   try {
-    const body = await request.json();
+    let body: Record<string, unknown>;
+    try {
+      body = await readBoundedJsonObject(request);
+    } catch (error) {
+      const bodyError = getJsonBodyError(error);
+      return NextResponse.json(
+        { error: bodyError.message },
+        { status: bodyError.status },
+      );
+    }
     const { allowedScopes, permissions, name } = body;
 
     const existing = await prisma.apiKey.findFirst({
@@ -79,10 +89,13 @@ export async function PATCH(
     }
 
     if (permissions !== undefined) {
-      if (!["READ", "WRITE", "ADMIN"].includes(permissions)) {
+      if (
+        typeof permissions !== "string" ||
+        !["READ", "WRITE", "ADMIN"].includes(permissions)
+      ) {
         return NextResponse.json({ error: "permissions must be READ, WRITE, or ADMIN" }, { status: 400 });
       }
-      updateData.permissions = permissions;
+      updateData.permissions = permissions as Permissions;
     }
 
     if (allowedScopes !== undefined) {
@@ -103,7 +116,7 @@ export async function PATCH(
           );
         }
       }
-      updateData.allowedScopes = allowedScopes;
+      updateData.allowedScopes = allowedScopes as string[];
     }
 
     if (Object.keys(updateData).length === 0) {

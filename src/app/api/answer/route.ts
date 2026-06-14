@@ -2,8 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
+import {
+  DEFAULT_JSON_BODY_MAX_BYTES,
+  getJsonBodyError,
+  readBoundedJsonObject,
+} from "@/lib/api/body";
 import { apiError } from "@/lib/api/errors";
 import {
+  ARTICLE_LIMITS,
   deriveExcerpt,
   isValidConfidence,
   isValidStatus,
@@ -15,6 +21,8 @@ import { invalidateSearchCache } from "@/lib/cache/search-cache";
 import { slugify } from "@/lib/wiki";
 
 const ANSWER_SLUG_MAX_LENGTH = 80;
+const ANSWER_JSON_BODY_MAX_BYTES =
+  ARTICLE_LIMITS.maxContentSize + DEFAULT_JSON_BODY_MAX_BYTES;
 
 // POST /api/answer — Save a synthesized answer as a new wiki article
 // Auth: API key (WRITE/ADMIN) or session (EDITOR/ADMIN)
@@ -58,9 +66,13 @@ export async function POST(request: NextRequest) {
   };
 
   try {
-    body = await request.json();
-  } catch {
-    return apiError("Invalid JSON body", 400);
+    body = await readBoundedJsonObject<typeof body>(
+      request,
+      ANSWER_JSON_BODY_MAX_BYTES,
+    );
+  } catch (error) {
+    const bodyError = getJsonBodyError(error);
+    return apiError(bodyError.message, bodyError.status);
   }
 
   const { title, content, topicId, excerpt, tags, sourceQuery, confidence, status, authorName: rawAuthorName } = body;

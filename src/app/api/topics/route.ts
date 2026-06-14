@@ -3,6 +3,7 @@ import { Permissions, type Topic } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/wiki";
 import { buildScopeFilter, checkRouteAuth, hasPermission, requirePermission } from "@/lib/api/auth";
+import { getJsonBodyError, readBoundedJsonObject } from "@/lib/api/body";
 import { rateLimit } from "@/lib/rate-limit";
 
 const TOPIC_TREE_MAX_TOPICS = 500;
@@ -166,7 +167,21 @@ export async function POST(request: NextRequest) {
       return topicTreeLimitExceededResponse();
     }
 
-    const body = await request.json();
+    let body: {
+      name?: unknown;
+      slug?: string;
+      parentId?: string | null;
+      description?: unknown;
+    };
+    try {
+      body = await readBoundedJsonObject<typeof body>(request);
+    } catch (error) {
+      const bodyError = getJsonBodyError(error);
+      return NextResponse.json(
+        { error: bodyError.message },
+        { status: bodyError.status },
+      );
+    }
     const { name, slug, parentId, description } = body;
 
     if (!name || typeof name !== "string" || !name.trim()) {

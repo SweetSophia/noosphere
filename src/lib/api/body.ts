@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 
+export const DEFAULT_JSON_BODY_MAX_BYTES = 64 * 1024;
+
 export class RequestBodyTooLargeError extends Error {
   constructor() {
     super("Request body is too large");
@@ -19,8 +21,13 @@ function concatChunks(chunks: Uint8Array[], totalBytes: number): Uint8Array {
 
 export async function readBoundedJsonBody(
   request: NextRequest,
-  maxBytes: number = 64 * 1024,
+  maxBytes: number = DEFAULT_JSON_BODY_MAX_BYTES,
 ): Promise<string> {
+  const contentLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new RequestBodyTooLargeError();
+  }
+
   const reader = request.body?.getReader();
   if (!reader) return "";
 
@@ -32,7 +39,7 @@ export async function readBoundedJsonBody(
     if (done) break;
     totalBytes += value.byteLength;
     if (totalBytes > maxBytes) {
-      await reader.cancel();
+      await reader.cancel().catch(() => undefined);
       throw new RequestBodyTooLargeError();
     }
     chunks.push(value);
@@ -41,7 +48,7 @@ export async function readBoundedJsonBody(
   return new TextDecoder().decode(concatChunks(chunks, totalBytes));
 }
 
-const MAX_JSON_DEPTH = 20;
+export const MAX_JSON_DEPTH = 20;
 
 export class JsonDepthExceededError extends Error {
   constructor() {
@@ -50,18 +57,59 @@ export class JsonDepthExceededError extends Error {
   }
 }
 
+export function getJsonBodyError(error: unknown): {
+  message: string;
+  status: 400 | 413;
+} {
+  if (
+    error instanceof RequestBodyTooLargeError ||
+    error instanceof JsonDepthExceededError
+  ) {
+    return { message: error.message, status: 413 };
+  }
+
+  return { message: "Invalid JSON body", status: 400 };
+}
+
+function assertJsonDepth(raw: string): void {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (const character of raw) {
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+    } else if (character === "{" || character === "[") {
+      depth += 1;
+      if (depth > MAX_JSON_DEPTH) {
+        throw new JsonDepthExceededError();
+      }
+    } else if (character === "}" || character === "]") {
+      // Malformed closing delimiters must not offset later nesting and weaken
+      // the guard. JSON.parse will still report the malformed payload.
+      depth = Math.max(0, depth - 1);
+    }
+  }
+}
+
 /**
  * Parse JSON with a nesting-depth guard to prevent CPU exhaustion
  * from deeply nested payloads (e.g. 30KB of brackets).
  */
 export function safeJsonParse(raw: string): unknown {
-  let depth = 0;
-  return JSON.parse(raw, (_key, value: unknown) => {
-    if (depth++ > MAX_JSON_DEPTH) {
-      throw new JsonDepthExceededError();
-    }
-    return value;
-  });
+  assertJsonDepth(raw);
+  return JSON.parse(raw);
 }
 
 /**
@@ -70,8 +118,19 @@ export function safeJsonParse(raw: string): unknown {
  */
 export async function readBoundedJson(
   request: NextRequest,
-  maxBytes: number = 64 * 1024,
+  maxBytes: number = DEFAULT_JSON_BODY_MAX_BYTES,
 ): Promise<unknown> {
   const rawBody = await readBoundedJsonBody(request, maxBytes);
   return safeJsonParse(rawBody);
+}
+
+export async function readBoundedJsonObject<T extends object = Record<string, unknown>>(
+  request: NextRequest,
+  maxBytes: number = DEFAULT_JSON_BODY_MAX_BYTES,
+): Promise<T> {
+  const body = await readBoundedJson(request, maxBytes);
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new SyntaxError("JSON body must be an object");
+  }
+  return body as T;
 }
