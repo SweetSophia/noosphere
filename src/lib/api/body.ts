@@ -63,15 +63,11 @@ export function getJsonBodyError(error: unknown): {
   message: string;
   status: 400 | 413;
 } {
-  // Match by `name` rather than `instanceof` so the 413 mapping survives
-  // module-duplication or realm boundaries that break instanceof identity.
   if (
-    typeof error === "object" &&
-    error !== null &&
-    ((error as { name?: string }).name === "RequestBodyTooLargeError" ||
-      (error as { name?: string }).name === "JsonDepthExceededError")
+    error instanceof RequestBodyTooLargeError ||
+    error instanceof JsonDepthExceededError
   ) {
-    return { message: (error as Error).message, status: 413 };
+    return { message: error.message, status: 413 };
   }
 
   return { message: "Invalid JSON body", status: 400 };
