@@ -22,6 +22,7 @@ import {
   validateSyncConflictPreferencesUpdate,
 } from "@/lib/markdown-sync/conflict-preferences";
 import { rateLimit } from "@/lib/rate-limit";
+import { JsonDepthExceededError, safeJsonParse } from "@/lib/api/body";
 
 export async function GET(request: NextRequest) {
   const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "sync-conflict-preferences-get" });
@@ -64,8 +65,14 @@ export async function POST(request: NextRequest) {
         { status: 413 },
       );
     }
-    body = JSON.parse(bodyText);
-  } catch {
+    body = safeJsonParse(bodyText);
+  } catch (error) {
+    if (error instanceof JsonDepthExceededError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 413 },
+      );
+    }
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 

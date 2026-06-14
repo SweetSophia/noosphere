@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/wiki";
 import { checkRouteAuth } from "@/lib/api/auth";
+import { getJsonBodyError, readBoundedJsonObject } from "@/lib/api/body";
 import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/tags — List all tags with article counts
@@ -46,7 +47,16 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json();
+    let body: Record<string, unknown>;
+    try {
+      body = await readBoundedJsonObject(request);
+    } catch (error) {
+      const bodyError = getJsonBodyError(error);
+      return NextResponse.json(
+        { error: bodyError.message },
+        { status: bodyError.status },
+      );
+    }
     const { name } = body;
 
     if (!name || typeof name !== "string" || !name.trim()) {

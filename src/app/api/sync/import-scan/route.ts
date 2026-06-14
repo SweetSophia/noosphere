@@ -19,6 +19,7 @@ import {
   validateMarkdownImportScanRequestBody,
 } from "@/lib/markdown-sync/import-scanner";
 import { rateLimit } from "@/lib/rate-limit";
+import { JsonDepthExceededError, safeJsonParse } from "@/lib/api/body";
 
 export async function POST(request: NextRequest) {
   const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 20, keyPrefix: "sync-import-scan-post" });
@@ -56,9 +57,15 @@ export async function POST(request: NextRequest) {
       if (!bodyTextValidation.ok) {
         return NextResponse.json({ error: bodyTextValidation.error }, { status: bodyTextValidation.status });
       }
-      body = JSON.parse(bodyText);
+      body = safeJsonParse(bodyText);
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof JsonDepthExceededError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 413 },
+      );
+    }
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 

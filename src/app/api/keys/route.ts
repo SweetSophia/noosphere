@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
+import { getJsonBodyError, readBoundedJsonObject } from "@/lib/api/body";
 import { generateApiKey } from "@/lib/api/keys";
 import { rateLimit } from "@/lib/rate-limit";
 
@@ -45,7 +46,17 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { name, permissions, allowedScopes } = await request.json();
+    let body: Record<string, unknown>;
+    try {
+      body = await readBoundedJsonObject(request);
+    } catch (error) {
+      const bodyError = getJsonBodyError(error);
+      return NextResponse.json(
+        { error: bodyError.message },
+        { status: bodyError.status },
+      );
+    }
+    const { name, permissions, allowedScopes } = body;
 
     if (!name || typeof name !== "string" || !name.trim()) {
       return NextResponse.json({ error: "name is required and must be a non-empty string" }, { status: 400 });
@@ -58,7 +69,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (permissions !== undefined) {
-      if (!["READ", "WRITE", "ADMIN"].includes(permissions)) {
+      if (
+        typeof permissions !== "string" ||
+        !["READ", "WRITE", "ADMIN"].includes(permissions)
+      ) {
         return NextResponse.json({ error: "permissions must be READ, WRITE, or ADMIN" }, { status: 400 });
       }
     }
@@ -92,7 +106,7 @@ export async function POST(request: NextRequest) {
         keyHash: hash,
         keyPrefix: prefix,
         permissions: (permissions as Permissions) ?? Permissions.WRITE,
-        allowedScopes: allowedScopes ?? [],
+        allowedScopes: (allowedScopes as string[] | undefined) ?? [],
       },
       select: {
         id: true,

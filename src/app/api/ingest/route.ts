@@ -2,11 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
+import {
+  DEFAULT_JSON_BODY_MAX_BYTES,
+  getJsonBodyError,
+  readBoundedJsonObject,
+} from "@/lib/api/body";
 import { apiError } from "@/lib/api/errors";
 import { ARTICLE_LIMITS, deriveExcerpt, sanitizeAuthorName } from "@/lib/validation";
 import { rateLimit } from "@/lib/rate-limit";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
 import { filterAccessibleRelatedTargets } from "@/lib/articles/relations";
+
+// Ingest is a multi-article batch endpoint, so it needs more headroom than a
+// single article while still rejecting payloads large enough to amplify work.
+const INGEST_JSON_BODY_MAX_BYTES =
+  ARTICLE_LIMITS.maxContentSize * 4 + DEFAULT_JSON_BODY_MAX_BYTES;
 
 // POST /api/ingest — Process a source into multiple wiki articles
 // Auth: API key (WRITE/ADMIN) or session (EDITOR/ADMIN)
@@ -63,9 +73,13 @@ export async function POST(request: NextRequest) {
   };
 
   try {
-    body = await request.json();
-  } catch {
-    return apiError("Invalid JSON body", 400);
+    body = await readBoundedJsonObject<typeof body>(
+      request,
+      INGEST_JSON_BODY_MAX_BYTES,
+    );
+  } catch (error) {
+    const bodyError = getJsonBodyError(error);
+    return apiError(bodyError.message, bodyError.status);
   }
 
   const { source, articles, tags: globalTags } = body;

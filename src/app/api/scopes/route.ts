@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
+import { getJsonBodyError, readBoundedJsonObject } from "@/lib/api/body";
 import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/scopes — List all available restricted scopes
@@ -35,7 +36,17 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { tag, description } = await request.json();
+    let body: Record<string, unknown>;
+    try {
+      body = await readBoundedJsonObject(request);
+    } catch (error) {
+      const bodyError = getJsonBodyError(error);
+      return NextResponse.json(
+        { error: bodyError.message },
+        { status: bodyError.status },
+      );
+    }
+    const { tag, description } = body;
 
     if (!tag || typeof tag !== "string") {
       return NextResponse.json({ error: "tag is required and must be a string" }, { status: 400 });
