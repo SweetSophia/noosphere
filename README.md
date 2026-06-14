@@ -175,7 +175,7 @@ Common endpoints:
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/health` | Service health check |
-| `GET` | `/api/topics` | List topics |
+| `GET` | `/api/topics` | List the complete topic tree (maximum 500 topics; returns `409` above the limit) |
 | `GET` | `/api/articles` | Search/list articles |
 | `POST` | `/api/articles` | Create an article |
 | `PATCH` | `/api/articles/:id` | Update an article |
