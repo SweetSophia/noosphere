@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { requirePermission } from "@/lib/api/auth";
-import { getJsonBodyError, readBoundedJson } from "@/lib/api/body";
+import { getJsonBodyError, readBoundedJsonObject } from "@/lib/api/body";
 import { getRecallSettingsFromDB, upsertRecallSettings } from "@/lib/memory/api/settings";
 import type { RecallSettings } from "@/lib/memory/settings";
 import { rateLimit } from "@/lib/rate-limit";
@@ -53,35 +53,14 @@ export async function POST(request: NextRequest) {
     return auth.response;
   }
 
-  // Reject oversized bodies
-  const contentLength = request.headers.get("content-length");
-  if (
-    contentLength !== null &&
-    parseInt(contentLength, 10) > SETTINGS_MAX_BODY_BYTES
-  ) {
-    return NextResponse.json(
-      {
-        error: `Request body too large. Maximum size is ${SETTINGS_MAX_BODY_BYTES} bytes.`,
-      },
-      { status: 413 },
-    );
-  }
-
-  let body: unknown;
+  let body: Record<string, unknown>;
   try {
-    body = await readBoundedJson(request, SETTINGS_MAX_BODY_BYTES);
+    body = await readBoundedJsonObject(request, SETTINGS_MAX_BODY_BYTES);
   } catch (error) {
     const bodyError = getJsonBodyError(error);
     return NextResponse.json(
       { error: bodyError.message },
       { status: bodyError.status },
-    );
-  }
-
-  if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    return NextResponse.json(
-      { error: "Body must be a JSON object" },
-      { status: 400 },
     );
   }
 

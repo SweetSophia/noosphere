@@ -28,3 +28,22 @@ for (const routePath of JSON_BODY_ROUTES) {
     assert.match(source, /readBoundedJson(?:Object)?(?:<[^>]+>)?\s*\(/);
   });
 }
+
+// Sync routes read the body as text (they run domain-specific text validators
+// before parsing), so they use the depth-guarded `safeJsonParse` rather than
+// the streaming `readBoundedJson` reader. Guard against regression to a raw
+// `JSON.parse`, which would skip the nesting-depth check.
+const SYNC_JSON_ROUTES = [
+  "src/app/api/sync/import-apply/route.ts",
+  "src/app/api/sync/import-scan/route.ts",
+  "src/app/api/sync/conflict-preferences/route.ts",
+] as const;
+
+for (const routePath of SYNC_JSON_ROUTES) {
+  test(`${routePath} uses the depth-guarded JSON parser`, async () => {
+    const source = await readFile(path.join(process.cwd(), routePath), "utf8");
+
+    assert.doesNotMatch(source, /JSON\.parse\s*\(/);
+    assert.match(source, /safeJsonParse\s*\(/);
+  });
+}

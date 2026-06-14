@@ -23,6 +23,8 @@ export async function readBoundedJsonBody(
   request: NextRequest,
   maxBytes: number = DEFAULT_JSON_BODY_MAX_BYTES,
 ): Promise<string> {
+  // Missing/empty header → Number(null)===0; the streaming cap below is the
+  // authoritative bound, so the absent-header path falls through safely.
   const contentLength = Number(request.headers.get("content-length"));
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
     throw new RequestBodyTooLargeError();
@@ -37,11 +39,11 @@ export async function readBoundedJsonBody(
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    totalBytes += value.byteLength;
-    if (totalBytes > maxBytes) {
+    if (totalBytes + value.byteLength > maxBytes) {
       await reader.cancel().catch(() => undefined);
       throw new RequestBodyTooLargeError();
     }
+    totalBytes += value.byteLength;
     chunks.push(value);
   }
 
@@ -61,11 +63,15 @@ export function getJsonBodyError(error: unknown): {
   message: string;
   status: 400 | 413;
 } {
+  // Match by `name` rather than `instanceof` so the 413 mapping survives
+  // module-duplication or realm boundaries that break instanceof identity.
   if (
-    error instanceof RequestBodyTooLargeError ||
-    error instanceof JsonDepthExceededError
+    typeof error === "object" &&
+    error !== null &&
+    ((error as { name?: string }).name === "RequestBodyTooLargeError" ||
+      (error as { name?: string }).name === "JsonDepthExceededError")
   ) {
-    return { message: error.message, status: 413 };
+    return { message: (error as Error).message, status: 413 };
   }
 
   return { message: "Invalid JSON body", status: 400 };

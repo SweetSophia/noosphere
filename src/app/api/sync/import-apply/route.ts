@@ -14,6 +14,7 @@ import { requirePermission } from "@/lib/api/auth";
 import { getObsidianSyncConfig } from "@/lib/obsidian-sync/config";
 import { rateLimit } from "@/lib/rate-limit";
 import { prisma } from "@/lib/prisma";
+import { JsonDepthExceededError, safeJsonParse } from "@/lib/api/body";
 import { loadManifest } from "@/lib/markdown-sync/manifest";
 import {
   applyMarkdownImports,
@@ -55,11 +56,17 @@ export async function POST(request: NextRequest) {
         { status: 413 }
       );
     }
-    body = JSON.parse(rawBody);
-  } catch {
+    body = safeJsonParse(rawBody) as ImportApplyRequestBody;
+  } catch (error) {
+    if (error instanceof JsonDepthExceededError) {
+      return NextResponse.json(
+        { success: false, error: error.message },
+        { status: 413 },
+      );
+    }
     return NextResponse.json(
       { success: false, error: "Invalid JSON body." },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
