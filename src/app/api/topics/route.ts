@@ -5,6 +5,8 @@ import { slugify } from "@/lib/wiki";
 import { buildScopeFilter, checkRouteAuth, hasPermission, requirePermission } from "@/lib/api/auth";
 import { rateLimit } from "@/lib/rate-limit";
 
+const TOPIC_TREE_MAX_TOPICS = 500;
+
 // GET /api/topics — List all topics (existing)
 export async function GET(request: NextRequest) {
   const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 60, keyPrefix: "topics-get" });
@@ -17,8 +19,20 @@ export async function GET(request: NextRequest) {
 
   try {
     const allTopics = await prisma.topic.findMany({
+      take: TOPIC_TREE_MAX_TOPICS + 1,
       orderBy: { name: "asc" },
     });
+
+    if (allTopics.length > TOPIC_TREE_MAX_TOPICS) {
+      return NextResponse.json(
+        {
+          error: `Topic tree exceeds the supported limit of ${TOPIC_TREE_MAX_TOPICS} topics`,
+          code: "TOPIC_TREE_LIMIT_EXCEEDED",
+          maxTopics: TOPIC_TREE_MAX_TOPICS,
+        },
+        { status: 409 },
+      );
+    }
 
     const counts = await prisma.article.groupBy({
       by: ["topicId"],
