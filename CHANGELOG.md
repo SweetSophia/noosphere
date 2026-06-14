@@ -8,6 +8,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-06-14
+
+Patch release bundling four bug fixes and security patches merged since
+v1.10.0 (2026-06-10). No breaking changes, no new features, no DB schema
+changes.
+
+### Security
+
+- **Bound legacy JSON request bodies (DoS amplification, issue #192)**
+  ([#196](https://github.com/SweetSophia/noosphere/pull/196)): 14 legacy
+  JSON write routes called `await request.json()` with no body-size or
+  nesting-depth limit, allowing an unauthenticated client to pin
+  arbitrary memory by streaming a deeply-nested or oversized payload
+  into `JSON.parse`. Replaced with three shared helpers in
+  `src/lib/api/body.ts`:
+  - `readBoundedJsonBody(request, maxBytes)` — streaming reader that
+    enforces a per-route byte cap via the `Content-Length` header and
+    the chunked stream (rejects oversized chunks before accumulating).
+  - `safeJsonParse(raw)` + `assertJsonDepth` — a streaming
+    nesting-depth scanner capped at 20 levels. `assertJsonDepth`
+    clamps unmatched closing delimiters at zero so a leading `}}}}`
+    payload cannot offset the counter and bypass the guard. Malformed
+    JSON still surfaces through the normal `JSON.parse` 400.
+  - `readBoundedJsonObject(request, maxBytes)` — rejects `null`,
+    arrays, and primitive JSON with 400 before any route destructures
+    the body, closing the `Cannot destructure property 'x' of 'body'
+    as it is null` 500 path that affected `PATCH /api/keys/:id`.
+  Per-route `*_JSON_BODY_MAX_BYTES` constants preserve each endpoint's
+  existing content contract (e.g. `/api/answer` keeps the ~1 MiB
+  ceiling it already validated against, `/api/lint` returns 200 only
+  when the body is empty, 400 for malformed JSON, 413 for
+  size/depth). `getJsonBodyError(error)` centralizes the 413 vs 400
+  mapping for `RequestBodyTooLargeError` and `JsonDepthExceededError`
+  so the public response is stable across routes. The same depth
+  guard is now applied to the three sync routes (`/api/sync/import-apply`,
+  `/api/sync/import-scan`, `/api/sync/conflict-preferences`) and
+  `memory/settings` was simplified to use `readBoundedJsonObject`
+  directly. Coverage: unit tests in `body.test.ts`, static tests in
+  `bounded-json-routes.test.ts` (asserting every legacy JSON route
+  uses the bounded reader and the three sync routes use
+  `safeJsonParse`), and an authenticated integration test in
+  `bounded-json-routes.integration.test.ts` covering empty-body 200,
+  malformed 400, oversized 413, deeply-nested 413, and null-body 400
+  against `PATCH /api/keys/:id`.
+- **Bump `tsx` 4.21.0 → 4.22.4 and `esbuild` 0.27.7 → 0.28.1 across
+  all workspaces** ([#190](https://github.com/SweetSophia/noosphere/pull/190)):
+  `esbuild` 0.28.1 is the first patched release for
+  [GHSA-g7r7-m6w7-qqqr](https://github.com/advisories/GHSA-g7r7-m6w7-qqqr).
+  `tsx` 4.22.4 picks up the dependency's own security bump. No
+  functional changes; build is reproducible via `npm ci`.
+
+### Fixed
+
+- **Bound topic tree queries (issue #144)**
+  ([#195](https://github.com/SweetSophia/noosphere/pull/195)):
+  `GET /api/topics` previously issued an unbounded recursive
+  topic-tree query, so a database with thousands of topics would
+  return an unbounded response. Added a 500-topic contract with a
+  501-row sentinel read, an explicit
+  `409 TOPIC_TREE_LIMIT_EXCEEDED` response, scope-aware bounded
+  ancestor loading, and a POST creation guard at the global ceiling
+  so the same client cannot create the topics that overflow the read
+  path. Route-level coverage for normal, scoped-hidden, overflow, and
+  blocked-create behavior is included.
+
+### Refactored
+
+- **Consolidate PATCH restricted-tags validation into a shared helper**
+  ([#191](https://github.com/SweetSophia/noosphere/pull/191)): the
+  restrictedTags permission and same-set merge logic was duplicated
+  between POST and PATCH article handlers. Both routes now route
+  through `applyRestrictedTagsUpdate`, eliminating the drift surface
+  for the issue #136 access-control contract.
+
 ## [1.10.0] - 2026-06-10
 
 ### Changed
@@ -76,7 +150,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backfill pipeline, and the memory provider refactor. Refer to the commit
   history (`git log v1.8.0..v1.9.0`) for the full set of changes.
 
-[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.10.1...HEAD
+[1.10.1]: https://github.com/SweetSophia/noosphere/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/SweetSophia/noosphere/compare/v1.9.1...v1.10.0
 [1.9.1]: https://github.com/SweetSophia/noosphere/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/SweetSophia/noosphere/compare/v1.8.0...v1.9.0
