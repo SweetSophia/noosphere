@@ -22,9 +22,22 @@ function buildGetRequest(rawKey: string): NextRequest {
   return request as unknown as NextRequest;
 }
 
+function buildPostRequest(rawKey: string, body: unknown): NextRequest {
+  const request = new Request("http://localhost/api/topics", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${rawKey}`,
+      "Content-Type": "application/json",
+      "x-real-ip": TEST_CLIENT_IP,
+    },
+    body: JSON.stringify(body),
+  });
+  return request as unknown as NextRequest;
+}
+
 test("GET /api/topics rejects oversized trees instead of returning a partial hierarchy (issue #144)", async () => {
   const { prisma } = await import("@/lib/prisma");
-  const { GET } = await import("@/app/api/topics/route");
+  const { GET, POST } = await import("@/app/api/topics/route");
   const runId = crypto.randomUUID();
   const rawKey = `noo_${crypto.randomBytes(32).toString("base64url")}`;
   const keyHash = crypto.createHash("sha256").update(rawKey).digest("hex");
@@ -88,6 +101,24 @@ test("GET /api/topics rejects oversized trees instead of returning a partial hie
     assert.equal(overflowBody.maxTopics, TOPIC_TREE_MAX_TOPICS);
     assert.equal(overflowBody.topics, undefined, "overflow must not expose a partial topic tree");
     assert.match(overflowBody.error ?? "", /supported limit of 500 topics/);
+
+    await prisma.apiKey.update({
+      where: { id: apiKey.id },
+      data: { permissions: "WRITE" },
+    });
+    const blockedSlug = `${TEST_PREFIX}${runId}-blocked`;
+    const createResponse = await POST(buildPostRequest(rawKey, {
+      name: "Blocked topic beyond limit",
+      slug: blockedSlug,
+    }));
+    const createBody = (await createResponse.json()) as { code?: string };
+    assert.equal(createResponse.status, 409);
+    assert.equal(createBody.code, "TOPIC_TREE_LIMIT_EXCEEDED");
+    assert.equal(
+      await prisma.topic.count({ where: { slug: blockedSlug } }),
+      0,
+      "POST must not create topics after the global ceiling is reached",
+    );
   } finally {
     await prisma.topic.deleteMany({
       where: { slug: { startsWith: `${TEST_PREFIX}${runId}` } },

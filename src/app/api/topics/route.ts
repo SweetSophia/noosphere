@@ -157,6 +157,15 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const topicAtLimit = await prisma.topic.findFirst({
+      orderBy: { id: "asc" },
+      skip: TOPIC_TREE_MAX_TOPICS - 1,
+      select: { id: true },
+    });
+    if (topicAtLimit) {
+      return topicTreeLimitExceededResponse();
+    }
+
     const body = await request.json();
     const { name, slug, parentId, description } = body;
 
