@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, buildScopeFilter } from "@/lib/api/auth";
+import { getJsonBodyError, readBoundedJsonObject } from "@/lib/api/body";
 import { rateLimit } from "@/lib/rate-limit";
 import { parseLintOptions } from "@/lib/lint-options";
 
@@ -44,10 +45,16 @@ export async function POST(request: NextRequest) {
 
   // --- Parse options ---
   let body: { staleDays?: unknown; tagMin?: unknown; maxArticles?: unknown } = {};
-  try {
-    body = await request.json();
-  } catch {
-    // No body — use defaults
+  if (request.body) {
+    try {
+      body = await readBoundedJsonObject<typeof body>(request);
+    } catch (error) {
+      const bodyError = getJsonBodyError(error);
+      return NextResponse.json(
+        { error: bodyError.message },
+        { status: bodyError.status },
+      );
+    }
   }
 
   const lintOptions = parseLintOptions(body);

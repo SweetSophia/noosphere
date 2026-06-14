@@ -232,7 +232,11 @@ Before implementing something, check what already exists:
 - **403 Forbidden**: Key lacks required scope for this operation (e.g., status check needs ADMIN)
 - **404 Not Found**: Topic or article doesn't exist — check slugs
 - **409 Conflict**: Article slug already exists in that topic — use a different slug or update existing
+- **413 Payload Too Large**: Request body exceeds the endpoint limit or JSON nesting exceeds 20 levels
 - **503 on /api/health**: Database connectivity issue — alert and retry
+
+JSON request limits are 64 KiB for standard write endpoints, approximately
+1 MiB for single-article writes, and 4 MiB for multi-article ingest batches.
 
 ---
 

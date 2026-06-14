@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import {
   safeJsonParse,
+  getJsonBodyError,
   JsonDepthExceededError,
   RequestBodyTooLargeError,
   readBoundedJsonBody,
   readBoundedJson,
+  readBoundedJsonObject,
 } from "@/lib/api/body";
 import { NextRequest } from "next/server";
 
@@ -59,6 +61,29 @@ describe("safeJsonParse", () => {
     assert.doesNotThrow(() => safeJsonParse(json));
   });
 
+  test("allows flat objects with more fields than the nesting limit", () => {
+    const flatObject = Object.fromEntries(
+      Array.from({ length: 100 }, (_, index) => [`field${index}`, index]),
+    );
+
+    assert.deepEqual(safeJsonParse(JSON.stringify(flatObject)), flatObject);
+  });
+
+  test("ignores structural characters inside JSON strings", () => {
+    const value = { content: "[[[{{{ deeply-looking but still a string }}}]]]" };
+
+    assert.deepEqual(safeJsonParse(JSON.stringify(value)), value);
+  });
+
+  test("does not let unmatched closing delimiters offset later nesting", () => {
+    const nested = `${'{"value":'.repeat(21)}0${"}".repeat(21)}`;
+
+    assert.throws(
+      () => safeJsonParse(`}${nested}`),
+      JsonDepthExceededError,
+    );
+  });
+
   test("parses nested arrays", () => {
     const result = safeJsonParse('{"items":[{"name":"a"},{"name":"b"}]}');
     assert.deepEqual(result, { items: [{ name: "a" }, { name: "b" }] });
@@ -81,6 +106,24 @@ describe("Error classes", () => {
     assert.equal(err.message, "JSON nesting depth exceeds limit");
     assert.ok(err instanceof Error);
   });
+
+  test("getJsonBodyError maps body limits to 413", () => {
+    assert.deepEqual(getJsonBodyError(new RequestBodyTooLargeError()), {
+      message: "Request body is too large",
+      status: 413,
+    });
+    assert.deepEqual(getJsonBodyError(new JsonDepthExceededError()), {
+      message: "JSON nesting depth exceeds limit",
+      status: 413,
+    });
+  });
+
+  test("getJsonBodyError maps malformed JSON to 400", () => {
+    assert.deepEqual(getJsonBodyError(new SyntaxError("Unexpected token")), {
+      message: "Invalid JSON body",
+      status: 400,
+    });
+  });
 });
 
 // ─── readBoundedJsonBody ────────────────────────────────────────────────────
@@ -96,6 +139,16 @@ describe("readBoundedJsonBody", () => {
   test("throws RequestBodyTooLargeError when body exceeds maxBytes", async () => {
     const body = "x".repeat(100);
     const req = makeRequest(body);
+    await assert.rejects(
+      () => readBoundedJsonBody(req, 50),
+      RequestBodyTooLargeError,
+    );
+  });
+
+  test("rejects an oversized Content-Length before reading the stream", async () => {
+    const req = makeRequest("{}", "application/json");
+    req.headers.set("content-length", "100");
+
     await assert.rejects(
       () => readBoundedJsonBody(req, 50),
       RequestBodyTooLargeError,
@@ -138,5 +191,21 @@ describe("readBoundedJson", () => {
   test("throws SyntaxError on invalid JSON within size limit", async () => {
     const req = makeRequest("{not-json}");
     await assert.rejects(() => readBoundedJson(req), SyntaxError);
+  });
+});
+
+describe("readBoundedJsonObject", () => {
+  test("reads JSON objects", async () => {
+    const result = await readBoundedJsonObject(makeRequest('{"key":"value"}'));
+    assert.deepEqual(result, { key: "value" });
+  });
+
+  test("rejects null, arrays, and primitive JSON values", async () => {
+    for (const body of ["null", "[]", '"text"', "42"]) {
+      await assert.rejects(
+        () => readBoundedJsonObject(makeRequest(body)),
+        SyntaxError,
+      );
+    }
   });
 });
