@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Permissions } from "@prisma/client";
+import { Permissions, type Topic } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/wiki";
 import { buildScopeFilter, checkRouteAuth, hasPermission, requirePermission } from "@/lib/api/auth";
@@ -18,35 +18,75 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const allTopics = await prisma.topic.findMany({
-      take: TOPIC_TREE_MAX_TOPICS + 1,
-      orderBy: { name: "asc" },
-    });
-
-    if (allTopics.length > TOPIC_TREE_MAX_TOPICS) {
-      return NextResponse.json(
-        {
-          error: `Topic tree exceeds the supported limit of ${TOPIC_TREE_MAX_TOPICS} topics`,
-          code: "TOPIC_TREE_LIMIT_EXCEEDED",
-          maxTopics: TOPIC_TREE_MAX_TOPICS,
-        },
-        { status: 409 },
-      );
-    }
-
-    const counts = await prisma.article.groupBy({
-      by: ["topicId"],
-      _count: { id: true },
-      where: buildScopeFilter(auth.auth.allowedScopes, {
-        topicId: { in: allTopics.map((t) => t.id) },
-        deletedAt: null,
-      }),
-    });
-    const countMap = new Map(counts.map((c) => [c.topicId, c._count.id]));
     const fullAccess = auth.auth.allowedScopes?.includes("*") ?? false;
-    const visibleTopicIds = fullAccess
-      ? new Set(allTopics.map((topic) => topic.id))
-      : collectVisibleTopicIds(allTopics, countMap);
+    let allTopics: Topic[];
+    let countMap: Map<string, number>;
+
+    if (fullAccess) {
+      allTopics = await prisma.topic.findMany({
+        take: TOPIC_TREE_MAX_TOPICS + 1,
+        orderBy: { name: "asc" },
+      });
+      if (allTopics.length > TOPIC_TREE_MAX_TOPICS) {
+        return topicTreeLimitExceededResponse();
+      }
+
+      const counts = await prisma.article.groupBy({
+        by: ["topicId"],
+        _count: { id: true },
+        where: {
+          topicId: { in: allTopics.map((topic) => topic.id) },
+          deletedAt: null,
+        },
+      });
+      countMap = new Map(counts.map((count) => [count.topicId, count._count.id]));
+    } else {
+      const counts = await prisma.article.groupBy({
+        by: ["topicId"],
+        _count: { id: true },
+        where: buildScopeFilter(auth.auth.allowedScopes, { deletedAt: null }),
+        orderBy: { topicId: "asc" },
+        take: TOPIC_TREE_MAX_TOPICS + 1,
+      });
+      if (counts.length > TOPIC_TREE_MAX_TOPICS) {
+        return topicTreeLimitExceededResponse();
+      }
+
+      countMap = new Map(counts.map((count) => [count.topicId, count._count.id]));
+      const visibleTopicIds = new Set<string>();
+      let pendingIds = [...countMap.keys()];
+
+      while (pendingIds.length > 0) {
+        const remaining = TOPIC_TREE_MAX_TOPICS - visibleTopicIds.size;
+        const topics = await prisma.topic.findMany({
+          where: { id: { in: pendingIds } },
+          select: { id: true, parentId: true },
+          orderBy: { id: "asc" },
+          take: remaining + 1,
+        });
+
+        if (topics.length > remaining) {
+          return topicTreeLimitExceededResponse();
+        }
+
+        const nextIds = new Set<string>();
+        for (const topic of topics) {
+          visibleTopicIds.add(topic.id);
+          if (topic.parentId && !visibleTopicIds.has(topic.parentId)) {
+            nextIds.add(topic.parentId);
+          }
+        }
+        pendingIds = [...nextIds];
+      }
+
+      allTopics = visibleTopicIds.size === 0
+        ? []
+        : await prisma.topic.findMany({
+            where: { id: { in: [...visibleTopicIds] } },
+            orderBy: { name: "asc" },
+            take: TOPIC_TREE_MAX_TOPICS,
+          });
+    }
 
     type TopicTree = {
       id: string;
@@ -61,7 +101,6 @@ export async function GET(request: NextRequest) {
     const roots: TopicTree[] = [];
 
     for (const topic of allTopics) {
-      if (!visibleTopicIds.has(topic.id)) continue;
       topicMap.set(topic.id, {
         id: topic.id,
         name: topic.name,
@@ -89,23 +128,15 @@ export async function GET(request: NextRequest) {
   }
 }
 
-function collectVisibleTopicIds(
-  topics: Array<{ id: string; parentId: string | null }>,
-  countMap: Map<string, number>,
-): Set<string> {
-  const byId = new Map(topics.map((topic) => [topic.id, topic]));
-  const visible = new Set<string>();
-
-  for (const topicId of countMap.keys()) {
-    let current = byId.get(topicId);
-    while (current) {
-      if (visible.has(current.id)) break;
-      visible.add(current.id);
-      current = current.parentId ? byId.get(current.parentId) : undefined;
-    }
-  }
-
-  return visible;
+function topicTreeLimitExceededResponse() {
+  return NextResponse.json(
+    {
+      error: `Topic tree exceeds the supported limit of ${TOPIC_TREE_MAX_TOPICS} topics`,
+      code: "TOPIC_TREE_LIMIT_EXCEEDED",
+      maxTopics: TOPIC_TREE_MAX_TOPICS,
+    },
+    { status: 409 },
+  );
 }
 
 // POST /api/topics — Create a topic or subtopic

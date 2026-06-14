@@ -41,22 +41,38 @@ test("GET /api/topics rejects oversized trees instead of returning a partial hie
 
   try {
     const initialCount = await prisma.topic.count();
-    assert.ok(
-      initialCount <= TOPIC_TREE_MAX_TOPICS,
-      `test database already exceeds the ${TOPIC_TREE_MAX_TOPICS}-topic contract`,
+    if (initialCount <= TOPIC_TREE_MAX_TOPICS) {
+      const normalResponse = await GET(buildGetRequest(rawKey));
+      const normalBody = (await normalResponse.json()) as { topics?: unknown[] };
+      assert.equal(normalResponse.status, 200);
+      assert.ok(Array.isArray(normalBody.topics), "normal datasets should retain the topic-tree response");
+
+      const topicsNeeded = TOPIC_TREE_MAX_TOPICS + 1 - initialCount;
+      await prisma.topic.createMany({
+        data: Array.from({ length: topicsNeeded }, (_, index) => ({
+          name: `${TEST_PREFIX}${runId}-${index}`,
+          slug: `${TEST_PREFIX}${runId}-${index}`,
+        })),
+      });
+    }
+
+    await prisma.apiKey.update({
+      where: { id: apiKey.id },
+      data: { allowedScopes: [] },
+    });
+    const scopedResponse = await GET(buildGetRequest(rawKey));
+    const scopedBody = (await scopedResponse.json()) as { topics?: unknown[] };
+    assert.equal(scopedResponse.status, 200, "hidden topics must not count against a scoped caller");
+    assert.ok(Array.isArray(scopedBody.topics));
+    assert.equal(
+      JSON.stringify(scopedBody.topics).includes(`${TEST_PREFIX}${runId}`),
+      false,
+      "empty topics outside the caller's visible tree must remain hidden",
     );
 
-    const normalResponse = await GET(buildGetRequest(rawKey));
-    const normalBody = (await normalResponse.json()) as { topics?: unknown[] };
-    assert.equal(normalResponse.status, 200);
-    assert.ok(Array.isArray(normalBody.topics), "normal datasets should retain the topic-tree response");
-
-    const topicsNeeded = TOPIC_TREE_MAX_TOPICS + 1 - initialCount;
-    await prisma.topic.createMany({
-      data: Array.from({ length: topicsNeeded }, (_, index) => ({
-        name: `${TEST_PREFIX}${runId}-${index}`,
-        slug: `${TEST_PREFIX}${runId}-${index}`,
-      })),
+    await prisma.apiKey.update({
+      where: { id: apiKey.id },
+      data: { allowedScopes: ["*"] },
     });
 
     const overflowResponse = await GET(buildGetRequest(rawKey));
