@@ -8,6 +8,47 @@ It provides:
 - optional idle auto-save through `POST /api/memory/save`
 - manual tools for status, recall, topic lookup, and draft memory saving
 
+## Before you start
+
+You need two things before this plugin will do anything useful:
+
+1. **A reachable Noosphere instance.** The plugin defaults to
+   `http://127.0.0.1:6578`. For a local install, the cleanest path is the
+   repository's Docker Compose stack — it provisions just Noosphere, without
+   pulling in any other plugin:
+
+   ```bash
+   git clone https://github.com/SweetSophia/noosphere.git
+   cd noosphere
+   cp noosphere.env.example .env
+   # Edit .env: POSTGRES_PASSWORD, NEXTAUTH_SECRET, NOOSPHERE_ADMIN_PASSWORD,
+   # and NOOSPHERE_BOOTSTRAP_API_KEY. Generate strong values, for example:
+   # openssl rand -hex 32
+   # printf 'noo_%s\n' "$(openssl rand -hex 32)"
+   docker compose -f docker-compose.noosphere.yml up -d
+   ```
+
+   The bootstrap key is whatever you put in `NOOSPHERE_BOOTSTRAP_API_KEY` and
+   has full `ADMIN` scope. To point at an existing Noosphere instead, set
+   `baseUrl` in the plugin options (see [Configuration](#configuration)).
+
+   > **Note:** the repository also ships `install-openclaw.sh`, a one-shot
+   > installer that provisions Noosphere *plus* the OpenClaw plugin. Use it
+   > if you intend to run both tools; skip it if you only want Kilo Code.
+
+2. **A Noosphere API key for this tool.** The plugin will refuse to start
+   without one. Create a **tool-scoped** key (named after the tool, e.g.
+   `kilocode`) in the Noosphere admin UI at:
+
+   ```text
+   https://<your-noosphere-host>/wiki/admin/keys
+   ```
+
+   Admin login is required. The local Docker Compose install creates an
+   `admin@noosphere.local` admin account whose password is in `.env` as
+   `NOOSPHERE_ADMIN_PASSWORD`. See [Secrets](#secrets) below for which
+   permissions the key needs and where to put it.
+
 ## Install
 
 ```bash
