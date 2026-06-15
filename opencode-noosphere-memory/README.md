@@ -13,36 +13,41 @@ It provides:
 You need two things before this plugin will do anything useful:
 
 1. **A reachable Noosphere instance.** The plugin defaults to
-   `http://127.0.0.1:6578`. For a local install, the easiest path is the
-   repository's one-shot installer:
+   `http://127.0.0.1:6578`. For a local install, the cleanest path is the
+   repository's Docker Compose stack — it provisions just Noosphere, without
+   pulling in any other plugin:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/master/install-openclaw.sh | bash
+   git clone https://github.com/SweetSophia/noosphere.git
+   cd noosphere
+   cp noosphere.env.example .env
+   # Edit .env: POSTGRES_PASSWORD, NEXTAUTH_SECRET, NOOSPHERE_ADMIN_PASSWORD,
+   # and NOOSPHERE_BOOTSTRAP_API_KEY. Generate strong values, for example:
+   # openssl rand -hex 32
+   # printf 'noo_%s\n' "$(openssl rand -hex 32)"
+   docker compose -f docker-compose.noosphere.yml up -d
    ```
 
-   It provisions Docker, Redis, the Noosphere container, and a bootstrap API key.
-   To point at an existing Noosphere instead, set `baseUrl` in the plugin
-   options (see [Configuration](#configuration)).
+   The bootstrap key is whatever you put in `NOOSPHERE_BOOTSTRAP_API_KEY` and
+   has full `ADMIN` scope. To point at an existing Noosphere instead, set
+   `baseUrl` in the plugin options (see [Configuration](#configuration)).
+
+   > **Note:** the repository also ships `install-openclaw.sh`, a one-shot
+   > installer that provisions Noosphere *plus* the OpenClaw plugin. Use it
+   > if you intend to run both tools; skip it if you only want opencode.
 
 2. **A Noosphere API key for this tool.** The plugin will refuse to start
-   without one. Create it in the Noosphere admin UI:
+   without one. Create a **tool-scoped** key (named after the tool, e.g.
+   `opencode`) in the Noosphere admin UI at:
 
    ```text
-   <NOOSPHERE_URL>/wiki/admin/keys
+   https://<your-noosphere-host>/wiki/admin/keys
    ```
 
-   (Admin login is required. The local installer creates an `admin@noosphere.local`
-   admin account whose password is in `~/.noosphere/.env` as
-   `NOOSPHERE_ADMIN_PASSWORD`.) Use a **tool-scoped key** rather than the
-   bootstrap key for production installs — name it after the tool
-   (e.g. `opencode`) and grant the permissions you need:
-
-   - `READ` for prompt-time recall and topic lookup
-   - `WRITE` for manual saves and idle auto-save
-   - `ADMIN` for full `noosphere_status` output (the plugin falls back to
-     `/api/health` automatically if the key lacks `ADMIN`)
-
-   See [Secrets](#secrets) below for where to put the key once you have it.
+   Admin login is required. The local Docker Compose install creates an
+   `admin@noosphere.local` admin account whose password is in `.env` as
+   `NOOSPHERE_ADMIN_PASSWORD`. See [Secrets](#secrets) below for which
+   permissions the key needs and where to put it.
 
 ## Install
 
