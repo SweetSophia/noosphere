@@ -8,6 +8,42 @@ It provides:
 - optional idle auto-save through `POST /api/memory/save`
 - manual tools for status, recall, topic lookup, and draft memory saving
 
+## Before you start
+
+You need two things before this plugin will do anything useful:
+
+1. **A reachable Noosphere instance.** The plugin defaults to
+   `http://127.0.0.1:6578`. For a local install, the easiest path is the
+   repository's one-shot installer:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/master/install-openclaw.sh | bash
+   ```
+
+   It provisions Docker, Redis, the Noosphere container, and a bootstrap API key.
+   To point at an existing Noosphere instead, set `baseUrl` in the plugin
+   options (see [Configuration](#configuration)).
+
+2. **A Noosphere API key for this tool.** The plugin will refuse to start
+   without one. Create it in the Noosphere admin UI:
+
+   ```text
+   <NOOSPHERE_URL>/wiki/admin/keys
+   ```
+
+   (Admin login is required. The local installer creates an `admin@noosphere.local`
+   admin account whose password is in `~/.noosphere/.env` as
+   `NOOSPHERE_ADMIN_PASSWORD`.) Use a **tool-scoped key** rather than the
+   bootstrap key for production installs — name it after the tool
+   (e.g. `kilocode`) and grant the permissions you need:
+
+   - `READ` for prompt-time recall and topic lookup
+   - `WRITE` for manual saves and idle auto-save
+   - `ADMIN` for full `noosphere_status` output (the plugin falls back to
+     `/api/health` automatically if the key lacks `ADMIN`)
+
+   See [Secrets](#secrets) below for where to put the key once you have it.
+
 ## Install
 
 ```bash
