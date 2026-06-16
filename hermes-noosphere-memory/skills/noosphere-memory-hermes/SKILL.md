@@ -163,6 +163,40 @@ For live smoke testing, use the provider tools:
 - `noosphere_save` should create a draft memory candidate when a valid `topicId` is supplied.
 - `noosphere_status` may fall back to `/api/health` for non-admin keys; this is expected for scoped READ/WRITE keys.
 
+## Lookup Semantics: Topics Are Not Memories
+
+`noosphere_topics` returns topic IDs for choosing save targets. Those IDs are
+not directly fetchable through `noosphere_get`.
+
+For the Noosphere provider, `noosphere_get` canonical refs are string envelopes:
+
+```text
+noosphere:article:<article-id>
+```
+
+Do not call `noosphere_get(canonicalRef="noosphere:topic:<topic-id>")`. That
+is rejected during canonical-ref validation, before provider lookup or scope
+checks. The current 400 response text is:
+
+```text
+400 Unsupported canonicalRef type for noosphere: topic
+```
+
+Treat this class of 400 as a request-shape reject: the type segment is not in
+the Noosphere provider's addressable memory enum. It is not evidence that the
+topic is missing or that the API key lacks scope.
+
+When you need article content under a topic:
+
+1. Call `noosphere_topics` to find the topic name and ID.
+2. Call `noosphere_recall(query="<topic name or distinctive keywords>")`.
+3. Use article IDs or canonical refs from recall results with
+   `noosphere_get(canonicalRef="noosphere:article:<article-id>")`.
+
+The Hermes `noosphere_get` tool also accepts `{provider: "noosphere", id:
+"<article-id>"}` as a provider-local lookup form. Do not assume every other MCP
+surface supports that shape; raw HTTP `POST /api/memory/get` does.
+
 ## Key Permissions
 
 - `READ`: recall and get only.

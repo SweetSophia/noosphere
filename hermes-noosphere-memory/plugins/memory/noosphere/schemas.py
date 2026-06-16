@@ -49,7 +49,11 @@ NOOSPHERE_GET_SCHEMA = {
         "properties": {
             "canonicalRef": {
                 "type": "string",
-                "description": "Canonical memory reference, for example noosphere:article:<id>.",
+                "description": (
+                    "Canonical memory reference. For Noosphere, use "
+                    "`noosphere:article:<id>`; topic IDs from `noosphere_topics` "
+                    "are not valid canonical refs."
+                ),
             },
             "provider": {
                 "type": "string",

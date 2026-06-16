@@ -140,6 +140,14 @@ test("memory get validation rejects malformed inputs", () => {
     },
   );
   assert.deepEqual(
+    validateMemoryGetRequest({ canonicalRef: "noosphere:topic:topic-1" }),
+    {
+      ok: false,
+      status: 400,
+      error: "Unsupported canonicalRef type for noosphere: topic",
+    },
+  );
+  assert.deepEqual(
     validateMemoryGetRequest({ provider: "Noosphere", id: "article-1" }),
     {
       ok: false,
