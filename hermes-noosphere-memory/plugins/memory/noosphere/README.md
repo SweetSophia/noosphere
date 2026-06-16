@@ -114,10 +114,16 @@ Writes are disabled during `cron`, `flush`, and `subagent` contexts.
 | --- | --- |
 | `noosphere_status` | Calls `GET /api/memory/status` and returns Noosphere memory status JSON. |
 | `noosphere_recall` | Calls `POST /api/memory/recall` in inspection mode. |
-| `noosphere_get` | Calls `POST /api/memory/get` by canonical ref or provider/id. |
+| `noosphere_get` | Calls `POST /api/memory/get` by canonical ref or provider/id. For Noosphere, use `noosphere:article:<id>`; topic IDs from `noosphere_topics` are save/navigation targets, not `noosphere_get` canonical refs. |
 | `noosphere_topics` | Calls `GET /api/topics` for topic selection. |
 | `noosphere_save` | Calls `POST /api/memory/save` and creates a draft memory candidate. |
 
 `noosphere_save` accepts optional `restrictedTags` for explicit scoped saves.
 The provider validates the shape only; the Noosphere API enforces whether the
 key may assign the requested scopes.
+
+If `noosphere_get` returns a 400 canonical-ref type validation error such as
+`Unsupported canonicalRef type for noosphere: topic`, the request used a
+non-addressable type segment. Recover by searching with
+`noosphere_recall(query="<topic name>")`, then fetch the returned article with
+`canonicalRef="noosphere:article:<id>"`.
