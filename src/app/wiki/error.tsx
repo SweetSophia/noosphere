@@ -16,9 +16,11 @@ export default function WikiError({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Surface the error in the browser console for debugging
-    // (Next.js already logs server-thrown errors with the digest in dev mode)
-    console.error("[Noosphere wiki error]", error);
+    // Keep detailed stacks local to development; production users can report
+    // the rendered digest without exposing raw client-side errors in DevTools.
+    if (process.env.NODE_ENV !== "production") {
+      console.error("[Noosphere wiki error]", error);
+    }
   }, [error]);
 
   return (
