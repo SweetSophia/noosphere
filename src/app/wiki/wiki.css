@@ -1846,6 +1846,107 @@ h2.activity-title {
   font-size: 0.88rem;
 }
 
+/* ── Route loading / error / not-found states ───────────────────────────── */
+
+.route-loading {
+  display: grid;
+  justify-items: center;
+  gap: 1.25rem;
+  padding: 4rem 1.5rem;
+  text-align: center;
+}
+
+.route-loading-spinner {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  border: 3px solid var(--border-color);
+  border-top-color: var(--accent-color);
+  animation: route-loading-spin 0.7s linear infinite;
+}
+
+.route-loading-text {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  letter-spacing: 0.04em;
+}
+
+@keyframes route-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.route-state {
+  display: grid;
+  gap: 1rem;
+  justify-items: center;
+  padding: 4rem 1.5rem;
+  text-align: center;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  background:
+    linear-gradient(180deg, var(--surface-highlight), transparent 18rem),
+    var(--surface-elevated);
+  box-shadow: var(--shadow-1);
+}
+
+.route-state-error {
+  border-color: color-mix(in srgb, var(--danger-color) 30%, transparent);
+}
+
+.route-state-eyebrow {
+  margin: 0;
+  color: var(--accent-color);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.route-state-error .route-state-eyebrow {
+  color: var(--danger-color);
+}
+
+.route-state-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 4vw, 2.5rem);
+  line-height: 0.98;
+  letter-spacing: -0.05em;
+  color: var(--text-color);
+}
+
+.route-state-description {
+  max-width: 30rem;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+
+.route-state-digest {
+  margin: 0;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.route-state-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 0.5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-loading-spinner {
+    animation: none;
+  }
+}
+
 @media (max-width: 960px) {
   .wiki-header-top,
   .wiki-header-bottom,
