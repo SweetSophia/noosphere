@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { SearchShortcut } from "@/components/wiki/SearchShortcut";
 import { SignOutButton } from "@/components/wiki/SignOutButton";
 import "./wiki.css";
 
@@ -52,12 +53,17 @@ export default async function WikiLayout({
                   ⌕
                 </span>
                 <input
+                  id="wiki-global-search"
                   type="search"
                   name="q"
                   placeholder="Search articles, excerpts, tags..."
                   aria-label="Search wiki"
+                  aria-keyshortcuts="Meta+K Control+K"
                   className="wiki-search-input"
                 />
+                <kbd className="wiki-search-shortcut" aria-hidden>
+                  ⌘/Ctrl K
+                </kbd>
               </label>
               <button type="submit" className="btn btn-secondary btn-sm">
                 Search
@@ -95,6 +101,7 @@ export default async function WikiLayout({
       <main className="wiki-main">
         <div className="wiki-main-inner">{children}</div>
       </main>
+      <SearchShortcut targetId="wiki-global-search" />
     </div>
   );
 }

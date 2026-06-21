@@ -52,6 +52,7 @@ export default async function ApiKeysPage({ searchParams }: Props) {
       <Breadcrumbs
         items={[
           { label: "Noosphere", href: "/wiki" },
+          { label: "Admin" },
           { label: "API Keys" },
         ]}
       />
