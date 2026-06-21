@@ -2,7 +2,7 @@ import Link from "next/link";
 
 /**
  * Wiki-wide 404.
- * Triggered by notFound() calls in topic/article pages and by unknown /wiki/* routes.
+ * Triggered by notFound() calls from wiki route pages.
  */
 export default function WikiNotFound() {
   return (
@@ -11,7 +11,7 @@ export default function WikiNotFound() {
         <p className="route-state-eyebrow">404</p>
         <h1 className="route-state-title">Page not found</h1>
         <p className="route-state-description">
-          The topic or article you&apos;re looking for may have been moved, renamed, or deleted.
+          This page may have been moved, renamed, or deleted.
         </p>
         <div className="route-state-actions">
           <Link href="/wiki" className="btn btn-primary btn-sm">
