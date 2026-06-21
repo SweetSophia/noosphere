@@ -60,6 +60,9 @@ uploads/
 
 # review artifacts
 CODE_REVIEW.md
+REVIEW.md
+.codegraph/
+.opencode/
 
 # agent instructions (personal)
 AGENTS.md
