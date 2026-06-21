@@ -12,6 +12,7 @@ import { buildTagConnections, countSearchArticles, searchArticleIds } from "@/li
 import { detectSecretInInputs } from "@/lib/memory/api/save";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
 import { filterAccessibleRelatedTargets, filterVisibleRelatedArticleRows } from "@/lib/articles/relations";
+import { buildSearchResultHydrationWhere } from "@/lib/wiki-search-results";
 import {
   ARTICLE_LIMITS,
   QUERY_LIMITS,
@@ -109,7 +110,7 @@ export async function GET(request: NextRequest) {
       q
         ? articleIds.length
           ? prisma.article.findMany({
-            where: { id: { in: articleIds } },
+            where: buildSearchResultHydrationWhere(articleIds, auth.auth.allowedScopes),
             include: {
               topic: true,
               tags: { include: { tag: true } },

@@ -180,6 +180,7 @@
 }
 
 .wiki-search-input {
+  flex: 1;
   width: 100%;
   min-width: 0;
   padding: 0.85rem 0;
@@ -191,6 +192,22 @@
 .wiki-search-input:focus {
   outline: none;
   box-shadow: none;
+}
+
+.wiki-search-shortcut {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.25rem;
+  padding: 0.18rem 0.45rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text-faint);
+  font-family: var(--font-noosphere-mono);
+  font-size: 0.72rem;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .wiki-nav {
@@ -824,6 +841,8 @@
 }
 
 .article-prose {
+  max-width: var(--reading-width);
+  margin-inline: auto;
   padding: clamp(1.1rem, 2vw, 1.6rem);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-xl);
@@ -2122,6 +2141,10 @@ h2.activity-title {
   .wiki-search-shell,
   .wiki-search-form .btn {
     width: 100%;
+  }
+
+  .wiki-search-shortcut {
+    display: none;
   }
 
   .nav-link,

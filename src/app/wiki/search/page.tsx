@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/wiki/PageHeader";
 import { EmptyState } from "@/components/wiki/EmptyState";
 import { authOptions } from "@/lib/auth";
 import { buildScopeFilter } from "@/lib/api/auth";
+import { buildSearchResultHydrationWhere } from "@/lib/wiki-search-results";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +54,7 @@ export default async function SearchPage({ searchParams }: Props) {
     q
       ? articleIds.length
         ? prisma.article.findMany({
-            where: { id: { in: articleIds } },
+            where: buildSearchResultHydrationWhere(articleIds, allowedScopes),
             include: {
               topic: true,
               tags: { include: { tag: true } },

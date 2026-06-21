@@ -35,6 +35,7 @@ export default async function TrashPage() {
       <Breadcrumbs
         items={[
           { label: "Noosphere", href: "/wiki" },
+          { label: "Admin" },
           { label: "Trash" },
         ]}
       />

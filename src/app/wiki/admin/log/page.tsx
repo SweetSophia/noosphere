@@ -2,6 +2,8 @@ import type { CSSProperties } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AdminNav } from "@/components/wiki/AdminNav";
+import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
+import { PageHeader } from "@/components/wiki/PageHeader";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -46,11 +48,13 @@ export default async function ActivityLogPage({
 
   const params = await searchParams;
 
-  const where: Record<string, unknown> = {};
-  if (params.type) where.type = params.type;
-  if (params.author) where.authorName = { equals: params.author, mode: "insensitive" };
+  const authorWhere: Record<string, unknown> = {};
+  if (params.author) authorWhere.authorName = { equals: params.author, mode: "insensitive" };
 
-  const [entries, typeCounts] = await Promise.all([
+  const where: Record<string, unknown> = { ...authorWhere };
+  if (params.type) where.type = params.type;
+
+  const [entries, typeCounts, filteredCount] = await Promise.all([
     prisma.activityLog.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -58,30 +62,49 @@ export default async function ActivityLogPage({
     }),
     prisma.activityLog.groupBy({
       by: ["type"],
+      where: authorWhere,
       _count: { type: true },
       orderBy: { _count: { type: "desc" } },
     }),
+    prisma.activityLog.count({ where }),
   ]);
 
   const totalCount = typeCounts.reduce((sum, item) => sum + item._count.type, 0);
+  const hasActiveFilters = Boolean(params.type || params.author);
+  const hasHiddenMatches = filteredCount > entries.length;
+  const metaCountLabel = hasHiddenMatches ? `${entries.length}/${filteredCount}` : String(filteredCount);
+  const metaDescription = hasActiveFilters
+    ? `matching event${filteredCount !== 1 ? "s" : ""}${hasHiddenMatches ? " shown" : ""}`
+    : `logged event${filteredCount !== 1 ? "s" : ""}${hasHiddenMatches ? " shown" : ""}`;
 
   return (
     <div className="wiki-content" style={{ maxWidth: 1040 }}>
-      <div className="page-toolbar">
-        <div>
-          <p className="page-eyebrow">Admin Console</p>
-          <h1>Activity Log</h1>
-          <p className="page-subtitle">
-            A rolling audit trail of ingests, edits, deletions, and maintenance events across the wiki.
-          </p>
-        </div>
+      <Breadcrumbs
+        items={[
+          { label: "Noosphere", href: "/wiki" },
+          { label: "Admin" },
+          { label: "Activity Log" },
+        ]}
+      />
 
-        <div className="page-actions">
+      <PageHeader
+        eyebrow="Admin Console"
+        title="Activity Log"
+        description="A rolling audit trail of ingests, edits, deletions, and maintenance events across the wiki."
+        meta={
+          <div className="page-meta-pills">
+            <span className="page-meta-pill">
+              <strong>{metaCountLabel}</strong>
+              <span>{metaDescription}</span>
+            </span>
+          </div>
+        }
+        actions={
           <Link href="/wiki" className="btn btn-secondary">
             Back to Wiki
           </Link>
-        </div>
-      </div>
+        }
+      />
 
       <AdminNav current="log" />
 
