@@ -1,12 +1,24 @@
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
-import type { Permissions } from "@prisma/client";
+import type { Permissions, Prisma } from "@prisma/client";
 
 const ALGORITHM = "sha256";
 const KEY_PREFIX_LENGTH = 8;
 
 /** How long to wait before re-recording a lastUsedAt timestamp (5 minutes). */
 const LAST_USED_DEBOUNCE_MS = 5 * 60 * 1000;
+
+export type ApiKeyValidationRecord = {
+  id: string;
+  permissions: Permissions;
+  allowedScopes: string[];
+  revokedAt: Date | null;
+};
+
+export type ApiKeyValidationClient = {
+  findUnique(args: Prisma.ApiKeyFindUniqueArgs): Promise<ApiKeyValidationRecord | null>;
+  updateMany(args: Prisma.ApiKeyUpdateManyArgs): Promise<Prisma.BatchPayload>;
+};
 
 /**
  * Hash an API key for storage.
@@ -40,30 +52,28 @@ export function generateApiKey(_name: string): {
  * Updates lastUsedAt on successful validation.
  */
 export async function validateApiKey(
-  rawKey: string
+  rawKey: string,
+  apiKeys: ApiKeyValidationClient = prisma.apiKey,
 ): Promise<
   | { valid: true; permissions: Permissions; keyId: string; allowedScopes: string[] }
   | { valid: false }
 > {
-  const prefix = rawKey.slice(0, KEY_PREFIX_LENGTH);
   const hash = hashApiKey(rawKey);
 
-  const record = await prisma.apiKey.findFirst({
-    where: {
-      keyPrefix: prefix,
-      keyHash: hash,
-      revokedAt: null,
-    },
+  // This is a normal indexed DB lookup, not a constant-time secret comparison.
+  // Missing and revoked keys are still collapsed to the same invalid response below.
+  const record = await apiKeys.findUnique({
+    where: { keyHash: hash },
   });
 
-  if (!record) {
+  if (!record || record.revokedAt !== null) {
     return { valid: false };
   }
 
   // Update last-used timestamp atomically and at most once per debounce window.
   const now = new Date();
   const cutoff = new Date(now.getTime() - LAST_USED_DEBOUNCE_MS);
-  await prisma.apiKey.updateMany({
+  await apiKeys.updateMany({
     where: {
       id: record.id,
       OR: [{ lastUsedAt: null }, { lastUsedAt: { lt: cutoff } }],
