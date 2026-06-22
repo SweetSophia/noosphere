@@ -8,6 +8,10 @@ import { slugify } from "@/lib/memory/backfill";
 import { deriveExcerpt } from "@/lib/validation";
 import type { Prisma } from "@prisma/client";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
+import {
+  SERVER_MEMORY_SAVE_STRIP_MODE,
+  stripInjectedMemoryBlocks as stripInjectedMemoryBlocksShared,
+} from "@sweetsophia/noosphere-injected-memory";
 
 export const MEMORY_SAVE_LIMITS = {
   maxTitleLength: 160,
@@ -18,36 +22,6 @@ export const MEMORY_SAVE_LIMITS = {
   maxTagLength: 64,
   minDurableContentLength: 40,
 } as const;
-
-const INJECTED_MEMORY_BLOCKS = [
-  // Tag names are embedded directly in RegExp sources; avoid metacharacters.
-  "recall",
-  "hindsight_memories",
-  "noosphere_auto_recall",
-] as const;
-
-type InjectedMemoryBlock = (typeof INJECTED_MEMORY_BLOCKS)[number];
-
-type InjectedMemoryPatterns = {
-  open: RegExp;
-  openGlobal: RegExp;
-  close: RegExp;
-};
-
-// Reused across calls to avoid per-call allocation; stripOneInjectedTag resets
-// stateful global regexes before scanning. Keep this derived from
-// INJECTED_MEMORY_BLOCKS so every configured tag has patterns.
-// TODO(noosphere/unify-strip): #207.
-const INJECTED_MEMORY_PATTERNS = Object.fromEntries(
-  INJECTED_MEMORY_BLOCKS.map((tag) => [
-    tag,
-    {
-      open: new RegExp(`<${tag}\\b[^>]*>`, "i"),
-      openGlobal: new RegExp(`<${tag}\\b[^>]*>`, "gi"),
-      close: new RegExp(`</${tag}>`, "gi"),
-    },
-  ]),
-) as Record<InjectedMemoryBlock, InjectedMemoryPatterns>;
 
 const SECRET_PATTERNS: Array<{ name: string; pattern: RegExp }> = [
   { name: "OpenAI-style API key", pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/ },
@@ -253,69 +227,7 @@ export function stripInjectedMemoryBlocks(content: string): {
   content: string;
   strippedBlocks: string[];
 } {
-  let strippedContent = content;
-  const strippedBlocks: string[] = [];
-
-  for (const tag of INJECTED_MEMORY_BLOCKS) {
-    let nextContent = stripOneInjectedTag(strippedContent, tag);
-    while (nextContent.changed) {
-      strippedBlocks.push(tag);
-      strippedContent = nextContent.content;
-      nextContent = stripOneInjectedTag(strippedContent, tag);
-    }
-  }
-
-  return { content: strippedContent, strippedBlocks };
-}
-
-function stripOneInjectedTag(
-  content: string,
-  tag: InjectedMemoryBlock,
-): { content: string; changed: boolean } {
-  const patterns = INJECTED_MEMORY_PATTERNS[tag];
-  patterns.openGlobal.lastIndex = 0;
-  patterns.close.lastIndex = 0;
-
-  const openMatch = patterns.open.exec(content);
-  if (!openMatch) return { content, changed: false };
-
-  const { close: closePattern, openGlobal: openSearchPattern } = patterns;
-  let depth = 1;
-  let cursor = openMatch.index + openMatch[0].length;
-
-  while (true) {
-    openSearchPattern.lastIndex = cursor;
-    closePattern.lastIndex = cursor;
-    const nestedOpen = openSearchPattern.exec(content);
-    const closeMatch = closePattern.exec(content);
-
-    if (!closeMatch) {
-      // An unclosed injected block drops the remainder so transient recall text
-      // cannot leak into durable memory. The OpenClaw package variant currently
-      // throws instead; track any unification under #207.
-      return {
-        content: `${content.slice(0, openMatch.index)}
-`,
-        changed: true,
-      };
-    }
-
-    if (nestedOpen && nestedOpen.index < closeMatch.index) {
-      depth += 1;
-      cursor = nestedOpen.index + nestedOpen[0].length;
-      continue;
-    }
-
-    depth -= 1;
-    cursor = closeMatch.index + closeMatch[0].length;
-    if (depth === 0) {
-      return {
-        content: `${content.slice(0, openMatch.index)}
-${content.slice(cursor)}`,
-        changed: true,
-      };
-    }
-  }
+  return stripInjectedMemoryBlocksShared(content, SERVER_MEMORY_SAVE_STRIP_MODE);
 }
 
 export async function getDefaultMemorySaveWriter(): Promise<MemorySaveWriter> {

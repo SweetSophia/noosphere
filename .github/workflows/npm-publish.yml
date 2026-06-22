@@ -14,6 +14,7 @@ on:
       - "README.md"
       - "docs/OPENCLAW*.md"
       - "hermes-noosphere-memory/plugins/memory/noosphere/plugin.yaml"
+      - "noosphere-injected-memory/**"
       - "openclaw-noosphere-memory/**"
       - "opencode-noosphere-memory/**"
       - "kilocode-noosphere-memory/**"
@@ -47,6 +48,8 @@ jobs:
       fail-fast: false
       matrix:
         package:
+          - dir: noosphere-injected-memory
+            name: "@sweetsophia/noosphere-injected-memory"
           - dir: openclaw-noosphere-memory
             name: "@sweetsophia/openclaw-noosphere-memory"
           - dir: opencode-noosphere-memory

@@ -30,5 +30,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "opencode-noosphere-memory", "hermes-noosphere-memory", "kilocode-noosphere-memory", "openclaw-noosphere-memory"]
+  "exclude": ["node_modules", "opencode-noosphere-memory", "hermes-noosphere-memory", "kilocode-noosphere-memory", "openclaw-noosphere-memory", "noosphere-injected-memory"]
 }

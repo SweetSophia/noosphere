@@ -15,6 +15,7 @@ on:
       - "docker-compose.yml"
       - "docker/**"
       - "scripts/sync-version.mjs"
+      - "noosphere-injected-memory/**"
       - "openclaw-noosphere-memory/**"
   pull_request:
     branches: [main, master]
@@ -29,6 +30,7 @@ on:
       - "docker-compose.yml"
       - "docker/**"
       - "scripts/sync-version.mjs"
+      - "noosphere-injected-memory/**"
       - "openclaw-noosphere-memory/**"
   workflow_dispatch:
 
@@ -55,6 +57,13 @@ jobs:
         run: |
           npm run version:check
           echo "NOOSPHERE_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+
+      - name: Verify shared injected-memory dist is current
+        run: |
+          cd noosphere-injected-memory
+          npm ci
+          npm run build
+          git diff --exit-code -- dist
 
       - name: Verify OpenClaw plugin dist is current
         run: |
