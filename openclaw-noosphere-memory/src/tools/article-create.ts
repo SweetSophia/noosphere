@@ -307,6 +307,8 @@ function stripInjectedMemoryBlocks(content: string): {
   content: string;
   strippedBlocks: string[];
 } {
+  // TODO(noosphere/unify-strip): #207 tracks deliberate unification with the
+  // server save helper without silently changing this published package contract.
   let strippedContent = content;
   const strippedBlocks: string[] = [];
 

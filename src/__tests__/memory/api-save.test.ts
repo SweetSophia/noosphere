@@ -96,6 +96,51 @@ test("memory save strip helper handles nested same-type blocks", () => {
   assert.deepEqual(stripped.strippedBlocks, ["recall"]);
 });
 
+test("memory save strip helper is stable across repeated calls", () => {
+  const first = stripInjectedMemoryBlocks(
+    "one <recall>first</recall> two <recall>second</recall> three",
+  );
+  const second = stripInjectedMemoryBlocks(
+    "alpha <hindsight_memories>hidden</hindsight_memories> omega",
+  );
+  const third = stripInjectedMemoryBlocks(
+    "start <recall>outer <recall>inner</recall></recall> finish",
+  );
+
+  assert.equal(first.content, "one \n two \n three");
+  assert.deepEqual(first.strippedBlocks, ["recall", "recall"]);
+  assert.equal(second.content, "alpha \n omega");
+  assert.deepEqual(second.strippedBlocks, ["hindsight_memories"]);
+  assert.equal(third.content, "start \n finish");
+  assert.deepEqual(third.strippedBlocks, ["recall"]);
+});
+
+test("memory save strip helper handles interleaved injected tags", () => {
+  const stripped = stripInjectedMemoryBlocks(
+    "a <recall>one</recall> b <hindsight_memories>two</hindsight_memories> c <recall>three</recall> d <noosphere_auto_recall>four</noosphere_auto_recall> e",
+  );
+
+  assert.equal(stripped.content, "a \n b \n c \n d \n e");
+  assert.deepEqual(stripped.strippedBlocks, [
+    "recall",
+    "recall",
+    "hindsight_memories",
+    "noosphere_auto_recall",
+  ]);
+});
+
+test("memory save strip helper pins unclosed variant behavior", () => {
+  assert.deepEqual(stripInjectedMemoryBlocks("before <recall/> after"), {
+    content: "before \n",
+    strippedBlocks: ["recall"],
+  });
+
+  assert.deepEqual(stripInjectedMemoryBlocks("before <recall>x</recall > after"), {
+    content: "before \n",
+    strippedBlocks: ["recall"],
+  });
+});
+
 test("memory save rejects empty, transient, and noisy content", () => {
   assert.deepEqual(validateMemorySaveRequest(validRequest({ content: "ok" })), {
     ok: false,

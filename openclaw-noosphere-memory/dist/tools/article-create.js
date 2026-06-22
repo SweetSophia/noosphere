@@ -245,6 +245,8 @@ function validateContentByteLength(content) {
     }
 }
 function stripInjectedMemoryBlocks(content) {
+    // TODO(noosphere/unify-strip): #207 tracks deliberate unification with the
+    // server save helper without silently changing this published package contract.
     let strippedContent = content;
     const strippedBlocks = [];
     for (const tag of INJECTED_MEMORY_BLOCKS) {
