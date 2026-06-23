@@ -8,6 +8,7 @@ import {
   readBoundedJsonObject,
 } from "@/lib/api/body";
 import {
+  buildArticleStripObservation,
   sanitizeArticleContent,
   sanitizeArticleExcerpt,
 } from "@/lib/api/article-content";
@@ -106,6 +107,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
     let sanitizedContent: string | undefined;
     let sanitizedExcerpt: string | undefined;
+    let contentStrippedBlocks: string[] = [];
+    let excerptStrippedBlocks: string[] = [];
 
     // title
     if (title !== undefined) {
@@ -160,6 +163,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       }
 
       sanitizedContent = contentSanitization.content;
+      contentStrippedBlocks = contentSanitization.strippedBlocks;
       updateData.content = sanitizedContent;
 
       // Auto-update excerpt if content changed and no explicit excerpt provided
@@ -176,8 +180,19 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (excerpt && excerpt.length > ARTICLE_LIMITS.maxExcerptLength) {
         return NextResponse.json({ error: `excerpt exceeds maximum length of ${ARTICLE_LIMITS.maxExcerptLength} characters` }, { status: 400 });
       }
-      sanitizedExcerpt =
-        excerpt === null ? "" : sanitizeArticleExcerpt(excerpt).excerpt;
+      if (excerpt === null) {
+        sanitizedExcerpt = "";
+      } else {
+        const excerptSanitization = sanitizeArticleExcerpt(excerpt);
+        if (!excerptSanitization.ok) {
+          return NextResponse.json(
+            { error: excerptSanitization.error },
+            { status: excerptSanitization.status },
+          );
+        }
+        sanitizedExcerpt = excerptSanitization.excerpt;
+        excerptStrippedBlocks = excerptSanitization.strippedBlocks;
+      }
       updateData.excerpt = sanitizedExcerpt;
     }
 
@@ -281,6 +296,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       };
     }
 
+    const stripObservation = buildArticleStripObservation([
+      { field: "content", strippedBlocks: contentStrippedBlocks },
+      { field: "excerpt", strippedBlocks: excerptStrippedBlocks },
+    ]);
+
     // Execute update in transaction: article update + tag reconnect + relation sync
     const updatedArticle = await prisma.$transaction(async (tx) => {
       // Update article fields
@@ -288,6 +308,24 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         where: { id },
         data: updateData,
       });
+
+      if (stripObservation) {
+        await tx.activityLog.create({
+          data: {
+            type: "article_content_stripped",
+            title: `Injected memory stripped from article update: ${String(updateData.title ?? existing.title)}`,
+            authorName: auth.auth.name ?? "API",
+            details: {
+              route: "PATCH /api/articles/[id]",
+              kind: "single",
+              articleId: id,
+              topicId: (updateData.topicId as string | undefined) ?? existing.topicId,
+              slug: (updateData.slug as string | undefined) ?? existing.slug,
+              ...stripObservation,
+            },
+          },
+        });
+      }
 
       // Reconnect tags if changed
       if (tags !== undefined) {

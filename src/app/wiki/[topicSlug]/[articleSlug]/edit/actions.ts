@@ -7,6 +7,12 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildTagConnections, parseTagInput } from "@/lib/wiki";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
+import {
+  buildArticleStripObservation,
+  sanitizeArticleContent,
+  sanitizeArticleExcerpt,
+} from "@/lib/api/article-content";
+import { detectSecretInInputs } from "@/lib/memory/api/save";
 
 async function requireEditorSession() {
   const session = await getServerSession(authOptions);
@@ -47,6 +53,10 @@ export async function saveArticle(
   if (!content.trim()) {
     throw new Error("Content cannot be empty.");
   }
+  const contentSanitization = sanitizeArticleContent(content.trim());
+  if (!contentSanitization.ok) {
+    throw new Error(contentSanitization.error);
+  }
 
   const topic = await prisma.topic.findUnique({ where: { slug: topicSlug } });
   if (!topic) throw new Error("Topic not found.");
@@ -58,8 +68,31 @@ export async function saveArticle(
   if (!article) throw new Error("Article not found.");
 
   const nextTitle = title.trim() || article.title;
-  const nextContent = content.trim();
-  const nextExcerpt = excerpt.trim() || nextContent.slice(0, 160).replace(/[#*`_]/g, "");
+  const nextContent = contentSanitization.content.trim();
+  const rawExcerpt = excerpt.trim();
+  const excerptSanitization = rawExcerpt
+    ? sanitizeArticleExcerpt(rawExcerpt)
+    : undefined;
+  if (excerptSanitization && !excerptSanitization.ok) {
+    throw new Error(excerptSanitization.error);
+  }
+  const nextExcerpt = excerptSanitization?.excerpt.trim() || nextContent.slice(0, 160).replace(/[#*`_]/g, "");
+  const stripObservation = buildArticleStripObservation([
+    { field: "content", strippedBlocks: contentSanitization.strippedBlocks },
+    {
+      field: "excerpt",
+      strippedBlocks: excerptSanitization?.strippedBlocks ?? [],
+    },
+  ]);
+  const secretError = detectSecretInInputs([
+    { field: "title", value: title.trim() ? nextTitle : undefined },
+    { field: "content", value: nextContent },
+    { field: "excerpt", value: rawExcerpt ? nextExcerpt : undefined },
+    ...tags.map((value) => ({ field: "tags", value })),
+  ]);
+  if (secretError) {
+    throw new Error(secretError.error);
+  }
   const tagConnections = await buildTagConnections(tags);
 
   // Collect restricted tags from form
@@ -83,8 +116,8 @@ export async function saveArticle(
     }
   }
 
-  await prisma.$transaction([
-    prisma.article.update({
+  await prisma.$transaction(async (tx) => {
+    await tx.article.update({
       where: { id: article.id },
       data: {
         content: nextContent,
@@ -93,17 +126,34 @@ export async function saveArticle(
         restrictedTags,
         updatedAt: new Date(),
       },
-    }),
-    prisma.articleTag.deleteMany({ where: { articleId: article.id } }),
-    prisma.articleRevision.create({
+    });
+    await tx.articleTag.deleteMany({ where: { articleId: article.id } });
+    await tx.articleRevision.create({
       data: {
         articleId: article.id,
         authorId: session.user.id,
         content: nextContent,
         title: nextTitle,
       },
-    }),
-  ]);
+    });
+    if (stripObservation) {
+      await tx.activityLog.create({
+        data: {
+          type: "article_content_stripped",
+          title: `Injected memory stripped from wiki article update: ${nextTitle}`,
+          authorName: session.user.name ?? session.user.email ?? "Web UI",
+          details: {
+            route: "wiki saveArticle",
+            kind: "single",
+            articleId: article.id,
+            topicId: topic.id,
+            slug: article.slug,
+            ...stripObservation,
+          },
+        },
+      });
+    }
+  });
 
   if (tagConnections.length > 0) {
     await prisma.articleTag.createMany({

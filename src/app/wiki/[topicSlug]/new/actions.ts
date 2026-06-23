@@ -7,6 +7,12 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildTagConnections, parseTagInput, slugify } from "@/lib/wiki";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
+import {
+  buildArticleStripObservation,
+  sanitizeArticleContent,
+  sanitizeArticleExcerpt,
+} from "@/lib/api/article-content";
+import { detectSecretInInputs } from "@/lib/memory/api/save";
 
 async function requireEditorSession() {
   const session = await getServerSession(authOptions);
@@ -32,18 +38,49 @@ export async function createArticle(
   const content = String(formData.get("content") ?? "");
   const excerpt = String(formData.get("excerpt") ?? "");
   const tags = parseTagInput(String(formData.get("tags") ?? ""));
+  const normalizedTitle = title.trim();
 
-  if (!title.trim()) {
+  if (!normalizedTitle) {
     throw new Error("Title is required.");
   }
   if (!content.trim()) {
     throw new Error("Content cannot be empty.");
   }
 
+  const contentSanitization = sanitizeArticleContent(content.trim());
+  if (!contentSanitization.ok) {
+    throw new Error(contentSanitization.error);
+  }
+  const sanitizedContent = contentSanitization.content.trim();
+  const rawExcerpt = excerpt.trim();
+  const excerptSanitization = rawExcerpt
+    ? sanitizeArticleExcerpt(rawExcerpt)
+    : undefined;
+  if (excerptSanitization && !excerptSanitization.ok) {
+    throw new Error(excerptSanitization.error);
+  }
+  const sanitizedExcerpt = excerptSanitization?.excerpt.trim();
+  const stripObservation = buildArticleStripObservation([
+    { field: "content", strippedBlocks: contentSanitization.strippedBlocks },
+    {
+      field: "excerpt",
+      strippedBlocks: excerptSanitization?.strippedBlocks ?? [],
+    },
+  ]);
+  const secretError = detectSecretInInputs([
+    { field: "title", value: normalizedTitle },
+    { field: "content", value: sanitizedContent },
+    { field: "excerpt", value: sanitizedExcerpt },
+    ...tags.map((value) => ({ field: "tags", value })),
+  ]);
+  if (secretError) {
+    throw new Error(secretError.error);
+  }
+
   const topic = await prisma.topic.findUnique({ where: { slug: topicSlug } });
   if (!topic) throw new Error("Topic not found.");
 
-  let slug = slugify(title) || "untitled";
+  let slug = slugify(normalizedTitle) || "untitled";
   const existing = await prisma.article.findFirst({
     where: { topicId: topic.id, slug, deletedAt: null },
   });
@@ -74,24 +111,46 @@ export async function createArticle(
     }
   }
 
-  const article = await prisma.article.create({
-    data: {
-      title: title.trim(),
-      slug,
-      content: content.trim(),
-      excerpt: excerpt.trim() || content.trim().slice(0, 160).replace(/[#*`_]/g, ""),
-      topicId: topic.id,
-      authorId: session.user.id,
-      tags: { create: tagConnections },
-      restrictedTags,
-      revisions: {
-        create: {
-          authorId: session.user.id,
-          title: title.trim(),
-          content: content.trim(),
+  const article = await prisma.$transaction(async (tx) => {
+    const created = await tx.article.create({
+      data: {
+        title: normalizedTitle,
+        slug,
+        content: sanitizedContent,
+        excerpt: sanitizedExcerpt || sanitizedContent.slice(0, 160).replace(/[#*`_]/g, ""),
+        topicId: topic.id,
+        authorId: session.user.id,
+        tags: { create: tagConnections },
+        restrictedTags,
+        revisions: {
+          create: {
+            authorId: session.user.id,
+            title: normalizedTitle,
+            content: sanitizedContent,
+          },
         },
       },
-    },
+    });
+
+    if (stripObservation) {
+      await tx.activityLog.create({
+        data: {
+          type: "article_content_stripped",
+          title: `Injected memory stripped from wiki article create: ${normalizedTitle}`,
+          authorName: session.user.name ?? session.user.email ?? "Web UI",
+          details: {
+            route: "wiki createArticle",
+            kind: "single",
+            articleId: created.id,
+            topicId: topic.id,
+            slug,
+            ...stripObservation,
+          },
+        },
+      });
+    }
+
+    return created;
   });
 
   await invalidateSearchCache();
