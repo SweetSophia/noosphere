@@ -70,7 +70,7 @@ jobs:
         run: npx prisma generate
 
       - name: Push schema to test DB
-        run: npx prisma db push --force-reset --skip-generate --url="$DATABASE_URL"
+        run: npx prisma db push --force-reset --url="$DATABASE_URL"
         env:
           DATABASE_URL: postgresql://test:test@localhost:5432/test
 
