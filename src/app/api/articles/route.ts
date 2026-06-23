@@ -14,6 +14,10 @@ import { invalidateSearchCache } from "@/lib/cache/search-cache";
 import { filterAccessibleRelatedTargets, filterVisibleRelatedArticleRows } from "@/lib/articles/relations";
 import { buildSearchResultHydrationWhere } from "@/lib/wiki-search-results";
 import {
+  sanitizeArticleContent,
+  sanitizeArticleExcerpt,
+} from "@/lib/api/article-content";
+import {
   ARTICLE_LIMITS,
   QUERY_LIMITS,
   deriveExcerpt,
@@ -296,10 +300,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const contentSanitization = sanitizeArticleContent(content);
+    if (!contentSanitization.ok) {
+      return NextResponse.json(
+        { error: contentSanitization.error },
+        { status: contentSanitization.status },
+      );
+    }
+    const sanitizedContent = contentSanitization.content;
+    const sanitizedExcerpt =
+      typeof excerpt === "string"
+        ? sanitizeArticleExcerpt(excerpt).excerpt
+        : undefined;
+
     const secretError = detectSecretInInputs([
       { field: "title", value: title },
-      { field: "content", value: content },
-      { field: "excerpt", value: excerpt ?? undefined },
+      { field: "content", value: sanitizedContent },
+      { field: "excerpt", value: sanitizedExcerpt },
       { field: "authorName", value: authorName },
       ...(Array.isArray(tags)
         ? tags.map((value) => ({ field: "tags", value: typeof value === "string" ? value : undefined }))
@@ -360,8 +377,8 @@ export async function POST(request: NextRequest) {
         data: {
           title,
           slug: slugValidation.slug,
-          content,
-          excerpt: excerpt || deriveExcerpt(content),
+          content: sanitizedContent,
+          excerpt: sanitizedExcerpt || deriveExcerpt(sanitizedContent),
           topicId,
           authorId: auth.auth.userId ?? null,
           authorName: sanitizeAuthorName(authorName) || (auth.auth.name ?? null),
@@ -373,7 +390,7 @@ export async function POST(request: NextRequest) {
             create: {
               authorId: auth.auth.userId ?? null,
               title,
-              content,
+              content: sanitizedContent,
             },
           },
         },
