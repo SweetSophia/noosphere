@@ -55,6 +55,9 @@ async function setupTopic(prisma: PrismaClient): Promise<{ id: string }> {
 }
 
 async function cleanupFixtures(prisma: PrismaClient): Promise<void> {
+  await prisma.activityLog.deleteMany({
+    where: { authorName: { startsWith: TEST_KEY_NAME } },
+  });
   await prisma.article.deleteMany({
     where: { topic: { slug: TEST_TOPIC_SLUG } },
   });
@@ -180,6 +183,40 @@ test("POST /api/articles rejects content made only of injected memory blocks", a
       where: { topicId: topic.id, slug: "issue-208-empty" },
     });
     assert.equal(article, null, "invalid content must not create an article");
+  } finally {
+    await cleanupFixtures(prisma);
+  }
+});
+
+test("POST /api/articles rejects caller excerpts made only of injected memory blocks", async () => {
+  const { prisma } = await import("@/lib/prisma");
+  const { POST } = await import("@/app/api/articles/route");
+  const rawKey = `noo_${crypto.randomBytes(32).toString("base64url")}`;
+
+  await cleanupFixtures(prisma);
+  const topic = await setupTopic(prisma);
+  await createWriteKey(prisma, rawKey);
+
+  try {
+    const response = await POST(buildPostRequest(rawKey, {
+      title: "Issue 208 Empty Excerpt",
+      slug: "issue-208-empty-excerpt",
+      content: "Visible durable content.",
+      excerpt: "<recall>hidden excerpt only</recall>",
+      topicId: topic.id,
+    }));
+    const body = (await response.json()) as { error?: string };
+
+    assert.equal(response.status, 400);
+    assert.equal(
+      body.error,
+      "Excerpt must include durable text outside injected memory blocks",
+    );
+
+    const article = await prisma.article.findFirst({
+      where: { topicId: topic.id, slug: "issue-208-empty-excerpt" },
+    });
+    assert.equal(article, null, "invalid excerpt must not create an article");
   } finally {
     await cleanupFixtures(prisma);
   }

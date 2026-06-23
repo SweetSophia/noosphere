@@ -20,6 +20,12 @@ import type {
 import { resolveExistingVaultFilePath } from "@/lib/markdown-sync/import-scanner";
 import { parseNoosphereMarkdown } from "@/lib/markdown/noosphere-markdown";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
+import {
+  buildArticleStripObservation,
+  sanitizeArticleContent,
+  sanitizeArticleExcerpt,
+} from "@/lib/api/article-content";
+import { detectSecretInInputs } from "@/lib/memory/api/save";
 import { isValidConfidence, isValidStatus } from "@/lib/validation";
 import type { Manifest, ManifestEntry } from "@/lib/obsidian-sync";
 import type { ObsidianSyncConfig } from "@/lib/obsidian-sync/config";
@@ -355,7 +361,7 @@ async function applyCreateOrUpdate(
   prisma: PrismaClient,
   options: ApplyCreateOrUpdateOptions
 ): Promise<ImportApplyCandidateResult> {
-  const { candidate, absolutePath, vaultPath, manifest, mode, forceOverwrite, dryRun, performedBy } = options;
+  const { candidate, absolutePath, manifest, mode, forceOverwrite, dryRun, performedBy } = options;
 
   // ── Read and parse the markdown file ─────────────────────────────────────
   let markdownContent: string;
@@ -495,14 +501,118 @@ async function applyCreateOrUpdate(
   const rawStatus = typeof frontmatter.status === "string" ? frontmatter.status : null;
   const confidence = rawConfidence && isValidConfidence(rawConfidence) ? rawConfidence : "medium";
   const status = rawStatus && isValidStatus(rawStatus) ? rawStatus : "published";
+  const articleTitle = (frontmatter.title as string | null) ?? metadata?.title ?? slug;
+  const articleAuthorName =
+    typeof frontmatter.authorName === "string" ? frontmatter.authorName : null;
+  const rawTags = (frontmatter.tags as unknown[] | undefined) ?? metadata?.tags ?? [];
+  // Validate tags before the article write so secret-like tag names cannot be
+  // persisted after the content has already been sanitized.
+  const validTags: string[] = [];
+  const seenSlugs = new Set<string>();
+  for (const tag of rawTags) {
+    if (typeof tag !== "string" || tag.trim().length === 0) continue;
+    const tagSlug = slugify(tag);
+    if (tagSlug.length === 0 || seenSlugs.has(tagSlug)) continue;
+    seenSlugs.add(tagSlug);
+    validTags.push(tag);
+  }
+  const contentSanitization = sanitizeArticleContent(body);
+  if (!contentSanitization.ok) {
+    await recordAudit(prisma, {
+      articleId: candidate.articleId ?? null,
+      relativePath: candidate.relativePath,
+      action: "skipped",
+      kind: candidate.kind,
+      dryRun,
+      mode,
+      forceOverwrite,
+      markdownHash: candidate.markdownHash ?? null,
+      noosphereHash: null,
+      conflictReason: contentSanitization.error,
+      performedBy,
+    });
+
+    return {
+      candidate,
+      action: "skipped",
+      articleId: candidate.articleId ?? null,
+      conflictReason: contentSanitization.error,
+      warning: null,
+    };
+  }
+  const rawExcerpt =
+    typeof frontmatter.excerpt === "string" ? frontmatter.excerpt : null;
+  const excerptSanitization = rawExcerpt
+    ? sanitizeArticleExcerpt(rawExcerpt)
+    : undefined;
+  if (excerptSanitization && !excerptSanitization.ok) {
+    await recordAudit(prisma, {
+      articleId: candidate.articleId ?? null,
+      relativePath: candidate.relativePath,
+      action: "skipped",
+      kind: candidate.kind,
+      dryRun,
+      mode,
+      forceOverwrite,
+      markdownHash: candidate.markdownHash ?? null,
+      noosphereHash: null,
+      conflictReason: excerptSanitization.error,
+      performedBy,
+    });
+
+    return {
+      candidate,
+      action: "skipped",
+      articleId: candidate.articleId ?? null,
+      conflictReason: excerptSanitization.error,
+      warning: null,
+    };
+  }
+  const secretError = detectSecretInInputs([
+    { field: `${candidate.relativePath}.title`, value: articleTitle },
+    { field: `${candidate.relativePath}.content`, value: contentSanitization.content },
+    { field: `${candidate.relativePath}.excerpt`, value: excerptSanitization?.excerpt },
+    { field: `${candidate.relativePath}.authorName`, value: articleAuthorName ?? undefined },
+    ...validTags.map((value) => ({ field: `${candidate.relativePath}.tags`, value })),
+  ]);
+  if (secretError) {
+    await recordAudit(prisma, {
+      articleId: candidate.articleId ?? null,
+      relativePath: candidate.relativePath,
+      action: "skipped",
+      kind: candidate.kind,
+      dryRun,
+      mode,
+      forceOverwrite,
+      markdownHash: candidate.markdownHash ?? null,
+      noosphereHash: null,
+      conflictReason: secretError.error,
+      performedBy,
+    });
+
+    return {
+      candidate,
+      action: "skipped",
+      articleId: candidate.articleId ?? null,
+      conflictReason: secretError.error,
+      warning: null,
+    };
+  }
+  const stripObservation = buildArticleStripObservation([
+    { field: "content", strippedBlocks: contentSanitization.strippedBlocks },
+    {
+      field: "excerpt",
+      strippedBlocks: excerptSanitization?.strippedBlocks ?? [],
+    },
+  ]);
 
   // ── Build article data ─────────────────────────────────────────────────────
   const articleData = {
-    title: (frontmatter.title as string | null) ?? metadata?.title ?? slug,
+    title: articleTitle,
     slug,
-    content: body,
-    excerpt: (frontmatter.excerpt as string | null) ?? null,
-    authorName: (frontmatter.authorName as string | null) ?? null,
+    content: contentSanitization.content,
+    excerpt: excerptSanitization?.excerpt ?? null,
+    authorName: articleAuthorName,
     topicId: topic.id,
     sourceType: "markdown-import" as const,
     sourceUrl: null,
@@ -588,18 +698,27 @@ async function applyCreateOrUpdate(
     }
   }
 
-  // ── Handle tags ────────────────────────────────────────────────────────────
-  const rawTags = (frontmatter.tags as unknown[] | undefined) ?? metadata?.tags ?? [];
-  // Validate: keep only non-empty strings, then deduplicate by slug
-  const validTags: string[] = [];
-  const seenSlugs = new Set<string>();
-  for (const tag of rawTags) {
-    if (typeof tag !== "string" || tag.trim().length === 0) continue;
-    const tagSlug = slugify(tag);
-    if (tagSlug.length === 0 || seenSlugs.has(tagSlug)) continue;
-    seenSlugs.add(tagSlug);
-    validTags.push(tag);
+  if (!dryRun && stripObservation) {
+    await prisma.activityLog.create({
+      data: {
+        type: "article_content_stripped",
+        title: `Injected memory stripped from markdown sync import: ${articleData.title}`,
+        authorName: performedBy,
+        details: {
+          route: "markdown-sync import-applier",
+          kind: "single",
+          articleId,
+          topicId: topic.id,
+          slug,
+          relativePath: candidate.relativePath,
+          action,
+          ...stripObservation,
+        },
+      },
+    });
   }
+
+  // ── Handle tags ────────────────────────────────────────────────────────────
   if (!dryRun && articleId) {
     await syncArticleTags(prisma, articleId, validTags);
   }

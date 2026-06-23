@@ -19,6 +19,12 @@ import {
 import { rateLimit } from "@/lib/rate-limit";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
 import { slugify } from "@/lib/wiki";
+import {
+  buildArticleStripObservation,
+  sanitizeArticleContent,
+  sanitizeArticleExcerpt,
+} from "@/lib/api/article-content";
+import { detectSecretInInputs } from "@/lib/memory/api/save";
 
 const ANSWER_SLUG_MAX_LENGTH = 80;
 const ANSWER_JSON_BODY_MAX_BYTES =
@@ -87,6 +93,9 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+  if (excerpt !== undefined && typeof excerpt !== "string") {
+    return NextResponse.json({ error: "excerpt must be a string" }, { status: 400 });
+  }
 
   // Validate enums
   if (status && !isValidStatus(status)) {
@@ -119,6 +128,45 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const contentSanitization = sanitizeArticleContent(content);
+  if (!contentSanitization.ok) {
+    return NextResponse.json(
+      { error: contentSanitization.error },
+      { status: contentSanitization.status },
+    );
+  }
+  const sanitizedContent = contentSanitization.content;
+  const excerptSanitization =
+    typeof excerpt === "string" ? sanitizeArticleExcerpt(excerpt) : undefined;
+  if (excerptSanitization && !excerptSanitization.ok) {
+    return NextResponse.json(
+      { error: excerptSanitization.error },
+      { status: excerptSanitization.status },
+    );
+  }
+  const sanitizedExcerpt = excerptSanitization?.excerpt;
+  const stripObservation = buildArticleStripObservation([
+    { field: "content", strippedBlocks: contentSanitization.strippedBlocks },
+    {
+      field: "excerpt",
+      strippedBlocks: excerptSanitization?.strippedBlocks ?? [],
+    },
+  ]);
+
+  const secretError = detectSecretInInputs([
+    { field: "title", value: title },
+    { field: "content", value: sanitizedContent },
+    { field: "excerpt", value: sanitizedExcerpt },
+    { field: "sourceQuery", value: sourceQuery },
+    { field: "authorName", value: rawAuthorName },
+    ...(Array.isArray(tags)
+      ? tags.map((value) => ({ field: "tags", value: typeof value === "string" ? value : undefined }))
+      : []),
+  ]);
+  if (secretError) {
+    return NextResponse.json({ error: secretError.error }, { status: secretError.status });
+  }
+
   // Build tag connections
   const tagConnections = tags?.length
     ? await Promise.all(
@@ -135,14 +183,14 @@ export async function POST(request: NextRequest) {
     : [];
 
   // Derive excerpt if not provided
-  const derivedExcerpt = excerpt || deriveExcerpt(content, 200);
+  const derivedExcerpt = sanitizedExcerpt || deriveExcerpt(sanitizedContent, 200);
 
   const article = await prisma.$transaction(async (tx) => {
     const created = await tx.article.create({
       data: {
         title,
         slug: slug.slug,
-        content,
+        content: sanitizedContent,
         excerpt: derivedExcerpt,
         topicId,
         authorId: userId,
@@ -156,7 +204,7 @@ export async function POST(request: NextRequest) {
           create: {
             authorId: userId,
             title,
-            content,
+            content: sanitizedContent,
           },
         },
       },
@@ -175,13 +223,31 @@ export async function POST(request: NextRequest) {
         details: {
           articleId: created.id,
           topic: topic.name,
-          sourceQuery,
           tagCount: tagConnections.length,
-          confidence,
           status: status || "published",
+          ...(sourceQuery ? { sourceQuery } : {}),
+          ...(confidence ? { confidence } : {}),
         },
       },
     });
+
+    if (stripObservation) {
+      await tx.activityLog.create({
+        data: {
+          type: "article_content_stripped",
+          title: `Injected memory stripped from answer save: ${title}`,
+          authorName,
+          details: {
+            route: "POST /api/answer",
+            kind: "single",
+            articleId: created.id,
+            topicId,
+            slug: slug.slug,
+            ...stripObservation,
+          },
+        },
+      });
+    }
 
     return created;
   });

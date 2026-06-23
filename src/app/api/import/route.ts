@@ -13,6 +13,13 @@ import {
   readMarkdownString,
   readMarkdownStringArray,
 } from "@/lib/markdown/noosphere-markdown";
+import {
+  type ArticleStripObservation,
+  buildArticleStripObservation,
+  sanitizeArticleContent,
+  sanitizeArticleExcerpt,
+} from "@/lib/api/article-content";
+import { detectSecretInInputs } from "@/lib/memory/api/save";
 
 // Disable Next.js body parsing for file uploads
 export const dynamic = "force-dynamic";
@@ -84,6 +91,7 @@ interface ImportArticle {
   restrictedTags?: string[];
   restrictedTagsInput?: unknown;
   hasRestrictedTagsField: boolean;
+  stripObservation?: ArticleStripObservation;
   error?: string;
 }
 
@@ -269,20 +277,72 @@ export async function POST(request: NextRequest) {
     }
 
     const tags = readMarkdownStringArray(frontmatter, "tags");
+    const rawExcerpt = readMarkdownString(frontmatter, "excerpt");
     const hasRestrictedTags = hasRestrictedTagsField(frontmatter);
     const restrictedTagsInput = hasRestrictedTags ? frontmatter.restrictedTags : undefined;
     const restrictedTags = hasRestrictedTags
       ? readMarkdownStringArray(frontmatter, "restrictedTags")
       : undefined;
+    const contentSanitization = sanitizeArticleContent(articleContent);
+    if (!contentSanitization.ok) {
+      toImport.push({
+        filename: entry.name,
+        title,
+        slug,
+        topicSlug,
+        content: articleContent,
+        tags,
+        hasRestrictedTagsField: hasRestrictedTags,
+        error: contentSanitization.error,
+      });
+      continue;
+    }
+    const excerptSanitization =
+      typeof rawExcerpt === "string"
+        ? sanitizeArticleExcerpt(rawExcerpt)
+        : undefined;
+    if (excerptSanitization && !excerptSanitization.ok) {
+      toImport.push({
+        filename: entry.name,
+        title,
+        slug,
+        topicSlug,
+        content: contentSanitization.content,
+        tags,
+        hasRestrictedTagsField: hasRestrictedTags,
+        error: excerptSanitization.error,
+      });
+      continue;
+    }
+    const secretError = detectSecretInInputs([
+      { field: `${entry.name}.title`, value: title },
+      { field: `${entry.name}.content`, value: contentSanitization.content },
+      { field: `${entry.name}.excerpt`, value: excerptSanitization?.excerpt },
+      { field: `${entry.name}.sourceUrl`, value: readMarkdownString(frontmatter, "sourceUrl") },
+      ...tags.map((value) => ({ field: `${entry.name}.tags`, value })),
+    ]);
+    if (secretError) {
+      toImport.push({
+        filename: entry.name,
+        title,
+        slug,
+        topicSlug,
+        content: contentSanitization.content,
+        tags,
+        hasRestrictedTagsField: hasRestrictedTags,
+        error: secretError.error,
+      });
+      continue;
+    }
 
     toImport.push({
       filename: entry.name,
       title,
       topicSlug,
       slug,
-      content: articleContent,
+      content: contentSanitization.content,
       tags,
-      excerpt: readMarkdownString(frontmatter, "excerpt"),
+      excerpt: excerptSanitization?.excerpt,
       confidence: readMarkdownString(frontmatter, "confidence"),
       status: readMarkdownString(frontmatter, "status"),
       sourceUrl: readMarkdownString(frontmatter, "sourceUrl"),
@@ -290,6 +350,13 @@ export async function POST(request: NextRequest) {
       restrictedTags,
       restrictedTagsInput,
       hasRestrictedTagsField: hasRestrictedTags,
+      stripObservation: buildArticleStripObservation([
+        { field: "content", strippedBlocks: contentSanitization.strippedBlocks },
+        {
+          field: "excerpt",
+          strippedBlocks: excerptSanitization?.strippedBlocks ?? [],
+        },
+      ]),
     });
   }
 
@@ -348,6 +415,14 @@ export async function POST(request: NextRequest) {
   const canChangeClassification = canChangeExistingRestrictedTags(auth.auth);
 
   const results = { imported: 0, skipped: 0, errors: 0 };
+  const strippedImports: Array<{
+    filename: string;
+    title: string;
+    slug: string;
+    topicSlug: string;
+    articleId: string;
+    observation: ArticleStripObservation;
+  }> = [];
 
   await prisma.$transaction(async (tx) => {
     for (const article of toImport) {
@@ -411,6 +486,16 @@ export async function POST(request: NextRequest) {
               updatedAt: new Date(),
             },
           });
+          if (article.stripObservation) {
+            strippedImports.push({
+              filename: article.filename,
+              title: article.title,
+              slug: article.slug,
+              topicSlug: article.topicSlug,
+              articleId: existing.id,
+              observation: article.stripObservation,
+            });
+          }
           if (restrictedTagsChanged) {
             const wasUnrestricted = existingRestrictedTags.length === 0;
             const isNowUnrestricted = nextRestrictedTags.length === 0;
@@ -467,7 +552,7 @@ export async function POST(request: NextRequest) {
         })
       );
 
-      await tx.article.create({
+      const created = await tx.article.create({
         data: {
           title: article.title,
           slug: article.slug,
@@ -490,9 +575,38 @@ export async function POST(request: NextRequest) {
             },
           },
         },
+        select: { id: true },
       });
+      if (article.stripObservation) {
+        strippedImports.push({
+          filename: article.filename,
+          title: article.title,
+          slug: article.slug,
+          topicSlug: article.topicSlug,
+          articleId: created.id,
+          observation: article.stripObservation,
+        });
+      }
 
       results.imported++;
+    }
+
+    if (strippedImports.length > 0) {
+      await tx.activityLog.create({
+        data: {
+          type: "article_content_stripped",
+          title: `Injected memory stripped from import: ${strippedImports
+            .map((article) => article.title)
+            .slice(0, 2)
+            .join(", ")}`,
+          authorName: userName,
+          details: {
+            route: "POST /api/import",
+            kind: "batch",
+            articles: strippedImports,
+          },
+        },
+      });
     }
   });
 

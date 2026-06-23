@@ -72,6 +72,9 @@ async function createArticle(
 }
 
 async function cleanupFixtures(prisma: PrismaClient): Promise<void> {
+  await prisma.activityLog.deleteMany({
+    where: { authorName: TEST_KEY_NAME },
+  });
   await prisma.article.deleteMany({
     where: { topic: { slug: TEST_TOPIC_SLUG } },
   });
@@ -199,6 +202,43 @@ test("PATCH /api/articles/[id] rejects visible secrets after stripping", async (
     assert.ok(after, "article must still exist");
     assert.equal(after.content, article.content);
     assert.equal(after.revisions.length, 0, "secret rejection must not create a revision");
+  } finally {
+    await cleanupFixtures(prisma);
+  }
+});
+
+test("PATCH /api/articles/[id] rejects caller excerpts made only of injected memory blocks", async () => {
+  const { prisma } = await import("@/lib/prisma");
+  const { PATCH } = await import("@/app/api/articles/[id]/route");
+  const rawKey = `noo_${crypto.randomBytes(32).toString("base64url")}`;
+
+  await cleanupFixtures(prisma);
+  const topic = await setupTopic(prisma);
+  await createWriteKey(prisma, rawKey);
+  const article = await createArticle(prisma, topic.id, "patch-empty-excerpt");
+
+  try {
+    const response = await PATCH(
+      buildPatchRequest(article.id, {
+        excerpt: "<recall>hidden excerpt only</recall>",
+      }, rawKey),
+      { params: Promise.resolve({ id: article.id }) },
+    );
+    const body = (await response.json()) as { error?: string };
+
+    assert.equal(response.status, 400);
+    assert.equal(
+      body.error,
+      "Excerpt must include durable text outside injected memory blocks",
+    );
+
+    const after = await prisma.article.findUnique({
+      where: { id: article.id },
+      include: { revisions: true },
+    });
+    assert.ok(after, "article must still exist");
+    assert.equal(after.excerpt, article.excerpt);
+    assert.equal(after.revisions.length, 0, "rejected excerpt must not create a revision");
   } finally {
     await cleanupFixtures(prisma);
   }

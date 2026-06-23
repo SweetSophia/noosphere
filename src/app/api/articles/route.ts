@@ -14,6 +14,7 @@ import { invalidateSearchCache } from "@/lib/cache/search-cache";
 import { filterAccessibleRelatedTargets, filterVisibleRelatedArticleRows } from "@/lib/articles/relations";
 import { buildSearchResultHydrationWhere } from "@/lib/wiki-search-results";
 import {
+  buildArticleStripObservation,
   sanitizeArticleContent,
   sanitizeArticleExcerpt,
 } from "@/lib/api/article-content";
@@ -308,10 +309,22 @@ export async function POST(request: NextRequest) {
       );
     }
     const sanitizedContent = contentSanitization.content;
-    const sanitizedExcerpt =
-      typeof excerpt === "string"
-        ? sanitizeArticleExcerpt(excerpt).excerpt
-        : undefined;
+    const excerptSanitization =
+      typeof excerpt === "string" ? sanitizeArticleExcerpt(excerpt) : undefined;
+    if (excerptSanitization && !excerptSanitization.ok) {
+      return NextResponse.json(
+        { error: excerptSanitization.error },
+        { status: excerptSanitization.status },
+      );
+    }
+    const sanitizedExcerpt = excerptSanitization?.excerpt;
+    const stripObservation = buildArticleStripObservation([
+      { field: "content", strippedBlocks: contentSanitization.strippedBlocks },
+      {
+        field: "excerpt",
+        strippedBlocks: excerptSanitization?.strippedBlocks ?? [],
+      },
+    ]);
 
     const secretError = detectSecretInInputs([
       { field: "title", value: title },
@@ -399,6 +412,24 @@ export async function POST(request: NextRequest) {
           tags: { include: { tag: true } },
         },
       });
+
+      if (stripObservation) {
+        await tx.activityLog.create({
+          data: {
+            type: "article_content_stripped",
+            title: `Injected memory stripped from article create: ${title}`,
+            authorName: sanitizeAuthorName(authorName) || (auth.auth.name ?? "API"),
+            details: {
+              route: "POST /api/articles",
+              kind: "single",
+              articleId: created.id,
+              topicId,
+              slug: slugValidation.slug,
+              ...stripObservation,
+            },
+          },
+        });
+      }
 
       // Filter against the caller's scopes so a scoped key cannot link an
       // unrestricted source to a restricted target the caller cannot see —
