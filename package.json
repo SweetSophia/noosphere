@@ -23,6 +23,7 @@
     "version:check": "node scripts/sync-version.mjs --check"
   },
   "dependencies": {
+    "@sweetsophia/noosphere-injected-memory": "file:./noosphere-injected-memory",
     "@prisma/adapter-pg": "^7.7.0",
     "@prisma/client": "^7.7.0",
     "@types/pg": "^8.20.0",

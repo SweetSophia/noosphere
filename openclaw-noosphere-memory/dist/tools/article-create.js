@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { errorResult, jsonResult } from "../format.js";
 import { createNoosphereClientContext, } from "../shared-init.js";
+import { OPENCLAW_ARTICLE_CREATE_STRIP_MODE, stripInjectedMemoryBlocks, } from "@sweetsophia/noosphere-injected-memory";
 const ARTICLE_TITLE_MAX_LENGTH = 160;
 const ARTICLE_CONTENT_MIN_LENGTH = 40;
 const ARTICLE_CONTENT_MAX_BYTES = 1024 * 1024;
@@ -12,11 +13,6 @@ const ARTICLE_TAG_MAX_LENGTH = 64;
 const ARTICLE_RESTRICTED_TAG_MAX_COUNT = 16;
 const ARTICLE_RESTRICTED_TAG_MAX_LENGTH = 64;
 const ARTICLE_AUTHOR_NAME_MAX_LENGTH = 100;
-const INJECTED_MEMORY_BLOCKS = [
-    "recall",
-    "hindsight_memories",
-    "noosphere_auto_recall",
-];
 const ArticleCreateToolParameters = {
     type: "object",
     additionalProperties: false,
@@ -103,7 +99,7 @@ function normalizeArticleCreateParams(rawParams) {
     const params = isRecord(rawParams) ? rawParams : {};
     const title = readRequiredString(params.title, "title", ARTICLE_TITLE_MAX_LENGTH);
     const topicId = readRequiredString(params.topicId, "topicId", ARTICLE_TOPIC_ID_MAX_LENGTH);
-    const stripped = stripInjectedMemoryBlocks(readRequiredString(params.content, "content"));
+    const stripped = stripInjectedMemoryBlocks(readRequiredString(params.content, "content"), OPENCLAW_ARTICLE_CREATE_STRIP_MODE);
     const content = normalizeContent(stripped.content);
     validateMeaningfulContent(content);
     validateContentByteLength(content);
@@ -242,55 +238,6 @@ function validateContentByteLength(content) {
     const byteLength = new TextEncoder().encode(content).byteLength;
     if (byteLength > ARTICLE_CONTENT_MAX_BYTES) {
         throw new Error("content exceeds the 1 MB article size limit");
-    }
-}
-function stripInjectedMemoryBlocks(content) {
-    // TODO(noosphere/unify-strip): #207 tracks deliberate unification with the
-    // server save helper without silently changing this published package contract.
-    let strippedContent = content;
-    const strippedBlocks = [];
-    for (const tag of INJECTED_MEMORY_BLOCKS) {
-        let nextContent = stripOneInjectedTag(strippedContent, tag);
-        while (nextContent.changed) {
-            strippedBlocks.push(tag);
-            strippedContent = nextContent.content;
-            nextContent = stripOneInjectedTag(strippedContent, tag);
-        }
-    }
-    return { content: strippedContent, strippedBlocks };
-}
-function stripOneInjectedTag(content, tag) {
-    const openPattern = new RegExp(`<${tag}(?=[\\s>/])[^>]*>`, "i");
-    const openMatch = openPattern.exec(content);
-    if (!openMatch)
-        return { content, changed: false };
-    const closePattern = new RegExp(`</${tag}\\s*>`, "gi");
-    const openSearchPattern = new RegExp(`<${tag}(?=[\\s>/])[^>]*>`, "gi");
-    closePattern.lastIndex = openMatch.index + openMatch[0].length;
-    openSearchPattern.lastIndex = openMatch.index + openMatch[0].length;
-    let depth = 1;
-    let cursor = openMatch.index + openMatch[0].length;
-    while (true) {
-        openSearchPattern.lastIndex = cursor;
-        closePattern.lastIndex = cursor;
-        const nestedOpen = openSearchPattern.exec(content);
-        const closeMatch = closePattern.exec(content);
-        if (!closeMatch) {
-            throw new Error(`Unclosed memory block tag: <${tag}>`);
-        }
-        if (nestedOpen && nestedOpen.index < closeMatch.index) {
-            depth += 1;
-            cursor = nestedOpen.index + nestedOpen[0].length;
-            continue;
-        }
-        depth -= 1;
-        cursor = closeMatch.index + closeMatch[0].length;
-        if (depth === 0) {
-            return {
-                content: `${content.slice(0, openMatch.index)}\n${content.slice(cursor)}`,
-                changed: true,
-            };
-        }
     }
 }
 function deriveSlug(value) {
