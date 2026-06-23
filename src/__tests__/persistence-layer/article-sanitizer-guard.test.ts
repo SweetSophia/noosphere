@@ -1,12 +1,19 @@
 /**
  * Regression test for issue #213: persistence-layer article sanitizer guard.
  *
- * This test proves that a direct `prisma.article.create()` call (bypassing all
- * route-level sanitization) is still protected against injected-memory blocks
+ * This test proves that direct `prisma.article.create()` calls (bypassing all
+ * route-level sanitization) are still protected against injected-memory blocks
  * by the Prisma client extension.
  *
- * The test uses the real database because the extension is applied at the
- * PrismaClient instance level and cannot be reliably mocked.
+ * It also covers:
+ * - article.update stripping
+ * - article.upsert stripping (both create and update branches)
+ * - articleRevision.create/update stripping
+ * - createMany/updateMany content rejection
+ * - Nested array writes (revisions: { create: [...] })
+ * - Prisma field operations (content: { set: "..." })
+ * - Excerpt-only stripping
+ * - Injected-only content rejection at all levels
  *
  * Requires DATABASE_URL pointing at a reachable PostgreSQL instance.
  */
@@ -14,7 +21,9 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
 import { prisma } from "@/lib/prisma";
-import { PERSISTENCE_LAYER_INJECTED_ONLY_ERROR } from "@/lib/prisma-extensions/article-sanitizer";
+import {
+  isPersistenceLayerInjectedOnlyError,
+} from "@/lib/prisma-extensions/article-sanitizer";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL environment variable must be set for tests");
@@ -34,6 +43,9 @@ async function ensureTestTopic() {
 }
 
 async function cleanupTestFixtures() {
+  await prisma.articleRevision.deleteMany({
+    where: { title: { contains: TEST_PREFIX } },
+  });
   await prisma.article.deleteMany({
     where: { title: { contains: TEST_PREFIX } },
   });
@@ -41,6 +53,8 @@ async function cleanupTestFixtures() {
     where: { slug: { contains: TEST_PREFIX } },
   });
 }
+
+// ── article.create ──
 
 test("persistence layer strips injected-memory blocks from direct article.create", async () => {
   const topic = await ensureTestTopic();
@@ -59,28 +73,11 @@ test("persistence layer strips injected-memory blocks from direct article.create
       },
     });
 
-    // The injected blocks must be stripped before persistence
-    assert.ok(
-      !created.content.includes("<recall>"),
-      "content must not contain <recall> blocks",
-    );
-    assert.ok(
-      !created.content.includes("secret recall data"),
-      "content must not contain stripped block content",
-    );
-    assert.ok(
-      created.content.includes("Visible durable content."),
-      "content must preserve durable text",
-    );
-
-    assert.ok(
-      !created.excerpt?.includes("<hindsight_memories>"),
-      "excerpt must not contain <hindsight_memories> blocks",
-    );
-    assert.ok(
-      created.excerpt?.includes("Visible excerpt."),
-      "excerpt must preserve durable text",
-    );
+    assert.ok(!created.content.includes("<recall>"));
+    assert.ok(!created.content.includes("secret recall data"));
+    assert.ok(created.content.includes("Visible durable content."));
+    assert.ok(!created.excerpt?.includes("<hindsight_memories>"));
+    assert.ok(created.excerpt?.includes("Visible excerpt."));
   } finally {
     await cleanupTestFixtures();
   }
@@ -100,23 +97,17 @@ test("persistence layer rejects article.create with injected-only content", asyn
             content: "<recall>only injected content, no durable text</recall>",
           },
         }),
-      (err: Error) => {
-        assert.ok(
-          err.message.includes(PERSISTENCE_LAYER_INJECTED_ONLY_ERROR),
-          `error should mention persistence layer rejection, got: ${err.message}`,
-        );
-        return true;
-      },
+      (err: unknown) => isPersistenceLayerInjectedOnlyError(err),
     );
   } finally {
     await cleanupTestFixtures();
   }
 });
 
+// ── article.update ──
+
 test("persistence layer strips injected-memory blocks from direct article.update", async () => {
   const topic = await ensureTestTopic();
-
-  // First create a clean article
   const article = await prisma.article.create({
     data: {
       title: `${TEST_PREFIX}-update-strip`,
@@ -135,14 +126,8 @@ test("persistence layer strips injected-memory blocks from direct article.update
       },
     });
 
-    assert.ok(
-      !updated.content.includes("<noosphere_auto_recall>"),
-      "updated content must not contain injected blocks",
-    );
-    assert.ok(
-      updated.content.includes("Updated visible content."),
-      "updated content must preserve durable text",
-    );
+    assert.ok(!updated.content.includes("<noosphere_auto_recall>"));
+    assert.ok(updated.content.includes("Updated visible content."));
   } finally {
     await cleanupTestFixtures();
   }
@@ -150,8 +135,6 @@ test("persistence layer strips injected-memory blocks from direct article.update
 
 test("persistence layer rejects article.update with injected-only content", async () => {
   const topic = await ensureTestTopic();
-
-  // Create a clean article first
   const article = await prisma.article.create({
     data: {
       title: `${TEST_PREFIX}-update-reject`,
@@ -171,22 +154,70 @@ test("persistence layer rejects article.update with injected-only content", asyn
               "<hindsight_memories>only injected, replaces all durable text</hindsight_memories>",
           },
         }),
-      (err: Error) => {
-        assert.ok(
-          err.message.includes(PERSISTENCE_LAYER_INJECTED_ONLY_ERROR),
-          `error should mention persistence layer rejection, got: ${err.message}`,
-        );
-        return true;
-      },
+      (err: unknown) => isPersistenceLayerInjectedOnlyError(err),
     );
   } finally {
     await cleanupTestFixtures();
   }
 });
 
-test("persistence layer does not interfere with updateMany (metadata-only update)", async () => {
+// ── article.upsert ──
+
+test("persistence layer strips injected-memory blocks from article.upsert (create branch)", async () => {
   const topic = await ensureTestTopic();
 
+  try {
+    const result = await prisma.article.upsert({
+      where: { id: `nonexistent-${TEST_RUN_ID}` },
+      create: {
+        title: `${TEST_PREFIX}-upsert-create`,
+        slug: `${TEST_PREFIX}-upsert-create`,
+        topicId: topic.id,
+        content:
+          "Upserted visible content.\n<recall>injected in upsert create</recall>\nEnd.",
+      },
+      update: {},
+    });
+
+    assert.ok(!result.content.includes("<recall>"));
+    assert.ok(result.content.includes("Upserted visible content."));
+  } finally {
+    await cleanupTestFixtures();
+  }
+});
+
+test("persistence layer strips injected-memory blocks from article.upsert (update branch)", async () => {
+  const topic = await ensureTestTopic();
+  const article = await prisma.article.create({
+    data: {
+      title: `${TEST_PREFIX}-upsert-update`,
+      slug: `${TEST_PREFIX}-upsert-update`,
+      topicId: topic.id,
+      content: "Original content for upsert test.",
+    },
+  });
+
+  try {
+    const result = await prisma.article.upsert({
+      where: { id: article.id },
+      create: { title: "unreachable", slug: "unreachable", topicId: topic.id, content: "unreachable" },
+      update: {
+        content:
+          "Updated via upsert.\n<hindsight_memories>injected in upsert update</hindsight_memories>",
+      },
+    });
+
+    assert.ok(!result.content.includes("<hindsight_memories>"));
+    assert.ok(result.content.includes("Updated via upsert."));
+  } finally {
+    await cleanupTestFixtures();
+  }
+});
+
+// ── updateMany / createMany content rejection ──
+
+test("persistence layer does not interfere with updateMany (metadata-only update)", async () => {
+  const topic = await ensureTestTopic();
   const article = await prisma.article.create({
     data: {
       title: `${TEST_PREFIX}-updatemany`,
@@ -198,24 +229,49 @@ test("persistence layer does not interfere with updateMany (metadata-only update
   });
 
   try {
-    // updateMany is used for bulk metadata updates (publish/unpublish)
-    // and should NOT be intercepted by the sanitizer
     const result = await prisma.article.updateMany({
       where: { id: article.id },
       data: { status: "draft" },
     });
-
-    assert.equal(result.count, 1, "updateMany should succeed for metadata-only update");
+    assert.equal(result.count, 1);
   } finally {
     await cleanupTestFixtures();
   }
 });
 
-test("persistence layer strips injected blocks from nested revision.create inside article.create", async () => {
+test("persistence layer rejects updateMany with content fields", async () => {
+  const topic = await ensureTestTopic();
+  const article = await prisma.article.create({
+    data: {
+      title: `${TEST_PREFIX}-updatemany-reject`,
+      slug: `${TEST_PREFIX}-updatemany-reject`,
+      topicId: topic.id,
+      content: "Clean content for updateMany rejection test.",
+    },
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        prisma.article.updateMany({
+          where: { id: article.id },
+          data: { content: "<recall>bulk injected</recall>" },
+        }),
+      (err: unknown) =>
+        err instanceof Error &&
+        err.message.includes("Persistence layer rejected article.updateMany"),
+    );
+  } finally {
+    await cleanupTestFixtures();
+  }
+});
+
+// ── Nested writes ──
+
+test("persistence layer strips injected blocks from nested revision.create (single object)", async () => {
   const topic = await ensureTestTopic();
 
   try {
-    // Article create with nested revision that contains injected blocks in its content
     const created = await prisma.article.create({
       data: {
         title: `${TEST_PREFIX}-nested-revision`,
@@ -233,15 +289,162 @@ test("persistence layer strips injected blocks from nested revision.create insid
       include: { revisions: true },
     });
 
-    // The revision content should also be stripped
     const revision = created.revisions[0];
-    assert.ok(
-      !revision.content.includes("<recall>"),
-      "nested revision content must not contain injected blocks",
-    );
-    assert.ok(
-      revision.content.includes("Revision content."),
-      "nested revision content must preserve durable text",
+    assert.ok(!revision.content.includes("<recall>"));
+    assert.ok(revision.content.includes("Revision content."));
+  } finally {
+    await cleanupTestFixtures();
+  }
+});
+
+test("persistence layer strips injected blocks from nested revision.create (array form)", async () => {
+  const topic = await ensureTestTopic();
+
+  try {
+    const created = await prisma.article.create({
+      data: {
+        title: `${TEST_PREFIX}-nested-array-revision`,
+        slug: `${TEST_PREFIX}-nested-array-revision`,
+        topicId: topic.id,
+        content: "Clean article content for array revision test.",
+        revisions: {
+          create: [
+            {
+              title: `${TEST_PREFIX}-array-rev-1`,
+              content:
+                "Array revision 1.\n<recall>injected array rev 1</recall>\nEnd.",
+            },
+            {
+              title: `${TEST_PREFIX}-array-rev-2`,
+              content:
+                "Array revision 2.\n<hindsight_memories>injected array rev 2</hindsight_memories>\nEnd.",
+            },
+          ],
+        },
+      },
+      include: { revisions: true },
+    });
+
+    assert.equal(created.revisions.length, 2);
+    for (const rev of created.revisions) {
+      assert.ok(!rev.content.includes("<recall>"), `revision ${rev.title} must not contain <recall>`);
+      assert.ok(
+        !rev.content.includes("<hindsight_memories>"),
+        `revision ${rev.title} must not contain <hindsight_memories>`,
+      );
+    }
+  } finally {
+    await cleanupTestFixtures();
+  }
+});
+
+// ── Excerpt-only stripping ──
+
+test("persistence layer strips excerpt-only injected blocks when content is clean", async () => {
+  const topic = await ensureTestTopic();
+
+  try {
+    const created = await prisma.article.create({
+      data: {
+        title: `${TEST_PREFIX}-excerpt-only`,
+        slug: `${TEST_PREFIX}-excerpt-only`,
+        topicId: topic.id,
+        content: "Completely clean durable content with no injected blocks.",
+        excerpt:
+          "Clean excerpt start.\n<noosphere_auto_recall>injected excerpt data</noosphere_auto_recall>\nClean excerpt end.",
+      },
+    });
+
+    assert.ok(created.content.includes("Completely clean durable content"));
+    assert.ok(!created.excerpt?.includes("<noosphere_auto_recall>"));
+    assert.ok(created.excerpt?.includes("Clean excerpt start."));
+  } finally {
+    await cleanupTestFixtures();
+  }
+});
+
+// ── Prisma field operations ──
+
+test("persistence layer strips injected blocks from content passed via { set } field operation", async () => {
+  const topic = await ensureTestTopic();
+  const article = await prisma.article.create({
+    data: {
+      title: `${TEST_PREFIX}-set-op`,
+      slug: `${TEST_PREFIX}-set-op`,
+      topicId: topic.id,
+      content: "Original clean content.",
+    },
+  });
+
+  try {
+    const updated = await prisma.article.update({
+      where: { id: article.id },
+      data: {
+        content: {
+          set: "Set via field op.\n<recall>injected via set</recall>\nEnd.",
+        },
+      },
+    });
+
+    assert.ok(!updated.content.includes("<recall>"));
+    assert.ok(updated.content.includes("Set via field op."));
+  } finally {
+    await cleanupTestFixtures();
+  }
+});
+
+// ── ArticleRevision direct writes ──
+
+test("persistence layer strips injected-memory blocks from direct articleRevision.create", async () => {
+  const topic = await ensureTestTopic();
+  const article = await prisma.article.create({
+    data: {
+      title: `${TEST_PREFIX}-rev-direct`,
+      slug: `${TEST_PREFIX}-rev-direct`,
+      topicId: topic.id,
+      content: "Clean article for revision direct write test.",
+    },
+  });
+
+  try {
+    const revision = await prisma.articleRevision.create({
+      data: {
+        articleId: article.id,
+        title: `${TEST_PREFIX}-rev-direct-r1`,
+        content:
+          "Direct revision content.\n<recall>injected in direct revision</recall>\nEnd.",
+      },
+    });
+
+    assert.ok(!revision.content.includes("<recall>"));
+    assert.ok(revision.content.includes("Direct revision content."));
+  } finally {
+    await cleanupTestFixtures();
+  }
+});
+
+test("persistence layer rejects articleRevision.create with injected-only content", async () => {
+  const topic = await ensureTestTopic();
+  const article = await prisma.article.create({
+    data: {
+      title: `${TEST_PREFIX}-rev-reject`,
+      slug: `${TEST_PREFIX}-rev-reject`,
+      topicId: topic.id,
+      content: "Clean article for revision rejection test.",
+    },
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        prisma.articleRevision.create({
+          data: {
+            articleId: article.id,
+            title: `${TEST_PREFIX}-rev-reject-r1`,
+            content: "<hindsight_memories>only injected revision</hindsight_memories>",
+          },
+        }),
+      (err: unknown) => isPersistenceLayerInjectedOnlyError(err),
     );
   } finally {
     await cleanupTestFixtures();

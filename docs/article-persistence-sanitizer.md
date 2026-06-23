@@ -27,8 +27,9 @@ can never reach the database.
    `PERSISTENCE_LAYER_INJECTED_ONLY_ERROR`).
 3. **Recurses** into nested write payloads (e.g., `revisions.create` inside
    `article.create`).
-4. **Does NOT intercept** `updateMany` (used for bulk metadata updates like
-   publish/unpublish that never touch content).
+4. **Rejects** `createMany`/`updateMany` calls that include `content` or
+   `excerpt` fields — bulk operations are metadata-only.
+5. **Protects** both `article` and `articleRevision` tables.
 
 ## What It Does NOT Do
 
