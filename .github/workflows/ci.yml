@@ -70,14 +70,15 @@ jobs:
         run: npx prisma generate
 
       - name: Push schema to test DB
-        run: npx prisma db push --force-reset --skip-generate
+        run: npx prisma db push --force-reset --skip-generate --url="$DATABASE_URL"
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+
+      - name: Create .env.test for test scripts
+        run: echo "DATABASE_URL=postgresql://test:test@localhost:5432/test" > .env.test
 
       - name: Run persistence-layer tests
         run: npm run test:persistence-layer
-        env:
-          DATABASE_URL: postgresql://test:test@localhost:5432/test
 
       - name: Run API tests
         run: npm run test:api
-        env:
-          DATABASE_URL: postgresql://test:test@localhost:5432/test
