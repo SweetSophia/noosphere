@@ -7,6 +7,10 @@ import {
   getJsonBodyError,
   readBoundedJsonObject,
 } from "@/lib/api/body";
+import {
+  sanitizeArticleContent,
+  sanitizeArticleExcerpt,
+} from "@/lib/api/article-content";
 import { buildTagConnections } from "@/lib/wiki";
 import {
   syncArticleRelations,
@@ -23,6 +27,7 @@ import {
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
 import { rateLimit } from "@/lib/rate-limit";
 import { resolvePatchRestrictedTags } from "@/lib/api/restricted-scopes";
+import { detectSecretInInputs } from "@/lib/memory/api/save";
 
 const ARTICLE_JSON_BODY_MAX_BYTES =
   ARTICLE_LIMITS.maxContentSize + DEFAULT_JSON_BODY_MAX_BYTES;
@@ -99,6 +104,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     // Build update data — all fields optional
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
+    let sanitizedContent: string | undefined;
+    let sanitizedExcerpt: string | undefined;
 
     // title
     if (title !== undefined) {
@@ -144,11 +151,20 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (encoded.length > ARTICLE_LIMITS.maxContentSize) {
         return NextResponse.json({ error: `content exceeds maximum size of ${ARTICLE_LIMITS.maxContentSize} bytes` }, { status: 400 });
       }
-      updateData.content = content;
+      const contentSanitization = sanitizeArticleContent(content);
+      if (!contentSanitization.ok) {
+        return NextResponse.json(
+          { error: contentSanitization.error },
+          { status: contentSanitization.status },
+        );
+      }
+
+      sanitizedContent = contentSanitization.content;
+      updateData.content = sanitizedContent;
 
       // Auto-update excerpt if content changed and no explicit excerpt provided
       if (excerpt === undefined) {
-        updateData.excerpt = deriveExcerpt(content);
+        updateData.excerpt = deriveExcerpt(sanitizedContent);
       }
     }
 
@@ -160,7 +176,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (excerpt && excerpt.length > ARTICLE_LIMITS.maxExcerptLength) {
         return NextResponse.json({ error: `excerpt exceeds maximum length of ${ARTICLE_LIMITS.maxExcerptLength} characters` }, { status: 400 });
       }
-      updateData.excerpt = excerpt ?? "";
+      sanitizedExcerpt =
+        excerpt === null ? "" : sanitizeArticleExcerpt(excerpt).excerpt;
+      updateData.excerpt = sanitizedExcerpt;
     }
 
     // topicId
@@ -230,6 +248,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       }
     }
 
+    const secretError = detectSecretInInputs([
+      { field: "title", value: title },
+      { field: "content", value: sanitizedContent },
+      { field: "excerpt", value: sanitizedExcerpt },
+      ...(Array.isArray(tags)
+        ? tags.map((value) => ({ field: "tags", value: typeof value === "string" ? value : undefined }))
+        : []),
+    ]);
+    if (secretError) {
+      return NextResponse.json({ error: secretError.error }, { status: secretError.status });
+    }
+
     // Build tag connections if tags are being updated
     let newTagConnections: { tagId: string }[] = [];
     if (tags !== undefined) {
@@ -238,14 +268,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     // Create revision if content or title changed
     const titleChanged = title !== undefined && title !== existing.title;
-    const contentChanged = content !== undefined && content !== existing.content;
+    const contentChanged =
+      sanitizedContent !== undefined && sanitizedContent !== existing.content;
 
     if (titleChanged || contentChanged) {
       updateData.revisions = {
         create: {
           authorId: auth.auth.userId ?? null,
           title: (title ?? existing.title) as string,
-          content: (content ?? existing.content) as string,
+          content: (sanitizedContent ?? existing.content) as string,
         },
       };
     }
