@@ -66,6 +66,35 @@ export function isPersistenceLayerInjectedOnlyError(
 }
 
 /**
+ * Error prefix for bulk operations that include content/excerpt fields.
+ */
+export const PERSISTENCE_LAYER_BULK_CONTENT_ERROR_PREFIX =
+  "Persistence layer rejected article.";
+
+/**
+ * Type guard for the bulk-rejection error.
+ */
+export function isPersistenceLayerBulkContentError(
+  err: unknown,
+): boolean {
+  return (
+    err instanceof Error &&
+    err.message.startsWith(PERSISTENCE_LAYER_BULK_CONTENT_ERROR_PREFIX)
+  );
+}
+
+/**
+ * Type guard for any persistence-layer sanitizer error (injected-only or bulk).
+ */
+export function isPersistenceLayerSanitizerError(
+  err: unknown,
+): boolean {
+  return (
+    isPersistenceLayerInjectedOnlyError(err) ||
+    isPersistenceLayerBulkContentError(err)
+  );
+}
+/**
  * Prisma field-operation keys whose `.set` / `.push` values may contain
  * the actual string payload. When we encounter one of these as a wrapper
  * around `content` or `excerpt`, we unwrap and sanitize the inner value.
@@ -148,9 +177,12 @@ function stripFromNestedData(
     }
   }
 
-  // Recurse into all nested properties to handle any Prisma nested write
-  // structures: create, update, upsert, connectOrCreate, where/data wrappers, etc.
-  for (const value of Object.values(record)) {
+  // Recurse into nested properties to handle Prisma nested write structures
+  // (create, update, upsert, connectOrCreate, data wrappers, etc.).
+  // Skip `where` keys — they are query conditions, not write payloads.
+  // Stripping `where.content` would corrupt the query, not protect stored data.
+  for (const [key, value] of Object.entries(record)) {
+    if (key === "where") continue;
     if (value && typeof value === "object") {
       stripFromNestedData(value, rejectEmpty);
     }
@@ -174,7 +206,7 @@ function rejectBulkContentFields(
       const record = item as Record<string, unknown>;
       if ("content" in record || "excerpt" in record) {
         throw new Error(
-          `Persistence layer rejected article.${operation} with content/excerpt fields. Use create/update/upsert for content writes.`,
+          `${PERSISTENCE_LAYER_BULK_CONTENT_ERROR_PREFIX}${operation} with content/excerpt fields. Use create/update/upsert for content writes.`,
         );
       }
     }
