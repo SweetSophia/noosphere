@@ -161,3 +161,51 @@ test.describe("staleDays and tagMin parsing logic", () => {
     assert.equal(tagMin.error, "tagMin must be a finite number");
   });
 });
+
+test("buildLintIssues handles null topic and tag joins defensively", async () => {
+  process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test";
+  const { buildLintIssues } = await import("@/app/api/lint/route");
+  const now = new Date("2026-06-24T12:00:00.000Z");
+  const content =
+    "This article has enough plain text content to avoid the near-empty lint rule.";
+  const sharedTag = { id: "tag-shared", name: "Shared", slug: "shared" };
+
+  const issues = buildLintIssues(
+    [
+      {
+        id: "null-only",
+        title: "Null Only",
+        slug: "null-only",
+        content,
+        updatedAt: now,
+        topic: null,
+        tags: [{ tag: null }],
+      },
+      {
+        id: "mixed-tag",
+        title: "Mixed Tag",
+        slug: "mixed-tag",
+        content,
+        updatedAt: now,
+        topic: { slug: "mixed-topic", name: "Mixed Topic" },
+        tags: [{ tag: null }, { tag: sharedTag }],
+      },
+      {
+        id: "shared-tag",
+        title: "Shared Tag",
+        slug: "shared-tag",
+        content,
+        updatedAt: now,
+        topic: { slug: "other-topic", name: "Other Topic" },
+        tags: [{ tag: sharedTag }],
+      },
+    ],
+    { staleDays: 90, tagMin: 2, now },
+  );
+
+  const orphanIssues = issues.filter((issue) => issue.type === "orphan");
+  assert.deepEqual(
+    orphanIssues.map((issue) => [issue.articleId, issue.severity]),
+    [["null-only", "high"]],
+  );
+});

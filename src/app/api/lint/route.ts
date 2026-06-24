@@ -32,75 +32,56 @@ interface LintIssue {
   details: string;
 }
 
-export async function POST(request: NextRequest) {
-  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "lint" });
-  if (!rl.allowed) return rl.response;
+interface LintArticle {
+  id: string;
+  title: string;
+  slug: string;
+  content: string;
+  updatedAt: Date;
+  topic: { slug: string; name?: string } | null;
+  tags: Array<{
+    tag: { id: string; name: string; slug?: string } | null;
+  }>;
+}
 
-  const auth = await requirePermission(request, [Permissions.WRITE]);
-  if (!auth.success) {
-    return auth.response;
-  }
+function hasTag(
+  entry: LintArticle["tags"][number],
+): entry is { tag: { id: string; name: string; slug?: string } } {
+  return Boolean(entry.tag);
+}
 
-  const scopeWhere = buildScopeFilter(auth.auth.allowedScopes, { deletedAt: null });
-
-  // --- Parse options ---
-  let body: { staleDays?: unknown; tagMin?: unknown; maxArticles?: unknown } = {};
-  if (request.body) {
-    try {
-      body = await readBoundedJsonObject<typeof body>(request);
-    } catch (error) {
-      const bodyError = getJsonBodyError(error);
-      return NextResponse.json(
-        { error: bodyError.message },
-        { status: bodyError.status },
-      );
-    }
-  }
-
-  const lintOptions = parseLintOptions(body);
-  if (!lintOptions.ok) {
-    return NextResponse.json({ error: lintOptions.error }, { status: 400 });
-  }
-  const { staleDays, tagMin, maxArticles } = lintOptions.options;
-  const staleThreshold = new Date(Date.now() - staleDays * 24 * 60 * 60 * 1000);
-
+export function buildLintIssues(
+  articles: LintArticle[],
+  options: { staleDays: number; tagMin: number; now?: Date },
+): LintIssue[] {
+  const { staleDays, tagMin, now = new Date() } = options;
+  const staleThreshold = new Date(now.getTime() - staleDays * 24 * 60 * 60 * 1000);
   const issues: LintIssue[] = [];
-
-  // ── Fetch non-deleted articles (capped for performance) ──
-  const articles = await prisma.article.findMany({
-    where: scopeWhere,
-    take: maxArticles,
-    orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
-    select: {
-      id: true,
-      title: true,
-      slug: true,
-      content: true,
-      updatedAt: true,
-      topic: { select: { slug: true, name: true } },
-      tags: { select: { tag: { select: { id: true, name: true, slug: true } } } },
-    },
-  });
 
   const articleMap = new Map(articles.map((a) => [a.slug, a]));
 
-  const topicSlugSet = new Set(articles.map((a) => a.topic.slug));
+  const topicSlugSet = new Set(
+    articles
+      .map((a) => a.topic?.slug)
+      .filter((slug): slug is string => typeof slug === "string" && slug.length > 0),
+  );
 
   // ── 1. Orphan articles ──
-  // An orphan has no topic-edge (same-topic) and no tag-edge and no cross_ref
-  // We check this by building inbound connection sets
+  // An orphan has no topic-edge (same-topic) and no tag-edge and no cross_ref.
 
-  // Build tag → article mapping
+  // Build tag → article mapping. Null joins are ignored defensively so a bad
+  // relation payload cannot crash the lint endpoint.
   const tagToArticles = new Map<string, string[]>();
   for (const a of articles) {
     for (const { tag } of a.tags) {
+      if (!tag) continue;
       const list = tagToArticles.get(tag.id) ?? [];
       list.push(a.id);
       tagToArticles.set(tag.id, list);
     }
   }
 
-  // Build cross_ref edges from content
+  // Build cross_ref edges from content.
   const crossRefTargets = new Map<string, Set<string>>();
   for (const a of articles) {
     const targets = new Set<string>();
@@ -132,16 +113,18 @@ export async function POST(request: NextRequest) {
   }
 
   for (const a of articles) {
-    const hasTopicEdge = articles.some(
-      (b) => b.id !== a.id && b.topic.slug === a.topic.slug
+    const validTags = a.tags.filter(hasTag);
+    const topicSlug = a.topic?.slug;
+    const hasTopicEdge = Boolean(topicSlug) && articles.some(
+      (b) => b.id !== a.id && b.topic?.slug === topicSlug
     );
-    const hasTagEdge = a.tags.some(({ tag }) => (tagToArticles.get(tag.id)?.length ?? 0) > 1);
+    const hasTagEdge = validTags.some(({ tag }) => (tagToArticles.get(tag.id)?.length ?? 0) > 1);
     const hasCrossRef = (crossRefTargets.get(a.id)?.size ?? 0) > 0;
 
     if (!hasTopicEdge && !hasTagEdge && !hasCrossRef) {
       issues.push({
         type: "orphan",
-        severity: a.tags.length === 0 ? "high" : "medium",
+        severity: validTags.length === 0 ? "high" : "medium",
         articleId: a.id,
         title: a.title,
         details: `No topic siblings, no shared tags, and no cross-references to or from other articles.`,
@@ -153,7 +136,7 @@ export async function POST(request: NextRequest) {
   for (const a of articles) {
     if (a.updatedAt < staleThreshold) {
       const daysSince = Math.floor(
-        (Date.now() - a.updatedAt.getTime()) / (24 * 60 * 60 * 1000)
+        (now.getTime() - a.updatedAt.getTime()) / (24 * 60 * 60 * 1000)
       );
       issues.push({
         type: "stale",
@@ -196,7 +179,7 @@ export async function POST(request: NextRequest) {
   for (const [tagId, articleIds] of tagOrphanTags) {
     const tagName = articles
       .flatMap((a) => a.tags)
-      .find((t) => t.tag.id === tagId)?.tag.name;
+      .find((t) => t.tag?.id === tagId)?.tag?.name;
     issues.push({
       type: "tag_orphan",
       severity: "low",
@@ -253,6 +236,58 @@ export async function POST(request: NextRequest) {
       });
     }
   }
+
+  return issues;
+}
+
+export async function POST(request: NextRequest) {
+  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "lint" });
+  if (!rl.allowed) return rl.response;
+
+  const auth = await requirePermission(request, [Permissions.WRITE]);
+  if (!auth.success) {
+    return auth.response;
+  }
+
+  const scopeWhere = buildScopeFilter(auth.auth.allowedScopes, { deletedAt: null });
+
+  // --- Parse options ---
+  let body: { staleDays?: unknown; tagMin?: unknown; maxArticles?: unknown } = {};
+  if (request.body) {
+    try {
+      body = await readBoundedJsonObject<typeof body>(request);
+    } catch (error) {
+      const bodyError = getJsonBodyError(error);
+      return NextResponse.json(
+        { error: bodyError.message },
+        { status: bodyError.status },
+      );
+    }
+  }
+
+  const lintOptions = parseLintOptions(body);
+  if (!lintOptions.ok) {
+    return NextResponse.json({ error: lintOptions.error }, { status: 400 });
+  }
+  const { staleDays, tagMin, maxArticles } = lintOptions.options;
+
+  // ── Fetch non-deleted articles (capped for performance) ──
+  const articles = await prisma.article.findMany({
+    where: scopeWhere,
+    take: maxArticles,
+    orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+    select: {
+      id: true,
+      title: true,
+      slug: true,
+      content: true,
+      updatedAt: true,
+      topic: { select: { slug: true, name: true } },
+      tags: { select: { tag: { select: { id: true, name: true, slug: true } } } },
+    },
+  });
+
+  const issues = buildLintIssues(articles, { staleDays, tagMin });
 
   // ── Summary ──
   const summary = {

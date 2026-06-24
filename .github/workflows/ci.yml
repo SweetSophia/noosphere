@@ -82,4 +82,3 @@ jobs:
 
       - name: Run API tests
         run: npm run test:api
-        continue-on-error: true # TODO: fix sync-conflict-review test (Node mock API issue)
