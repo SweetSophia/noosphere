@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
+import { articleSanitizerExtension } from "@/lib/prisma-extensions/article-sanitizer";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -16,7 +17,7 @@ function parsePositiveInt(envVar: string | undefined, defaultValue: number): num
   return isNaN(parsed) || parsed <= 0 ? defaultValue : parsed;
 }
 
-function createPrismaClient() {
+function createPrismaClient(): PrismaClient {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error("DATABASE_URL environment variable is not set");
@@ -34,13 +35,21 @@ function createPrismaClient() {
 
   const adapter = new PrismaPg(pool);
 
-  return new PrismaClient({
+  const client = new PrismaClient({
     adapter,
     log:
       process.env.NODE_ENV === "development"
         ? ["query", "error", "warn"]
         : ["error"],
   });
+
+  // Apply the persistence-layer sanitizer as a hard boundary.
+  // The extension intercepts article.create/update/upsert at the query layer,
+  // stripping injected-memory blocks before they reach PostgreSQL.
+  // Cast back to PrismaClient because the extension only adds query interceptors
+  // (no new API surface), so the runtime behaviour is fully compatible.
+  // See: https://github.com/SweetSophia/noosphere/issues/213
+  return client.$extends(articleSanitizerExtension) as unknown as PrismaClient;
 }
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();
