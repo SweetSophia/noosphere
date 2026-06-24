@@ -300,6 +300,7 @@ memory capture instructions are not injected into prompts.
 - **Auto-recall fails open**. If Noosphere is unavailable, OpenClaw continues without injected memory.
 - **`noosphere_save` creates draft candidates only**. It never auto-publishes curated knowledge.
 - **Release tags are package-specific**. Use `v-openclaw-*` for `@sweetsophia/openclaw-noosphere-memory`, `v-opencode-*` for `@sweetsophia/opencode-noosphere-memory`, and `v-kilocode-*` for `@sweetsophia/kilocode-noosphere-memory`; add a new `v-{package}-*` CI prefix before introducing another package.
+- **Injected-memory stripping is bundled-only**. `@sweetsophia/noosphere-injected-memory` is a private internal helper package. It is still built and packed in CI, but it is not published under its own npm tag because the OpenClaw plugin bundles it.
 - **Prompt injection is explicit but broad by default in the installer**. OpenClaw requires `hooks.allowPromptInjection: true` before plugin hook text can enter the prompt; the installer enables it with no `enabledAgents` or `allowedChatTypes` allowlist.
 
 ## Restricting auto-recall scope
