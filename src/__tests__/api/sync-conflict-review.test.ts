@@ -222,17 +222,39 @@ test("runObsidianSync keeps local markdown visible when conflict review persiste
       tags: [],
     };
 
-    const { mock } = await import("node:test");
+    const client = prisma as unknown as {
+      $queryRaw: (query: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
+    };
+    const topicDelegate = prisma.topic as unknown as {
+      findMany: (args?: unknown) => Promise<unknown>;
+    };
+    const articleDelegate = prisma.article as unknown as {
+      findMany: (args?: unknown) => Promise<unknown>;
+    };
+    const reviewDelegate = prisma.syncConflictReview as unknown as {
+      findFirst: (args?: unknown) => Promise<unknown>;
+      create: (args?: unknown) => Promise<unknown>;
+    };
+    const activityDelegate = prisma.activityLog as unknown as {
+      create: (args?: unknown) => Promise<unknown>;
+    };
+    const originalQueryRaw = client.$queryRaw;
+    const originalTopicFindMany = topicDelegate.findMany;
+    const originalArticleFindMany = articleDelegate.findMany;
+    const originalReviewFindFirst = reviewDelegate.findFirst;
+    const originalReviewCreate = reviewDelegate.create;
+    const originalActivityCreate = activityDelegate.create;
+    const originalConsoleError = console.error;
 
-    mock.method(prisma, "$queryRaw", async () => [{ acquire: true }]);
-    mock.method(prisma.topic, "findMany", async () => [topic]);
-    mock.method(prisma.article, "findMany", async () => [syncArticle]);
-    mock.method(prisma.syncConflictReview, "findFirst", async () => null);
-    mock.method(prisma.syncConflictReview, "create", async () => {
+    client.$queryRaw = async () => [{ acquire: true }];
+    topicDelegate.findMany = async () => [topic];
+    articleDelegate.findMany = async () => [syncArticle];
+    reviewDelegate.findFirst = async () => null;
+    reviewDelegate.create = async () => {
       throw new Error("database unavailable");
-    });
-    mock.method(prisma.activityLog, "create", async () => ({}));
-    mock.method(console, "error", () => {});
+    };
+    activityDelegate.create = async () => ({});
+    console.error = () => {};
 
     try {
       const result = await runObsidianSync({ mode: "full", clean: false, git: false, dryRun: false });
@@ -246,7 +268,13 @@ test("runObsidianSync keeps local markdown visible when conflict review persiste
       );
       assert.equal(existsSync(join(vaultPath, ".noosphere-sync", "conflicts")), true);
     } finally {
-      mock.restoreAll();
+      client.$queryRaw = originalQueryRaw;
+      topicDelegate.findMany = originalTopicFindMany;
+      articleDelegate.findMany = originalArticleFindMany;
+      reviewDelegate.findFirst = originalReviewFindFirst;
+      reviewDelegate.create = originalReviewCreate;
+      activityDelegate.create = originalActivityCreate;
+      console.error = originalConsoleError;
     }
   } finally {
     if (oldEnabled === undefined) delete process.env.OBSIDIAN_SYNC_ENABLED;
