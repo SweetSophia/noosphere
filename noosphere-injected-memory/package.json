@@ -1,8 +1,8 @@
 {
   "name": "@sweetsophia/noosphere-injected-memory",
   "version": "1.10.2",
-  "private": false,
-  "description": "Shared injected-memory block stripping helpers for Noosphere server and agent adapters.",
+  "private": true,
+  "description": "Internal bundled injected-memory block stripping helpers for Noosphere server and agent adapters.",
   "type": "module",
   "license": "Apache-2.0",
   "main": "./dist/index.js",
@@ -26,9 +26,6 @@
   "devDependencies": {
     "@types/node": "^20",
     "typescript": "^5"
-  },
-  "publishConfig": {
-    "access": "public"
   },
   "repository": {
     "type": "git",
