@@ -56,7 +56,7 @@ function RestrictedArticleIcon({ tags }: { tags: string[] }) {
   if (tags.length === 0) return null;
 
   return (
-    <span className="restricted-icon" role="img" aria-label="Restricted">
+    <span className="restricted-icon" role="img" aria-label={`Restricted: ${tags.join(", ")}`}>
       <svg
         width="12"
         height="12"
@@ -88,7 +88,12 @@ function pluralize(count: number, singular: string, plural = `${singular}s`) {
 }
 
 function articleCardLabel(article: WikiHomeArticle) {
-  return `${article.restrictedTags.length > 0 ? "Restricted article" : "Article"}: ${article.title} in ${article.topic.name}`;
+  const restriction =
+    article.restrictedTags.length > 0
+      ? `Restricted article (${article.restrictedTags.join(", ")})`
+      : "Article";
+
+  return `${restriction}: ${article.title} in ${article.topic.name}`;
 }
 
 function TopicTreeNode({ tree, depth = 0 }: { tree: TopicRenderNode; depth?: number }) {
