@@ -3,6 +3,16 @@ import test from "node:test";
 
 import { NextRequest } from "next/server";
 import { proxy } from "@/proxy";
+import { _redisTestHooks } from "@/lib/cache/redis";
+import { FakeRedisClient } from "../_helpers/fake-redis";
+
+test.beforeEach(() => {
+  _redisTestHooks.setClientForTesting(new FakeRedisClient() as never);
+});
+
+test.afterEach(() => {
+  _redisTestHooks.reset();
+});
 
 function request(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
