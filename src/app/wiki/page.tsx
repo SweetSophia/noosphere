@@ -46,7 +46,7 @@ function buildTopicRenderNode(node: TopicNode, countMap: ArticleCountMap): Topic
   };
 }
 
-const homeDateFormatter = new Intl.DateTimeFormat(undefined, {
+const homeDateFormatter = new Intl.DateTimeFormat("en-GB", {
   month: "short",
   day: "numeric",
   year: "numeric",
@@ -56,7 +56,7 @@ function RestrictedArticleIcon({ tags }: { tags: string[] }) {
   if (tags.length === 0) return null;
 
   return (
-    <span className="restricted-icon" title={`Restricted: ${tags.join(", ")}`}>
+    <span className="restricted-icon" role="img" aria-label={`Restricted: ${tags.join(", ")}`}>
       <svg
         width="12"
         height="12"
@@ -72,6 +72,14 @@ function RestrictedArticleIcon({ tags }: { tags: string[] }) {
         <path d="M7 11V7a5 5 0 0 1 10 0v4" />
       </svg>
     </span>
+  );
+}
+
+function countTopicClusters(nodes: TopicRenderNode[]): number {
+  return nodes.reduce(
+    (total, topic) =>
+      total + (topic.children.length > 0 ? 1 : 0) + countTopicClusters(topic.children),
+    0,
   );
 }
 
@@ -95,7 +103,6 @@ function TopicTreeNode({ tree, depth = 0 }: { tree: TopicRenderNode; depth?: num
           </p>
           <div className="topic-tree-meta meta-row">
             <span>{directArticleCount} direct article{directArticleCount !== 1 ? "s" : ""}</span>
-            <span>{descendantCount} nested topic{descendantCount !== 1 ? "s" : ""}</span>
           </div>
         </div>
 
@@ -153,7 +160,7 @@ export default async function WikiHomePage() {
 
   const totalArticles = Object.values(countMap).reduce((total, count) => total + count, 0);
   const topicTree = roots.map((topic) => buildTopicRenderNode(topic, countMap));
-  const topicClusters = topicTree.filter((topic) => topic.children.length > 0).length;
+  const topicClusters = countTopicClusters(topicTree);
   const latestArticle = recentArticles[0];
   const secondaryArticles = recentArticles.slice(1);
 

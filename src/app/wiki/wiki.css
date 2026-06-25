@@ -674,6 +674,10 @@
   align-items: stretch;
 }
 
+.home-updates-layout > :only-child {
+  grid-column: 1 / -1;
+}
+
 .home-featured-update,
 .home-update-card {
   margin-bottom: 0;
