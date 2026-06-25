@@ -3,6 +3,7 @@ import Redis from "ioredis";
 let redisClient: Redis | null = null;
 let isConfigured = true;
 let nextConnectAttemptAt = 0;
+let redisConnectPromise: Promise<void> | null = null;
 
 const REDIS_RECONNECT_COOLDOWN_MS = 5000;
 const TERMINAL_REDIS_STATUSES = new Set(["close", "end"]);
@@ -12,6 +13,7 @@ function resetRedisClient(client: Redis | null = redisClient): void {
     client.disconnect();
   }
   redisClient = null;
+  redisConnectPromise = null;
 }
 
 /**
@@ -83,7 +85,10 @@ export async function getReadyRedisClient(): Promise<Redis | null> {
   }
 
   try {
-    await client.connect();
+    redisConnectPromise ??= client.connect().finally(() => {
+      redisConnectPromise = null;
+    });
+    await redisConnectPromise;
     return (client.status as string) === "ready" ? client : null;
   } catch (error) {
     console.error("Redis connection error:", error);
@@ -102,6 +107,7 @@ export async function closeRedisClient(): Promise<void> {
 export const _redisTestHooks = {
   setClientForTesting(client: Redis | null) {
     redisClient = client;
+    redisConnectPromise = null;
     isConfigured = true;
     nextConnectAttemptAt = 0;
   },

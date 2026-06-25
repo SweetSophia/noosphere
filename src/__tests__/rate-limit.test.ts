@@ -3,116 +3,7 @@ import assert from "assert";
 import { rateLimit } from "@/lib/rate-limit";
 import { _redisTestHooks } from "@/lib/cache/redis";
 import { NextRequest } from "next/server";
-
-class FakeRedisClient {
-  status = "wait";
-  private readonly store = new Map<string, string>();
-  private readonly expires = new Map<string, number>();
-
-  async connect() {
-    this.status = "ready";
-  }
-
-  disconnect() {
-    this.status = "end";
-  }
-
-  async get(key: string): Promise<string | null> {
-    this.assertReady();
-    const expiry = this.expires.get(key);
-    if (expiry !== undefined && Date.now() > expiry) {
-      this.store.delete(key);
-      this.expires.delete(key);
-      return null;
-    }
-    return this.store.get(key) ?? null;
-  }
-
-  async setex(key: string, ttlSeconds: number, value: string): Promise<string> {
-    this.assertReady();
-    this.store.set(key, value);
-    this.expires.set(key, Date.now() + ttlSeconds * 1000);
-    return "OK";
-  }
-
-  async zadd(key: string, _score: number, member: string): Promise<number> {
-    this.assertReady();
-    const setKey = `zset:${key}`;
-    if (!this.store.has(setKey)) {
-      this.store.set(setKey, JSON.stringify([]));
-    }
-    const arr: string[] = JSON.parse(this.store.get(setKey) ?? "[]");
-    if (!arr.includes(member)) {
-      arr.push(member);
-      this.store.set(setKey, JSON.stringify(arr));
-      return 1;
-    }
-    return 0;
-  }
-
-  async zremrangebyscore(key: string, min: string, max: string): Promise<number> {
-    this.assertReady();
-    const setKey = `zset:${key}`;
-    const arr: string[] = JSON.parse(this.store.get(setKey) ?? "[]");
-    const before = arr.length;
-    const minNum = min === "-inf" ? Number.NEGATIVE_INFINITY : parseFloat(min);
-    const maxNum = parseFloat(max);
-    const filtered = arr.filter((item) => {
-      const timestamp = parseFloat(item.split(":")[0] ?? "0");
-      return timestamp < minNum || timestamp > maxNum;
-    });
-    this.store.set(setKey, JSON.stringify(filtered));
-    return before - filtered.length;
-  }
-
-  async zcard(key: string): Promise<number> {
-    this.assertReady();
-    const setKey = `zset:${key}`;
-    return JSON.parse(this.store.get(setKey) ?? "[]").length;
-  }
-
-  private assertReady() {
-    if (this.status !== "ready") {
-      throw new Error("Redis command executed before client was ready");
-    }
-  }
-
-  pipeline() {
-    const commands: Array<{ method: string; args: unknown[] }> = [];
-
-    const pipelineObj = {
-      zremrangebyscore: (key: string, min: string, max: string) => {
-        commands.push({ method: "zremrangebyscore", args: [key, min, max] });
-        return pipelineObj;
-      },
-      zcard: (key: string) => {
-        commands.push({ method: "zcard", args: [key] });
-        return pipelineObj;
-      },
-      zadd: (key: string, score: number, member: string) => {
-        commands.push({ method: "zadd", args: [key, score, member] });
-        return pipelineObj;
-      },
-      expire: (key: string, seconds: number) => {
-        commands.push({ method: "expire", args: [key, seconds] });
-        return pipelineObj;
-      },
-      exec: async () => {
-        const results: Array<[Error | null, unknown]> = [];
-        for (const cmd of commands) {
-          try {
-            const result = await (this as unknown as Record<string, (...args: unknown[]) => unknown>)[cmd.method](...cmd.args);
-            results.push([null, result]);
-          } catch (err) {
-            results.push([err as Error, null]);
-          }
-        }
-        return results;
-      },
-    };
-    return pipelineObj;
-  }
-}
+import { FakeRedisClient } from "./_helpers/fake-redis";
 
 function makeRequest(ip: string = "192.168.1.1"): NextRequest {
   return new NextRequest("http://localhost/api/test", {
@@ -253,6 +144,50 @@ describe("Rate Limiter Edge Cases", () => {
     for (let i = 0; i < 50; i++) {
       const result = await rateLimit(request, options);
       assert.equal(result.allowed, true);
+    }
+  });
+
+  it("shares the first Redis connection attempt across a lazy-client burst", async () => {
+    const burstRedis = new FakeRedisClient({ connectDelayMs: 10 });
+    _redisTestHooks.setClientForTesting(burstRedis as never);
+
+    const request = makeRequest("10.0.0.12");
+    const options = { windowMs: 60_000, maxRequests: 100, keyPrefix: "test-lazy-burst" };
+
+    // The delayed connect keeps the lazy client in "wait" long enough for the
+    // burst to share the in-flight connection promise.
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () => rateLimit(request, options))
+    );
+
+    assert.equal(burstRedis.connectCalls, 1);
+    for (const result of results) {
+      assert.deepStrictEqual(result, { allowed: true });
+    }
+  });
+
+  it("falls open and suppresses immediate retries when the lazy Redis connect fails", async () => {
+    const failingRedis = new FakeRedisClient({ rejectConnect: true });
+    _redisTestHooks.setClientForTesting(failingRedis as never);
+
+    const request = makeRequest("10.0.0.13");
+    const options = { windowMs: 60_000, maxRequests: 1, keyPrefix: "test-lazy-fail" };
+    const originalConsoleError = console.error;
+    const errorLogs: unknown[][] = [];
+
+    console.error = (...args: unknown[]) => {
+      errorLogs.push(args);
+    };
+
+    try {
+      assert.deepStrictEqual(await rateLimit(request, options), { allowed: true });
+      assert.deepStrictEqual(await rateLimit(request, options), { allowed: true });
+      assert.equal(failingRedis.connectCalls, 1);
+      // The second call should short-circuit on the reconnect cooldown instead
+      // of attempting, and logging, another failed Redis connection.
+      assert.equal(errorLogs.length, 1);
+    } finally {
+      console.error = originalConsoleError;
     }
   });
 });
