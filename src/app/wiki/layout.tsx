@@ -18,35 +18,19 @@ export default async function WikiLayout({
     <div className="wiki-layout">
       <header className="wiki-header">
         <div className="wiki-header-inner">
-          <div className="wiki-header-top">
-            <Link href="/wiki" className="wiki-logo" aria-label="Noosphere home">
-              <span className="wiki-logo-mark" aria-hidden>
-                N
-              </span>
-              <span className="wiki-logo-copy">
-                <span className="wiki-logo-name">Noosphere</span>
-                <span className="wiki-logo-tag">Agent-authored knowledge atlas</span>
-              </span>
-            </Link>
+          <div className="wiki-header-row">
+            <div className="wiki-header-brand">
+              <Link href="/wiki" className="wiki-logo" aria-label="Noosphere home">
+                <span className="wiki-logo-mark" aria-hidden>
+                  N
+                </span>
+                <span className="wiki-logo-copy">
+                  <span className="wiki-logo-name">Noosphere</span>
+                  <span className="wiki-logo-tag">Agent-authored knowledge atlas</span>
+                </span>
+              </Link>
+            </div>
 
-            {session?.user ? (
-              <div className="wiki-user-nav">
-                <div className="wiki-user-chip">
-                  <span className="wiki-user-role">{role}</span>
-                  <span className="wiki-user-name">{userLabel}</span>
-                </div>
-                <SignOutButton />
-              </div>
-            ) : (
-              <div className="wiki-user-nav">
-                <Link href="/wiki/login" className="btn btn-primary btn-sm">
-                  Sign In
-                </Link>
-              </div>
-            )}
-          </div>
-
-          <div className="wiki-header-bottom">
             <form action="/wiki/search" method="get" className="wiki-search-form">
               <label className="wiki-search-shell">
                 <span className="wiki-search-icon" aria-hidden>
@@ -70,35 +54,56 @@ export default async function WikiLayout({
               </button>
             </form>
 
-            <nav className="wiki-nav" aria-label="Wiki navigation">
-              <Link href="/wiki" className="nav-link">
-                Browse
-              </Link>
-              {role === "ADMIN" && (
-                <Link href="/wiki/admin/log" className="nav-link">
-                  Activity
+            <div className="wiki-header-actions">
+              <nav className="wiki-nav" aria-label="Wiki navigation">
+                <Link href="/wiki" className="nav-link">
+                  Browse
                 </Link>
-              )}
-              {role === "ADMIN" && (
-                <Link href="/wiki/admin/keys" className="nav-link">
-                  API Keys
+                <Link href="/wiki/search" className="nav-link">
+                  Search
                 </Link>
+                {role === "ADMIN" && (
+                  <Link href="/wiki/admin/keys" className="nav-link">
+                    API Keys
+                  </Link>
+                )}
+                {role === "ADMIN" && (
+                  <Link href="/wiki/admin/settings" className="nav-link">
+                    Recall Settings
+                  </Link>
+                )}
+                {role === "ADMIN" && (
+                  <Link href="/wiki/admin/trash" className="nav-link">
+                    Trash
+                  </Link>
+                )}
+                {role === "ADMIN" && (
+                  <Link href="/wiki/admin/log" className="nav-link">
+                    Activity Log
+                  </Link>
+                )}
+              </nav>
+
+              {session?.user ? (
+                <div className="wiki-user-nav">
+                  <div className="wiki-user-chip">
+                    <span className="wiki-user-role">{role}</span>
+                    <span className="wiki-user-name">{userLabel}</span>
+                  </div>
+                  <SignOutButton />
+                </div>
+              ) : (
+                <div className="wiki-user-nav">
+                  <Link href="/wiki/login" className="btn btn-primary btn-sm">
+                    Sign In
+                  </Link>
+                </div>
               )}
-              {role === "ADMIN" && (
-                <Link href="/wiki/admin/trash" className="nav-link">
-                  Trash
-                </Link>
-              )}
-              {role === "ADMIN" && (
-                <Link href="/wiki/admin/settings" className="nav-link">
-                  Settings
-                </Link>
-              )}
-            </nav>
+            </div>
           </div>
         </div>
       </header>
-      <main className="wiki-main">
+      <main className="wiki-main page-shell">
         <div className="wiki-main-inner">{children}</div>
       </main>
       <SearchShortcut targetId="wiki-global-search" />

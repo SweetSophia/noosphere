@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apiError } from "@/lib/api/errors";
-import { getRedisClient } from "@/lib/cache/redis";
+import { getReadyRedisClient } from "@/lib/cache/redis";
 
 interface RateLimitOptions {
   windowMs: number;
@@ -26,7 +26,7 @@ export async function rateLimit(
   const now = Date.now();
   const windowStart = now - options.windowMs;
 
-  const redis = getRedisClient();
+  const redis = await getReadyRedisClient();
 
   if (!redis) {
     return { allowed: true };

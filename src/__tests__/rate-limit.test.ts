@@ -55,10 +55,10 @@ class FakeRedisClient {
     const setKey = `zset:${key}`;
     const arr: string[] = JSON.parse(this.store.get(setKey) ?? "[]");
     const before = arr.length;
-    const minNum = parseFloat(min);
+    const minNum = min === "-inf" ? Number.NEGATIVE_INFINITY : parseFloat(min);
     const maxNum = parseFloat(max);
     const filtered = arr.filter((item) => {
-      const timestamp = parseFloat(item.split(":")[1] ?? "0");
+      const timestamp = parseFloat(item.split(":")[0] ?? "0");
       return timestamp < minNum || timestamp > maxNum;
     });
     this.store.set(setKey, JSON.stringify(filtered));
@@ -97,11 +97,11 @@ class FakeRedisClient {
         commands.push({ method: "expire", args: [key, seconds] });
         return pipelineObj;
       },
-      exec: () => {
+      exec: async () => {
         const results: Array<[Error | null, unknown]> = [];
         for (const cmd of commands) {
           try {
-            const result = (this as unknown as Record<string, (...args: unknown[]) => unknown>)[cmd.method](...cmd.args);
+            const result = await (this as unknown as Record<string, (...args: unknown[]) => unknown>)[cmd.method](...cmd.args);
             results.push([null, result]);
           } catch (err) {
             results.push([err as Error, null]);
@@ -142,9 +142,11 @@ describe("Redis Rate Limiter", () => {
     const request = makeRequest("10.0.0.2");
     const options = { windowMs: 60_000, maxRequests: 3, keyPrefix: "test-block" };
 
-    // Use up the limit
-    await rateLimit(request, options);
-    await rateLimit(request, options);
+    // The limiter checks the count before adding the current request, so the
+    // first three requests consume the allowance and the fourth is blocked.
+    assert.deepStrictEqual(await rateLimit(request, options), { allowed: true });
+    assert.deepStrictEqual(await rateLimit(request, options), { allowed: true });
+    assert.deepStrictEqual(await rateLimit(request, options), { allowed: true });
     const result = await rateLimit(request, options);
 
     assert.equal(result.allowed, false);

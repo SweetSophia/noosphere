@@ -1,8 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import { Fraunces, Manrope, JetBrains_Mono } from "next/font/google";
+import { Fraunces, Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-const noosphereBody = Manrope({
+const noosphereBody = Geist({
   variable: "--font-noosphere-sans",
   subsets: ["latin"],
 });
@@ -12,7 +12,7 @@ const noosphereDisplay = Fraunces({
   subsets: ["latin"],
 });
 
-const noosphereMono = JetBrains_Mono({
+const noosphereMono = Geist_Mono({
   variable: "--font-noosphere-mono",
   subsets: ["latin"],
 });
@@ -23,7 +23,7 @@ export const metadata: Metadata = {
     template: "%s · Noosphere",
   },
   description:
-    "Noosphere is a wiki for agent-authored documentation, human review, and searchable operational knowledge.",
+    "Agent-authored documentation, designed for human browsing and editing.",
   applicationName: "Noosphere",
   keywords: [
     "Noosphere",
@@ -35,7 +35,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Noosphere",
     description:
-      "A shared knowledge atlas for agent-authored documentation and human-guided editing.",
+      "Agent-authored documentation, designed for human browsing and editing.",
     siteName: "Noosphere",
     type: "website",
   },
@@ -43,7 +43,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Noosphere",
     description:
-      "A shared knowledge atlas for agent-authored documentation and human-guided editing.",
+      "Agent-authored documentation, designed for human browsing and editing.",
   },
 };
 
