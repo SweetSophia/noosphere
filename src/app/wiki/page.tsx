@@ -56,7 +56,7 @@ function RestrictedArticleIcon({ tags }: { tags: string[] }) {
   if (tags.length === 0) return null;
 
   return (
-    <span className="restricted-icon" role="img" aria-label={`Restricted: ${tags.join(", ")}`}>
+    <span className="restricted-icon" role="img" aria-label="Restricted">
       <svg
         width="12"
         height="12"
@@ -75,12 +75,20 @@ function RestrictedArticleIcon({ tags }: { tags: string[] }) {
   );
 }
 
-function countTopicClusters(nodes: TopicRenderNode[]): number {
+function countBranchTopics(nodes: TopicRenderNode[]): number {
   return nodes.reduce(
     (total, topic) =>
-      total + (topic.children.length > 0 ? 1 : 0) + countTopicClusters(topic.children),
+      total + (topic.children.length > 0 ? 1 : 0) + countBranchTopics(topic.children),
     0,
   );
+}
+
+function pluralize(count: number, singular: string, plural = `${singular}s`) {
+  return count === 1 ? singular : plural;
+}
+
+function articleCardLabel(article: WikiHomeArticle) {
+  return `${article.restrictedTags.length > 0 ? "Restricted article" : "Article"}: ${article.title} in ${article.topic.name}`;
 }
 
 function TopicTreeNode({ tree, depth = 0 }: { tree: TopicRenderNode; depth?: number }) {
@@ -89,11 +97,15 @@ function TopicTreeNode({ tree, depth = 0 }: { tree: TopicRenderNode; depth?: num
 
   return (
     <div className="topic-tree-node" data-depth={depth}>
-      <Link href={`/wiki/${node.slug}`} className="topic-card topic-tree-card">
+      <Link
+        href={`/wiki/${node.slug}`}
+        className="topic-card topic-tree-card"
+        aria-label={`${node.name}: ${directArticleCount} direct ${pluralize(directArticleCount, "article")}, ${articleCount} total ${pluralize(articleCount, "article")} in tree, ${descendantCount} ${pluralize(descendantCount, "subtopic")}`}
+      >
         <div className="topic-tree-copy">
-          <p className="topic-tree-kind">
+          <p className="topic-tree-kind" aria-hidden="true">
             {hasChildren ? "Topic cluster" : "Leaf topic"}
-            {depth > 0 ? <span>Level {depth}</span> : null}
+            {depth > 0 ? <span aria-hidden="true">Level {depth}</span> : null}
           </p>
           <h2 className="topic-tree-title">
             <span>{node.name}</span>
@@ -106,10 +118,10 @@ function TopicTreeNode({ tree, depth = 0 }: { tree: TopicRenderNode; depth?: num
           </div>
         </div>
 
-        <div className="topic-tree-metrics" aria-label={`${node.name} metrics`}>
+        <div className="topic-tree-metrics" aria-hidden="true">
           <div className="topic-tree-stat">
             <strong>{articleCount}</strong>
-            <span>article{articleCount !== 1 ? "s" : ""}</span>
+            <span>total article{articleCount !== 1 ? "s" : ""}</span>
           </div>
           <div className="topic-tree-stat">
             <strong>{descendantCount}</strong>
@@ -160,7 +172,7 @@ export default async function WikiHomePage() {
 
   const totalArticles = Object.values(countMap).reduce((total, count) => total + count, 0);
   const topicTree = roots.map((topic) => buildTopicRenderNode(topic, countMap));
-  const topicClusters = countTopicClusters(topicTree);
+  const branchTopics = countBranchTopics(topicTree);
   const latestArticle = recentArticles[0];
   const secondaryArticles = recentArticles.slice(1);
 
@@ -182,8 +194,8 @@ export default async function WikiHomePage() {
               <span>topics mapped</span>
             </span>
             <span className="page-meta-pill">
-              <strong>{topicClusters}</strong>
-              <span>topic clusters</span>
+              <strong>{branchTopics}</strong>
+              <span>branch topics</span>
             </span>
           </div>
         }
@@ -221,13 +233,14 @@ export default async function WikiHomePage() {
               <Link
                 href={`/wiki/${latestArticle.topic.slug}/${latestArticle.slug}`}
                 className="article-card article-card-featured home-featured-update"
+                aria-label={articleCardLabel(latestArticle)}
               >
                 <div className="article-card-header-row">
-                  <span className="article-kicker">{latestArticle.topic.name}</span>
-                  <span className="article-date">{homeDateFormatter.format(new Date(latestArticle.updatedAt))}</span>
+                  <span className="article-kicker" aria-hidden="true">{latestArticle.topic.name}</span>
+                  <span className="article-date" aria-hidden="true">{homeDateFormatter.format(new Date(latestArticle.updatedAt))}</span>
                 </div>
                 <h3>
-                  <RestrictedArticleIcon tags={latestArticle.restrictedTags ?? []} />
+                  <RestrictedArticleIcon tags={latestArticle.restrictedTags} />
                   {latestArticle.title}
                 </h3>
                 <p>
@@ -246,19 +259,20 @@ export default async function WikiHomePage() {
             ) : null}
 
             {secondaryArticles.length > 0 ? (
-              <div className="home-update-list" aria-label="Additional recent updates">
+              <div className="home-update-list">
                 {secondaryArticles.map((article) => (
                   <Link
                     key={article.id}
                     href={`/wiki/${article.topic.slug}/${article.slug}`}
                     className="article-card article-card-compact home-update-card"
+                    aria-label={articleCardLabel(article)}
                   >
                     <div className="article-card-header-row">
-                      <span className="article-kicker">{article.topic.name}</span>
-                      <span className="article-date">{homeDateFormatter.format(new Date(article.updatedAt))}</span>
+                      <span className="article-kicker" aria-hidden="true">{article.topic.name}</span>
+                      <span className="article-date" aria-hidden="true">{homeDateFormatter.format(new Date(article.updatedAt))}</span>
                     </div>
                     <h3>
-                      <RestrictedArticleIcon tags={article.restrictedTags ?? []} />
+                      <RestrictedArticleIcon tags={article.restrictedTags} />
                       {article.title}
                     </h3>
                     <p>{article.excerpt ?? "Open the latest revision to read the current summary and linked references."}</p>
