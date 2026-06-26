@@ -5,12 +5,36 @@ import { getServerSession } from "next-auth";
 import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { EmptyState } from "@/components/wiki/EmptyState";
 import { PageHeader } from "@/components/wiki/PageHeader";
+import { RestrictedArticleIcon } from "@/components/wiki/RestrictedArticleIcon";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildScopeFilter } from "@/lib/api/auth";
+import { articleCardLabel, pluralize, wikiDateFormatter } from "@/lib/wiki-format";
 
 interface Props {
   params: Promise<{ topicSlug: string }>;
+}
+
+interface TopicPathNode {
+  id: string;
+  name: string;
+  slug: string;
+  parentId: string | null;
+}
+
+function buildTopicPath(topics: TopicPathNode[], current: TopicPathNode) {
+  const topicMap = new Map(topics.map((topic) => [topic.id, topic]));
+  const path: TopicPathNode[] = [];
+  const seen = new Set<string>();
+  let cursor: TopicPathNode | undefined = current;
+
+  while (cursor && !seen.has(cursor.id)) {
+    path.unshift(cursor);
+    seen.add(cursor.id);
+    cursor = cursor.parentId ? topicMap.get(cursor.parentId) : undefined;
+  }
+
+  return path;
 }
 
 export default async function TopicPage({ params }: Props) {
@@ -23,11 +47,12 @@ export default async function TopicPage({ params }: Props) {
   const topic = await prisma.topic.findUnique({
     where: { slug: topicSlug },
     include: {
-      parent: true,
+      parent: { select: { name: true } },
       children: {
         include: {
-          _count: { select: { articles: true } },
+          _count: { select: { articles: true, children: true } },
         },
+        orderBy: { name: "asc" },
       },
     },
   });
@@ -35,6 +60,11 @@ export default async function TopicPage({ params }: Props) {
   if (!topic) {
     notFound();
   }
+
+  const allTopics = await prisma.topic.findMany({
+    select: { id: true, name: true, slug: true, parentId: true },
+  });
+  const topicPath = buildTopicPath(allTopics, topic);
 
   // Unauthenticated users only see unrestricted articles.
   // Human sessions (via NextAuth) always have full access — they bypass restrictions.
@@ -49,14 +79,17 @@ export default async function TopicPage({ params }: Props) {
     },
     orderBy: { updatedAt: "desc" },
   });
+  const hasSubtopics = topic.children.length > 0;
 
   return (
     <div className="wiki-content topic-page">
       <Breadcrumbs
         items={[
           { label: "Noosphere", href: "/wiki" },
-          ...(topic.parent ? [{ label: topic.parent.name, href: `/wiki/${topic.parent.slug}` }] : []),
-          { label: topic.name },
+          ...topicPath.map((pathTopic, index) => ({
+            label: pathTopic.name,
+            href: index === topicPath.length - 1 ? undefined : `/wiki/${pathTopic.slug}`,
+          })),
         ]}
       />
 
@@ -64,6 +97,7 @@ export default async function TopicPage({ params }: Props) {
         eyebrow="Topic"
         title={topic.name}
         description={topic.description ?? "A focused collection of articles and subtopics inside the Noosphere knowledge graph."}
+        className="topic-page-hero"
         actions={
           canCreateArticle ? (
             <Link href={`/wiki/${topic.slug}/new`} className="btn btn-primary btn-sm">
@@ -75,43 +109,59 @@ export default async function TopicPage({ params }: Props) {
           <div className="page-meta-pills">
             <span className="page-meta-pill">
               <strong>{articles.length}</strong>
-              <span>article{articles.length !== 1 ? "s" : ""}</span>
+              <span>{pluralize(articles.length, "article")}</span>
             </span>
             <span className="page-meta-pill">
               <strong>{topic.children.length}</strong>
-              <span>subtopic{topic.children.length !== 1 ? "s" : ""}</span>
+              <span>{pluralize(topic.children.length, "subtopic")}</span>
             </span>
             {topic.parent ? (
               <span className="page-meta-pill">
                 <strong>{topic.parent.name}</strong>
                 <span>parent topic</span>
               </span>
+            ) : hasSubtopics ? (
+              <span className="page-meta-pill">
+                <strong>Root</strong>
+                <span>top-level topic</span>
+              </span>
             ) : null}
           </div>
         }
       />
 
-      {topic.children.length > 0 && (
-        <section className="browse-section browse-section-tight">
+      {hasSubtopics && (
+        <section className="browse-section browse-section-tight topic-page-section">
           <div className="section-header">
             <div className="section-header-copy">
               <p className="page-eyebrow">Branch outward</p>
               <h2 className="section-title">Subtopics</h2>
-              <p className="section-subtitle">Jump into narrower branches connected to this topic.</p>
+              <p className="section-subtitle">Subtopics nested under this branch - open any to see its articles and nested branches.</p>
             </div>
           </div>
 
           <div className="topic-subtopic-grid">
             {topic.children.map((child) => (
-              <Link key={child.id} href={`/wiki/${child.slug}`} className="topic-card topic-subtopic-card">
-                <div>
-                  <p className="topic-tree-kind">Subtopic</p>
+              <Link
+                key={child.id}
+                href={`/wiki/${child.slug}`}
+                className="topic-card topic-subtopic-card"
+                aria-label={`Subtopic ${child.name}: ${child._count.articles} direct ${pluralize(child._count.articles, "article")}, ${child._count.children} direct ${pluralize(child._count.children, "subtopic")}`}
+              >
+                <div className="topic-subtopic-copy">
+                  <p className="subtopic-kind" aria-hidden="true">Subtopic</p>
                   <h3>{child.name}</h3>
                   <p>{child.description ?? "Explore the next layer of articles nested under this branch."}</p>
                 </div>
-                <div className="topic-subtopic-count">
-                  <strong>{child._count.articles}</strong>
-                  <span>article{child._count.articles !== 1 ? "s" : ""}</span>
+                <div className="topic-subtopic-metrics" aria-hidden="true">
+                  <div className="topic-subtopic-count">
+                    <strong>{child._count.articles}</strong>
+                    <span>direct {pluralize(child._count.articles, "article")}</span>
+                  </div>
+                  <div className="topic-subtopic-count">
+                    <strong>{child._count.children}</strong>
+                    <span>direct {pluralize(child._count.children, "subtopic")}</span>
+                  </div>
                 </div>
               </Link>
             ))}
@@ -119,12 +169,12 @@ export default async function TopicPage({ params }: Props) {
         </section>
       )}
 
-      <section className="browse-section browse-section-tight">
+      <section className="browse-section browse-section-tight topic-page-section">
         <div className="section-header">
           <div className="section-header-copy">
             <p className="page-eyebrow">Reading list</p>
             <h2 className="section-title">Articles</h2>
-            <p className="section-subtitle">The latest pages in this topic, ordered by most recent update.</p>
+            <p className="section-subtitle">Direct articles in this topic, ordered by the most recent update.</p>
           </div>
           {articles.length > 0 ? <span className="result-count">{articles.length} total</span> : null}
         </div>
@@ -143,41 +193,54 @@ export default async function TopicPage({ params }: Props) {
           />
         ) : (
           <div className="article-list">
-            {articles.map((article) => (
-              <Link
-                key={article.id}
-                href={`/wiki/${topic.slug}/${article.slug}`}
-                className="article-card article-card-rich"
-              >
-                <div className="article-card-header-row">
-                  <span className="article-kicker">{article.author?.name ?? article.authorName ?? "Unknown author"}</span>
-                  <span className="article-date">Updated {new Date(article.updatedAt).toLocaleDateString()}</span>
-                </div>
-                <h3>
-                  {article.restrictedTags && article.restrictedTags.length > 0 && (
-                    <span className="restricted-icon" title={`Restricted: ${article.restrictedTags.join(", ")}`}>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                      </svg>
-                    </span>
-                  )}
-                  {article.title}
-                </h3>
-                <p>
-                  {article.excerpt ?? "Open the article to read the latest revision, related sources, and linked references."}
-                </p>
-                {article.tags.length > 0 ? (
-                  <div className="article-tag-row article-tag-row-muted">
-                    {article.tags.map((entry) => (
-                      <span key={entry.tag.id} className="tag-badge">
-                        {entry.tag.name}
-                      </span>
-                    ))}
+            {articles.map((article) => {
+              const visibleTags = article.tags.slice(0, 5);
+              const hiddenTagCount = article.tags.length - visibleTags.length;
+
+              return (
+                <Link
+                  key={article.id}
+                  href={`/wiki/${topic.slug}/${article.slug}`}
+                  className="article-card article-card-rich topic-article-card"
+                  aria-label={articleCardLabel(article)}
+                >
+                  <div className="topic-article-main">
+                    <div className="article-card-header-row">
+                      <span className="article-kicker" aria-hidden="true">{article.author?.name ?? article.authorName ?? "Unknown author"}</span>
+                      <span className="article-date" aria-hidden="true">Updated {wikiDateFormatter.format(new Date(article.updatedAt))}</span>
+                    </div>
+                    <h3>
+                      <RestrictedArticleIcon tags={article.restrictedTags} />
+                      {article.title}
+                    </h3>
+                    <p>
+                      {article.excerpt ?? "Open the article to read the latest revision, related sources, and linked references."}
+                    </p>
+                    {article.tags.length > 0 ? (
+                      <div className="article-tag-row article-tag-row-muted" aria-hidden="true">
+                        {visibleTags.map((entry) => (
+                          <span key={entry.tag.id} className="tag-badge">
+                            {entry.tag.name}
+                          </span>
+                        ))}
+                        {hiddenTagCount > 0 ? (
+                          <span className="tag-badge tag-badge-more">+{hiddenTagCount} more</span>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-              </Link>
-            ))}
+
+                  <div className="topic-article-signals" aria-hidden="true">
+                    <span className={`status-badge status-${article.status}`}>{article.status}</span>
+                    {article.confidence ? (
+                      <span className={`confidence-badge confidence-${article.confidence}`}>
+                        {article.confidence} confidence
+                      </span>
+                    ) : null}
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         )}
       </section>

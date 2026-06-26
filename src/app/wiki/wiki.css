@@ -475,12 +475,14 @@
   margin-top: 1.8rem;
 }
 
-.wiki-home-hero {
+.wiki-home-hero,
+.topic-page-hero {
   padding-bottom: 1.35rem;
   border-bottom: 1px solid var(--border-color);
 }
 
-.wiki-home-section {
+.wiki-home-section,
+.topic-page-section {
   display: grid;
   gap: 1.1rem;
 }
@@ -810,6 +812,10 @@
   position: relative;
 }
 
+.topic-subtopic-copy {
+  min-width: 0;
+}
+
 .topic-subtopic-card h3 {
   margin: 0;
   color: var(--text-color);
@@ -819,6 +825,15 @@
 .topic-subtopic-card p + p,
 .topic-subtopic-card h3 + p {
   margin-top: 0.45rem;
+}
+
+.subtopic-kind {
+  margin: 0 0 0.45rem;
+  color: var(--accent-color);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 .topic-subtopic-count {
@@ -836,6 +851,59 @@
 .topic-subtopic-count span {
   color: var(--text-faint);
   font-size: 0.78rem;
+}
+
+.topic-subtopic-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.topic-subtopic-metrics .topic-subtopic-count {
+  padding: 0.68rem 0.78rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-inset);
+  text-align: left;
+}
+
+.topic-article-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  color: inherit;
+}
+
+.topic-article-main {
+  display: grid;
+  gap: 0.8rem;
+  min-width: 0;
+}
+
+.topic-article-main > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.topic-article-main h3,
+.topic-article-main p {
+  overflow-wrap: break-word;
+}
+
+.topic-article-main .tag-badge {
+  overflow-wrap: anywhere;
+}
+
+.tag-badge-more {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.topic-article-signals {
+  display: grid;
+  gap: 0.45rem;
+  justify-items: end;
+  min-width: 8.5rem;
 }
 
 .article-header {
@@ -2070,6 +2138,7 @@ h2.activity-title {
   .article-detail-grid,
   .topic-tree-card,
   .topic-subtopic-card,
+  .topic-article-card,
   .sync-conflict-diff-grid {
     grid-template-columns: 1fr;
   }
@@ -2085,9 +2154,15 @@ h2.activity-title {
   }
 
   .topic-tree-metrics,
-  .topic-subtopic-count {
+  .topic-subtopic-count,
+  .topic-subtopic-metrics,
+  .topic-article-signals {
     min-width: 0;
     text-align: left;
+  }
+
+  .topic-article-signals {
+    justify-items: start;
   }
 
   .topic-tree-children {
@@ -2248,10 +2323,13 @@ h2.activity-title {
     width: 100%;
   }
 
-  .page-meta-pill,
+  .page-meta-pill {
+    width: 100%;
+    justify-content: center;
+  }
+
   .sub-topic-tag,
   .tag-badge {
-    width: 100%;
     justify-content: center;
   }
 
