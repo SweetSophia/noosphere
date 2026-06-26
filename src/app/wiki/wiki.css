@@ -475,6 +475,16 @@
   margin-top: 1.8rem;
 }
 
+.wiki-home-hero {
+  padding-bottom: 1.35rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.wiki-home-section {
+  display: grid;
+  gap: 1.1rem;
+}
+
 .article-card,
 .topic-card,
 .admin-card,
@@ -542,8 +552,7 @@
   gap: 1rem;
 }
 
-.article-list .article-card,
-.recent-updates-shell .article-card {
+.article-list .article-card {
   margin-bottom: 0;
 }
 
@@ -558,18 +567,13 @@
   min-height: 100%;
   padding: 1.5rem;
   background:
-    radial-gradient(circle at top right, rgba(95, 115, 255, 0.18), transparent 34%),
+    radial-gradient(circle at top right, var(--accent-glow), transparent 34%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 22rem),
     var(--surface-color);
 }
 
 .article-card-compact {
   height: 100%;
-}
-
-.article-card-grid {
-  height: 100%;
-  padding: 1.25rem;
 }
 
 .article-card-header-row {
@@ -658,26 +662,49 @@
   color: var(--accent-color);
 }
 
-.recent-updates-grid {
+.home-updates-layout {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(18rem, 0.9fr);
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.home-updates-layout > :only-child {
+  grid-column: 1 / -1;
+}
+
+.home-featured-update,
+.home-update-card {
+  margin-bottom: 0;
+}
+
+.home-featured-update {
+  align-content: start;
+}
+
+.home-featured-update h3 {
+  font-size: clamp(1.35rem, 2vw, 1.8rem);
+  line-height: 1.12;
+}
+
+.home-featured-update p {
+  font-size: 0.98rem;
+  line-height: 1.7;
+}
+
+.home-update-list {
+  display: grid;
   gap: 1rem;
 }
 
-@media (max-width: 768px) {
-  .recent-updates-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.recent-updates-list {
+.home-update-card {
   display: grid;
-  gap: 1rem;
+  gap: 0.7rem;
 }
 
 .topic-tree {
   display: grid;
-  gap: 1rem;
+  gap: 1.1rem;
 }
 
 .topic-tree-node {
@@ -686,11 +713,18 @@
 }
 
 .topic-tree-card {
-  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 1rem;
   align-items: start;
+  color: inherit;
+  text-decoration: none;
+}
+
+.topic-tree-node[data-depth="0"] > .topic-tree-card {
+  background:
+    linear-gradient(90deg, var(--surface-highlight), transparent 42%),
+    var(--surface-color);
 }
 
 .topic-tree-copy {
@@ -706,30 +740,24 @@
   text-transform: uppercase;
 }
 
+.topic-tree-kind span {
+  margin-left: 0.6rem;
+  color: var(--text-muted);
+}
+
 .topic-tree-title {
   margin: 0;
   font-size: clamp(1.05rem, 1.4vw, 1.32rem);
-}
-
-.topic-tree-title a {
-  position: relative;
-  z-index: 1;
-  display: block;
-  color: inherit;
-}
-
-/* Stretched link: title link covers entire card so clicking anywhere on the card navigates */
-.topic-tree-title a::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
 }
 
 .topic-tree-description {
   margin-top: 0.5rem;
   color: var(--text-muted);
   line-height: 1.65;
+}
+
+.topic-tree-meta {
+  margin-top: 0.8rem;
 }
 
 .topic-tree-metrics {
@@ -2038,7 +2066,7 @@ h2.activity-title {
   .search-grid,
   .admin-form-grid,
   .upload-grid,
-  .recent-updates-shell,
+  .home-updates-layout,
   .article-detail-grid,
   .topic-tree-card,
   .topic-subtopic-card,
