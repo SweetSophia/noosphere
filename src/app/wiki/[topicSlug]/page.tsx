@@ -5,9 +5,11 @@ import { getServerSession } from "next-auth";
 import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { EmptyState } from "@/components/wiki/EmptyState";
 import { PageHeader } from "@/components/wiki/PageHeader";
+import { RestrictedArticleIcon } from "@/components/wiki/RestrictedArticleIcon";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildScopeFilter } from "@/lib/api/auth";
+import { articleCardLabel, pluralize, wikiDateFormatter } from "@/lib/wiki-format";
 
 interface Props {
   params: Promise<{ topicSlug: string }>;
@@ -18,16 +20,6 @@ interface TopicPathNode {
   name: string;
   slug: string;
   parentId: string | null;
-}
-
-const topicDateFormatter = new Intl.DateTimeFormat("en-GB", {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-});
-
-function pluralize(count: number, singular: string, plural = `${singular}s`) {
-  return count === 1 ? singular : plural;
 }
 
 function buildTopicPath(topics: TopicPathNode[], current: TopicPathNode) {
@@ -45,47 +37,6 @@ function buildTopicPath(topics: TopicPathNode[], current: TopicPathNode) {
   return path;
 }
 
-function RestrictedArticleIcon({ tags }: { tags: string[] }) {
-  if (tags.length === 0) return null;
-
-  return (
-    <span className="restricted-icon" role="img" aria-label={`Restricted: ${tags.join(", ")}`}>
-      <svg
-        width="12"
-        height="12"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-      </svg>
-    </span>
-  );
-}
-
-function articleCardLabel(article: {
-  title: string;
-  author?: { name: string | null } | null;
-  authorName: string | null;
-  status: string;
-  confidence: string | null;
-  restrictedTags: string[];
-}) {
-  const author = article.author?.name ?? article.authorName ?? "Unknown author";
-  const restriction =
-    article.restrictedTags.length > 0
-      ? `Restricted article (${article.restrictedTags.join(", ")})`
-      : "Article";
-  const confidence = article.confidence ? `, ${article.confidence} confidence` : "";
-
-  return `${restriction}: ${article.title}, ${article.status}${confidence}, by ${author}`;
-}
-
 export default async function TopicPage({ params }: Props) {
   const { topicSlug } = await params;
 
@@ -96,7 +47,7 @@ export default async function TopicPage({ params }: Props) {
   const topic = await prisma.topic.findUnique({
     where: { slug: topicSlug },
     include: {
-      parent: true,
+      parent: { select: { name: true } },
       children: {
         include: {
           _count: { select: { articles: true, children: true } },
@@ -112,7 +63,6 @@ export default async function TopicPage({ params }: Props) {
 
   const allTopics = await prisma.topic.findMany({
     select: { id: true, name: true, slug: true, parentId: true },
-    orderBy: { name: "asc" },
   });
   const topicPath = buildTopicPath(allTopics, topic);
 
@@ -159,11 +109,11 @@ export default async function TopicPage({ params }: Props) {
           <div className="page-meta-pills">
             <span className="page-meta-pill">
               <strong>{articles.length}</strong>
-              <span>article{articles.length !== 1 ? "s" : ""}</span>
+              <span>{pluralize(articles.length, "article")}</span>
             </span>
             <span className="page-meta-pill">
               <strong>{topic.children.length}</strong>
-              <span>subtopic{topic.children.length !== 1 ? "s" : ""}</span>
+              <span>{pluralize(topic.children.length, "subtopic")}</span>
             </span>
             {topic.parent ? (
               <span className="page-meta-pill">
@@ -173,7 +123,7 @@ export default async function TopicPage({ params }: Props) {
             ) : hasSubtopics ? (
               <span className="page-meta-pill">
                 <strong>Root</strong>
-                <span>topic branch</span>
+                <span>top-level topic</span>
               </span>
             ) : null}
           </div>
@@ -186,7 +136,7 @@ export default async function TopicPage({ params }: Props) {
             <div className="section-header-copy">
               <p className="page-eyebrow">Branch outward</p>
               <h2 className="section-title">Subtopics</h2>
-              <p className="section-subtitle">Move into narrower branches without losing the local article context.</p>
+              <p className="section-subtitle">Subtopics nested under this branch - open any to see its articles and nested branches.</p>
             </div>
           </div>
 
@@ -196,21 +146,21 @@ export default async function TopicPage({ params }: Props) {
                 key={child.id}
                 href={`/wiki/${child.slug}`}
                 className="topic-card topic-subtopic-card"
-                aria-label={`${child.name}: ${child._count.articles} direct ${pluralize(child._count.articles, "article")}, ${child._count.children} child ${pluralize(child._count.children, "subtopic")}`}
+                aria-label={`Subtopic ${child.name}: ${child._count.articles} direct ${pluralize(child._count.articles, "article")}, ${child._count.children} direct ${pluralize(child._count.children, "subtopic")}`}
               >
-                <div>
-                  <p className="topic-tree-kind" aria-hidden="true">Subtopic</p>
+                <div className="topic-subtopic-copy">
+                  <p className="subtopic-kind" aria-hidden="true">Subtopic</p>
                   <h3>{child.name}</h3>
                   <p>{child.description ?? "Explore the next layer of articles nested under this branch."}</p>
                 </div>
                 <div className="topic-subtopic-metrics" aria-hidden="true">
                   <div className="topic-subtopic-count">
                     <strong>{child._count.articles}</strong>
-                    <span>direct article{child._count.articles !== 1 ? "s" : ""}</span>
+                    <span>direct {pluralize(child._count.articles, "article")}</span>
                   </div>
                   <div className="topic-subtopic-count">
                     <strong>{child._count.children}</strong>
-                    <span>child subtopic{child._count.children !== 1 ? "s" : ""}</span>
+                    <span>direct {pluralize(child._count.children, "subtopic")}</span>
                   </div>
                 </div>
               </Link>
@@ -257,7 +207,7 @@ export default async function TopicPage({ params }: Props) {
                   <div className="topic-article-main">
                     <div className="article-card-header-row">
                       <span className="article-kicker" aria-hidden="true">{article.author?.name ?? article.authorName ?? "Unknown author"}</span>
-                      <span className="article-date" aria-hidden="true">Updated {topicDateFormatter.format(new Date(article.updatedAt))}</span>
+                      <span className="article-date" aria-hidden="true">Updated {wikiDateFormatter.format(new Date(article.updatedAt))}</span>
                     </div>
                     <h3>
                       <RestrictedArticleIcon tags={article.restrictedTags} />

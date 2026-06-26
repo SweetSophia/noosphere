@@ -3,9 +3,11 @@ import { getServerSession } from "next-auth";
 import type { Prisma } from "@prisma/client";
 import { EmptyState } from "@/components/wiki/EmptyState";
 import { PageHeader } from "@/components/wiki/PageHeader";
+import { RestrictedArticleIcon } from "@/components/wiki/RestrictedArticleIcon";
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
 import { loadWikiHomeData, type WikiHomeDb, type WikiHomeTopic } from "@/lib/wiki-home";
+import { articleCardLabel, pluralize, wikiDateFormatter } from "@/lib/wiki-format";
 
 export const dynamic = "force-dynamic";
 
@@ -46,54 +48,12 @@ function buildTopicRenderNode(node: TopicNode, countMap: ArticleCountMap): Topic
   };
 }
 
-const homeDateFormatter = new Intl.DateTimeFormat("en-GB", {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-});
-
-function RestrictedArticleIcon({ tags }: { tags: string[] }) {
-  if (tags.length === 0) return null;
-
-  return (
-    <span className="restricted-icon" role="img" aria-label={`Restricted: ${tags.join(", ")}`}>
-      <svg
-        width="12"
-        height="12"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-      </svg>
-    </span>
-  );
-}
-
 function countBranchTopics(nodes: TopicRenderNode[]): number {
   return nodes.reduce(
     (total, topic) =>
       total + (topic.children.length > 0 ? 1 : 0) + countBranchTopics(topic.children),
     0,
   );
-}
-
-function pluralize(count: number, singular: string, plural = `${singular}s`) {
-  return count === 1 ? singular : plural;
-}
-
-function articleCardLabel(article: WikiHomeArticle) {
-  const restriction =
-    article.restrictedTags.length > 0
-      ? `Restricted article (${article.restrictedTags.join(", ")})`
-      : "Article";
-
-  return `${restriction}: ${article.title} in ${article.topic.name}`;
 }
 
 function TopicTreeNode({ tree, depth = 0 }: { tree: TopicRenderNode; depth?: number }) {
@@ -238,11 +198,11 @@ export default async function WikiHomePage() {
               <Link
                 href={`/wiki/${latestArticle.topic.slug}/${latestArticle.slug}`}
                 className="article-card article-card-featured home-featured-update"
-                aria-label={articleCardLabel(latestArticle)}
+                aria-label={articleCardLabel({ ...latestArticle, topicName: latestArticle.topic.name })}
               >
                 <div className="article-card-header-row">
                   <span className="article-kicker" aria-hidden="true">{latestArticle.topic.name}</span>
-                  <span className="article-date" aria-hidden="true">{homeDateFormatter.format(new Date(latestArticle.updatedAt))}</span>
+                  <span className="article-date" aria-hidden="true">{wikiDateFormatter.format(new Date(latestArticle.updatedAt))}</span>
                 </div>
                 <h3>
                   <RestrictedArticleIcon tags={latestArticle.restrictedTags} />
@@ -252,7 +212,7 @@ export default async function WikiHomePage() {
                   {latestArticle.excerpt ?? "Open the latest revision to read the current summary and linked references."}
                 </p>
                 {latestArticle.tags.length > 0 ? (
-                  <div className="article-tag-row article-tag-row-muted">
+                  <div className="article-tag-row article-tag-row-muted" aria-hidden="true">
                     {latestArticle.tags.slice(0, 4).map((tag) => (
                       <span key={tag.tag.id} className="tag-badge">
                         {tag.tag.name}
@@ -270,11 +230,11 @@ export default async function WikiHomePage() {
                     key={article.id}
                     href={`/wiki/${article.topic.slug}/${article.slug}`}
                     className="article-card article-card-compact home-update-card"
-                    aria-label={articleCardLabel(article)}
+                    aria-label={articleCardLabel({ ...article, topicName: article.topic.name })}
                   >
                     <div className="article-card-header-row">
                       <span className="article-kicker" aria-hidden="true">{article.topic.name}</span>
-                      <span className="article-date" aria-hidden="true">{homeDateFormatter.format(new Date(article.updatedAt))}</span>
+                      <span className="article-date" aria-hidden="true">{wikiDateFormatter.format(new Date(article.updatedAt))}</span>
                     </div>
                     <h3>
                       <RestrictedArticleIcon tags={article.restrictedTags} />
