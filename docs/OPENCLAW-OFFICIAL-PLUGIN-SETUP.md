@@ -87,6 +87,8 @@ Set these environment variables before running the installer when you need non-d
 | `REDIS_URL` | `redis://redis:6379` | Redis connection string used inside Compose. Leave default for the bundled Redis service. |
 | `APP_URL` | `http://127.0.0.1:${NOOSPHERE_PORT}` | URL stored in Noosphere/OpenClaw config. When set, skips the interactive IP selection prompt. |
 | `BIND_ADDRESS` | derived from `APP_URL` host (if a valid IP) or `127.0.0.1` | Docker port binding address. Set explicitly to override the derived value (e.g., `0.0.0.0` to bind all interfaces, or `127.0.0.1` to force localhost regardless of `APP_URL`). |
+| `NOOSPHERE_ADMIN_PASSWORD_RESET` | `false` | Forwarded into the generated `.env`; set to `true` only when intentionally rotating an existing bootstrap admin password. |
+| `NOOSPHERE_FORCE_ADMIN` | `false` | Forwarded into the generated `.env`; set to `true` to re-assert the ADMIN role on the existing bootstrap admin account without rotating its password. |
 | `NOOSPHERE_PLUGIN_SPEC` | `npm:@sweetsophia/openclaw-noosphere-memory` | Plugin install spec. Useful for testing local tarballs. |
 | `OPENCLAW_SECRETS_DIR` | `~/.openclaw/secrets` | OpenClaw secret directory. |
 | `NOOSPHERE_SECRETS_FILE` | `${OPENCLAW_SECRETS_DIR}/noosphere-memory.json` | Secret file written by installer. |
