@@ -154,6 +154,7 @@ Edit `~/.noosphere/.env` and set strong values for:
 - `POSTGRES_PASSWORD`
 - `NEXTAUTH_SECRET`
 - `NOOSPHERE_ADMIN_PASSWORD`
+- `NOOSPHERE_ADMIN_PASSWORD_RESET=true` only when intentionally rotating an existing admin password
 - `NOOSPHERE_BOOTSTRAP_API_KEY`
 
 Start and wait for health:
@@ -392,7 +393,7 @@ openclaw plugins update noosphere-memory
 openclaw noosphere doctor
 ```
 
-The Compose `init` service runs migration/bootstrap logic before app startup, and `docker compose up -d` is preferred over app-only recreation when upgrading to versions that add services such as Redis. Bootstrap is repeatable and preserves article/topic content, but it reconciles the bootstrap admin account: it may reset that account's name/password to the values in `.env`, and `NOOSPHERE_FORCE_ADMIN=true` can force its role back to ADMIN.
+The Compose `init` service runs migration/bootstrap logic before app startup, and `docker compose up -d` is preferred over app-only recreation when upgrading to versions that add services such as Redis. Bootstrap is repeatable and preserves article/topic content. Existing bootstrap admin accounts keep their current password unless `NOOSPHERE_ADMIN_PASSWORD_RESET=true`; `NOOSPHERE_FORCE_ADMIN=true` can still force the account role back to ADMIN. After upgrading, verify admin login once; set `NOOSPHERE_ADMIN_PASSWORD_RESET=true` for a single bootstrap run if you intentionally want `.env` to rotate the existing admin password.
 After an upgrade, verify the database volume identity before treating API key errors as key rotation:
 
 ```bash

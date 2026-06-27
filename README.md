@@ -35,6 +35,8 @@ cp noosphere.env.example .env
 # and NOOSPHERE_BOOTSTRAP_API_KEY. Generate strong values, for example:
 # openssl rand -hex 32
 # printf 'noo_%s\n' "$(openssl rand -hex 32)"
+# Set NOOSPHERE_ADMIN_PASSWORD_RESET=true only when intentionally rotating
+# an existing bootstrap admin password.
 docker compose -f docker-compose.noosphere.yml up -d
 ```
 

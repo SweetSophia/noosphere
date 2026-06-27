@@ -60,11 +60,26 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const themeScript = `(() => {
+    try {
+      const theme = window.localStorage.getItem("noosphere-theme");
+      if (theme === "light" || theme === "dark") {
+        document.documentElement.dataset.theme = theme;
+      } else {
+        document.documentElement.removeAttribute("data-theme");
+      }
+    } catch {}
+  })();`;
+
   return (
     <html
       lang="en"
       className={`${noosphereBody.variable} ${noosphereDisplay.variable} ${noosphereMono.variable}`}
+      suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body>{children}</body>
     </html>
   );

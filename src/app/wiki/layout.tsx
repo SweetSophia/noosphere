@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { SearchShortcut } from "@/components/wiki/SearchShortcut";
 import { SignOutButton } from "@/components/wiki/SignOutButton";
+import { ThemeToggle } from "@/components/wiki/ThemeToggle";
 import "./wiki.css";
 
 export default async function WikiLayout({
@@ -55,6 +56,8 @@ export default async function WikiLayout({
             </form>
 
             <div className="wiki-header-actions">
+              <ThemeToggle />
+
               <nav className="wiki-nav" aria-label="Wiki navigation">
                 <Link href="/wiki" className="nav-link">
                   Browse
