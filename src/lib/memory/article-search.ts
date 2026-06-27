@@ -12,6 +12,97 @@
 
 import { Prisma } from "@prisma/client";
 
+const FALLBACK_SEARCH_MAX_SEED_TERMS = 8;
+const FALLBACK_SEARCH_MAX_TERMS = 16;
+
+const FALLBACK_SEARCH_STOP_WORDS = new Set([
+  "a",
+  "about",
+  "after",
+  "again",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "been",
+  "because",
+  "being",
+  "before",
+  "by",
+  "can",
+  "could",
+  "did",
+  "do",
+  "does",
+  "for",
+  "from",
+  "had",
+  "has",
+  "have",
+  "he",
+  "her",
+  "hers",
+  "him",
+  "his",
+  "how",
+  "if",
+  "in",
+  "is",
+  "it",
+  "its",
+  "just",
+  "like",
+  "may",
+  "me",
+  "might",
+  "my",
+  "not",
+  "of",
+  "on",
+  "or",
+  "our",
+  "ours",
+  "shall",
+  "she",
+  "should",
+  "that",
+  "the",
+  "their",
+  "them",
+  "then",
+  "there",
+  "these",
+  "they",
+  "those",
+  "this",
+  "to",
+  "us",
+  "was",
+  "we",
+  "were",
+  "what",
+  "when",
+  "where",
+  "whether",
+  "which",
+  "who",
+  "why",
+  "will",
+  "with",
+  "would",
+  "you",
+  "your",
+]);
+
+const FALLBACK_SEARCH_SYNONYMS: string[][] = [
+  ["photo", "photos", "image", "images", "picture", "pictures", "portrait"],
+  ["avatar", "profile", "portrait"],
+  ["screenshot", "screenshots", "image", "images", "picture", "pictures"],
+  ["attach", "attached", "attachment", "attachments", "file", "files", "upload", "uploaded"],
+];
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface ArticleSearchFilters {
@@ -122,4 +213,55 @@ export function buildSearchableCTE(
  */
 export function buildSearchTsQuery(query: string): Prisma.Sql {
   return Prisma.sql`websearch_to_tsquery('simple', ${query})`;
+}
+
+/**
+ * Build a less strict fallback tsquery for conversational recall misses.
+ *
+ * `websearch_to_tsquery` is intentionally precise, but ordinary user phrasing
+ * can include words that are absent from the durable article ("forgot",
+ * "reattach") while still naming the concept ("photo"). This fallback is used
+ * only after the strict query returns zero rows, and keeps the term set bounded
+ * so broad searches do not swamp normal relevance ranking.
+ */
+export function buildFallbackSearchTsQuery(query: string): Prisma.Sql | null {
+  const terms = extractFallbackSearchTerms(query);
+  if (terms.length === 0) return null;
+
+  return Prisma.sql`to_tsquery('simple', ${terms.join(" | ")})`;
+}
+
+export function extractFallbackSearchTerms(query: string): string[] {
+  const seeds = query
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .split(/[^a-z0-9]+/)
+    .filter((term) => term.length >= 3 && !FALLBACK_SEARCH_STOP_WORDS.has(term))
+    .slice(0, FALLBACK_SEARCH_MAX_SEED_TERMS);
+
+  const terms = new Set<string>();
+
+  for (const seed of seeds) {
+    addFallbackSearchTerm(terms, seed);
+
+    const synonymGroup = FALLBACK_SEARCH_SYNONYMS.find((group) =>
+      group.includes(seed),
+    );
+    if (synonymGroup) {
+      for (const synonym of synonymGroup) {
+        addFallbackSearchTerm(terms, synonym);
+      }
+    }
+
+    if (terms.size >= FALLBACK_SEARCH_MAX_TERMS) break;
+  }
+
+  return [...terms].slice(0, FALLBACK_SEARCH_MAX_TERMS);
+}
+
+function addFallbackSearchTerm(terms: Set<string>, term: string): void {
+  if (!/^[a-z0-9]+$/.test(term)) return;
+  if (FALLBACK_SEARCH_STOP_WORDS.has(term)) return;
+  terms.add(term);
 }

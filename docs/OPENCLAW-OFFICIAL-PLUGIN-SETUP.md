@@ -455,6 +455,23 @@ Restart Gateway after changing config:
 openclaw gateway restart
 ```
 
+### Auto-recall misses a memory that manual wording can find
+
+The plugin sends cleaned user text to Noosphere; the memory article provider
+searches articles with strict full-text matching first. If that strict query
+returns no rows, the provider retries once with a bounded synonym fallback for
+conversational wording gaps such as "photo" versus "portrait", or "avatar"
+versus "profile".
+
+If a memory still does not surface:
+
+- add the user's natural wording as article text or tags
+- keep important personal/context articles reviewed or published when they are
+  no longer raw draft captures
+- test both the original message and a short concept query with the
+  `noosphere_recall` plugin tool to separate query extraction from article
+  vocabulary
+
 ### Noosphere is unreachable
 
 Check health and containers:
