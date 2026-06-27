@@ -37,6 +37,8 @@ cp noosphere.env.example .env
 # printf 'noo_%s\n' "$(openssl rand -hex 32)"
 # Set NOOSPHERE_ADMIN_PASSWORD_RESET=true only when intentionally rotating
 # an existing bootstrap admin password.
+# Set NOOSPHERE_FORCE_ADMIN=true to re-assert the ADMIN role on the existing
+# bootstrap admin account (does not rotate the password).
 docker compose -f docker-compose.noosphere.yml up -d
 ```
 

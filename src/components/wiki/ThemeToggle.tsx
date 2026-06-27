@@ -65,7 +65,7 @@ export function ThemeToggle() {
   return (
     <button
       type="button"
-      className={`theme-toggle theme-toggle-${theme}`}
+      className="theme-toggle"
       onClick={cycleTheme}
       aria-label={label}
       title={label}
