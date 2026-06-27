@@ -559,19 +559,9 @@
 }
 
 .article-card-rich,
-.article-card-featured,
 .article-card-compact {
   display: grid;
   gap: 0.8rem;
-}
-
-.article-card-featured {
-  min-height: 100%;
-  padding: 1.5rem;
-  background:
-    radial-gradient(circle at top right, var(--accent-glow), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 22rem),
-    var(--surface-color);
 }
 
 .article-card-compact {
@@ -664,34 +654,8 @@
   color: var(--accent-color);
 }
 
-.home-updates-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(18rem, 0.9fr);
-  gap: 1rem;
-  align-items: stretch;
-}
-
-.home-updates-layout > :only-child {
-  grid-column: 1 / -1;
-}
-
-.home-featured-update,
 .home-update-card {
   margin-bottom: 0;
-}
-
-.home-featured-update {
-  align-content: start;
-}
-
-.home-featured-update h3 {
-  font-size: clamp(1.35rem, 2vw, 1.8rem);
-  line-height: 1.12;
-}
-
-.home-featured-update p {
-  font-size: 0.98rem;
-  line-height: 1.7;
 }
 
 .home-update-list {
@@ -2134,7 +2098,6 @@ h2.activity-title {
   .search-grid,
   .admin-form-grid,
   .upload-grid,
-  .home-updates-layout,
   .article-detail-grid,
   .topic-tree-card,
   .topic-subtopic-card,
