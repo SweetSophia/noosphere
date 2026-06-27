@@ -48,6 +48,7 @@ test("validateApiKey looks up by unique key hash and updates active keys", async
       findUniqueArgs = args;
       return {
         id: "key-active",
+        name: "Active test key",
         permissions: Permissions.READ,
         allowedScopes: ["scope-a"],
         revokedAt: null,
@@ -65,6 +66,7 @@ test("validateApiKey looks up by unique key hash and updates active keys", async
   assert.equal(result.valid, true);
   if (!result.valid) return;
   assert.equal(result.keyId, "key-active");
+  assert.equal(result.name, "Active test key");
   assert.equal(result.permissions, Permissions.READ);
   assert.deepEqual(result.allowedScopes, ["scope-a"]);
   assert.ok(updateManyArgs);
@@ -89,6 +91,7 @@ test("validateApiKey rejects revoked records after unique hash lookup", async ()
       findUniqueArgs = args;
       const record: ApiKeyValidationRecord = {
         id: "key-revoked",
+        name: "Revoked test key",
         permissions: Permissions.ADMIN,
         allowedScopes: ["*"],
         revokedAt: new Date(),
@@ -151,6 +154,7 @@ test("validateApiKey propagates last-used update errors", async () => {
     async findUnique() {
       return {
         id: "key-update-error",
+        name: "Update error test key",
         permissions: Permissions.READ,
         allowedScopes: [],
         revokedAt: null,
@@ -169,6 +173,7 @@ test("validateApiKey stays valid when last-used update is debounced", async () =
     async findUnique() {
       return {
         id: "key-debounced",
+        name: "Debounced test key",
         permissions: Permissions.READ,
         allowedScopes: [],
         revokedAt: null,
@@ -184,6 +189,7 @@ test("validateApiKey stays valid when last-used update is debounced", async () =
   assert.equal(result.valid, true);
   if (!result.valid) return;
   assert.equal(result.keyId, "key-debounced");
+  assert.equal(result.name, "Debounced test key");
 });
 
 test("validateApiKey rejects a real key after it is revoked", async () => {
@@ -204,6 +210,7 @@ test("validateApiKey rejects a real key after it is revoked", async () => {
     assert.equal(activeResult.valid, true);
     if (!activeResult.valid) return;
     assert.equal(activeResult.keyId, createdKey.id);
+    assert.equal(activeResult.name, createdKey.name);
 
     await prisma.apiKey.update({
       where: { id: createdKey.id },

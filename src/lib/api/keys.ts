@@ -10,6 +10,7 @@ const LAST_USED_DEBOUNCE_MS = 5 * 60 * 1000;
 
 export type ApiKeyValidationRecord = {
   id: string;
+  name: string;
   permissions: Permissions;
   allowedScopes: string[];
   revokedAt: Date | null;
@@ -55,7 +56,7 @@ export async function validateApiKey(
   rawKey: string,
   apiKeys: ApiKeyValidationClient = prisma.apiKey,
 ): Promise<
-  | { valid: true; permissions: Permissions; keyId: string; allowedScopes: string[] }
+  | { valid: true; permissions: Permissions; keyId: string; name: string; allowedScopes: string[] }
   | { valid: false }
 > {
   const hash = hashApiKey(rawKey);
@@ -85,6 +86,7 @@ export async function validateApiKey(
     valid: true,
     permissions: record.permissions,
     keyId: record.id,
+    name: record.name,
     allowedScopes: record.allowedScopes,
   };
 }
@@ -99,7 +101,7 @@ export async function validateApiKey(
 export async function requireApiKey(
   request: Request
 ): Promise<
-  | { authorized: true; permissions: Permissions; keyId: string; allowedScopes: string[] }
+  | { authorized: true; permissions: Permissions; keyId: string; name: string; allowedScopes: string[] }
   | { authorized: false }
 > {
   const authHeader = request.headers.get("Authorization");
@@ -118,6 +120,7 @@ export async function requireApiKey(
     authorized: true,
     permissions: result.permissions,
     keyId: result.keyId,
+    name: result.name,
     allowedScopes: result.allowedScopes,
   };
 }

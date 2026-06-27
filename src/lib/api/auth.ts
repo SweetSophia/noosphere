@@ -30,6 +30,7 @@ export async function checkRouteAuth(
       authorized: true,
       permissions: apiAuth.permissions,
       keyId: apiAuth.keyId,
+      name: apiAuth.name,
       allowedScopes: apiAuth.allowedScopes,
     };
   }
