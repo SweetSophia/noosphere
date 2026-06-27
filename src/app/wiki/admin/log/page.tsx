@@ -6,6 +6,7 @@ import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { formatDetailValue } from "@/lib/admin-log-format";
 import { prisma } from "@/lib/prisma";
 
 export const metadata = {
@@ -186,7 +187,7 @@ export default async function ActivityLogPage({
                     <div className="activity-details">
                       {Object.entries(entry.details as Record<string, unknown>).map(([key, value]) => (
                         <span key={key} className="activity-detail-tag">
-                          {key}: {String(value)}
+                          {key}: {formatDetailValue(value)}
                         </span>
                       ))}
                     </div>

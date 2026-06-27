@@ -119,6 +119,17 @@ test("legacy JSON routes enforce size and nesting limits (issue #192)", async ()
     );
     assert.equal(oversizedArticleResponse.status, 413);
   } finally {
+    const expectedAuthorName = `${TEST_PREFIX}${runId}`;
+    const auditLogs = await prisma.activityLog.findMany({
+      where: { authorName: expectedAuthorName },
+      select: { authorName: true, type: true },
+    });
+    // Exactly one log is expected here: the empty-body lint success at the start.
+    assert.deepEqual(auditLogs, [{ authorName: expectedAuthorName, type: "lint" }]);
+    const deletedLogs = await prisma.activityLog.deleteMany({
+      where: { authorName: expectedAuthorName },
+    });
+    assert.equal(deletedLogs.count, 1);
     await prisma.apiKey.delete({ where: { id: apiKey.id } });
   }
 });

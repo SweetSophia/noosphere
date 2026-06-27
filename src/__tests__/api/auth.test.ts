@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { hasPermission, type AuthResult } from "@/lib/api/auth";
+import crypto from "node:crypto";
+import test, { after } from "node:test";
+import { NextRequest } from "next/server";
+import { checkRouteAuth, hasPermission, type AuthResult } from "@/lib/api/auth";
+import { hashApiKey } from "@/lib/api/keys";
+import { prisma } from "@/lib/prisma";
 import type { Permissions, Role } from "@prisma/client";
+
+after(async () => {
+  await prisma.$disconnect();
+});
 
 function authWithPermissions(permissions: Permissions): AuthResult {
   return { authorized: true, permissions, keyId: "key-1" };
@@ -71,3 +79,37 @@ test("hasPermission rejects unauthorized", () => {
 test("hasPermission rejects missing role/permissions", () => {
   assert.equal(hasPermission({ authorized: true }, ["READ"]), false);
 });
+
+test(
+  "checkRouteAuth includes API key names for audit authors",
+  { skip: !process.env.DATABASE_URL },
+  async () => {
+    const runId = crypto.randomUUID();
+    const rawKey = `noo_${crypto.randomBytes(32).toString("base64url")}`;
+    const keyName = `test-auth-name-${runId}`;
+    const apiKey = await prisma.apiKey.create({
+      data: {
+        name: keyName,
+        keyHash: hashApiKey(rawKey),
+        keyPrefix: rawKey.slice(0, 8),
+        permissions: "WRITE",
+        allowedScopes: ["*"],
+      },
+    });
+
+    try {
+      const request = new NextRequest("http://localhost/api/lint", {
+        headers: { Authorization: `Bearer ${rawKey}` },
+      });
+
+      const auth = await checkRouteAuth(request);
+
+      assert.equal(auth.authorized, true);
+      assert.equal(auth.keyId, apiKey.id);
+      assert.equal(auth.name, keyName);
+      assert.equal(auth.permissions, "WRITE");
+    } finally {
+      await prisma.apiKey.delete({ where: { id: apiKey.id } }).catch(() => undefined);
+    }
+  },
+);

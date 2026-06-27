@@ -1,6 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { formatDetailValue } from "@/lib/admin-log-format";
 import { parseDateFilter } from "@/lib/log-validation";
+
+test.describe("formatDetailValue", () => {
+  test("formats primitive, array, and object detail values for admin log tags", () => {
+    assert.equal(formatDetailValue(null), "null");
+    assert.equal(formatDetailValue("ready"), "ready");
+    assert.equal(formatDetailValue(3), "3");
+    assert.equal(formatDetailValue(true), "true");
+    assert.equal(formatDetailValue([]), "[]");
+    assert.equal(formatDetailValue(["a", 2, null]), "a, 2, null");
+    assert.equal(formatDetailValue([[1, 2], [3]]), "1, 2, 3");
+    assert.equal(formatDetailValue({ byType: { stale: 2 } }), '{"byType":{"stale":2}}');
+  });
+});
 
 test.describe("parseDateFilter", () => {
   // ── Both params null / no filter applied ────────────────────────────────
