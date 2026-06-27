@@ -138,8 +138,6 @@ export default async function WikiHomePage() {
   const totalArticles = Object.values(countMap).reduce((total, count) => total + count, 0);
   const topicTree = roots.map((topic) => buildTopicRenderNode(topic, countMap));
   const branchTopics = countBranchTopics(topicTree);
-  const latestArticle = recentArticles[0];
-  const secondaryArticles = recentArticles.slice(1);
 
   return (
     <div className="wiki-content wiki-home">
@@ -193,58 +191,25 @@ export default async function WikiHomePage() {
             </div>
           </div>
 
-          <div className="home-updates-layout">
-            {latestArticle ? (
+          <div className="home-update-list">
+            {recentArticles.map((article) => (
               <Link
-                href={`/wiki/${latestArticle.topic.slug}/${latestArticle.slug}`}
-                className="article-card article-card-featured home-featured-update"
-                aria-label={articleCardLabel({ ...latestArticle, topicName: latestArticle.topic.name })}
+                key={article.id}
+                href={`/wiki/${article.topic.slug}/${article.slug}`}
+                className="article-card article-card-compact home-update-card"
+                aria-label={articleCardLabel({ ...article, topicName: article.topic.name })}
               >
                 <div className="article-card-header-row">
-                  <span className="article-kicker" aria-hidden="true">{latestArticle.topic.name}</span>
-                  <span className="article-date" aria-hidden="true">{wikiDateFormatter.format(new Date(latestArticle.updatedAt))}</span>
+                  <span className="article-kicker" aria-hidden="true">{article.topic.name}</span>
+                  <span className="article-date" aria-hidden="true">{wikiDateFormatter.format(new Date(article.updatedAt))}</span>
                 </div>
                 <h3>
-                  <RestrictedArticleIcon tags={latestArticle.restrictedTags} />
-                  {latestArticle.title}
+                  <RestrictedArticleIcon tags={article.restrictedTags} />
+                  {article.title}
                 </h3>
-                <p>
-                  {latestArticle.excerpt ?? "Open the latest revision to read the current summary and linked references."}
-                </p>
-                {latestArticle.tags.length > 0 ? (
-                  <div className="article-tag-row article-tag-row-muted" aria-hidden="true">
-                    {latestArticle.tags.slice(0, 4).map((tag) => (
-                      <span key={tag.tag.id} className="tag-badge">
-                        {tag.tag.name}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
+                <p>{article.excerpt ?? "Open the latest revision to read the current summary and linked references."}</p>
               </Link>
-            ) : null}
-
-            {secondaryArticles.length > 0 ? (
-              <div className="home-update-list">
-                {secondaryArticles.map((article) => (
-                  <Link
-                    key={article.id}
-                    href={`/wiki/${article.topic.slug}/${article.slug}`}
-                    className="article-card article-card-compact home-update-card"
-                    aria-label={articleCardLabel({ ...article, topicName: article.topic.name })}
-                  >
-                    <div className="article-card-header-row">
-                      <span className="article-kicker" aria-hidden="true">{article.topic.name}</span>
-                      <span className="article-date" aria-hidden="true">{wikiDateFormatter.format(new Date(article.updatedAt))}</span>
-                    </div>
-                    <h3>
-                      <RestrictedArticleIcon tags={article.restrictedTags} />
-                      {article.title}
-                    </h3>
-                    <p>{article.excerpt ?? "Open the latest revision to read the current summary and linked references."}</p>
-                  </Link>
-                ))}
-              </div>
-            ) : null}
+            ))}
           </div>
         </section>
       )}
