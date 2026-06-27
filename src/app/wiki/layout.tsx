@@ -32,8 +32,8 @@ export default async function WikiLayout({
               </Link>
             </div>
 
-            <form action="/wiki/search" method="get" className="wiki-search-form">
-              <label className="wiki-search-shell">
+            <form action="/wiki/search" method="get" className="wiki-search-form" role="search">
+              <div className="wiki-search-shell">
                 <span className="wiki-search-icon" aria-hidden>
                   ⌕
                 </span>
@@ -49,15 +49,14 @@ export default async function WikiLayout({
                 <kbd className="wiki-search-shortcut" aria-hidden>
                   ⌘/Ctrl K
                 </kbd>
-              </label>
+                <ThemeToggle />
+              </div>
               <button type="submit" className="btn btn-secondary btn-sm">
                 Search
               </button>
             </form>
 
             <div className="wiki-header-actions">
-              <ThemeToggle />
-
               <nav className="wiki-nav" aria-label="Wiki navigation">
                 <Link href="/wiki" className="nav-link">
                   Browse
