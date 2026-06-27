@@ -669,4 +669,16 @@ The plugin guards against older config shapes that may not have new fields:
 - **Local-first setup**: the official OpenClaw setup binds Noosphere to
   `127.0.0.1:6578` by default and stores secrets outside the repository.
 
+### Conversational Search Fallback
+
+The Noosphere article provider first runs the normal weighted PostgreSQL
+full-text query over title, excerpt, content, and tags. If that strict query
+returns no rows, it retries once with a bounded fallback tsquery built from
+distinctive terms plus a small synonym set for common conversational misses.
+
+Example: a user may ask for a "photo" while the durable article says "portrait",
+or ask for an "avatar" while the article says "profile". The fallback can bridge
+that vocabulary gap, but only after the precise query has failed, so normal
+exact search ranking remains unchanged.
+
 See also: [`OPENCLAW-OFFICIAL-PLUGIN-SETUP.md`](OPENCLAW-OFFICIAL-PLUGIN-SETUP.md).

@@ -1,6 +1,11 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { prisma as defaultPrisma } from "@/lib/prisma";
-import { buildArticleSearchFilters, buildSearchableCTE, buildSearchTsQuery } from "@/lib/memory/article-search";
+import {
+  buildArticleSearchFilters,
+  buildFallbackSearchTsQuery,
+  buildSearchableCTE,
+  buildSearchTsQuery,
+} from "@/lib/memory/article-search";
 
 import type {
   MemoryProvider,
@@ -70,6 +75,28 @@ type NoosphereArticle = Prisma.ArticleGetPayload<{
 }>;
 
 const RECENCY_HALF_LIFE_DAYS = 90;
+
+type SearchArticleRow = {
+  id: string;
+  rank: number | string;
+  title: string;
+  slug: string;
+  content: string;
+  excerpt: string | null;
+  status: string;
+  confidence: string | null;
+  sourceUrl: string | null;
+  sourceType: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  lastReviewed: Date | null;
+  authorId: string | null;
+  authorName: string | null;
+  topicId: string;
+  topicSlug: string;
+  topicName: string;
+  tagName: string | null;
+};
 
 export class NoosphereProvider implements MemoryProvider {
   readonly descriptor: MemoryProviderDescriptor;
@@ -271,63 +298,22 @@ export class NoosphereProvider implements MemoryProvider {
   ): Promise<MemoryResult[]> {
     const filters = buildArticleSearchFilters(options);
     const cte = buildSearchableCTE(filters);
-    const tsQuery = buildSearchTsQuery(query);
+    const strictTsQuery = buildSearchTsQuery(query);
     const limitClause =
       options.limit === undefined ? Prisma.empty : Prisma.sql`LIMIT ${options.limit}`;
 
-    // Raw query returns flat rows — we'll aggregate tags in JS.
-    const rows = await this.prisma.$queryRaw<
-      {
-        id: string;
-        rank: number | string;
-        title: string;
-        slug: string;
-        content: string;
-        excerpt: string | null;
-        status: string;
-        confidence: string | null;
-        sourceUrl: string | null;
-        sourceType: string | null;
-        createdAt: Date;
-        updatedAt: Date;
-        lastReviewed: Date | null;
-        authorId: string | null;
-        authorName: string | null;
-        topicId: string;
-        topicSlug: string;
-        topicName: string;
-        tagName: string | null;
-      }[]
-    >(Prisma.sql`
-      WITH searchable AS (
-        ${cte}
-      ),
-      ranked AS (
-        SELECT
-          s.id,
-          s."updatedAt",
-          ts_rank(s.document, ${tsQuery}) AS rank
-        FROM searchable s
-        WHERE s.document @@ ${tsQuery}
-        ORDER BY rank DESC, s."updatedAt" DESC
-        ${limitClause}
-        OFFSET ${options.offset}
-      )
-      SELECT
-        r.id, r.rank,
-        a.title, a.slug, a.content, a.excerpt, a.status, a.confidence,
-        a."sourceUrl", a."sourceType",
-        a."createdAt", a."updatedAt", a."lastReviewed",
-        a."authorId", a."authorName",
-        tpc.id AS "topicId", tpc.slug AS "topicSlug", tpc.name AS "topicName",
-        tg.name AS "tagName"
-      FROM ranked r
-      INNER JOIN "Article" a ON a.id = r.id
-      INNER JOIN "Topic" tpc ON tpc.id = a."topicId"
-      LEFT JOIN "ArticleTag" at2 ON at2."articleId" = a.id
-      LEFT JOIN "Tag" tg ON tg.id = at2."tagId"
-      ORDER BY r.rank DESC, a."updatedAt" DESC
-    `);
+    let rows = await this.queryRankedArticleRows(cte, strictTsQuery, limitClause, options.offset);
+
+    const shouldTryFallback =
+      rows.length === 0 &&
+      (options.offset === 0 || !(await this.hasSearchMatches(cte, strictTsQuery)));
+
+    if (shouldTryFallback) {
+      const fallbackTsQuery = buildFallbackSearchTsQuery(query);
+      if (fallbackTsQuery) {
+        rows = await this.queryRankedArticleRows(cte, fallbackTsQuery, limitClause, options.offset);
+      }
+    }
 
     if (rows.length === 0) {
       return [];
@@ -380,6 +366,63 @@ export class NoosphereProvider implements MemoryProvider {
     }
 
     return results;
+  }
+
+  private async hasSearchMatches(
+    cte: Prisma.Sql,
+    tsQuery: Prisma.Sql,
+  ): Promise<boolean> {
+    const rows = await this.prisma.$queryRaw<{ exists: boolean }[]>(Prisma.sql`
+      WITH searchable AS (
+        ${cte}
+      )
+      SELECT EXISTS (
+        SELECT 1
+        FROM searchable s
+        WHERE s.document @@ ${tsQuery}
+      ) AS "exists"
+    `);
+
+    return rows[0]?.exists === true;
+  }
+
+  private queryRankedArticleRows(
+    cte: Prisma.Sql,
+    tsQuery: Prisma.Sql,
+    limitClause: Prisma.Sql,
+    offset: number,
+  ): Promise<SearchArticleRow[]> {
+    // Raw query returns flat rows — we'll aggregate tags in JS.
+    return this.prisma.$queryRaw<SearchArticleRow[]>(Prisma.sql`
+      WITH searchable AS (
+        ${cte}
+      ),
+      ranked AS (
+        SELECT
+          s.id,
+          s."updatedAt",
+          ts_rank(s.document, ${tsQuery}) AS rank
+        FROM searchable s
+        WHERE s.document @@ ${tsQuery}
+        ORDER BY rank DESC, s."updatedAt" DESC
+        ${limitClause}
+        OFFSET ${offset}
+      )
+      SELECT
+        r.id, r.rank,
+        a.title, a.slug, a.content, a.excerpt, a.status, a.confidence,
+        a."sourceUrl", a."sourceType",
+        a."createdAt", a."updatedAt", a."lastReviewed",
+        a."authorId", a."authorName",
+        tpc.id AS "topicId", tpc.slug AS "topicSlug", tpc.name AS "topicName",
+        tg.name AS "tagName"
+      FROM ranked r
+      INNER JOIN "Article" a ON a.id = r.id
+      INNER JOIN "Topic" tpc ON tpc.id = a."topicId"
+      LEFT JOIN "ArticleTag" at2 ON at2."articleId" = a.id
+      LEFT JOIN "Tag" tg ON tg.id = at2."tagId"
+      ORDER BY r.rank DESC, a."updatedAt" DESC
+    `);
   }
 
   /**

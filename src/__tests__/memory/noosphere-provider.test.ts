@@ -19,7 +19,9 @@ import {
 import type { MemoryCurationLevel } from "@/lib/memory/types";
 import {
   createMockPrisma,
+  createSequentialQueryRaw,
   mockArticle,
+  mockSearchRow,
 } from "./noosphere-provider-helpers";
 
 let testCounter = 0;
@@ -148,6 +150,102 @@ async function main() {
     });
     const results = await provider.search("nonexistent topic");
     assertEqual(results.length, 0, "no results");
+  });
+
+  test("search does not retry fallback when strict query returns results", async () => {
+    let queryCount = 0;
+    const provider = new NoosphereProvider({
+      prisma: createMockPrisma({
+        $queryRaw: () => {
+          queryCount++;
+          return Promise.resolve([mockSearchRow({ id: "strict-1" })]);
+        },
+      }),
+    });
+
+    const results = await provider.search("avatar portrait");
+
+    assertEqual(queryCount, 1, "strict query only");
+    assertEqual(results.length, 1, "strict result count");
+    assertEqual(results[0].id, "strict-1", "strict result id");
+  });
+
+  test("search retries with synonym fallback when strict query yields no results", async () => {
+    let queryCount = 0;
+    const queryRaw = createSequentialQueryRaw([
+      [],
+      [
+        mockSearchRow({
+          id: "portrait-1",
+          title: "Cybera avatar portrait",
+          content: "Telegram profile picture and avatar portrait reference.",
+          tagName: "avatar",
+        }),
+        mockSearchRow({
+          id: "portrait-1",
+          title: "Cybera avatar portrait",
+          content: "Telegram profile picture and avatar portrait reference.",
+          tagName: "portrait",
+        }),
+      ],
+    ]);
+    const provider = new NoosphereProvider({
+      prisma: createMockPrisma({
+        $queryRaw: (...args: unknown[]) => {
+          void args;
+          queryCount++;
+          return queryRaw();
+        },
+      }),
+    });
+
+    const results = await provider.search("forgot photo reattach");
+
+    assertEqual(queryCount, 2, "strict query then fallback query");
+    assertEqual(results.length, 1, "fallback result count");
+    assertEqual(results[0].id, "portrait-1", "fallback result id");
+    assertEqual(results[0].tags?.join(","), "avatar,portrait", "fallback tags");
+  });
+
+  test("search skips fallback on paginated empty strict pages with earlier strict matches", async () => {
+    let queryCount = 0;
+    const queryRaw = createSequentialQueryRaw([
+      [],
+      [{ exists: true }],
+      [mockSearchRow({ id: "fallback-should-not-run" })],
+    ]);
+    const provider = new NoosphereProvider({
+      prisma: createMockPrisma({
+        $queryRaw: () => {
+          queryCount++;
+          return queryRaw();
+        },
+      }),
+    });
+
+    const results = await provider.search("photo", {
+      metadata: { offset: 10 },
+    });
+
+    assertEqual(queryCount, 2, "strict page query plus global strict existence check");
+    assertEqual(results.length, 0, "empty strict page remains empty");
+  });
+
+  test("search skips fallback when relaxed query has no useful terms", async () => {
+    let queryCount = 0;
+    const provider = new NoosphereProvider({
+      prisma: createMockPrisma({
+        $queryRaw: () => {
+          queryCount++;
+          return Promise.resolve([]);
+        },
+      }),
+    });
+
+    const results = await provider.search("the and of is are was were be been being has had do does did will may might can shall");
+
+    assertEqual(queryCount, 1, "strict query only");
+    assertEqual(results.length, 0, "no fallback results");
   });
 
   // ─── getById() ──────────────────────────────────────────────────────────
