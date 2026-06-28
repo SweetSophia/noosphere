@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import { MarkdownToolbar } from "@/components/wiki/MarkdownToolbar";
 
 // Extend default schema to preserve className on code/pre for syntax highlighting
 const sanitizeSchema = {
@@ -17,19 +18,37 @@ const sanitizeSchema = {
 
 interface MarkdownPreviewTabsProps {
   targetTextareaId: string;
+  name: string;
   defaultValue?: string;
+  placeholder?: string;
+  required?: boolean;
+  hint?: string;
 }
 
-export function MarkdownPreviewTabs({ targetTextareaId, defaultValue = "" }: MarkdownPreviewTabsProps) {
-  const [activeTab, setActiveTab] = useState<"write" | "preview">("write");
-  const [content, setContent] = useState(defaultValue);
+type EditorMode = "write" | "preview" | "split";
 
-  const sync = useCallback(() => {
-    const textarea = document.getElementById(targetTextareaId);
-    if (textarea instanceof HTMLTextAreaElement) {
-      setContent(textarea.value);
-    }
-  }, [targetTextareaId]);
+const EDITOR_MODES = ["write", "preview", "split"] as const satisfies readonly EditorMode[];
+
+function getModeLabel(mode: EditorMode) {
+  return mode === "write" ? "Write" : mode === "preview" ? "Preview" : "Split";
+}
+
+export function MarkdownPreviewTabs({
+  targetTextareaId,
+  name,
+  defaultValue = "",
+  placeholder = "Write your article in Markdown...",
+  required = false,
+  hint,
+}: MarkdownPreviewTabsProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const modeButtonRefs = useRef<Record<EditorMode, HTMLButtonElement | null>>({
+    write: null,
+    preview: null,
+    split: null,
+  });
+  const [activeMode, setActiveMode] = useState<EditorMode>("write");
+  const [content, setContent] = useState(defaultValue);
 
   // Sync content when defaultValue prop changes (e.g., switching articles)
   useEffect(() => {
@@ -37,48 +56,105 @@ export function MarkdownPreviewTabs({ targetTextareaId, defaultValue = "" }: Mar
   }, [defaultValue]);
 
   useEffect(() => {
-    const textarea = document.getElementById(targetTextareaId);
-    if (!(textarea instanceof HTMLTextAreaElement)) return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
 
-    // Initial sync — textarea found, content already set from defaultValue or useEffect
+    const sync = () => setContent(textarea.value);
+
+    // Toolbar and image insertion update the DOM textarea directly, then emit input.
     sync();
-
     textarea.addEventListener("input", sync, { passive: true });
-    return () => {
-      textarea.removeEventListener("input", sync);
-    };
-  }, [targetTextareaId, sync]);
+    return () => textarea.removeEventListener("input", sync);
+  }, []);
 
   const preview = useMemo(() => content.trim(), [content]);
+  const canHideEditor = !required || preview.length > 0;
+
+  function selectMode(mode: EditorMode, options: { focusButton?: boolean } = {}) {
+    if (mode === "preview" && !canHideEditor) {
+      const textarea = textareaRef.current;
+      textarea?.focus();
+      textarea?.reportValidity();
+      setActiveMode("write");
+      return;
+    }
+
+    setActiveMode(mode);
+    if (options.focusButton) {
+      requestAnimationFrame(() => modeButtonRefs.current[mode]?.focus());
+    }
+  }
+
+  function selectModeFromKeyboard(event: KeyboardEvent<HTMLDivElement>) {
+    if (!["ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown", "Home", "End"].includes(event.key)) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const currentIndex = EDITOR_MODES.indexOf(activeMode);
+    const nextIndex =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? EDITOR_MODES.length - 1
+          : (currentIndex + (event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1) + EDITOR_MODES.length) %
+            EDITOR_MODES.length;
+    const nextMode = EDITOR_MODES[nextIndex] ?? activeMode;
+
+    selectMode(nextMode, { focusButton: true });
+  }
 
   return (
-    <div className="preview-tabs-shell">
-      <div className="preview-tabs-header" role="tablist" aria-label="Editor preview mode">
-        <button
-          type="button"
-          className={`preview-tab ${activeTab === "write" ? "active" : ""}`}
-          onClick={() => setActiveTab("write")}
-        >
-          Write
-        </button>
-        <button
-          type="button"
-          className={`preview-tab ${activeTab === "preview" ? "active" : ""}`}
-          onClick={() => setActiveTab("preview")}
-        >
-          Preview
-        </button>
+    <div className="markdown-editor-shell" data-mode={activeMode}>
+      <div className="preview-tabs-header" role="radiogroup" aria-label="Editor mode" onKeyDown={selectModeFromKeyboard}>
+        {EDITOR_MODES.map((mode) => (
+          <button
+            key={mode}
+            ref={(button) => {
+              modeButtonRefs.current[mode] = button;
+            }}
+            type="button"
+            role="radio"
+            aria-checked={activeMode === mode}
+            tabIndex={activeMode === mode ? 0 : -1}
+            className={`preview-tab ${activeMode === mode ? "active" : ""}`}
+            onClick={() => selectMode(mode)}
+          >
+            {getModeLabel(mode)}
+          </button>
+        ))}
       </div>
 
-      {activeTab === "preview" && (
-        <div className="preview-pane markdown-body">
+      <div className="markdown-editor-grid">
+        <div className="markdown-editor-write">
+          <MarkdownToolbar targetTextareaId={targetTextareaId} />
+          <textarea
+            ref={textareaRef}
+            id={targetTextareaId}
+            name={name}
+            className="form-textarea markdown-editor-textarea"
+            value={content}
+            placeholder={placeholder}
+            required={required && activeMode !== "preview"}
+            aria-describedby={hint ? `${targetTextareaId}-hint` : undefined}
+            onChange={(event) => setContent(event.currentTarget.value)}
+          />
+          {hint ? (
+            <p id={`${targetTextareaId}-hint`} className="form-hint">
+              {hint}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="markdown-editor-preview preview-pane markdown-body">
           {preview ? (
             <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeSanitize, sanitizeSchema]]}>{preview}</ReactMarkdown>
           ) : (
             <p className="text-muted">Nothing to preview yet.</p>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

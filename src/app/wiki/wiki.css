@@ -1232,7 +1232,7 @@
   gap: 0.5rem;
 }
 
-.preview-tabs-shell {
+.markdown-editor-shell {
   margin-top: 0.85rem;
 }
 
@@ -1259,6 +1259,45 @@
 
 .preview-pane {
   padding: 1rem;
+}
+
+.markdown-editor-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.markdown-editor-write {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.markdown-editor-textarea {
+  min-height: 28rem;
+}
+
+.markdown-editor-preview {
+  min-height: 28rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--surface-inset);
+  overflow: auto;
+}
+
+.markdown-editor-shell[data-mode="write"] .markdown-editor-preview,
+.markdown-editor-shell[data-mode="preview"] .markdown-editor-write {
+  display: none;
+}
+
+@media (min-width: 980px) {
+  .markdown-editor-shell[data-mode="split"] .markdown-editor-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .markdown-editor-shell[data-mode="split"] .markdown-editor-textarea,
+  .markdown-editor-shell[data-mode="split"] .markdown-editor-preview {
+    min-height: 34rem;
+  }
 }
 
 .revision-summary-list,
