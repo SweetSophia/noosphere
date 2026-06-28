@@ -6,6 +6,10 @@ import remarkGfm from "remark-gfm";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import type { PluggableList } from "unified";
 import { MarkdownToolbar } from "@/components/wiki/MarkdownToolbar";
+import {
+  MARKDOWN_TEXTAREA_UPDATE_EVENT,
+  type MarkdownTextareaUpdateDetail,
+} from "@/components/wiki/markdownTextareaUpdate";
 
 // Extend default schema to preserve className on code/pre for syntax highlighting
 const sanitizeSchema = {
@@ -32,6 +36,7 @@ interface MarkdownPreviewTabsProps {
 type EditorMode = "write" | "preview" | "split";
 
 const EDITOR_MODES = ["write", "preview", "split"] as const satisfies readonly EditorMode[];
+const STACKED_EDITOR_MODES = ["write", "preview"] as const satisfies readonly EditorMode[];
 
 function getModeLabel(mode: EditorMode) {
   return mode === "write" ? "Write" : mode === "preview" ? "Preview" : "Split";
@@ -53,6 +58,7 @@ export function MarkdownPreviewTabs({
   });
   const [activeMode, setActiveMode] = useState<EditorMode>("write");
   const [content, setContent] = useState(defaultValue ?? "");
+  const [supportsSplitMode, setSupportsSplitMode] = useState(true);
   const writePaneId = `${targetTextareaId}-write`;
   const previewPaneId = `${targetTextareaId}-preview`;
 
@@ -60,31 +66,53 @@ export function MarkdownPreviewTabs({
     const textarea = textareaRef.current;
     if (!textarea) return;
 
-    const sync = () => setContent(textarea.value);
+    const syncControlledContent = (event: Event) => {
+      const detail = (event as CustomEvent<MarkdownTextareaUpdateDetail>).detail;
+      setContent(detail.value);
+      requestAnimationFrame(() => {
+        textarea.setSelectionRange(detail.selectionStart, detail.selectionEnd);
+      });
+    };
 
-    // Toolbar and image insertion update the DOM textarea directly, then emit input.
-    textarea.addEventListener("input", sync, { passive: true });
-    return () => textarea.removeEventListener("input", sync);
+    textarea.addEventListener(MARKDOWN_TEXTAREA_UPDATE_EVENT, syncControlledContent);
+    return () => textarea.removeEventListener(MARKDOWN_TEXTAREA_UPDATE_EVENT, syncControlledContent);
+  }, []);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(min-width: 980px)");
+    const syncSplitSupport = () => {
+      const matches = mediaQuery.matches;
+      setSupportsSplitMode(matches);
+      if (!matches) {
+        setActiveMode((currentMode) => {
+          if (currentMode !== "split") return currentMode;
+          return textareaRef.current?.value.trim() ? "preview" : "write";
+        });
+      }
+    };
+
+    syncSplitSupport();
+    mediaQuery.addEventListener("change", syncSplitSupport);
+    return () => mediaQuery.removeEventListener("change", syncSplitSupport);
   }, []);
 
   const trimmedContent = useMemo(() => content.trim(), [content]);
   const canHideEditor = !required || trimmedContent.length > 0;
+  const availableModes: readonly EditorMode[] = supportsSplitMode ? EDITOR_MODES : STACKED_EDITOR_MODES;
 
   function selectMode(mode: EditorMode, options: { focusButton?: boolean } = {}) {
-    if (mode === "preview" && !canHideEditor) {
-      if (options.focusButton) {
-        requestAnimationFrame(() => modeButtonRefs.current[activeMode]?.focus());
-      } else {
-        const textarea = textareaRef.current;
-        textarea?.focus();
-        textarea?.reportValidity();
-      }
+    const nextMode = mode === "split" && !supportsSplitMode ? "preview" : mode;
+
+    if (nextMode === "preview" && !canHideEditor) {
+      const textarea = textareaRef.current;
+      textarea?.focus();
+      textarea?.reportValidity();
       return;
     }
 
-    setActiveMode(mode);
+    setActiveMode(nextMode);
     if (options.focusButton) {
-      requestAnimationFrame(() => modeButtonRefs.current[mode]?.focus());
+      requestAnimationFrame(() => modeButtonRefs.current[nextMode]?.focus());
     }
   }
 
@@ -95,15 +123,15 @@ export function MarkdownPreviewTabs({
 
     event.preventDefault();
 
-    const currentIndex = EDITOR_MODES.indexOf(activeMode);
+    const currentIndex = Math.max(availableModes.indexOf(activeMode), 0);
     const nextIndex =
       event.key === "Home"
         ? 0
         : event.key === "End"
-          ? EDITOR_MODES.length - 1
-          : (currentIndex + (event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1) + EDITOR_MODES.length) %
-            EDITOR_MODES.length;
-    const nextMode = EDITOR_MODES[nextIndex] ?? activeMode;
+          ? availableModes.length - 1
+          : (currentIndex + (event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1) + availableModes.length) %
+            availableModes.length;
+    const nextMode = availableModes[nextIndex] ?? activeMode;
 
     selectMode(nextMode, { focusButton: true });
   }
@@ -132,7 +160,9 @@ export function MarkdownPreviewTabs({
             role="radio"
             aria-checked={activeMode === mode}
             aria-controls={getModeControls(mode)}
+            aria-description={mode === "split" ? "Shows the editor and rendered preview side by side" : undefined}
             tabIndex={activeMode === mode ? 0 : -1}
+            data-mode={mode}
             className={`preview-tab ${activeMode === mode ? "active" : ""}`}
             onClick={() => selectMode(mode)}
           >
@@ -151,8 +181,8 @@ export function MarkdownPreviewTabs({
             className="form-textarea markdown-editor-textarea"
             value={content}
             placeholder={placeholder}
-            required={required && activeMode !== "preview"}
-            aria-describedby={hint ? `${targetTextareaId}-hint` : undefined}
+            required={required}
+            aria-describedby={hint && activeMode !== "preview" ? `${targetTextareaId}-hint` : undefined}
             onChange={(event) => setContent(event.currentTarget.value)}
           />
           {hint ? (
@@ -165,6 +195,8 @@ export function MarkdownPreviewTabs({
         <div id={previewPaneId} className="markdown-editor-preview preview-pane markdown-body">
           {activeMode === "write" ? null : trimmedContent ? (
             <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS}>{trimmedContent}</ReactMarkdown>
+          ) : activeMode === "split" ? (
+            <p className="text-muted">Preview will appear here as you type.</p>
           ) : (
             <p className="text-muted">Nothing to preview yet.</p>
           )}

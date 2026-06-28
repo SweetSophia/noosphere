@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { updateMarkdownTextarea } from "@/components/wiki/markdownTextareaUpdate";
 
 interface ImageUploadPanelProps {
   targetTextareaId: string;
@@ -57,17 +58,11 @@ export function ImageUploadPanel({ targetTextareaId }: ImageUploadPanelProps) {
   function insertMarkdown() {
     if (!result) return;
 
-    const textarea = document.getElementById(targetTextareaId) as HTMLTextAreaElement | null;
-    if (!textarea) return;
-
     const snippet = `\n${result.markdown}\n`;
-    const start = textarea.selectionStart ?? textarea.value.length;
-    const end = textarea.selectionEnd ?? textarea.value.length;
-    const nextValue = textarea.value.slice(0, start) + snippet + textarea.value.slice(end);
-    textarea.value = nextValue;
-    textarea.focus();
-    textarea.setSelectionRange(start + snippet.length, start + snippet.length);
-    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    updateMarkdownTextarea(targetTextareaId, (value, start, end) => ({
+      value: value.slice(0, start) + snippet + value.slice(end),
+      cursor: start + snippet.length,
+    }));
   }
 
   return (
