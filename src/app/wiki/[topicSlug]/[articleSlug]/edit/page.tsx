@@ -134,6 +134,7 @@ export default async function EditArticlePage({ params }: Props) {
         <div className="form-group">
           <label className="form-label" htmlFor="content">Content (Markdown)</label>
           <MarkdownPreviewTabs
+            key={article.id}
             targetTextareaId="content"
             name="content"
             defaultValue={article.content}

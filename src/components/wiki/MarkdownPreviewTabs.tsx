@@ -56,21 +56,6 @@ export function MarkdownPreviewTabs({
   const writePaneId = `${targetTextareaId}-write`;
   const previewPaneId = `${targetTextareaId}-preview`;
 
-  // Sync content when defaultValue prop changes (e.g., switching articles)
-  useEffect(() => {
-    let isCurrent = true;
-
-    queueMicrotask(() => {
-      if (isCurrent) {
-        setContent(defaultValue ?? "");
-      }
-    });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [defaultValue]);
-
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
@@ -78,7 +63,6 @@ export function MarkdownPreviewTabs({
     const sync = () => setContent(textarea.value);
 
     // Toolbar and image insertion update the DOM textarea directly, then emit input.
-    sync();
     textarea.addEventListener("input", sync, { passive: true });
     return () => textarea.removeEventListener("input", sync);
   }, []);
