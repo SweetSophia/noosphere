@@ -4,6 +4,7 @@ import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import type { PluggableList } from "unified";
 import { MarkdownToolbar } from "@/components/wiki/MarkdownToolbar";
 
 // Extend default schema to preserve className on code/pre for syntax highlighting
@@ -16,10 +17,13 @@ const sanitizeSchema = {
   },
 };
 
+const REMARK_PLUGINS: PluggableList = [remarkGfm];
+const REHYPE_PLUGINS: PluggableList = [[rehypeSanitize, sanitizeSchema]];
+
 interface MarkdownPreviewTabsProps {
   targetTextareaId: string;
   name: string;
-  defaultValue?: string;
+  defaultValue?: string | null;
   placeholder?: string;
   required?: boolean;
   hint?: string;
@@ -36,7 +40,7 @@ function getModeLabel(mode: EditorMode) {
 export function MarkdownPreviewTabs({
   targetTextareaId,
   name,
-  defaultValue = "",
+  defaultValue,
   placeholder = "Write your article in Markdown...",
   required = false,
   hint,
@@ -48,11 +52,23 @@ export function MarkdownPreviewTabs({
     split: null,
   });
   const [activeMode, setActiveMode] = useState<EditorMode>("write");
-  const [content, setContent] = useState(defaultValue);
+  const [content, setContent] = useState(defaultValue ?? "");
+  const writePaneId = `${targetTextareaId}-write`;
+  const previewPaneId = `${targetTextareaId}-preview`;
 
   // Sync content when defaultValue prop changes (e.g., switching articles)
   useEffect(() => {
-    setContent(defaultValue);
+    let isCurrent = true;
+
+    queueMicrotask(() => {
+      if (isCurrent) {
+        setContent(defaultValue ?? "");
+      }
+    });
+
+    return () => {
+      isCurrent = false;
+    };
   }, [defaultValue]);
 
   useEffect(() => {
@@ -67,15 +83,18 @@ export function MarkdownPreviewTabs({
     return () => textarea.removeEventListener("input", sync);
   }, []);
 
-  const preview = useMemo(() => content.trim(), [content]);
-  const canHideEditor = !required || preview.length > 0;
+  const trimmedContent = useMemo(() => content.trim(), [content]);
+  const canHideEditor = !required || trimmedContent.length > 0;
 
   function selectMode(mode: EditorMode, options: { focusButton?: boolean } = {}) {
     if (mode === "preview" && !canHideEditor) {
-      const textarea = textareaRef.current;
-      textarea?.focus();
-      textarea?.reportValidity();
-      setActiveMode("write");
+      if (options.focusButton) {
+        requestAnimationFrame(() => modeButtonRefs.current[activeMode]?.focus());
+      } else {
+        const textarea = textareaRef.current;
+        textarea?.focus();
+        textarea?.reportValidity();
+      }
       return;
     }
 
@@ -105,9 +124,20 @@ export function MarkdownPreviewTabs({
     selectMode(nextMode, { focusButton: true });
   }
 
+  function getModeControls(mode: EditorMode) {
+    if (mode === "split") return `${writePaneId} ${previewPaneId}`;
+    return mode === "preview" ? previewPaneId : writePaneId;
+  }
+
   return (
     <div className="markdown-editor-shell" data-mode={activeMode}>
-      <div className="preview-tabs-header" role="radiogroup" aria-label="Editor mode" onKeyDown={selectModeFromKeyboard}>
+      <div
+        className="preview-tabs-header"
+        role="radiogroup"
+        aria-label="Editor mode"
+        aria-orientation="horizontal"
+        onKeyDown={selectModeFromKeyboard}
+      >
         {EDITOR_MODES.map((mode) => (
           <button
             key={mode}
@@ -117,6 +147,7 @@ export function MarkdownPreviewTabs({
             type="button"
             role="radio"
             aria-checked={activeMode === mode}
+            aria-controls={getModeControls(mode)}
             tabIndex={activeMode === mode ? 0 : -1}
             className={`preview-tab ${activeMode === mode ? "active" : ""}`}
             onClick={() => selectMode(mode)}
@@ -127,7 +158,7 @@ export function MarkdownPreviewTabs({
       </div>
 
       <div className="markdown-editor-grid">
-        <div className="markdown-editor-write">
+        <div id={writePaneId} className="markdown-editor-write">
           <MarkdownToolbar targetTextareaId={targetTextareaId} />
           <textarea
             ref={textareaRef}
@@ -147,9 +178,9 @@ export function MarkdownPreviewTabs({
           ) : null}
         </div>
 
-        <div className="markdown-editor-preview preview-pane markdown-body">
-          {preview ? (
-            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeSanitize, sanitizeSchema]]}>{preview}</ReactMarkdown>
+        <div id={previewPaneId} className="markdown-editor-preview preview-pane markdown-body">
+          {activeMode === "write" ? null : trimmedContent ? (
+            <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS}>{trimmedContent}</ReactMarkdown>
           ) : (
             <p className="text-muted">Nothing to preview yet.</p>
           )}
