@@ -39,5 +39,4 @@ export function updateMarkdownTextarea(
       },
     }),
   );
-  textarea.dispatchEvent(new Event("input", { bubbles: true }));
 }

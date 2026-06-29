@@ -66,13 +66,9 @@ test("updates the textarea and emits a controlled-editor sync event", () => {
   textarea.selectionStart = 6;
   textarea.selectionEnd = 10;
   let updateDetail: MarkdownTextareaUpdateDetail | undefined;
-  let inputDispatched = false;
 
   textarea.addEventListener(MARKDOWN_TEXTAREA_UPDATE_EVENT, (event) => {
     updateDetail = (event as CustomEvent<MarkdownTextareaUpdateDetail>).detail;
-  });
-  textarea.addEventListener("input", () => {
-    inputDispatched = true;
   });
 
   Object.defineProperty(globalThis, "document", {
@@ -94,7 +90,6 @@ test("updates the textarea and emits a controlled-editor sync event", () => {
   assert.equal(textarea.selectionStart, 14);
   assert.equal(textarea.selectionEnd, 14);
   assert.equal(textarea.focused, true);
-  assert.equal(inputDispatched, true);
   assert.deepEqual(updateDetail, {
     value: "alpha **beta**",
     selectionStart: 14,

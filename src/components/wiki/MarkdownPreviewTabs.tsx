@@ -61,6 +61,7 @@ export function MarkdownPreviewTabs({
   const [supportsSplitMode, setSupportsSplitMode] = useState(true);
   const writePaneId = `${targetTextareaId}-write`;
   const previewPaneId = `${targetTextareaId}-preview`;
+  const splitDescriptionId = `${targetTextareaId}-split-description`;
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -160,7 +161,7 @@ export function MarkdownPreviewTabs({
             role="radio"
             aria-checked={activeMode === mode}
             aria-controls={getModeControls(mode)}
-            aria-description={mode === "split" ? "Shows the editor and rendered preview side by side" : undefined}
+            aria-describedby={mode === "split" ? splitDescriptionId : undefined}
             tabIndex={activeMode === mode ? 0 : -1}
             data-mode={mode}
             className={`preview-tab ${activeMode === mode ? "active" : ""}`}
@@ -169,6 +170,9 @@ export function MarkdownPreviewTabs({
             {getModeLabel(mode)}
           </button>
         ))}
+        <span id={splitDescriptionId} className="screen-reader-only">
+          Shows the editor and rendered preview side by side.
+        </span>
       </div>
 
       <div className="markdown-editor-grid">
