@@ -3,49 +3,23 @@
  * Usage: npx tsx scripts/seed-topics.ts
  */
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { closePrisma, prisma } from "./_prisma";
 
-const TOPICS = [
-  {
-    name: "Engineering",
-    slug: "engineering",
-    description: "Technical documentation, architecture, and engineering practices",
-    children: [
-      { name: "Architecture", slug: "architecture", description: "System design and architectural decisions" },
-      { name: "Backend", slug: "backend", description: "Server-side services and APIs" },
-      { name: "Frontend", slug: "frontend", description: "UI/UX development and component libraries" },
-      { name: "DevOps", slug: "devops", description: "Infrastructure, CI/CD, and deployment" },
-      { name: "Security", slug: "security", description: "Security practices, audits, and hardening" },
-    ],
-  },
-  {
-    name: "Projects",
-    slug: "projects",
-    description: "Project-specific documentation",
-    children: [
-      { name: "Noosphere", slug: "noosphere", description: "This wiki system" },
-    ],
-  },
-  {
-    name: "Research",
-    slug: "research",
-    description: "Research notes, experiments, and findings",
-    children: [
-      { name: "AI & LLMs", slug: "ai-llms", description: "LLM evaluations, prompts, and integrations" },
-      { name: "Tools", slug: "tools", description: "Tool evaluations and comparisons" },
-    ],
-  },
-  {
-    name: "Workflows",
-    slug: "workflows",
-    description: "Operational runbooks and procedures",
-    children: [
-      { name: "Deployment", slug: "deployment", description: "Deployment procedures" },
-      { name: "Incident Response", slug: "incident-response", description: "How to handle incidents" },
-      { name: "Onboarding", slug: "onboarding", description: "New member onboarding guides" },
-    ],
-  },
-];
+interface BootstrapTopic {
+  name: string;
+  slug: string;
+  description?: string | null;
+  children?: BootstrapTopic[];
+}
+
+const TOPICS = JSON.parse(
+  readFileSync(
+    fileURLToPath(new URL("../docker/bootstrap-topics.json", import.meta.url)),
+    "utf8",
+  ),
+) as BootstrapTopic[];
 
 async function seedTopics() {
   console.log("Seeding topics...\n");

@@ -1,53 +1,13 @@
 import crypto from "node:crypto";
+import { readFileSync } from "node:fs";
 import process from "node:process";
 import bcrypt from "bcryptjs";
 import pg from "pg";
 
 const { Pool } = pg;
-
-const TOPICS = [
-  {
-    name: "Engineering",
-    slug: "engineering",
-    description: "Technical documentation, architecture, and engineering practices",
-    children: [
-      { name: "Architecture", slug: "architecture", description: "System design and architectural decisions" },
-      { name: "Backend", slug: "backend", description: "Server-side services and APIs" },
-      { name: "Frontend", slug: "frontend", description: "UI/UX development and component libraries" },
-      { name: "DevOps", slug: "devops", description: "Infrastructure, CI/CD, and deployment" },
-      { name: "Security", slug: "security", description: "Security practices, audits, and hardening" },
-    ],
-  },
-  {
-    name: "Projects",
-    slug: "projects",
-    description: "Project-specific documentation",
-    children: [
-      { name: "Noosphere", slug: "noosphere", description: "This wiki system" },
-      { name: "PK-PRO", slug: "pk-pro", description: "Product knowledge database" },
-      { name: "IHK Study Trainer", slug: "ihk-study-trainer", description: "Study and practice platform" },
-    ],
-  },
-  {
-    name: "Research",
-    slug: "research",
-    description: "Research notes, experiments, and findings",
-    children: [
-      { name: "AI & LLMs", slug: "ai-llms", description: "LLM evaluations, prompts, and integrations" },
-      { name: "Tools", slug: "tools", description: "Tool evaluations and comparisons" },
-    ],
-  },
-  {
-    name: "Workflows",
-    slug: "workflows",
-    description: "Operational runbooks and procedures",
-    children: [
-      { name: "Deployment", slug: "deployment", description: "Deployment procedures" },
-      { name: "Incident Response", slug: "incident-response", description: "How to handle incidents" },
-      { name: "Onboarding", slug: "onboarding", description: "New member onboarding guides" },
-    ],
-  },
-];
+const TOPICS = JSON.parse(
+  readFileSync(new URL("./bootstrap-topics.json", import.meta.url), "utf8"),
+);
 
 function requireEnv(name) {
   const value = process.env[name];
