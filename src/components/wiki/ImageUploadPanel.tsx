@@ -58,11 +58,16 @@ export function ImageUploadPanel({ targetTextareaId }: ImageUploadPanelProps) {
   function insertMarkdown() {
     if (!result) return;
 
-    const snippet = `\n${result.markdown}\n`;
-    updateMarkdownTextarea(targetTextareaId, (value, start, end) => ({
-      value: value.slice(0, start) + snippet + value.slice(end),
-      cursor: start + snippet.length,
-    }));
+    updateMarkdownTextarea(targetTextareaId, (value, start, end) => {
+      const spacerBefore = start > 0 && value[start - 1] !== "\n" ? "\n\n" : "";
+      const spacerAfter = end < value.length && value[end] !== "\n" ? "\n\n" : "\n";
+      const inserted = `${spacerBefore}${result.markdown}${spacerAfter}`;
+
+      return {
+        value: value.slice(0, start) + inserted + value.slice(end),
+        cursor: start + inserted.length,
+      };
+    });
   }
 
   return (

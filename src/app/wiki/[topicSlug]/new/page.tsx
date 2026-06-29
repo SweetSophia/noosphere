@@ -98,7 +98,6 @@ export default async function NewArticlePage({ params }: Props) {
         <div className="form-group">
           <label className="form-label" htmlFor="content">Content (Markdown) *</label>
           <MarkdownPreviewTabs
-            key={topicSlug}
             targetTextareaId="content"
             name="content"
             placeholder="Write your article in Markdown..."

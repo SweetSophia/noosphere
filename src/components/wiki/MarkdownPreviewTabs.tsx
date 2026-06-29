@@ -56,12 +56,21 @@ export function MarkdownPreviewTabs({
     preview: null,
     split: null,
   });
+  const initialContent = defaultValue ?? "";
+  const trimmedContentRef = useRef(initialContent.trim());
   const [activeMode, setActiveMode] = useState<EditorMode>("write");
-  const [content, setContent] = useState(defaultValue ?? "");
+  const [content, setContentState] = useState(initialContent);
   const [supportsSplitMode, setSupportsSplitMode] = useState(true);
+  const shellId = `${targetTextareaId}-shell`;
   const writePaneId = `${targetTextareaId}-write`;
   const previewPaneId = `${targetTextareaId}-preview`;
   const splitDescriptionId = `${targetTextareaId}-split-description`;
+  const trimmedContent = useMemo(() => content.trim(), [content]);
+
+  function setContent(value: string) {
+    trimmedContentRef.current = value.trim();
+    setContentState(value);
+  }
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -87,7 +96,7 @@ export function MarkdownPreviewTabs({
       if (!matches) {
         setActiveMode((currentMode) => {
           if (currentMode !== "split") return currentMode;
-          return textareaRef.current?.value.trim() ? "preview" : "write";
+          return trimmedContentRef.current ? "preview" : "write";
         });
       }
     };
@@ -97,7 +106,6 @@ export function MarkdownPreviewTabs({
     return () => mediaQuery.removeEventListener("change", syncSplitSupport);
   }, []);
 
-  const trimmedContent = useMemo(() => content.trim(), [content]);
   const canHideEditor = !required || trimmedContent.length > 0;
   const availableModes: readonly EditorMode[] = supportsSplitMode ? EDITOR_MODES : STACKED_EDITOR_MODES;
 
@@ -118,11 +126,16 @@ export function MarkdownPreviewTabs({
   }
 
   function selectModeFromKeyboard(event: KeyboardEvent<HTMLDivElement>) {
-    if (!["ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown", "Home", "End"].includes(event.key)) {
+    if (!["ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown", "Home", "End", " "].includes(event.key)) {
       return;
     }
 
     event.preventDefault();
+
+    if (event.key === " ") {
+      selectMode(activeMode, { focusButton: true });
+      return;
+    }
 
     const currentIndex = Math.max(availableModes.indexOf(activeMode), 0);
     const nextIndex =
@@ -137,13 +150,8 @@ export function MarkdownPreviewTabs({
     selectMode(nextMode, { focusButton: true });
   }
 
-  function getModeControls(mode: EditorMode) {
-    if (mode === "split") return `${writePaneId} ${previewPaneId}`;
-    return mode === "preview" ? previewPaneId : writePaneId;
-  }
-
   return (
-    <div className="markdown-editor-shell" data-mode={activeMode}>
+    <div id={shellId} className="markdown-editor-shell" data-mode={activeMode}>
       <div
         className="preview-tabs-header"
         role="radiogroup"
@@ -160,7 +168,7 @@ export function MarkdownPreviewTabs({
             type="button"
             role="radio"
             aria-checked={activeMode === mode}
-            aria-controls={getModeControls(mode)}
+            aria-controls={shellId}
             aria-describedby={mode === "split" ? splitDescriptionId : undefined}
             tabIndex={activeMode === mode ? 0 : -1}
             data-mode={mode}
