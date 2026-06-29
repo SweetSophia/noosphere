@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, resolve } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 interface BootstrapTopic {
   name: string;
@@ -10,14 +11,16 @@ interface BootstrapTopic {
   children?: BootstrapTopic[];
 }
 
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+
 function readBootstrapTopics() {
   return JSON.parse(
-    readFileSync(join(process.cwd(), "docker", "bootstrap-topics.json"), "utf8"),
+    readFileSync(resolve(repoRoot, "docker", "bootstrap-topics.json"), "utf8"),
   ) as BootstrapTopic[];
 }
 
 function readRepoFile(path: string) {
-  return readFileSync(join(process.cwd(), path), "utf8");
+  return readFileSync(resolve(repoRoot, path), "utf8");
 }
 
 test("bootstrap topic tree is valid and shared by seed/bootstrap scripts", () => {
