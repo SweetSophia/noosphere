@@ -6,8 +6,9 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start",
-    "test": "npm run test:memory && npm run test:cache && npm run test:rate-limit && npm run test:api && npm run test:security && npm run test:persistence-layer",
+    "test": "npm run test:memory && npm run test:wiki && npm run test:cache && npm run test:rate-limit && npm run test:api && npm run test:security && npm run test:persistence-layer",
     "test:memory": "node --env-file=.env.test --import tsx --test 'src/__tests__/memory/**/*.test.ts'",
+    "test:wiki": "node --import tsx --test 'src/__tests__/wiki/**/*.test.ts'",
     "test:cache": "node --env-file=.env.test --import tsx --test 'src/__tests__/cache/**/*.test.ts'",
     "test:rate-limit": "node --env-file=.env.test --import tsx --test src/__tests__/rate-limit.test.ts",
     "test:api": "node --import tsx --test 'src/__tests__/api/**/*.test.ts'",
@@ -26,9 +27,9 @@
     "test:persistence-layer": "node --env-file=.env.test --import tsx --test 'src/__tests__/persistence-layer/**/*.test.ts'"
   },
   "dependencies": {
-    "@sweetsophia/noosphere-injected-memory": "file:./noosphere-injected-memory",
     "@prisma/adapter-pg": "^7.7.0",
     "@prisma/client": "^7.7.0",
+    "@sweetsophia/noosphere-injected-memory": "file:./noosphere-injected-memory",
     "@types/pg": "^8.20.0",
     "bcryptjs": "^3.0.3",
     "ioredis": "^5.10.1",
@@ -48,6 +49,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.2",
     "@types/bcryptjs": "^2.4.6",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20",
@@ -57,6 +59,7 @@
     "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
+    "happy-dom": "^20.10.6",
     "tsx": "^4.22.4",
     "typescript": "^5"
   },

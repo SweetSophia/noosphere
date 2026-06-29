@@ -1,5 +1,7 @@
 "use client";
 
+import { updateMarkdownTextarea } from "@/components/wiki/markdownTextareaUpdate";
+
 const ACTIONS = [
   { label: "H2", mode: "line-prefix", value: "## " },
   { label: "Bold", mode: "wrap", before: "**", after: "**", placeholder: "bold text" },
@@ -19,17 +21,7 @@ interface MarkdownToolbarProps {
 
 export function MarkdownToolbar({ targetTextareaId }: MarkdownToolbarProps) {
   function updateTextarea(transform: (value: string, start: number, end: number) => { value: string; cursor: number }) {
-    const textarea = document.getElementById(targetTextareaId) as HTMLTextAreaElement | null;
-    if (!textarea) return;
-
-    const start = textarea.selectionStart ?? textarea.value.length;
-    const end = textarea.selectionEnd ?? textarea.value.length;
-    const next = transform(textarea.value, start, end);
-
-    textarea.value = next.value;
-    textarea.focus();
-    textarea.setSelectionRange(next.cursor, next.cursor);
-    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    updateMarkdownTextarea(targetTextareaId, transform);
   }
 
   function applyWrap(before: string, after: string, placeholder: string) {

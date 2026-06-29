@@ -8,7 +8,6 @@ import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import { ImageUploadPanel } from "@/components/wiki/ImageUploadPanel";
 import { MarkdownPreviewTabs } from "@/components/wiki/MarkdownPreviewTabs";
-import { MarkdownToolbar } from "@/components/wiki/MarkdownToolbar";
 import { createArticle } from "./actions";
 import { RestrictedTagPicker } from "@/components/wiki/RestrictedTagPicker";
 
@@ -98,18 +97,14 @@ export default async function NewArticlePage({ params }: Props) {
 
         <div className="form-group">
           <label className="form-label" htmlFor="content">Content (Markdown) *</label>
-          <MarkdownToolbar targetTextareaId="content" />
-          <textarea
-            id="content"
+          <MarkdownPreviewTabs
+            key={topicSlug}
+            targetTextareaId="content"
             name="content"
-            className="form-textarea"
             placeholder="Write your article in Markdown..."
             required
+            hint="Supports GitHub-flavored Markdown. Code blocks with syntax highlighting."
           />
-          <p className="form-hint">
-            Supports GitHub-flavored Markdown. Code blocks with syntax highlighting.
-          </p>
-          <MarkdownPreviewTabs targetTextareaId="content" />
         </div>
 
         <div className="form-actions-row">
