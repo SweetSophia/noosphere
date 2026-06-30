@@ -26,6 +26,7 @@ services:
       PG_IDLE_TIMEOUT_MS: ${PG_IDLE_TIMEOUT_MS:-30000}
       PG_CONN_TIMEOUT_MS: ${PG_CONN_TIMEOUT_MS:-5000}
       REDIS_URL: redis://redis:6379
+      NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE: ${NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE:-120}
     volumes:
       - ./uploads:/app/uploads:rw
       - ./uploads/images:/app/uploads/images:rw
