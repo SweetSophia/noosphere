@@ -47,7 +47,14 @@ test("memory recall rate limit can be tuned by environment", async () => {
 
 test("memory recall rate limit ignores invalid environment values", async () => {
   const previous = process.env.NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE;
-  const invalidValues = ["0", "-1", "1.5", "240abc", "not-a-number"];
+  const invalidValues = [
+    "0",
+    "-1",
+    "1.5",
+    "240abc",
+    "not-a-number",
+    "9007199254740992",
+  ];
 
   const {
     DEFAULT_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE,
