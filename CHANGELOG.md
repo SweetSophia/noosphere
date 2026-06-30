@@ -8,6 +8,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.3] - 2026-06-30
+
+Patch release for concurrent agent recall reliability. No breaking changes and
+no database schema changes.
+
+### Fixed
+
+- **Raise the read-only memory recall rate limit for concurrent CLI use**:
+  `POST /api/memory/recall` now defaults to 120 requests per minute per client
+  IP instead of 10, preventing legitimate prompt-time auto-recall bursts from
+  several local coding CLIs from exhausting one shared bucket.
+- Added `NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE` so operators can tune
+  the recall-only limit without weakening auth or write-route throttles.
+- Added regression coverage for the default limit, valid environment override,
+  and malformed override fallback behavior.
+
+## [1.10.2] - 2026-06-24
+
+Patch release focused on injected-memory persistence hardening and release
+pipeline cleanup. No breaking changes.
+
+### Security
+
+- Added the persistence-layer injected-memory sanitizer guard so direct
+  `article.create`, `article.update`, `article.upsert`, and article revision
+  writes strip transient recall blocks before durable storage.
+- Hardened article create/update, answer, ingest, import, markdown-sync import,
+  and non-API wiki-action write paths so injected recall context cannot be
+  accidentally persisted as article content.
+
+### Fixed
+
+- Restored the strict API CI gate after cleaning up the sync-conflict-review
+  mock issue.
+- Refreshed dependency lockfiles within existing semver ranges.
+
 ## [1.10.1] - 2026-06-14
 
 Patch release bundling four bug fixes and security patches merged since

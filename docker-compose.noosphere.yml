@@ -22,6 +22,7 @@ services:
       PG_IDLE_TIMEOUT_MS: ${PG_IDLE_TIMEOUT_MS:-30000}
       PG_CONN_TIMEOUT_MS: ${PG_CONN_TIMEOUT_MS:-5000}
       REDIS_URL: redis://redis:6379
+      NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE: ${NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE:-120}
     command: ["sh", "-c", "node docker/migrate-or-baseline.mjs && node docker/bootstrap.mjs"]
     volumes:
       - noosphere_uploads:/app/uploads:rw
@@ -45,6 +46,7 @@ services:
       PG_IDLE_TIMEOUT_MS: ${PG_IDLE_TIMEOUT_MS:-30000}
       PG_CONN_TIMEOUT_MS: ${PG_CONN_TIMEOUT_MS:-5000}
       REDIS_URL: redis://redis:6379
+      NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE: ${NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE:-120}
     volumes:
       - noosphere_uploads:/app/uploads:rw
     depends_on:
