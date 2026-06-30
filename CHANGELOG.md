@@ -24,6 +24,26 @@ no database schema changes.
 - Added regression coverage for the default limit, valid environment override,
   and malformed override fallback behavior.
 
+## [1.10.2] - 2026-06-24
+
+Patch release focused on injected-memory persistence hardening and release
+pipeline cleanup. No breaking changes.
+
+### Security
+
+- Added the persistence-layer injected-memory sanitizer guard so direct
+  `article.create`, `article.update`, `article.upsert`, and article revision
+  writes strip transient recall blocks before durable storage.
+- Hardened article create/update, answer, ingest, import, markdown-sync import,
+  and non-API wiki-action write paths so injected recall context cannot be
+  accidentally persisted as article content.
+
+### Fixed
+
+- Restored the strict API CI gate after cleaning up the sync-conflict-review
+  mock issue.
+- Refreshed dependency lockfiles within existing semver ranges.
+
 ## [1.10.1] - 2026-06-14
 
 Patch release bundling four bug fixes and security patches merged since

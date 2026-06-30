@@ -5,9 +5,11 @@ import { readBoundedJson, RequestBodyTooLargeError, JsonDepthExceededError } fro
 import { executeMemoryRecallRequest } from "@/lib/memory/api/recall";
 import { rateLimit } from "@/lib/rate-limit";
 
-const MEMORY_RECALL_RATE_LIMIT_ENV = "NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE";
+export const MEMORY_RECALL_RATE_LIMIT_ENV = "NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE";
 
 export const DEFAULT_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE = 120;
+
+const warnedInvalidEnvValues = new Set<string>();
 
 export function getMemoryRecallRateLimitOptions() {
   return {
@@ -56,9 +58,29 @@ export async function POST(request: NextRequest) {
 function readPositiveIntegerEnv(name: string, fallback: number): number {
   const value = process.env[name];
   if (value === undefined || !/^\d+$/.test(value)) {
+    if (value !== undefined) {
+      warnInvalidEnvValueOnce(name, value, fallback);
+    }
     return fallback;
   }
 
   const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+  if (Number.isSafeInteger(parsed) && parsed > 0) {
+    return parsed;
+  }
+
+  warnInvalidEnvValueOnce(name, value, fallback);
+  return fallback;
+}
+
+function warnInvalidEnvValueOnce(name: string, value: string, fallback: number) {
+  const key = `${name}\0${value}`;
+  if (warnedInvalidEnvValues.has(key)) {
+    return;
+  }
+
+  warnedInvalidEnvValues.add(key);
+  console.warn(
+    `[memory-recall] Ignoring invalid ${name}=${JSON.stringify(value)}; using ${fallback}`,
+  );
 }

@@ -5,11 +5,12 @@ process.env.DATABASE_URL ??= "postgresql://noosphere:noosphere@localhost:5432/no
 
 test("memory recall rate limit defaults to concurrent CLI-friendly read capacity", async () => {
   await withRestoredRateLimitEnv(async () => {
-    delete process.env.NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE;
     const {
       DEFAULT_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE,
+      MEMORY_RECALL_RATE_LIMIT_ENV,
       getMemoryRecallRateLimitOptions,
     } = await import("@/app/api/memory/recall/route");
+    delete process.env[MEMORY_RECALL_RATE_LIMIT_ENV];
 
     assert.deepEqual(getMemoryRecallRateLimitOptions(), {
       windowMs: 60_000,
@@ -22,8 +23,11 @@ test("memory recall rate limit defaults to concurrent CLI-friendly read capacity
 
 test("memory recall rate limit can be tuned by environment", async () => {
   await withRestoredRateLimitEnv(async () => {
-    process.env.NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE = "240";
-    const { getMemoryRecallRateLimitOptions } = await import("@/app/api/memory/recall/route");
+    const {
+      MEMORY_RECALL_RATE_LIMIT_ENV,
+      getMemoryRecallRateLimitOptions,
+    } = await import("@/app/api/memory/recall/route");
+    process.env[MEMORY_RECALL_RATE_LIMIT_ENV] = "240";
 
     assert.equal(getMemoryRecallRateLimitOptions().maxRequests, 240);
   });
@@ -42,29 +46,44 @@ test("memory recall rate limit ignores invalid environment values", async () => 
 
     const {
       DEFAULT_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE,
+      MEMORY_RECALL_RATE_LIMIT_ENV,
       getMemoryRecallRateLimitOptions,
     } = await import("@/app/api/memory/recall/route");
+    const originalWarn = console.warn;
+    const warnings: unknown[][] = [];
 
-    for (const value of invalidValues) {
-      process.env.NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE = value;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args);
+    };
 
-      assert.equal(
-        getMemoryRecallRateLimitOptions().maxRequests,
-        DEFAULT_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE,
-      );
+    try {
+      for (const value of invalidValues) {
+        process.env[MEMORY_RECALL_RATE_LIMIT_ENV] = value;
+
+        assert.equal(
+          getMemoryRecallRateLimitOptions().maxRequests,
+          DEFAULT_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE,
+        );
+      }
+    } finally {
+      console.warn = originalWarn;
     }
+
+    assert.equal(warnings.length, invalidValues.length);
+    assert.match(String(warnings[0]?.[0]), /Ignoring invalid/);
   });
 });
 
 async function withRestoredRateLimitEnv(run: () => Promise<void>) {
-  const previous = process.env.NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE;
+  const { MEMORY_RECALL_RATE_LIMIT_ENV } = await import("@/app/api/memory/recall/route");
+  const previous = process.env[MEMORY_RECALL_RATE_LIMIT_ENV];
   try {
     await run();
   } finally {
     if (previous === undefined) {
-      delete process.env.NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE;
+      delete process.env[MEMORY_RECALL_RATE_LIMIT_ENV];
     } else {
-      process.env.NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE = previous;
+      process.env[MEMORY_RECALL_RATE_LIMIT_ENV] = previous;
     }
   }
 }
