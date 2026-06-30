@@ -5,8 +5,23 @@ import { readBoundedJson, RequestBodyTooLargeError, JsonDepthExceededError } fro
 import { executeMemoryRecallRequest } from "@/lib/memory/api/recall";
 import { rateLimit } from "@/lib/rate-limit";
 
+const MEMORY_RECALL_RATE_LIMIT_ENV = "NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE";
+
+export const DEFAULT_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE = 120;
+
+export function getMemoryRecallRateLimitOptions() {
+  return {
+    windowMs: 60_000,
+    maxRequests: readPositiveIntegerEnv(
+      MEMORY_RECALL_RATE_LIMIT_ENV,
+      DEFAULT_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE,
+    ),
+    keyPrefix: "memory-recall",
+  };
+}
+
 export async function POST(request: NextRequest) {
-  const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 10, keyPrefix: "memory-recall" });
+  const rl = await rateLimit(request, getMemoryRecallRateLimitOptions());
   if (!rl.allowed) return rl.response;
 
   const auth = await requirePermission(request, [Permissions.READ]);
@@ -36,4 +51,14 @@ export async function POST(request: NextRequest) {
       { status: 503 },
     );
   }
+}
+
+function readPositiveIntegerEnv(name: string, fallback: number): number {
+  const value = process.env[name];
+  if (value === undefined || !/^\d+$/.test(value)) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }

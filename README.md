@@ -196,6 +196,10 @@ Common endpoints:
 JSON write endpoints reject malformed or excessively nested payloads and return
 `413` when their route-specific body-size limit is exceeded. Most routes allow
 64 KiB; article writes allow approximately 1 MiB, and batch ingest allows 4 MiB.
+`POST /api/memory/recall` allows 120 requests per minute per client IP by
+default so several local coding CLIs can use prompt-time recall concurrently.
+Set `NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE` to tune that read-only
+endpoint for your deployment.
 
 Example recall request:
 
