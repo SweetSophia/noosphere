@@ -26,6 +26,29 @@ function request(path: string, init: RequestInit = {}) {
   });
 }
 
+async function expectRateLimitedAfter({
+  path,
+  method = "GET",
+  maxRequests,
+  ipPrefix,
+}: {
+  path: string;
+  method?: string;
+  maxRequests: number;
+  ipPrefix: string;
+}) {
+  const headers = { "x-real-ip": `${ipPrefix}-${crypto.randomUUID()}` };
+
+  for (let i = 0; i < maxRequests; i += 1) {
+    const response = await proxy(request(path, { method, headers }));
+    // 200 here means the proxy let the request continue to the downstream handler.
+    assert.equal(response.status, 200);
+  }
+
+  const blocked = await proxy(request(path, { method, headers }));
+  assert.equal(blocked.status, 429);
+}
+
 test("proxy adds security headers to wiki pages", async () => {
   const response = await proxy(request("/wiki/projects/example"));
 
@@ -36,16 +59,72 @@ test("proxy adds security headers to wiki pages", async () => {
 });
 
 test("proxy rate-limits article mutation routes", async () => {
-  const headers = { "x-real-ip": `patch-${crypto.randomUUID()}` };
-  let response = await proxy(request("/api/articles/article-1", { method: "PATCH", headers }));
+  await expectRateLimitedAfter({
+    path: "/api/articles/article-1",
+    method: "PATCH",
+    maxRequests: 30,
+    ipPrefix: "patch",
+  });
+});
 
-  for (let i = 1; i < 30; i += 1) {
-    response = await proxy(request("/api/articles/article-1", { method: "PATCH", headers }));
+test("proxy rate-limits NextAuth callback attempts", async () => {
+  await expectRateLimitedAfter({
+    path: "/api/auth/callback/credentials",
+    method: "POST",
+    maxRequests: 10,
+    ipPrefix: "auth",
+  });
+});
+
+test("proxy rate-limits a representative NextAuth non-callback route", async () => {
+  await expectRateLimitedAfter({
+    path: "/api/auth/signin",
+    maxRequests: 10,
+    ipPrefix: "auth-signin",
+  });
+});
+
+test("proxy rate-limits the wiki login page", async () => {
+  await expectRateLimitedAfter({
+    path: "/wiki/login",
+    maxRequests: 10,
+    ipPrefix: "login",
+  });
+});
+
+test("proxy auth rate limits are isolated per IP", async () => {
+  const path = "/wiki/login";
+  const saturatedIpHeaders = { "x-real-ip": `auth-ip-a-${crypto.randomUUID()}` };
+  const otherIpHeaders = { "x-real-ip": `auth-ip-b-${crypto.randomUUID()}` };
+
+  for (let i = 0; i < 10; i += 1) {
+    const response = await proxy(request(path, { headers: saturatedIpHeaders }));
+    assert.equal(response.status, 200);
   }
 
-  assert.notEqual(response.status, 429);
+  const blocked = await proxy(request(path, { headers: saturatedIpHeaders }));
+  assert.equal(blocked.status, 429);
 
-  const blocked = await proxy(request("/api/articles/article-1", { method: "PATCH", headers }));
+  const otherIpResponse = await proxy(request(path, { headers: otherIpHeaders }));
+  assert.equal(otherIpResponse.status, 200);
+});
+
+test("proxy shares the auth rate-limit budget across login and auth API routes", async () => {
+  const headers = { "x-real-ip": `auth-shared-${crypto.randomUUID()}` };
+
+  for (let i = 0; i < 5; i += 1) {
+    const response = await proxy(request("/wiki/login", { headers }));
+    assert.equal(response.status, 200);
+  }
+
+  for (let i = 0; i < 5; i += 1) {
+    const response = await proxy(
+      request("/api/auth/callback/credentials", { method: "POST", headers })
+    );
+    assert.equal(response.status, 200);
+  }
+
+  const blocked = await proxy(request("/wiki/login", { headers }));
   assert.equal(blocked.status, 429);
 });
 
