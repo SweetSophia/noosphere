@@ -85,3 +85,6 @@ jobs:
 
       - name: Run API tests
         run: npm run test:api
+
+      - name: Run security tests
+        run: npm run test:security

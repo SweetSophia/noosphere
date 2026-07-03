@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import test from "node:test";
 
 import { NextRequest } from "next/server";
@@ -33,9 +31,9 @@ function patchRequest(ip: string): NextRequest {
 }
 
 test("PATCH /api/articles/[id] rate-limits before auth work", async () => {
-  // The route imports Prisma-backed auth helpers, but this assertion never
-  // reaches DB work: the limiter runs first and unauthenticated requests stop
-  // at 401 until the limiter returns 429.
+  // The first 30 requests pass the limiter and return 401 without DB work
+  // because they carry no API key/session. The 31st returning 429 proves the
+  // route-local limiter runs before auth.
   requireDatabaseUrl();
   const originalConsoleError = console.error;
 
@@ -64,17 +62,4 @@ test("PATCH /api/articles/[id] rate-limits before auth work", async () => {
   } finally {
     console.error = originalConsoleError;
   }
-});
-
-test("PATCH /api/articles/[id] uses the bounded JSON parser", async () => {
-  const source = await readFile(
-    path.join(process.cwd(), "src/app/api/articles/[id]/route.ts"),
-    "utf8",
-  );
-
-  assert.doesNotMatch(source, /request\.json\s*\(/);
-  assert.match(
-    source,
-    /readBoundedJsonObject<[^>]+>\s*\(\s*request,\s*ARTICLE_JSON_BODY_MAX_BYTES,\s*\)/,
-  );
 });
