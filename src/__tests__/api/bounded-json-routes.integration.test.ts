@@ -124,12 +124,74 @@ test("legacy JSON routes enforce size and nesting limits (issue #192)", async ()
       where: { authorName: expectedAuthorName },
       select: { authorName: true, type: true },
     });
-    // Exactly one log is expected here: the empty-body lint success at the start.
-    assert.deepEqual(auditLogs, [{ authorName: expectedAuthorName, type: "lint" }]);
     const deletedLogs = await prisma.activityLog.deleteMany({
       where: { authorName: expectedAuthorName },
     });
+    await prisma.apiKey.delete({ where: { id: apiKey.id } });
+
+    // Exactly one log is expected here: the empty-body lint success at the start.
+    assert.deepEqual(auditLogs, [{ authorName: expectedAuthorName, type: "lint" }]);
     assert.equal(deletedLogs.count, 1);
+  }
+});
+
+test("article PATCH rejects oversized request bodies", async () => {
+  const { prisma } = await import("@/lib/prisma");
+  const { PATCH: updateArticle } = await import("@/app/api/articles/[id]/route");
+  const runId = crypto.randomUUID();
+  const rawKey = `noo_${crypto.randomBytes(32).toString("base64url")}`;
+  const keyHash = crypto.createHash("sha256").update(rawKey).digest("hex");
+
+  const apiKey = await prisma.apiKey.create({
+    data: {
+      name: `${TEST_PREFIX}${runId}`,
+      keyHash,
+      keyPrefix: rawKey.slice(0, 8),
+      permissions: "ADMIN",
+      allowedScopes: ["*"],
+    },
+  });
+
+  try {
+    const topic = await prisma.topic.create({
+      data: {
+        name: `${TEST_PREFIX}${runId}`,
+        slug: `${TEST_PREFIX}${runId}`,
+      },
+    });
+    const article = await prisma.article.create({
+      data: {
+        title: `${TEST_PREFIX}${runId}`,
+        slug: `${TEST_PREFIX}${runId}`,
+        content: "Original content",
+        topicId: topic.id,
+      },
+    });
+    const oversizedArticlePatchBody = JSON.stringify({
+      content: "x".repeat(
+        ARTICLE_LIMITS.maxContentSize + DEFAULT_JSON_BODY_MAX_BYTES + 1,
+      ),
+    });
+    const response = await updateArticle(
+      buildRequest(
+        rawKey,
+        `/api/articles/${article.id}`,
+        oversizedArticlePatchBody,
+        "PATCH",
+      ),
+      { params: Promise.resolve({ id: article.id }) },
+    );
+    assert.equal(response.status, 413);
+  } finally {
+    await prisma.activityLog.deleteMany({
+      where: { authorName: `${TEST_PREFIX}${runId}` },
+    });
+    await prisma.article.deleteMany({
+      where: { slug: `${TEST_PREFIX}${runId}` },
+    });
+    await prisma.topic.deleteMany({
+      where: { slug: `${TEST_PREFIX}${runId}` },
+    });
     await prisma.apiKey.delete({ where: { id: apiKey.id } });
   }
 });
