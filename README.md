@@ -44,6 +44,13 @@ docker compose -f docker-compose.noosphere.yml up -d
 
 Then open `http://localhost:6578/wiki`.
 
+If you omit `NOOSPHERE_ADMIN_PASSWORD` or `NOOSPHERE_BOOTSTRAP_API_KEY`, the
+bootstrap init container writes generated credentials to
+`/tmp/noosphere-bootstrap-secrets.json` inside that init container with mode
+`0600` and logs only the file path. Retrieve it before removing the init
+container, or set `NOOSPHERE_BOOTSTRAP_SECRETS_FILE` to a different container
+path.
+
 The production template uses `ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION:-latest}`,
 binds to `127.0.0.1:6578` by default, includes PostgreSQL and Redis, and runs a
 one-shot init service before the app starts.
