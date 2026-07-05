@@ -15,9 +15,11 @@ const TOPICS = JSON.parse(
   readFileSync(new URL("./bootstrap-topics.json", import.meta.url), "utf8"),
 );
 
+class SafeBootstrapError extends Error {}
+
 function requireEnv(name) {
   const value = process.env[name];
-  if (!value) throw new Error(`${name} is required`);
+  if (!value) throw new SafeBootstrapError(`${name} is required`);
   return value;
 }
 
@@ -69,7 +71,7 @@ function isWithinDirectory(path, root) {
 function ensurePrivateSecretsParent(parentDir) {
   const resolvedParentDir = resolve(parentDir);
   if (!ALLOWED_BOOTSTRAP_SECRETS_PARENT_ROOTS.some((root) => isWithinDirectory(resolvedParentDir, root))) {
-    throw new Error(
+    throw new SafeBootstrapError(
       "NOOSPHERE_BOOTSTRAP_SECRETS_FILE must point inside a dedicated private directory, " +
         "for example /tmp/noosphere-bootstrap-secrets/secrets.json or " +
         "/app/uploads/bootstrap-secrets/secrets.json.",
@@ -115,7 +117,8 @@ function formatBootstrapError(error) {
     details.push(`code=${error.code}`);
   }
   const suffix = details.length > 0 ? ` (${details.join(", ")})` : "";
-  return `[bootstrap] Failed to initialize Noosphere${suffix}. Verify database and bootstrap configuration.`;
+  const safeMessage = error instanceof SafeBootstrapError ? `: ${error.message}` : "";
+  return `[bootstrap] Failed to initialize Noosphere${suffix}${safeMessage}. Verify database and bootstrap configuration.`;
 }
 
 async function upsertTopic(client, topic, parentId = null) {

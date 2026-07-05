@@ -222,3 +222,36 @@ test("bootstrap process output does not include supplied secrets or database cre
     rmSync(dir, { force: true, recursive: true });
   }
 });
+
+test("bootstrap process output keeps safe validation context without supplied secrets", () => {
+  const dir = makeAllowedSecretsDir("safe-output-");
+  const adminPassword = "sentinel-admin-password-safe-output-test";
+  const apiKey = "noo_sentinel_safe_output_test";
+
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [resolve(repoRoot, "docker", "bootstrap.mjs")],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        timeout: 5_000,
+        env: {
+          ...process.env,
+          DATABASE_URL: "",
+          NOOSPHERE_ADMIN_PASSWORD: adminPassword,
+          NOOSPHERE_BOOTSTRAP_API_KEY: apiKey,
+          NOOSPHERE_BOOTSTRAP_SECRETS_FILE: join(dir, "private", "secrets.json"),
+        },
+      },
+    );
+
+    assert.notEqual(result.status, 0);
+    const output = `${result.stdout}\n${result.stderr}`;
+    assert.match(output, /DATABASE_URL is required/);
+    assert.doesNotMatch(output, new RegExp(adminPassword));
+    assert.doesNotMatch(output, new RegExp(apiKey));
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
