@@ -1,12 +1,16 @@
 import crypto from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 import process from "node:process";
 import bcrypt from "bcryptjs";
 import pg from "pg";
 
 const { Pool } = pg;
-const DEFAULT_BOOTSTRAP_SECRETS_FILE = "/tmp/noosphere-bootstrap-secrets.json";
+const DEFAULT_BOOTSTRAP_SECRETS_FILE = "/tmp/noosphere-bootstrap-secrets/secrets.json";
+const ALLOWED_BOOTSTRAP_SECRETS_PARENT_ROOTS = [
+  "/tmp/noosphere-bootstrap-secrets",
+  "/app/uploads/bootstrap-secrets",
+];
 const TOPICS = JSON.parse(
   readFileSync(new URL("./bootstrap-topics.json", import.meta.url), "utf8"),
 );
@@ -58,15 +62,33 @@ function readExistingGeneratedCredentials(secretsFile) {
   return {};
 }
 
+function isWithinDirectory(path, root) {
+  return path === root || path.startsWith(`${root}${sep}`);
+}
+
+function ensurePrivateSecretsParent(parentDir) {
+  const resolvedParentDir = resolve(parentDir);
+  if (!ALLOWED_BOOTSTRAP_SECRETS_PARENT_ROOTS.some((root) => isWithinDirectory(resolvedParentDir, root))) {
+    throw new Error(
+      "NOOSPHERE_BOOTSTRAP_SECRETS_FILE must point inside a dedicated private directory, " +
+        "for example /tmp/noosphere-bootstrap-secrets/secrets.json or " +
+        "/app/uploads/bootstrap-secrets/secrets.json.",
+    );
+  }
+
+  mkdirSync(resolvedParentDir, { recursive: true, mode: 0o700 });
+  chmodSync(resolvedParentDir, 0o700);
+}
+
 export function writeGeneratedSecretsFile(credentials) {
   if (Object.keys(credentials).length === 0) return null;
 
   const secretsFile = process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE || DEFAULT_BOOTSTRAP_SECRETS_FILE;
+  ensurePrivateSecretsParent(dirname(secretsFile));
   const mergedCredentials = {
     ...readExistingGeneratedCredentials(secretsFile),
     ...credentials,
   };
-  mkdirSync(dirname(secretsFile), { recursive: true, mode: 0o700 });
   const tmpFile = `${secretsFile}.${process.pid}.${crypto.randomBytes(8).toString("hex")}.tmp`;
   try {
     writeFileSync(
@@ -84,6 +106,16 @@ export function writeGeneratedSecretsFile(credentials) {
     throw error;
   }
   return secretsFile;
+}
+
+function formatBootstrapError(error) {
+  const details = [];
+  if (error instanceof Error && error.name) details.push(`name=${error.name}`);
+  if (error && typeof error === "object" && "code" in error && typeof error.code === "string") {
+    details.push(`code=${error.code}`);
+  }
+  const suffix = details.length > 0 ? ` (${details.join(", ")})` : "";
+  return `[bootstrap] Failed to initialize Noosphere${suffix}. Verify database and bootstrap configuration.`;
 }
 
 async function upsertTopic(client, topic, parentId = null) {
@@ -216,7 +248,7 @@ async function main() {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((error) => {
-    console.error(error instanceof Error ? error.message : String(error));
+    console.error(formatBootstrapError(error));
     process.exit(1);
   });
 }

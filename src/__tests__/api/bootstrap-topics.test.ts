@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -26,6 +27,12 @@ function readRepoFile(path: string) {
 
 async function importBootstrapHelpers() {
   return import(pathToFileURL(resolve(repoRoot, "docker", "bootstrap.mjs")).href);
+}
+
+function makeAllowedSecretsDir(prefix: string) {
+  const root = join(tmpdir(), "noosphere-bootstrap-secrets");
+  mkdirSync(root, { recursive: true });
+  return mkdtempSync(join(root, prefix));
 }
 
 test("bootstrap topic tree is valid and shared by seed/bootstrap scripts", () => {
@@ -75,7 +82,7 @@ test("bootstrap stores generated secrets out of logs", () => {
 test("bootstrap generated-secret helpers write secure JSON and preserve existing credentials", async () => {
   const { collectGeneratedSecrets, writeGeneratedSecretsFile } = await importBootstrapHelpers();
   const originalSecretsFile = process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
-  const dir = mkdtempSync(join(tmpdir(), "noosphere-bootstrap-secrets-"));
+  const dir = makeAllowedSecretsDir("helper-");
   const target = join(dir, "nested", "secrets.json");
 
   try {
@@ -93,6 +100,7 @@ test("bootstrap generated-secret helpers write secure JSON and preserve existing
       apiKey: "noo_first",
     });
     assert.equal(writeGeneratedSecretsFile(credentials), target);
+    assert.equal(statSync(dirname(target)).mode & 0o777, 0o700);
     assert.equal(statSync(target).mode & 0o777, 0o600);
     assert.deepEqual(JSON.parse(readFileSync(target, "utf8")).credentials, {
       adminPassword: "admin-pass",
@@ -102,6 +110,7 @@ test("bootstrap generated-secret helpers write secure JSON and preserve existing
     assert.equal(writeGeneratedSecretsFile({
       apiKey: "noo_second",
     }), target);
+    assert.equal(statSync(dirname(target)).mode & 0o777, 0o700);
     assert.equal(statSync(target).mode & 0o777, 0o600);
     assert.deepEqual(JSON.parse(readFileSync(target, "utf8")).credentials, {
       adminPassword: "admin-pass",
@@ -120,7 +129,7 @@ test("bootstrap generated-secret helpers write secure JSON and preserve existing
 test("bootstrap generated-secret helpers omit unapplied and empty credentials", async () => {
   const { collectGeneratedSecrets, writeGeneratedSecretsFile } = await importBootstrapHelpers();
   const originalSecretsFile = process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
-  const dir = mkdtempSync(join(tmpdir(), "noosphere-bootstrap-secrets-empty-"));
+  const dir = makeAllowedSecretsDir("empty-");
   const target = join(dir, "secrets.json");
 
   try {
@@ -137,8 +146,9 @@ test("bootstrap generated-secret helpers omit unapplied and empty credentials", 
     assert.equal(writeGeneratedSecretsFile(credentials), null);
     assert.throws(() => statSync(target), /ENOENT/);
 
-    writeFileSync(target, "{\"credentials\":{\"adminPassword\":\"existing\"}}\n", { mode: 0o600 });
+    writeFileSync(target, "{\"credentials\":{\"adminPassword\":\"existing\"}}\n", { mode: 0o644 });
     assert.equal(writeGeneratedSecretsFile({ apiKey: "noo_new" }), target);
+    assert.equal(statSync(target).mode & 0o777, 0o600);
     assert.deepEqual(JSON.parse(readFileSync(target, "utf8")).credentials, {
       adminPassword: "existing",
       apiKey: "noo_new",
@@ -149,6 +159,66 @@ test("bootstrap generated-secret helpers omit unapplied and empty credentials", 
     } else {
       process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = originalSecretsFile;
     }
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("bootstrap generated-secret helper rejects shared parent directories", async () => {
+  const { writeGeneratedSecretsFile } = await importBootstrapHelpers();
+  const originalSecretsFile = process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+
+  try {
+    for (const target of [
+      "/tmp/noosphere-bootstrap-secrets-rejected.json",
+      "/tmp/../tmp/noosphere-bootstrap-secrets-rejected.json",
+      "/app/uploads/bootstrap-secrets-rejected.json",
+    ]) {
+      process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = target;
+      assert.throws(
+        () => writeGeneratedSecretsFile({ apiKey: "noo_rejected" }),
+        /must point inside a dedicated private directory/,
+      );
+    }
+  } finally {
+    if (originalSecretsFile === undefined) {
+      delete process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+    } else {
+      process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = originalSecretsFile;
+    }
+  }
+});
+
+test("bootstrap process output does not include supplied secrets or database credentials on failure", () => {
+  const dir = makeAllowedSecretsDir("output-");
+  const adminPassword = "sentinel-admin-password-output-test";
+  const apiKey = "noo_sentinel_api_key_output_test";
+  const databasePassword = "sentinel-database-password-output-test";
+
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [resolve(repoRoot, "docker", "bootstrap.mjs")],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        timeout: 5_000,
+        env: {
+          ...process.env,
+          DATABASE_URL: `postgresql://noosphere:${databasePassword}@127.0.0.1:1/noosphere`,
+          NOOSPHERE_ADMIN_PASSWORD: adminPassword,
+          NOOSPHERE_BOOTSTRAP_API_KEY: apiKey,
+          NOOSPHERE_BOOTSTRAP_SECRETS_FILE: join(dir, "private", "secrets.json"),
+        },
+      },
+    );
+
+    assert.notEqual(result.status, 0);
+    const output = `${result.stdout}\n${result.stderr}`;
+    assert.doesNotMatch(output, new RegExp(adminPassword));
+    assert.doesNotMatch(output, new RegExp(apiKey));
+    assert.doesNotMatch(output, new RegExp(databasePassword));
+    assert.match(output, /\[bootstrap\] Failed to initialize Noosphere \(name=Error, code=ECONNREFUSED\)\./);
+  } finally {
     rmSync(dir, { force: true, recursive: true });
   }
 });
