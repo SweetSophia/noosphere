@@ -255,3 +255,40 @@ test("bootstrap process output keeps safe validation context without supplied se
     rmSync(dir, { force: true, recursive: true });
   }
 });
+
+test("bootstrap process output keeps safe permission validation context", () => {
+  const dir = makeAllowedSecretsDir("safe-permissions-");
+  const adminPassword = "sentinel-admin-password-permission-test";
+  const apiKey = "noo_sentinel_permission_test";
+  const databasePassword = "sentinel-database-password-permission-test";
+
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [resolve(repoRoot, "docker", "bootstrap.mjs")],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        timeout: 5_000,
+        env: {
+          ...process.env,
+          DATABASE_URL: `postgresql://noosphere:${databasePassword}@127.0.0.1:1/noosphere`,
+          NOOSPHERE_ADMIN_PASSWORD: adminPassword,
+          NOOSPHERE_BOOTSTRAP_API_KEY: apiKey,
+          NOOSPHERE_API_KEY_PERMISSIONS: "SUPERUSER",
+          NOOSPHERE_BOOTSTRAP_SECRETS_FILE: join(dir, "private", "secrets.json"),
+        },
+      },
+    );
+
+    assert.notEqual(result.status, 0);
+    const output = `${result.stdout}\n${result.stderr}`;
+    assert.match(output, /\[bootstrap\] Failed to initialize Noosphere/);
+    assert.match(output, /NOOSPHERE_API_KEY_PERMISSIONS must be READ, WRITE, or ADMIN/);
+    assert.doesNotMatch(output, new RegExp(adminPassword));
+    assert.doesNotMatch(output, new RegExp(apiKey));
+    assert.doesNotMatch(output, new RegExp(databasePassword));
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
+});

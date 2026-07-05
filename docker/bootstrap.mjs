@@ -159,7 +159,7 @@ async function main() {
   const permissions = process.env.NOOSPHERE_API_KEY_PERMISSIONS || "ADMIN";
 
   if (!["READ", "WRITE", "ADMIN"].includes(permissions)) {
-    throw new Error("NOOSPHERE_API_KEY_PERMISSIONS must be READ, WRITE, or ADMIN");
+    throw new SafeBootstrapError("NOOSPHERE_API_KEY_PERMISSIONS must be READ, WRITE, or ADMIN");
   }
 
   const pool = new Pool({ connectionString: databaseUrl });
