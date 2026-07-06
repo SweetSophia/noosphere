@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getServerSession } from "next-auth";
+import type { Prisma } from "@prisma/client";
 import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { EmptyState } from "@/components/wiki/EmptyState";
 import { PageHeader } from "@/components/wiki/PageHeader";
@@ -15,12 +16,14 @@ interface Props {
   params: Promise<{ topicSlug: string }>;
 }
 
-interface TopicPathNode {
-  id: string;
-  name: string;
-  slug: string;
-  parentId: string | null;
-}
+const topicPathSelect = {
+  id: true,
+  name: true,
+  slug: true,
+  parentId: true,
+} satisfies Prisma.TopicSelect;
+
+type TopicPathNode = Prisma.TopicGetPayload<{ select: typeof topicPathSelect }>;
 
 function buildTopicPath(topics: TopicPathNode[], current: TopicPathNode) {
   const topicMap = new Map(topics.map((topic) => [topic.id, topic]));
@@ -62,7 +65,7 @@ export default async function TopicPage({ params }: Props) {
   }
 
   const allTopics = await prisma.topic.findMany({
-    select: { id: true, name: true, slug: true, parentId: true },
+    select: topicPathSelect,
   });
   const topicPath = buildTopicPath(allTopics, topic);
 
@@ -80,6 +83,17 @@ export default async function TopicPage({ params }: Props) {
     orderBy: { updatedAt: "desc" },
   });
   const hasSubtopics = topic.children.length > 0;
+  const emptyArticlesState = hasSubtopics
+    ? {
+        title: "No direct articles yet",
+        description: "This branch is organized through subtopics. Open one below, or add a direct article here.",
+        actionLabel: "Add direct article",
+      }
+    : {
+        title: "No articles or subtopics yet",
+        description: "This leaf topic is ready for its first article when there is something to preserve here.",
+        actionLabel: "Create the first article",
+      };
 
   return (
     <div className="wiki-content topic-page">
@@ -181,12 +195,12 @@ export default async function TopicPage({ params }: Props) {
 
         {articles.length === 0 ? (
           <EmptyState
-            title="No articles yet"
-            description="Articles in this topic will appear here once they are created."
+            title={emptyArticlesState.title}
+            description={emptyArticlesState.description}
             action={
               canCreateArticle ? (
                 <Link href={`/wiki/${topic.slug}/new`} className="btn btn-primary btn-sm">
-                  Create the first article
+                  {emptyArticlesState.actionLabel}
                 </Link>
               ) : null
             }
