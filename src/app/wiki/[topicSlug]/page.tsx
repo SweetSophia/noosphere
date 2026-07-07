@@ -2,7 +2,6 @@ export const dynamic = "force-dynamic";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getServerSession } from "next-auth";
-import type { Prisma } from "@prisma/client";
 import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { EmptyState } from "@/components/wiki/EmptyState";
 import { PageHeader } from "@/components/wiki/PageHeader";
@@ -11,33 +10,10 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildScopeFilter } from "@/lib/api/auth";
 import { articleCardLabel, pluralize, wikiDateFormatter } from "@/lib/wiki-format";
+import { buildTopicPath, getTopicArticlesEmptyState, topicPathSelect } from "@/lib/wiki-topic-page";
 
 interface Props {
   params: Promise<{ topicSlug: string }>;
-}
-
-const topicPathSelect = {
-  id: true,
-  name: true,
-  slug: true,
-  parentId: true,
-} satisfies Prisma.TopicSelect;
-
-type TopicPathNode = Prisma.TopicGetPayload<{ select: typeof topicPathSelect }>;
-
-function buildTopicPath(topics: TopicPathNode[], current: TopicPathNode) {
-  const topicMap = new Map(topics.map((topic) => [topic.id, topic]));
-  const path: TopicPathNode[] = [];
-  const seen = new Set<string>();
-  let cursor: TopicPathNode | undefined = current;
-
-  while (cursor && !seen.has(cursor.id)) {
-    path.unshift(cursor);
-    seen.add(cursor.id);
-    cursor = cursor.parentId ? topicMap.get(cursor.parentId) : undefined;
-  }
-
-  return path;
 }
 
 export default async function TopicPage({ params }: Props) {
@@ -83,17 +59,7 @@ export default async function TopicPage({ params }: Props) {
     orderBy: { updatedAt: "desc" },
   });
   const hasSubtopics = topic.children.length > 0;
-  const emptyArticlesState = hasSubtopics
-    ? {
-        title: "No direct articles yet",
-        description: "This branch is organized through subtopics. Open one below, or add a direct article here.",
-        actionLabel: "Add direct article",
-      }
-    : {
-        title: "No articles or subtopics yet",
-        description: "This leaf topic is ready for its first article when there is something to preserve here.",
-        actionLabel: "Create the first article",
-      };
+  const emptyArticlesState = getTopicArticlesEmptyState(hasSubtopics);
 
   return (
     <div className="wiki-content topic-page">
