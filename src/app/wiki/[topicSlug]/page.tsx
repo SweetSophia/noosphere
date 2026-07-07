@@ -10,31 +10,10 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildScopeFilter } from "@/lib/api/auth";
 import { articleCardLabel, pluralize, wikiDateFormatter } from "@/lib/wiki-format";
+import { buildTopicPath, getTopicArticlesEmptyState, topicPathSelect } from "@/lib/wiki-topic-page";
 
 interface Props {
   params: Promise<{ topicSlug: string }>;
-}
-
-interface TopicPathNode {
-  id: string;
-  name: string;
-  slug: string;
-  parentId: string | null;
-}
-
-function buildTopicPath(topics: TopicPathNode[], current: TopicPathNode) {
-  const topicMap = new Map(topics.map((topic) => [topic.id, topic]));
-  const path: TopicPathNode[] = [];
-  const seen = new Set<string>();
-  let cursor: TopicPathNode | undefined = current;
-
-  while (cursor && !seen.has(cursor.id)) {
-    path.unshift(cursor);
-    seen.add(cursor.id);
-    cursor = cursor.parentId ? topicMap.get(cursor.parentId) : undefined;
-  }
-
-  return path;
 }
 
 export default async function TopicPage({ params }: Props) {
@@ -62,7 +41,7 @@ export default async function TopicPage({ params }: Props) {
   }
 
   const allTopics = await prisma.topic.findMany({
-    select: { id: true, name: true, slug: true, parentId: true },
+    select: topicPathSelect,
   });
   const topicPath = buildTopicPath(allTopics, topic);
 
@@ -80,6 +59,7 @@ export default async function TopicPage({ params }: Props) {
     orderBy: { updatedAt: "desc" },
   });
   const hasSubtopics = topic.children.length > 0;
+  const emptyArticlesState = getTopicArticlesEmptyState(hasSubtopics);
 
   return (
     <div className="wiki-content topic-page">
@@ -181,12 +161,12 @@ export default async function TopicPage({ params }: Props) {
 
         {articles.length === 0 ? (
           <EmptyState
-            title="No articles yet"
-            description="Articles in this topic will appear here once they are created."
+            title={emptyArticlesState.title}
+            description={emptyArticlesState.description}
             action={
               canCreateArticle ? (
                 <Link href={`/wiki/${topic.slug}/new`} className="btn btn-primary btn-sm">
-                  Create the first article
+                  {emptyArticlesState.actionLabel}
                 </Link>
               ) : null
             }
