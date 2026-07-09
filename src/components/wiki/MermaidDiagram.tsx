@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 
 interface MermaidDiagramProps {
   code: string;
@@ -11,10 +11,16 @@ type RenderState =
   | { status: "rendered"; svg: string }
   | { status: "error"; message: string };
 
+// Module-level guard: initialize mermaid exactly once per page load so
+// multiple diagrams don't race to clobber each other's config (W1 fix).
+let mermaidInitialized = false;
+
 export function MermaidDiagram({ code }: MermaidDiagramProps) {
   const reactId = useId();
   const diagramId = `mermaid-${reactId.replace(/[^A-Za-z0-9_-]/g, "")}`;
-  const source = code.trim();
+  // Stabilize the source string so the effect doesn't re-fire on every parent
+  // re-render (W2 fix — .trim() returns a fresh string each call).
+  const source = useMemo(() => code.trim(), [code]);
   const [renderState, setRenderState] = useState<RenderState>({ status: "idle" });
 
   useEffect(() => {
@@ -33,14 +39,18 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
         const mermaidModule = await import("mermaid");
         const mermaid = mermaidModule.default;
 
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: "strict",
-          theme: "base",
-          themeVariables: {
-            fontFamily: "inherit",
-          },
-        });
+        // Initialize once per page — safe even with concurrent diagrams.
+        if (!mermaidInitialized) {
+          mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: "strict",
+            theme: "base",
+            themeVariables: {
+              fontFamily: "inherit",
+            },
+          });
+          mermaidInitialized = true;
+        }
 
         const { svg } = await mermaid.render(diagramId, source);
         if (!cancelled) {

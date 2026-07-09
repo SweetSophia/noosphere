@@ -48,7 +48,6 @@ export const ARTICLE_SANITIZE_SCHEMA = {
     pre: [...(defaultSchema.attributes?.pre ?? []), "className"],
     span: [
       ...(defaultSchema.attributes?.span ?? []),
-      "aria-hidden",
       "ariaHidden",
       "className",
       "style",
