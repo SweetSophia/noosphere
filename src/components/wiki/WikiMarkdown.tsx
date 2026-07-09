@@ -20,8 +20,9 @@ export const ARTICLE_REHYPE_PLUGINS: PluggableList = [[rehypeSanitize, ARTICLE_S
 const LANGUAGE_CLASS_PATTERN = /\blanguage-([\w-]+)\b/;
 
 const ARTICLE_MARKDOWN_COMPONENTS: Components = {
-  code({ className, children, node, ...props }) {
-    void node;
+  code({ className, children, ...props }) {
+    const codeProps = { ...props };
+    delete (codeProps as { node?: unknown }).node;
 
     const match = LANGUAGE_CLASS_PATTERN.exec(className || "");
     if (className && match) {
@@ -37,7 +38,7 @@ const ARTICLE_MARKDOWN_COMPONENTS: Components = {
     }
 
     return (
-      <code className={className} {...props}>
+      <code className={className} {...codeProps}>
         {children}
       </code>
     );

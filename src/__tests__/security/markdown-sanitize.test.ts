@@ -3,7 +3,12 @@ import test from "node:test";
 
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { WikiMarkdown } from "@/components/wiki/WikiMarkdown";
+import {
+  ARTICLE_REHYPE_PLUGINS,
+  ARTICLE_REMARK_PLUGINS,
+  ARTICLE_SANITIZE_SCHEMA,
+  WikiMarkdown,
+} from "@/components/wiki/WikiMarkdown";
 
 /**
  * B4: Verify that server-side markdown rendering sanitizes dangerous HTML.
@@ -16,6 +21,19 @@ import { WikiMarkdown } from "@/components/wiki/WikiMarkdown";
 function renderMarkdown(content: string): string {
   return renderToStaticMarkup(React.createElement(WikiMarkdown, { content }));
 }
+
+test("B4: shared markdown config preserves syntax-highlight classes", () => {
+  const [rehypeSanitizeEntry] = ARTICLE_REHYPE_PLUGINS as [unknown[]];
+
+  assert.ok(ARTICLE_REMARK_PLUGINS.length > 0, "remark plugins should be configured");
+  assert.strictEqual(
+    rehypeSanitizeEntry[1],
+    ARTICLE_SANITIZE_SCHEMA,
+    "rehype-sanitize should use the exported article sanitize schema",
+  );
+  assert.ok(ARTICLE_SANITIZE_SCHEMA.attributes?.code?.includes("className"));
+  assert.ok(ARTICLE_SANITIZE_SCHEMA.attributes?.pre?.includes("className"));
+});
 
 test("B4: <script> tags are rendered as inert text, not executable HTML", () => {
   const malicious = 'Some text\n\n<script>alert("xss")</script>\n\nMore text';
@@ -74,8 +92,11 @@ test("B4: legitimate markdown formatting is preserved", () => {
 
 test("B4: code block className is preserved for syntax highlighting", () => {
   const codeBlock = "```js\nconst x = 1;\n```";
+  const jsonBlock = "```json\n{\"x\":1}\n```";
   const html = renderMarkdown(codeBlock);
+  const jsonHtml = renderMarkdown(jsonBlock);
 
   assert.match(html, /\blanguage-js\b/, "language-js className should be preserved");
-  assert.doesNotMatch(html, /\blanguage-json\b/, "language-js assertion should not match language-json");
+  assert.match(jsonHtml, /\blanguage-json\b/, "language-json className should be preserved");
+  assert.doesNotMatch(jsonHtml, /\blanguage-js\b/, "language-json should not satisfy language-js checks");
 });
