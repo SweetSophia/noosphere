@@ -54,7 +54,11 @@ test("B4: <iframe> tags are rendered as inert text", () => {
   assert.doesNotMatch(html, /<iframe\b/);
 });
 
-test("B4: raw HTML links with inline event handlers are not rendered as HTML", () => {
+test("B4: raw HTML with inline event handlers is stripped (no tag or handler appears in output)", () => {
+  // ReactMarkdown + rehype-sanitize (without rehype-raw) treats raw HTML in the source
+  // as text that gets sanitized. An <a> with onclick never becomes a rendered element
+  // with the attribute because sanitize removes unknown/dangerous constructs.
+  // We assert both the dangerous attribute and the tag are absent.
   const malicious = '<a href="https://ok.example.com" onclick="alert(1)">link</a>';
   const html = renderMarkdown(malicious);
 
