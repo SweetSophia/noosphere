@@ -1,3 +1,5 @@
+@import "katex/dist/katex.min.css";
+
 :root {
   color-scheme: light;
 
@@ -380,6 +382,47 @@ pre,
 kbd,
 samp {
   font-family: var(--font-mono);
+}
+
+.katex {
+  color: var(--text-primary);
+}
+
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.5rem 0;
+}
+
+.mermaid-container {
+  margin: 1.25rem 0;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-inset);
+  overflow-x: auto;
+}
+
+.mermaid-rendered {
+  min-width: min-content;
+}
+
+.mermaid-rendered svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.mermaid-fallback {
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-sm);
+  background: var(--code-surface);
+  color: var(--code-fg, #f4f7fb);
+  overflow-x: auto;
+  white-space: pre-wrap;
 }
 
 ::placeholder {

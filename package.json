@@ -36,6 +36,8 @@
     "isomorphic-dompurify": "^3.15.0",
     "js-yaml": "^4.1.1",
     "jszip": "^3.10.1",
+    "katex": "^0.17.0",
+    "mermaid": "^11.16.0",
     "next": "16.2.6",
     "next-auth": "^4.24.14",
     "pg": "^8.20.0",
@@ -45,8 +47,10 @@
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.1",
     "rehype-highlight": "^7.0.2",
+    "rehype-katex": "^7.0.1",
     "rehype-sanitize": "^6.0.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.2",
