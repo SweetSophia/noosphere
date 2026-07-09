@@ -1,28 +1,12 @@
 "use client";
 
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
-import type { PluggableList } from "unified";
 import { MarkdownToolbar } from "@/components/wiki/MarkdownToolbar";
+import { WikiMarkdown } from "@/components/wiki/WikiMarkdown";
 import {
   MARKDOWN_TEXTAREA_UPDATE_EVENT,
   type MarkdownTextareaUpdateDetail,
 } from "@/components/wiki/markdownTextareaUpdate";
-
-// Extend default schema to preserve className on code/pre for syntax highlighting
-const sanitizeSchema = {
-  ...defaultSchema,
-  attributes: {
-    ...defaultSchema.attributes,
-    code: [...(defaultSchema.attributes?.code ?? []), "className"],
-    pre: [...(defaultSchema.attributes?.pre ?? []), "className"],
-  },
-};
-
-const REMARK_PLUGINS: PluggableList = [remarkGfm];
-const REHYPE_PLUGINS: PluggableList = [[rehypeSanitize, sanitizeSchema]];
 
 interface MarkdownPreviewTabsProps {
   targetTextareaId: string;
@@ -206,7 +190,7 @@ export function MarkdownPreviewTabs({
 
         <div id={previewPaneId} className="markdown-editor-preview preview-pane markdown-body">
           {activeMode === "write" ? null : trimmedContent ? (
-            <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS}>{trimmedContent}</ReactMarkdown>
+            <WikiMarkdown content={trimmedContent} />
           ) : activeMode === "split" ? (
             <p className="text-muted">Preview will appear here as you type.</p>
           ) : (

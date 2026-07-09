@@ -8,22 +8,7 @@ import { authOptions } from "@/lib/auth";
 import { filterVisibleRelatedArticleRows } from "@/lib/articles/relations";
 import { DeleteArticleForm } from "@/components/wiki/DeleteArticleForm";
 import { PageHeader } from "@/components/wiki/PageHeader";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
-
-// Extend default rehype-sanitize schema to preserve className on code/pre
-// elements so syntax highlighting (language-xyz classes) is not stripped.
-const sanitizeSchema = {
-  ...defaultSchema,
-  attributes: {
-    ...defaultSchema.attributes,
-    code: [...(defaultSchema.attributes?.code ?? []), "className"],
-    pre: [...(defaultSchema.attributes?.pre ?? []), "className"],
-  },
-};
+import { WikiMarkdown } from "@/components/wiki/WikiMarkdown";
 import { deleteArticle } from "./edit/actions";
 
 interface Props {
@@ -214,34 +199,7 @@ export default async function ArticlePage({ params }: Props) {
       </header>
 
       <article className="markdown-body article-prose">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          rehypePlugins={[[rehypeSanitize, sanitizeSchema]]}
-          components={{
-            code({ className, children, ...props }) {
-              const inline = !className;
-              const match = /language-(\w+)/.exec(className || "");
-              if (!inline && match) {
-                return (
-                  <SyntaxHighlighter
-                    style={oneDark}
-                    language={match[1]}
-                    PreTag="div"
-                  >
-                    {String(children).replace(/\n$/, "")}
-                  </SyntaxHighlighter>
-                );
-              }
-              return (
-                <code className={className} {...props}>
-                  {children}
-                </code>
-              );
-            },
-          }}
-        >
-          {article.content}
-        </ReactMarkdown>
+        <WikiMarkdown content={article.content} />
       </article>
 
       <section className="revision-summary-card">
