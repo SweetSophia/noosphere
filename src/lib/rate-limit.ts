@@ -33,7 +33,6 @@ function getClientIdentifier(request: NextRequest): string {
     .digest("base64url")}`;
 }
 
-let redisDegraded = false;
 let outageWarningLogged = false;
 let firstErrorLogged = false;
 
@@ -51,17 +50,15 @@ function warnFallbackEngaged(reason: string, error?: unknown): void {
     console.error("Rate limiter error:", error);
     firstErrorLogged = true;
   }
-  redisDegraded = true;
 }
 
-function markRedisHealthy(): void {
+function markRedisResponded(): void {
   // Note: the in-process fallback Map still holds timestamps accumulated during
   // the outage.  For up to `windowMs` after recovery the local guard may deny
   // requests that Redis would allow, because the stale local entries have not
   // yet expired.  This is an acceptable trade-off: the alternative (clearing
   // the Map on recovery) would briefly allow every client to exceed the shared
   // limit at the recovery boundary.
-  redisDegraded = false;
   outageWarningLogged = false;
   firstErrorLogged = false;
 }
@@ -123,7 +120,7 @@ export async function rateLimit(
       return degradedResult(fallbackDecision);
     }
 
-    markRedisHealthy();
+    markRedisResponded();
 
     if (!redisAllowed) {
       if (fallbackDecision === "allowed") {
@@ -141,7 +138,6 @@ export async function rateLimit(
 
 export const _rateLimitTestHooks = {
   resetDegradationState(): void {
-    redisDegraded = false;
     outageWarningLogged = false;
     firstErrorLogged = false;
   },

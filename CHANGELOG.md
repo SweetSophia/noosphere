@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   health check or eval round-trip fails. Operators relying on fail-open
   behavior during Redis maintenance windows should plan a Redis-aware deploy
   strategy.
+- The local guard now runs ahead of every Redis call (warm-fallback-leading-
+  guard); under heavy single-worker skew the local cap may deny requests that
+  Redis would globally allow.
 
 ## [1.10.3] - 2026-06-30
 
