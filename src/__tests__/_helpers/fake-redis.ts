@@ -12,6 +12,7 @@ interface FakeRedisClientOptions {
 export class FakeRedisClient {
   status = "wait";
   connectCalls = 0;
+  readonly evalKeys: string[] = [];
 
   private readonly values = new Map<string, string>();
   private readonly expires = new Map<string, number>();
@@ -86,6 +87,33 @@ export class FakeRedisClient {
   expire(key: string, seconds: number): number {
     this.assertReady();
     this.expires.set(key, Date.now() + seconds * 1000);
+    return 1;
+  }
+
+  async eval(
+    _script: string,
+    numberOfKeys: number,
+    ...args: Array<string | number>
+  ): Promise<number> {
+    this.assertReady();
+    if (numberOfKeys !== 1) {
+      throw new Error("FakeRedisClient only supports one-key rate-limit scripts");
+    }
+
+    const [key, windowStart, now, maxRequests, member, ttlSeconds] = args;
+    if (typeof key !== "string" || typeof member !== "string") {
+      throw new Error("Invalid rate-limit script arguments");
+    }
+    this.evalKeys.push(key);
+
+    this.zremrangebyscore(key, "-inf", String(windowStart));
+    const count = this.zcard(key);
+    if (count >= Number(maxRequests)) {
+      return 0;
+    }
+
+    this.zadd(key, Number(now), member);
+    this.expire(key, Number(ttlSeconds));
     return 1;
   }
 
