@@ -8,6 +8,10 @@ interface RedisRateLimitOptions {
   member?: string;
 }
 
+/** Grace period (seconds) added to the computed TTL to prevent edge-case
+ *  races where the key expires between ZADD and EXPIRE. */
+const TTL_GRACE_SECONDS = 1;
+
 // Redis executes Lua scripts atomically, so concurrent app instances cannot
 // both observe the same pre-limit count and over-admit requests.
 const REDIS_RATE_LIMIT_SCRIPT = `
@@ -40,7 +44,7 @@ export async function checkRedisRateLimit(
     options.now,
     options.maxRequests,
     options.member ?? `${options.now}:${crypto.randomUUID()}`,
-    Math.ceil(options.windowMs / 1000) + 1
+    Math.ceil(options.windowMs / 1000) + TTL_GRACE_SECONDS
   );
 
   if (result === 1 || result === "1") return true;

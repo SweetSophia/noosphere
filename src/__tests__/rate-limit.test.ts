@@ -189,6 +189,8 @@ describe("Redis Rate Limiter", () => {
     try {
       const degraded = await rateLimit(makeRequest("10.0.0.9"), options);
       assert.equal(degraded.allowed, false);
+      // Verify no new entry was added on capacity-saturated denial.
+      assert.equal(_fallbackLimiterTestHooks.size, _fallbackLimiterTestHooks.capacity);
     } finally {
       if (previousRedisUrl === undefined) {
         delete process.env.REDIS_URL;

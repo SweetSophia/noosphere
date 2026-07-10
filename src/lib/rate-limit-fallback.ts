@@ -11,6 +11,19 @@
  * - Conservative: same windowMs and maxRequests as the Redis path.
  * - Intentionally simple — this is a defense-in-depth last resort, not a
  *   replacement for the Redis-backed limiter.
+ *
+ * Sweep & memory:
+ * - Expired entries are reclaimed lazily on the first request after the 30s
+ *   sweep boundary, or whenever the bucket cap forces evaluation.
+ * - Worst-case memory: MAX_ENTRIES (10 000) × maxRequests × 8 bytes ≈ 5 MB.
+ *
+ * Window-change semantics:
+ * - If a key is reused across routes with different `windowMs` values, the
+ *   latest call's `windowMs` is treated as authoritative and stored
+ *   timestamps are retroactively filtered under the new window. This is an
+ *   explicit design choice: in production each route uses a distinct
+ *   `keyPrefix`, so cross-route key reuse does not occur. If key reuse
+ *   across windows is ever introduced, consider splitting the key namespace.
  */
 
 interface FallbackEntry {
@@ -80,7 +93,7 @@ class InProcessRateLimiter {
     const entry = this.entries.get(key);
     if (!entry) return;
 
-    const index = entry.timestamps.lastIndexOf(timestamp);
+    const index = entry.timestamps.indexOf(timestamp);
     if (index === -1) return;
 
     entry.timestamps.splice(index, 1);
