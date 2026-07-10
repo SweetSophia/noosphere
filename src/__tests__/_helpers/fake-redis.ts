@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { REDIS_RATE_LIMIT_SCRIPT } from "@/lib/rate-limit-redis";
 
 type PipelineCommand =
   | { method: "zremrangebyscore"; args: [string, string, string] }
@@ -16,7 +17,6 @@ export class FakeRedisClient {
   connectCalls = 0;
   readonly evalKeys: string[] = [];
   evalshaCalls = 0;
-  evalFallbackCalls = 0;
 
   private readonly values = new Map<string, string>();
   private readonly expires = new Map<string, number>();
@@ -94,11 +94,8 @@ export class FakeRedisClient {
     return 1;
   }
 
-  /** SHA1 of the rate-limit script body.  Must match rate-limit-redis.ts. */
   private static readonly SCRIPT_SHA =
-    createHash("sha1")
-      .update('\nredis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", ARGV[1])\nlocal count = redis.call("ZCARD", KEYS[1])\n\nif count >= tonumber(ARGV[3]) then\n  return 0\nend\n\nredis.call("ZADD", KEYS[1], ARGV[2], ARGV[4])\nredis.call("EXPIRE", KEYS[1], ARGV[5])\nreturn 1\n')
-      .digest("hex");
+    createHash("sha1").update(REDIS_RATE_LIMIT_SCRIPT).digest("hex");
 
   async evalsha(
     sha1: string,

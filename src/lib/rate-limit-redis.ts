@@ -23,7 +23,7 @@ const EVAL_TIMEOUT_MS = 1500;
 
 // Redis executes Lua scripts atomically, so concurrent app instances cannot
 // both observe the same pre-limit count and over-admit requests.
-const REDIS_RATE_LIMIT_SCRIPT = `
+export const REDIS_RATE_LIMIT_SCRIPT = `
 redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", ARGV[1])
 local count = redis.call("ZCARD", KEYS[1])
 
@@ -37,7 +37,6 @@ return 1
 `;
 
 const SCRIPT_SHA = createHash("sha1").update(REDIS_RATE_LIMIT_SCRIPT).digest("hex");
-
 /**
  * Atomically prune, count, and conditionally record a request in Redis.
  *
@@ -95,8 +94,11 @@ async function evalWithFallback(
 }
 
 /**
- * Race the eval promise against a timeout.  If the timeout fires, throw an
- * error so the caller's catch block routes to the degraded fallback path.
+ * Race the eval promise against a timeout.  If the timeout fires, the
+ * in-flight Redis promise may still reject later (broken pipe, cluster
+ * failover, etc.).  We attach a no-op catch to prevent that late rejection
+ * from surfacing as an unhandled promise rejection — but only AFTER the
+ * race is settled, so the first rejection still propagates correctly.
  */
 async function timeoutRace(
   promise: Promise<number | string>,
@@ -115,5 +117,8 @@ async function timeoutRace(
     return await Promise.race([promise, timeoutPromise]);
   } finally {
     if (timer) clearTimeout(timer);
+    // The race is over.  Silently consume any late rejection from the loser
+    // so it doesn't surface as an unhandled promise rejection.
+    promise.catch(() => {});
   }
 }
