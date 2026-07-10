@@ -1,6 +1,10 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "assert";
-import { rateLimit } from "@/lib/rate-limit";
+import { rateLimit, _rateLimitTestHooks } from "@/lib/rate-limit";
+import {
+  fallbackLimiter,
+  _fallbackLimiterTestHooks,
+} from "@/lib/rate-limit-fallback";
 import { _redisTestHooks } from "@/lib/cache/redis";
 import { NextRequest } from "next/server";
 import { FakeRedisClient } from "./_helpers/fake-redis";
@@ -17,10 +21,14 @@ describe("Redis Rate Limiter", () => {
   beforeEach(() => {
     fakeRedis = new FakeRedisClient();
     _redisTestHooks.setClientForTesting(fakeRedis as never);
+    _fallbackLimiterTestHooks.reset();
+    _rateLimitTestHooks.resetDegradationState();
   });
 
   afterEach(() => {
     _redisTestHooks.reset();
+    _fallbackLimiterTestHooks.reset();
+    _rateLimitTestHooks.resetDegradationState();
   });
 
   it("allows requests within limit", async () => {
@@ -84,30 +92,234 @@ describe("Redis Rate Limiter", () => {
     assert.deepStrictEqual(result, { allowed: true });
   });
 
-  it("falls back to allowing when Redis client is unavailable", async () => {
-    // Simulate Redis not configured by passing null-like state
-    const request = makeRequest("10.0.0.6");
+  it("hashes invalid proxy identifiers before storing rate-limit keys", async () => {
+    const maliciousIdentifier = "x".repeat(12_000);
+    const request = makeRequest(maliciousIdentifier);
 
-    // With a disconnected client, should fail open (allow)
-    fakeRedis.status = "end";
-    const result = await rateLimit(request, { windowMs: 60_000, maxRequests: 1, keyPrefix: "test-failopen" });
-    assert.deepStrictEqual(result, { allowed: true });
+    assert.deepStrictEqual(
+      await rateLimit(request, {
+        windowMs: 60_000,
+        maxRequests: 5,
+        keyPrefix: "bounded-identifier",
+      }),
+      { allowed: true }
+    );
+
+    assert.equal(fakeRedis.evalKeys.length, 1);
+    assert.equal(fakeRedis.evalKeys[0].includes(maliciousIdentifier), false);
+    assert.ok(fakeRedis.evalKeys[0].length < 128);
   });
 
-  it("falls back to allowing when Redis URL is not set", async () => {
+  it("falls back to in-process limiter when Redis client is unavailable", async () => {
+    // Simulate Redis not configured by passing null-like state
+    const request = makeRequest("10.0.0.6");
+    const previousRedisUrl = process.env.REDIS_URL;
+
+    // With a disconnected client, the in-process fallback kicks in.
+    // First request should be allowed (bucket empty), second blocked.
+    _fallbackLimiterTestHooks.reset();
+    _rateLimitTestHooks.resetDegradationState();
+    delete process.env.REDIS_URL;
+    fakeRedis.status = "end";
+    try {
+      const result1 = await rateLimit(request, { windowMs: 60_000, maxRequests: 1, keyPrefix: "test-failopen" });
+      assert.deepStrictEqual(result1, { allowed: true });
+
+      const result2 = await rateLimit(request, { windowMs: 60_000, maxRequests: 1, keyPrefix: "test-failopen" });
+      assert.equal(result2.allowed, false);
+    } finally {
+      if (previousRedisUrl === undefined) {
+        delete process.env.REDIS_URL;
+      } else {
+        process.env.REDIS_URL = previousRedisUrl;
+      }
+    }
+  });
+
+  it("falls back to in-process limiter when Redis URL is not set", async () => {
     const previousRedisUrl = process.env.REDIS_URL;
     delete process.env.REDIS_URL;
     _redisTestHooks.reset();
+    _fallbackLimiterTestHooks.reset();
+    _rateLimitTestHooks.resetDegradationState();
 
     const request = makeRequest("10.0.0.7");
-    const result = await rateLimit(request, { windowMs: 60_000, maxRequests: 1, keyPrefix: "test-noredis" });
-
-    if (previousRedisUrl !== undefined) {
-      process.env.REDIS_URL = previousRedisUrl;
+    let result: Awaited<ReturnType<typeof rateLimit>>;
+    try {
+      result = await rateLimit(request, {
+        windowMs: 60_000,
+        maxRequests: 1,
+        keyPrefix: "test-noredis",
+      });
+    } finally {
+      if (previousRedisUrl === undefined) {
+        delete process.env.REDIS_URL;
+      } else {
+        process.env.REDIS_URL = previousRedisUrl;
+      }
+      _redisTestHooks.reset();
     }
-    _redisTestHooks.reset();
 
+    // First request is allowed (bucket empty in fallback).
     assert.deepStrictEqual(result, { allowed: true });
+  });
+
+  it("uses healthy Redis at local capacity but fails closed if Redis is down", async () => {
+    const now = Date.now();
+    for (let i = 0; i < _fallbackLimiterTestHooks.capacity; i++) {
+      assert.equal(
+        fallbackLimiter.check(`capacity-${i}`, 60_000, 10, now),
+        "allowed"
+      );
+    }
+
+    const options = {
+      windowMs: 60_000,
+      maxRequests: 10,
+      keyPrefix: "capacity-fallback",
+    };
+    assert.deepStrictEqual(
+      await rateLimit(makeRequest("10.0.0.8"), options),
+      { allowed: true }
+    );
+
+    const previousRedisUrl = process.env.REDIS_URL;
+    delete process.env.REDIS_URL;
+    fakeRedis.status = "end";
+    try {
+      const degraded = await rateLimit(makeRequest("10.0.0.9"), options);
+      assert.equal(degraded.allowed, false);
+      // Verify no new entry was added on capacity-saturated denial.
+      assert.equal(_fallbackLimiterTestHooks.size, _fallbackLimiterTestHooks.capacity);
+    } finally {
+      if (previousRedisUrl === undefined) {
+        delete process.env.REDIS_URL;
+      } else {
+        process.env.REDIS_URL = previousRedisUrl;
+      }
+    }
+  });
+
+  it("rolls back the warmed local entry when Redis rejects the request", async () => {
+    const ip = "10.0.0.14";
+    const keyPrefix = "rollback-on-redis-reject";
+    const key = `ratelimit:${keyPrefix}:${ip}`;
+    const now = Date.now();
+    fakeRedis.status = "ready";
+    fakeRedis.zadd(key, now, "other-instance-request");
+
+    const options = { windowMs: 60_000, maxRequests: 1, keyPrefix };
+    const rejected = await rateLimit(makeRequest(ip), options);
+    assert.equal(rejected.allowed, false);
+
+    const previousRedisUrl = process.env.REDIS_URL;
+    delete process.env.REDIS_URL;
+    fakeRedis.status = "end";
+    try {
+      assert.deepStrictEqual(await rateLimit(makeRequest(ip), options), {
+        allowed: true,
+      });
+    } finally {
+      if (previousRedisUrl === undefined) {
+        delete process.env.REDIS_URL;
+      } else {
+        process.env.REDIS_URL = previousRedisUrl;
+      }
+    }
+  });
+
+  it("survives a full healthy → degraded → healthy → degraded transition cycle", async () => {
+    const ip = "10.0.0.15";
+    const options = { windowMs: 60_000, maxRequests: 2, keyPrefix: "lifecycle" };
+    const request = makeRequest(ip);
+    const previousRedisUrl = process.env.REDIS_URL;
+
+    try {
+      // Phase 1: Redis healthy — requests go through Redis path.
+      assert.deepStrictEqual(await rateLimit(request, options), { allowed: true });
+      assert.deepStrictEqual(await rateLimit(request, options), { allowed: true });
+      // Third request: local guard (2/2) blocks before Redis is consulted.
+      const blocked = await rateLimit(request, options);
+      assert.equal(blocked.allowed, false);
+
+      // Phase 2: Redis goes down — fallback limiter is already warm from phase 1.
+      // The local map holds 2 timestamps for this key, so the next request is
+      // denied by the local guard without touching Redis.
+      fakeRedis.status = "end";
+      const degraded = await rateLimit(request, options);
+      assert.equal(degraded.allowed, false);
+
+      // Phase 3: Redis recovers.  Simulate windowMs elapsing by resetting
+      // both the in-process fallback (stale local timestamps) and the
+      // FakeRedis sorted set (stale Redis-side timestamps).  In production
+      // this happens naturally when windowMs seconds pass.
+      fakeRedis.status = "ready";
+      _fallbackLimiterTestHooks.reset();
+      // Swap in a fresh FakeRedis so Phase 1's ZSET entries are gone.
+      fakeRedis = new FakeRedisClient();
+      _redisTestHooks.setClientForTesting(fakeRedis as never);
+      const recovered = await rateLimit(request, options);
+      assert.deepStrictEqual(recovered, { allowed: true });
+
+      // Phase 4: A second degradation cycle begins. The warning should fire
+      // again because markRedisResponded reset the degradation flags in phase 3.
+      fakeRedis.status = "end";
+      const degradedAgain = await rateLimit(request, options);
+      // Local guard has 1 timestamp (from phase 3), so this is allowed.
+      assert.deepStrictEqual(degradedAgain, { allowed: true });
+      // One more request should be blocked by the local guard (2/2).
+      const blocked2 = await rateLimit(request, options);
+      assert.equal(blocked2.allowed, false);
+    } finally {
+      if (previousRedisUrl === undefined) {
+        delete process.env.REDIS_URL;
+      } else {
+        process.env.REDIS_URL = previousRedisUrl;
+      }
+    }
+  });
+
+  it("correctly rolls back duplicate timestamps when Redis rejects under same-ms burst", async () => {
+    // Construct a scenario where the local guard ADMITS but Redis REJECTS,
+    // forcing the rollback path to run on duplicate timestamps.
+    //
+    // Strategy: use a FakeRedisClient that always rejects (pre-filled to
+    // capacity) so every rateLimit call passes the local guard but is
+    // denied by Redis, triggering rollback of duplicate timestamps.
+    const ip = "10.0.0.16";
+    const keyPrefix = "dup-rollback-redis-reject";
+    const redisKey = `ratelimit:${keyPrefix}:${ip}`;
+    const options = { windowMs: 60_000, maxRequests: 10, keyPrefix };
+    const request = makeRequest(ip);
+
+    // Pre-fill Redis to capacity so every eval returns 0 (denied).
+    const now = Date.now();
+    fakeRedis.status = "ready";
+    fakeRedis.zadd(redisKey, now, "blocker"); // 1 entry, but maxRequests=10
+    // Fill to exactly maxRequests so eval denies.
+    for (let i = 1; i < 10; i++) {
+      fakeRedis.zadd(redisKey, now - i, `pre-existing-${i}`);
+    }
+
+    // Single request that passes local guard but Redis denies → rollback.
+    const result = await rateLimit(request, options);
+    assert.equal(result.allowed, false, "Redis should deny (at capacity)");
+
+    // The rollback should have removed the local timestamp.
+    // Verify by turning Redis off and checking local guard allows (empty bucket).
+    const previousRedisUrl = process.env.REDIS_URL;
+    delete process.env.REDIS_URL;
+    fakeRedis.status = "end";
+    try {
+      const recovered = await rateLimit(request, options);
+      assert.deepStrictEqual(recovered, { allowed: true });
+    } finally {
+      if (previousRedisUrl === undefined) {
+        delete process.env.REDIS_URL;
+      } else {
+        process.env.REDIS_URL = previousRedisUrl;
+      }
+    }
   });
 });
 
@@ -117,10 +329,14 @@ describe("Rate Limiter Edge Cases", () => {
   beforeEach(() => {
     fakeRedis = new FakeRedisClient();
     _redisTestHooks.setClientForTesting(fakeRedis as never);
+    _fallbackLimiterTestHooks.reset();
+    _rateLimitTestHooks.resetDegradationState();
   });
 
   afterEach(() => {
     _redisTestHooks.reset();
+    _fallbackLimiterTestHooks.reset();
+    _rateLimitTestHooks.resetDegradationState();
   });
 
   it("returns correct error message on rate limit", async () => {
@@ -136,15 +352,16 @@ describe("Rate Limiter Edge Cases", () => {
     }
   });
 
-  it("handles concurrent requests from same IP", async () => {
+  it("enforces the local guard across concurrent requests from the same IP", async () => {
     const request = makeRequest("10.0.0.11");
-    const options = { windowMs: 60_000, maxRequests: 100, keyPrefix: "test-concurrent" };
+    const options = { windowMs: 60_000, maxRequests: 10, keyPrefix: "test-concurrent" };
 
-    // Simulate burst of requests
-    for (let i = 0; i < 50; i++) {
-      const result = await rateLimit(request, options);
-      assert.equal(result.allowed, true);
-    }
+    const results = await Promise.all(
+      Array.from({ length: 50 }, () => rateLimit(request, options))
+    );
+
+    assert.equal(results.filter((result) => result.allowed).length, 10);
+    assert.equal(results.filter((result) => !result.allowed).length, 40);
   });
 
   it("shares the first Redis connection attempt across a lazy-client burst", async () => {
@@ -166,9 +383,10 @@ describe("Rate Limiter Edge Cases", () => {
     }
   });
 
-  it("falls open and suppresses immediate retries when the lazy Redis connect fails", async () => {
+  it("falls back to in-process limiter and suppresses immediate retries when the lazy Redis connect fails", async () => {
     const failingRedis = new FakeRedisClient({ rejectConnect: true });
     _redisTestHooks.setClientForTesting(failingRedis as never);
+    _fallbackLimiterTestHooks.reset();
 
     const request = makeRequest("10.0.0.13");
     const options = { windowMs: 60_000, maxRequests: 1, keyPrefix: "test-lazy-fail" };
@@ -180,8 +398,14 @@ describe("Rate Limiter Edge Cases", () => {
     };
 
     try {
+      // First request: Redis connect fails, fallback limiter allows (bucket empty).
       assert.deepStrictEqual(await rateLimit(request, options), { allowed: true });
-      assert.deepStrictEqual(await rateLimit(request, options), { allowed: true });
+      // Second request: Redis on cooldown, fallback limiter blocks (bucket full).
+      const result2 = await rateLimit(request, options);
+      assert.equal(result2.allowed, false);
+      if (!result2.allowed) {
+        assert.equal(result2.response.status, 429);
+      }
       assert.equal(failingRedis.connectCalls, 1);
       // The second call should short-circuit on the reconnect cooldown instead
       // of attempting, and logging, another failed Redis connection.
