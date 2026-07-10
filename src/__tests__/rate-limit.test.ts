@@ -144,12 +144,27 @@ describe("Redis Rate Limiter", () => {
   });
 
   it("uses EVALSHA and falls back to EVAL on NOSCRIPT", async () => {
-    // The FakeRedisClient.evalsha throws NOSCRIPT for unknown SHAs.
-    // Verify that a normal call uses evalsha first.
+    // Phase 1: normal call — EVALSHA succeeds with the correct SHA.
     const request = makeRequest("10.0.0.21");
     await rateLimit(request, { windowMs: 60_000, maxRequests: 5, keyPrefix: "evalsha-test" });
-
     assert.ok(fakeRedis.evalshaCalls > 0, "EVALSHA should be called first");
+
+    // Phase 2: force NOSCRIPT by overriding evalsha to always throw.
+    // The EVAL fallback should kick in and the request should still succeed.
+    const originalEvalsha = fakeRedis.evalsha.bind(fakeRedis);
+    fakeRedis.evalsha = async () => {
+      throw new Error("NOSCRIPT No matching script. Please use EVAL.");
+    };
+    try {
+      const result = await rateLimit(makeRequest("10.0.0.22"), {
+        windowMs: 60_000,
+        maxRequests: 5,
+        keyPrefix: "evalsha-noscript",
+      });
+      assert.deepStrictEqual(result, { allowed: true });
+    } finally {
+      fakeRedis.evalsha = originalEvalsha;
+    }
   });
 
   it("falls back to in-process limiter when Redis client is unavailable", async () => {
