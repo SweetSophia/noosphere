@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 type PipelineCommand =
   | { method: "zremrangebyscore"; args: [string, string, string] }
   | { method: "zcard"; args: [string] }
@@ -13,6 +15,8 @@ export class FakeRedisClient {
   status = "wait";
   connectCalls = 0;
   readonly evalKeys: string[] = [];
+  evalshaCalls = 0;
+  evalFallbackCalls = 0;
 
   private readonly values = new Map<string, string>();
   private readonly expires = new Map<string, number>();
@@ -90,6 +94,27 @@ export class FakeRedisClient {
     return 1;
   }
 
+  /** SHA1 of the rate-limit script body.  Must match rate-limit-redis.ts. */
+  private static readonly SCRIPT_SHA =
+    createHash("sha1")
+      .update('\nredis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", ARGV[1])\nlocal count = redis.call("ZCARD", KEYS[1])\n\nif count >= tonumber(ARGV[3]) then\n  return 0\nend\n\nredis.call("ZADD", KEYS[1], ARGV[2], ARGV[4])\nredis.call("EXPIRE", KEYS[1], ARGV[5])\nreturn 1\n')
+      .digest("hex");
+
+  async evalsha(
+    sha1: string,
+    numberOfKeys: number,
+    ...args: Array<string | number>
+  ): Promise<number> {
+    this.assertReady();
+    this.evalshaCalls++;
+    if (sha1 !== FakeRedisClient.SCRIPT_SHA) {
+      throw new Error("NOSCRIPT No matching script. Please use EVAL.");
+    }
+    // Delegate to the existing eval logic (skip the script body arg).
+    this.evalKeys.push(args[0] as string);
+    return this.runRateLimitScript(numberOfKeys, args);
+  }
+
   async eval(
     _script: string,
     numberOfKeys: number,
@@ -100,11 +125,26 @@ export class FakeRedisClient {
       throw new Error("FakeRedisClient only supports one-key rate-limit scripts");
     }
 
+    // Validate basic types (runRateLimitScript does full validation).
+    if (typeof args[0] !== "string" || typeof args[4] !== "string") {
+      throw new Error("Invalid rate-limit script arguments");
+    }
+    this.evalKeys.push(args[0] as string);
+    return this.runRateLimitScript(numberOfKeys, args);
+  }
+
+  private runRateLimitScript(
+    numberOfKeys: number,
+    args: Array<string | number>
+  ): number {
+    if (numberOfKeys !== 1) {
+      throw new Error("FakeRedisClient only supports one-key rate-limit scripts");
+    }
+
     const [key, windowStart, now, maxRequests, member, ttlSeconds] = args;
     if (typeof key !== "string" || typeof member !== "string") {
       throw new Error("Invalid rate-limit script arguments");
     }
-    this.evalKeys.push(key);
 
     this.zremrangebyscore(key, "-inf", String(windowStart));
     const count = this.zcard(key);

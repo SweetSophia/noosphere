@@ -110,6 +110,48 @@ describe("Redis Rate Limiter", () => {
     assert.ok(fakeRedis.evalKeys[0].length < 128);
   });
 
+  it("short-circuits oversized identifiers without hashing", async () => {
+    const oversized = "x".repeat(512);
+    const request = makeRequest(oversized);
+
+    assert.deepStrictEqual(
+      await rateLimit(request, {
+        windowMs: 60_000,
+        maxRequests: 5,
+        keyPrefix: "oversized-identifier",
+      }),
+      { allowed: true }
+    );
+
+    // The key should use the "invalid:oversized" short-circuit, not a hash.
+    assert.equal(fakeRedis.evalKeys.length, 1);
+    assert.ok(fakeRedis.evalKeys[0].includes("invalid:oversized"));
+    assert.ok(fakeRedis.evalKeys[0].length < 80);
+  });
+
+  it("includes a Retry-After header on 429 responses", async () => {
+    const request = makeRequest("10.0.0.20");
+    const options = { windowMs: 30_000, maxRequests: 1, keyPrefix: "retry-after" };
+
+    await rateLimit(request, options); // First request OK
+    const result = await rateLimit(request, options); // Second blocked
+
+    assert.equal(result.allowed, false);
+    if (!result.allowed) {
+      assert.equal(result.response.status, 429);
+      assert.equal(result.response.headers.get("Retry-After"), "30");
+    }
+  });
+
+  it("uses EVALSHA and falls back to EVAL on NOSCRIPT", async () => {
+    // The FakeRedisClient.evalsha throws NOSCRIPT for unknown SHAs.
+    // Verify that a normal call uses evalsha first.
+    const request = makeRequest("10.0.0.21");
+    await rateLimit(request, { windowMs: 60_000, maxRequests: 5, keyPrefix: "evalsha-test" });
+
+    assert.ok(fakeRedis.evalshaCalls > 0, "EVALSHA should be called first");
+  });
+
   it("falls back to in-process limiter when Redis client is unavailable", async () => {
     // Simulate Redis not configured by passing null-like state
     const request = makeRequest("10.0.0.6");

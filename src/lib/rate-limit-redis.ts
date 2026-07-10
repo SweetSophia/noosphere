@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type Redis from "ioredis";
 
 interface RedisRateLimitOptions {
@@ -15,6 +16,11 @@ interface RedisRateLimitOptions {
  *  the instant the oldest in-window entry becomes queryable-out-of-window. */
 const TTL_GRACE_SECONDS = 1;
 
+/** Maximum time to wait for a Redis eval response before falling back.
+ *  Covers wedged-socket scenarios where the client is "ready" but the
+ *  connection is stuck mid-command. */
+const EVAL_TIMEOUT_MS = 1500;
+
 // Redis executes Lua scripts atomically, so concurrent app instances cannot
 // both observe the same pre-limit count and over-admit requests.
 const REDIS_RATE_LIMIT_SCRIPT = `
@@ -30,28 +36,84 @@ redis.call("EXPIRE", KEYS[1], ARGV[5])
 return 1
 `;
 
+const SCRIPT_SHA = createHash("sha1").update(REDIS_RATE_LIMIT_SCRIPT).digest("hex");
+
 /**
  * Atomically prune, count, and conditionally record a request in Redis.
+ *
+ * Uses EVALSHA with automatic EVAL fallback (via ioredis defineCommand pattern)
+ * to avoid re-sending the script body on every call.  The entire eval is wrapped
+ * in a timeout to handle wedged-socket scenarios where the client reports
+ * "ready" but the connection is stuck mid-command.
+ *
  * Returns null for an unexpected Redis response so the caller can use its
  * already-warmed in-process fallback rather than trusting malformed state.
+ * Throws on timeout or Redis error so the caller's catch block routes to
+ * the degraded path.
  */
 export async function checkRedisRateLimit(
-  redis: Pick<Redis, "eval">,
+  redis: Pick<Redis, "eval" | "evalsha">,
   options: RedisRateLimitOptions
 ): Promise<boolean | null> {
-  const result = await redis.eval(
-    REDIS_RATE_LIMIT_SCRIPT,
-    1,
+  const args: Array<string | number> = [
     options.key,
     options.now - options.windowMs,
     options.now,
     options.maxRequests,
     options.member ?? `${options.now}:${crypto.randomUUID()}`,
-    Math.ceil(options.windowMs / 1000) + TTL_GRACE_SECONDS
-  );
+    Math.ceil(options.windowMs / 1000) + TTL_GRACE_SECONDS,
+  ];
+
+  const evalPromise = evalWithFallback(redis, args);
+
+  const result = await timeoutRace(evalPromise, EVAL_TIMEOUT_MS, options.key);
 
   if (result === 1 || result === "1") return true;
   if (result === 0 || result === "0") return false;
   console.warn("[rate-limit-redis] Unexpected script result", { key: options.key, result });
   return null;
+}
+
+/**
+ * Try EVALSHA first; on NOSCRIPT error (script evicted from Redis cache),
+ * fall back to EVAL.  This mirrors ioredis's built-in behaviour but gives
+ * us explicit control over the fallback path.
+ */
+async function evalWithFallback(
+  redis: Pick<Redis, "eval" | "evalsha">,
+  args: Array<string | number>
+): Promise<number | string> {
+  try {
+    return (await redis.evalsha(SCRIPT_SHA, 1, ...args)) as number | string;
+  } catch (err: unknown) {
+    // NOSCRIPT means Redis doesn't have the script cached.  Fall back to EVAL.
+    if (err instanceof Error && /NOSCRIPT/i.test(err.message)) {
+      return (await redis.eval(REDIS_RATE_LIMIT_SCRIPT, 1, ...args)) as number | string;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Race the eval promise against a timeout.  If the timeout fires, throw an
+ * error so the caller's catch block routes to the degraded fallback path.
+ */
+async function timeoutRace(
+  promise: Promise<number | string>,
+  timeoutMs: number,
+  key: string
+): Promise<number | string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`Redis eval timed out after ${timeoutMs}ms (key: ${key})`)),
+      timeoutMs
+    );
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

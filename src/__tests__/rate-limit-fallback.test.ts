@@ -207,12 +207,16 @@ describe("Rate Limiter Fallback (Redis failures)", () => {
   });
 
   it("warns again when Redis recovers and a later degradation begins", async () => {
-    const originalEval = fakeRedis.eval.bind(fakeRedis);
+    const originalEvalsha = fakeRedis.evalsha.bind(fakeRedis);
     let shouldFail = true;
-    fakeRedis.eval = async (...args: Parameters<FakeRedisClient["eval"]>) => {
+    fakeRedis.evalsha = (async (
+      sha1: string,
+      numberOfKeys: number,
+      ...args: Array<string | number>
+    ) => {
       if (shouldFail) throw new Error("Redis unavailable");
-      return originalEval(...args);
-    };
+      return originalEvalsha(sha1, numberOfKeys, ...args);
+    }) as typeof fakeRedis.evalsha;
 
     const request = makeRequest("10.0.0.63");
     const options = { windowMs: 60_000, maxRequests: 10, keyPrefix: "warning-transition" };
