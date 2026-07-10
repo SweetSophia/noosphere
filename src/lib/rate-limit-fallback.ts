@@ -60,8 +60,7 @@ class InProcessRateLimiter {
     const entry = this.entries.get(key);
 
     if (entry) {
-      // The current call is authoritative if a route changes its configured
-      // window. This mirrors Redis's use of the current windowStart value.
+      // Apply the current call's window. See file header for rationale.
       entry.timestamps = entry.timestamps.filter((t) => t > now - windowMs);
       entry.windowMs = windowMs;
     }

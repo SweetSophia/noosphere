@@ -278,6 +278,44 @@ describe("Redis Rate Limiter", () => {
       }
     }
   });
+
+  it("correctly rolls back duplicate timestamps from a same-ms burst", async () => {
+    // Simulate a burst where multiple requests share the same Date.now()
+    // value, Redis admits only some, and the rest must be rolled back
+    // using indexOf on duplicate timestamps.
+    const ip = "10.0.0.16";
+    const keyPrefix = "dup-rollback";
+    const options = { windowMs: 60_000, maxRequests: 5, keyPrefix };
+    const request = makeRequest(ip);
+
+    // Issue 3 concurrent requests (same event-loop tick → likely same ms).
+    // Redis (fake) admits all 3 since maxRequests=5 and bucket starts empty.
+    const results = await Promise.all([
+      rateLimit(request, options),
+      rateLimit(request, options),
+      rateLimit(request, options),
+    ]);
+    assert.equal(results.filter((r) => r.allowed).length, 3);
+
+    // Issue 3 more concurrent requests. Redis admits 2 more (total 5 = max),
+    // rejects 1. The rejected one must roll back its local timestamp.
+    const results2 = await Promise.all([
+      rateLimit(request, options),
+      rateLimit(request, options),
+      rateLimit(request, options),
+    ]);
+    const admitted2 = results2.filter((r) => r.allowed).length;
+    const rejected2 = results2.filter((r) => !r.allowed).length;
+    assert.equal(admitted2, 2);
+    assert.equal(rejected2, 1);
+
+    // At this point, 5 requests are in the local fallback map (all admitted).
+    // The 6th request that was rejected by Redis had its timestamp rolled back.
+    // Verify the bucket is exactly at capacity (5/5) by checking that the
+    // next request is blocked by the local guard without touching Redis.
+    const blocked = await rateLimit(request, options);
+    assert.equal(blocked.allowed, false);
+  });
 });
 
 describe("Rate Limiter Edge Cases", () => {

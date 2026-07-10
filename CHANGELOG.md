@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Rate limiter fails degraded under Redis outage (#276)**: all rate-limited
+  routes now return 429 once the in-process per-worker cap is hit during a
+  Redis outage, replacing the previous fail-open behavior. The fallback
+  limiter is per-process, so the effective cluster-wide ceiling during an
+  outage is `maxRequests × worker_count` per `windowMs`. Per-route defaults
+  and Redis behavior are unchanged; the change applies only when the Redis
+  health check or eval round-trip fails. Operators relying on fail-open
+  behavior during Redis maintenance windows should plan a Redis-aware deploy
+  strategy.
+
 ## [1.10.3] - 2026-06-30
 
 Patch release for concurrent agent recall reliability. No breaking changes and

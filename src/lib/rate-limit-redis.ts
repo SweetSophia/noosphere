@@ -8,8 +8,11 @@ interface RedisRateLimitOptions {
   member?: string;
 }
 
-/** Grace period (seconds) added to the computed TTL to prevent edge-case
- *  races where the key expires between ZADD and EXPIRE. */
+/** Grace period (seconds) added to the TTL so the EXPIRE window always
+ *  strictly exceeds `windowMs`. `Math.ceil(windowMs / 1000)` can equal the
+ *  window's effective lifetime to-the-second (e.g. 60 000 ms → 60 s), and
+ *  Redis EXPIRE rounds to the second, so without +1 the key could expire
+ *  the instant the oldest in-window entry becomes queryable-out-of-window. */
 const TTL_GRACE_SECONDS = 1;
 
 // Redis executes Lua scripts atomically, so concurrent app instances cannot
@@ -49,5 +52,6 @@ export async function checkRedisRateLimit(
 
   if (result === 1 || result === "1") return true;
   if (result === 0 || result === "0") return false;
+  console.warn("[rate-limit-redis] Unexpected script result", { key: options.key, result });
   return null;
 }

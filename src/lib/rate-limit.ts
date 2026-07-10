@@ -34,16 +34,22 @@ function getClientIdentifier(request: NextRequest): string {
 }
 
 let redisDegraded = false;
+let outageWarningLogged = false;
+let firstErrorLogged = false;
 
 function warnFallbackEngaged(reason: string, error?: unknown): void {
-  if (!redisDegraded) {
-    if (error !== undefined) {
-      console.error("Rate limiter error:", error);
-    }
+  if (!outageWarningLogged) {
     console.warn(
       `[rate-limit] Redis unavailable (${reason}); relying on in-process limiter. ` +
         "Rate limiting will be per-process, not shared across instances."
     );
+    outageWarningLogged = true;
+  }
+  // Always log the first error of each degradation window, even if the
+  // banner was already printed via a no-error path.
+  if (error !== undefined && !firstErrorLogged) {
+    console.error("Rate limiter error:", error);
+    firstErrorLogged = true;
   }
   redisDegraded = true;
 }
@@ -56,6 +62,8 @@ function markRedisHealthy(): void {
   // the Map on recovery) would briefly allow every client to exceed the shared
   // limit at the recovery boundary.
   redisDegraded = false;
+  outageWarningLogged = false;
+  firstErrorLogged = false;
 }
 
 function rateLimitExceeded(): { allowed: false; response: NextResponse } {
@@ -134,5 +142,7 @@ export async function rateLimit(
 export const _rateLimitTestHooks = {
   resetDegradationState(): void {
     redisDegraded = false;
+    outageWarningLogged = false;
+    firstErrorLogged = false;
   },
 };
