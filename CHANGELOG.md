@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Rate limiter fails degraded under Redis outage (#276)**: all rate-limited
+- **Rate limiter fails degraded under Redis outage ([#276](https://github.com/SweetSophia/noosphere/pull/276))**: all rate-limited
   routes now return 429 once the in-process per-worker cap is hit during a
   Redis outage, replacing the previous fail-open behavior. The fallback
   limiter is per-process, so the effective cluster-wide ceiling during an

@@ -262,7 +262,7 @@ describe("Redis Rate Limiter", () => {
       assert.deepStrictEqual(recovered, { allowed: true });
 
       // Phase 4: A second degradation cycle begins. The warning should fire
-      // again because markRedisHealthy cleared redisDegraded in phase 3.
+      // again because markRedisResponded reset the degradation flags in phase 3.
       fakeRedis.status = "end";
       const degradedAgain = await rateLimit(request, options);
       // Local guard has 1 timestamp (from phase 3), so this is allowed.
