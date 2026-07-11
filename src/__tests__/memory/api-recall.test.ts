@@ -383,6 +383,91 @@ test("memory recall enabledProviders filters default providers", async () => {
   assert.equal(response.body.results[0]?.providerId, "alpha");
 });
 
+test("memory recall auto mode omits conflicts to keep response small", async () => {
+  // Regression test: auto-mode responses used to include conflict pairs with
+  // full article content, pushing responses past the plugin's 1 MB limit.
+  const response = await executeMemoryRecallRequest(
+    { query: "meeting", mode: "auto", resultCap: 5, tokenBudget: 200 },
+    {
+      providers: [
+        {
+          provider: mockProvider("hindsight", [
+            mockResult({
+              id: "mem-a",
+              provider: "hindsight",
+              content: "Meeting at 3pm",
+              relevanceScore: 0.8,
+            }),
+          ]),
+        },
+        {
+          provider: mockProvider("noosphere", [
+            mockResult({
+              id: "mem-b",
+              provider: "noosphere",
+              content: "Meeting at 5pm",
+              relevanceScore: 0.5,
+            }),
+          ]),
+        },
+      ],
+      settings: {
+        enabledProviders: ["hindsight", "noosphere"],
+      },
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.ok("results" in response.body);
+  if (!("results" in response.body)) return;
+  // Auto mode must NOT include conflicts or conflictStats — they can account
+  // for >98% of payload on broad queries and push responses past the 1 MB
+  // plugin limit. The plugin only consumes promptInjectionText in auto mode.
+  assert.equal(response.body.conflicts, undefined, "conflicts must be omitted in auto mode");
+  assert.equal(response.body.conflictStats, undefined, "conflictStats must be omitted in auto mode");
+});
+
+test("memory recall inspection mode still includes conflicts", async () => {
+  const response = await executeMemoryRecallRequest(
+    { query: "meeting", mode: "inspection", resultCap: 5 },
+    {
+      providers: [
+        {
+          provider: mockProvider("hindsight", [
+            mockResult({
+              id: "mem-a",
+              provider: "hindsight",
+              content: "Meeting at 3pm",
+              relevanceScore: 0.8,
+            }),
+          ]),
+        },
+        {
+          provider: mockProvider("noosphere", [
+            mockResult({
+              id: "mem-b",
+              provider: "noosphere",
+              content: "Meeting at 5pm",
+              relevanceScore: 0.5,
+            }),
+          ]),
+        },
+      ],
+      settings: {
+        enabledProviders: ["hindsight", "noosphere"],
+      },
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.ok("results" in response.body);
+  if (!("results" in response.body)) return;
+  // Inspection mode MUST still include conflicts — tools like noosphere_recall
+  // use inspection mode and need conflict data.
+  assert.ok(response.body.conflicts !== undefined, "conflicts present in inspection mode");
+  assert.ok(response.body.conflictStats !== undefined, "conflictStats present in inspection mode");
+});
+
 test("memory recall explicit providers bypass enabledProviders filter", async () => {
   const response = await executeMemoryRecallRequest(
     { query: "memory", mode: "inspection", providers: ["beta"] },
