@@ -284,17 +284,22 @@ async function withTimeout<T>(
 }
 
 function toMemoryRecallResponse(response: RecallResponse): MemoryRecallResponse {
+  const isAuto = response.mode === "auto";
   return {
     results: response.results,
     totalBeforeCap: response.totalBeforeCap,
     mode: response.mode,
     tokenBudgetUsed: response.tokenBudgetUsed,
-    promptInjectionText:
-      response.mode === "auto" ? response.promptInjectionText : undefined,
+    promptInjectionText: isAuto ? response.promptInjectionText : undefined,
     providerMeta: response.providerMeta,
     dedupStats: response.dedupStats,
-    conflicts: response.conflicts,
-    conflictStats: response.conflictStats,
+    // Omit conflicts in auto mode. The plugin only consumes promptInjectionText
+    // in that path; conflict pairs embed full article content for both sides
+    // and can account for >98% of the payload on broad queries, pushing
+    // responses past the plugin's 1 MB limit (MAX_RESPONSE_BODY_BYTES) and
+    // causing silent auto-recall failures.
+    conflicts: isAuto ? undefined : response.conflicts,
+    conflictStats: isAuto ? undefined : response.conflictStats,
   };
 }
 
