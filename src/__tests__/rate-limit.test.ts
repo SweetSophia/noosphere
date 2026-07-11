@@ -152,6 +152,7 @@ describe("Redis Rate Limiter", () => {
     // Phase 2: force NOSCRIPT by overriding evalsha to always throw.
     // The EVAL fallback should kick in and the request should still succeed.
     const originalEvalsha = fakeRedis.evalsha.bind(fakeRedis);
+    const evalKeysBefore = fakeRedis.evalKeys.length;
     fakeRedis.evalsha = async () => {
       throw new Error("NOSCRIPT No matching script. Please use EVAL.");
     };
@@ -162,6 +163,17 @@ describe("Redis Rate Limiter", () => {
         keyPrefix: "evalsha-noscript",
       });
       assert.deepStrictEqual(result, { allowed: true });
+      // EVAL fallback must have actually run — a new evalKey entry for this IP
+      // proves the Lua script executed (not just degradedResult allowing it).
+      assert.equal(
+        fakeRedis.evalKeys.length,
+        evalKeysBefore + 1,
+        "EVAL fallback should have added a new eval key"
+      );
+      assert.ok(
+        fakeRedis.evalKeys[fakeRedis.evalKeys.length - 1].includes("evalsha-noscript"),
+        "EVAL fallback key should match the request's keyPrefix"
+      );
     } finally {
       fakeRedis.evalsha = originalEvalsha;
     }
@@ -314,6 +326,7 @@ describe("Redis Rate Limiter", () => {
       _fallbackLimiterTestHooks.reset();
       // Swap in a fresh FakeRedis so Phase 1's ZSET entries are gone.
       fakeRedis = new FakeRedisClient();
+      await fakeRedis.connect();
       _redisTestHooks.setClientForTesting(fakeRedis as never);
       const recovered = await rateLimit(request, options);
       assert.deepStrictEqual(recovered, { allowed: true });

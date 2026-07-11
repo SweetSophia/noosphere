@@ -18,10 +18,13 @@ interface RateLimitOptions {
 const MAX_IDENTIFIER_LENGTH = 256;
 
 function getClientIdentifier(request: NextRequest): string {
+  const xff = request.headers.get("x-forwarded-for");
+  // Cap before parsing so a multi-kilobyte x-forwarded-for doesn't waste CPU
+  // on split/trim.  1 024 bytes is generous for any legitimate proxy chain.
   const rawIdentifier = (
     request.headers.get("x-real-ip") ??
     request.headers.get("cf-connecting-ip") ??
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    (xff ? xff.slice(0, 1024).split(",")[0]?.trim() : null) ??
     "unknown"
   ).trim();
 
