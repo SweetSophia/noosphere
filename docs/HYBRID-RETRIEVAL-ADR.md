@@ -27,7 +27,7 @@ Hybrid recall will be disabled by default. Enabling it requires all of the follo
 4. sufficient ready-vector coverage; and
 5. explicit operator consent for any remote content or query egress.
 
-Missing or stale embeddings never make an article undiscoverable: the lexical leg continues to search all authorized articles.
+Missing or stale embeddings do not exclude an article from lexical eligibility. The article can still be returned when it ranks within the lexical leg's fixed candidate depth; only the vector leg requires a ready, current embedding.
 
 For a profile, an eligible article is non-deleted, has a canonical document, and satisfies that profile's local/remote and restricted-content egress policy. Ready-vector coverage is the percentage of eligible articles whose vector is ready for the same profile, current embedding revision, and current canonical content hash. Initial profile activation requires at least 95% ready-vector coverage. Uncovered or newly changed articles remain lexical-only; the numerator, denominator, and excluded-policy counts are exposed separately without article identifiers.
 
@@ -46,7 +46,7 @@ The first infrastructure PR will build and test that image in CI without changin
 
 External PostgreSQL is a separate compatibility boundary. Hybrid storage is an optional feature activation, not an unconditional standard Prisma migration. Activation must preflight extension availability and permissions, install and verify the extension and feature schema transactionally, and record its feature-schema version. The application must continue to run keyword-only against a supported external database when hybrid retrieval is not activated.
 
-The activation design must pass `migrate deploy`, shadow-database, `migrate diff`, and `db push` drift tests before it can ship. Feature activation owns the vector DDL. Its Prisma representation must be selected from evidence from that drift matrix; candidates include introspected ignored models and `Unsupported("vector")` fields. Standard Prisma commands must neither create vector storage on an extension-less keyword-only database nor drop activated feature objects. Vector tables are accessed through a narrow raw-SQL repository; generated Prisma CRUD does not read or write vector values.
+The activation design must pass `migrate deploy`, shadow-database, `migrate diff`, and `db push` drift tests before it can ship. Feature activation owns the vector DDL. Its Prisma representation must be selected from evidence in that drift matrix; candidates include introspected ignored models and `Unsupported("vector")` fields. Standard Prisma commands must neither create vector storage on an extension-less keyword-only database nor drop activated feature objects. Vector tables are accessed through a narrow raw-SQL repository; generated Prisma CRUD does not read or write vector values.
 
 ### 3. Immutable embedding profiles
 
