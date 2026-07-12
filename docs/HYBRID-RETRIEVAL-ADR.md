@@ -29,6 +29,8 @@ Hybrid recall will be disabled by default. Enabling it requires all of the follo
 
 Missing or stale embeddings never make an article undiscoverable: the lexical leg continues to search all authorized articles.
 
+For a profile, an eligible article is non-deleted, has a canonical document, and satisfies that profile's local/remote and restricted-content egress policy. Ready-vector coverage is the percentage of eligible articles whose vector is ready for the same profile, current embedding revision, and current canonical content hash. Initial profile activation requires at least 95% ready-vector coverage. Uncovered or newly changed articles remain lexical-only; the numerator, denominator, and excluded-policy counts are exposed separately without article identifiers.
+
 ### 2. Database image and compatibility
 
 The bundled database currently uses PostgreSQL 16 on Alpine. The upstream pgvector 0.8.1 images use Debian Bookworm or Trixie; there is no equivalent Alpine tag. Noosphere will not reuse an Alpine-created physical data volume in a Debian-based container.
@@ -44,7 +46,7 @@ The first infrastructure PR will build and test that image in CI without changin
 
 External PostgreSQL is a separate compatibility boundary. Hybrid storage is an optional feature activation, not an unconditional standard Prisma migration. Activation must preflight extension availability and permissions, install and verify the extension and feature schema transactionally, and record its feature-schema version. The application must continue to run keyword-only against a supported external database when hybrid retrieval is not activated.
 
-The activation design must pass `migrate deploy`, shadow-database, `migrate diff`, and `db push` drift tests before it can ship. Vector tables will be owned by a narrow raw-SQL repository; generated Prisma CRUD will not read or write vector values.
+The activation design must pass `migrate deploy`, shadow-database, `migrate diff`, and `db push` drift tests before it can ship. Feature activation owns the vector DDL. Its Prisma representation must be selected from evidence from that drift matrix; candidates include introspected ignored models and `Unsupported("vector")` fields. Standard Prisma commands must neither create vector storage on an extension-less keyword-only database nor drop activated feature objects. Vector tables are accessed through a narrow raw-SQL repository; generated Prisma CRUD does not read or write vector values.
 
 ### 3. Immutable embedding profiles
 
@@ -69,7 +71,7 @@ The vector column may hold different dimensions across profiles, so storage must
 - finite numeric values and exact response length before persistence; and
 - dimension-guarded distance expressions, so PostgreSQL cannot evaluate a vector operator against a mismatched row before a profile filter.
 
-Exact vector search is the initial implementation. Approximate indexes require a separately approved fixed-dimension/index strategy and measured scale threshold.
+Exact vector search is the initial implementation. No ANN index is created over the mixed-dimension vector column. Approximate indexes require a separately approved, measured design that isolates a fixed dimension and profile, such as a profile-specific table or guarded expression/partial index; they cannot assume the shared column is indexable across profiles.
 
 ### 4. Canonical embedded document and privacy
 
@@ -112,7 +114,7 @@ One database-backed embedding-job table is sufficient; no separate outbox table 
 
 Next.js request processes do not own durable background work. A separate CLI process runs as a Compose worker service when the hybrid profile is enabled. It defines startup readiness, graceful shutdown, lease recovery, concurrency, backpressure, and health reporting. External deployments run the same worker command under their process manager.
 
-Each relevant article change advances a monotonic embedding revision. A worker captures the revision and canonical content hash before calling the provider, then publishes a vector only if the article is still eligible and its revision and hash still match. Otherwise it discards the response and leaves or creates work for the current revision. Delete and privacy transitions cannot be undone by a late provider response.
+Each relevant article change advances a monotonic embedding revision. A worker captures the revision and canonical content hash before calling the provider, then publishes a vector only if the article is still eligible and its revision and hash still match. Otherwise it discards the response and releases the stale lease, relying exclusively on the database trigger to have created or advanced work for the current revision. The worker never enqueues replacement work. Delete and privacy transitions cannot be undone by a late provider response.
 
 Backfill uses the same idempotent job path and is resumable. Vector readiness, staleness, active-profile changes, and backfill transitions invalidate the search-cache version without placing endpoint data or credentials in cache keys.
 
