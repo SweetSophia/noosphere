@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -393,7 +393,7 @@ test("bootstrap rolls back when generated credentials cannot be persisted", { ti
   const blockedParent = join(dir, "not-a-directory");
   const adminEmail = `bootstrap-rollback-${randomUUID()}@noosphere.test`;
   const apiKey = `noo_bootstrap_rollback_${randomUUID()}`;
-  const apiKeyHash = createHash("sha256").update(apiKey).digest("hex");
+  const apiKeyName = `Bootstrap rollback ${randomUUID()}`;
   writeFileSync(blockedParent, "blocks creation of the secrets directory\n");
 
   const result = spawnSync(
@@ -408,6 +408,7 @@ test("bootstrap rolls back when generated credentials cannot be persisted", { ti
         NOOSPHERE_ADMIN_EMAIL: adminEmail,
         NOOSPHERE_ADMIN_PASSWORD: "",
         NOOSPHERE_BOOTSTRAP_API_KEY: apiKey,
+        NOOSPHERE_API_KEY_NAME: apiKeyName,
         NOOSPHERE_BOOTSTRAP_SECRETS_FILE: join(blockedParent, "secrets.json"),
       },
     },
@@ -422,11 +423,11 @@ test("bootstrap rolls back when generated credentials cannot be persisted", { ti
       [adminEmail],
     )).rows[0]?.count ?? -1);
     apiKeyCount = Number((await pool.query(
-      `SELECT COUNT(*)::int AS count FROM "ApiKey" WHERE "keyHash" = $1`,
-      [apiKeyHash],
+      `SELECT COUNT(*)::int AS count FROM "ApiKey" WHERE name = $1`,
+      [apiKeyName],
     )).rows[0]?.count ?? -1);
   } finally {
-    await pool.query(`DELETE FROM "ApiKey" WHERE "keyHash" = $1`, [apiKeyHash]);
+    await pool.query(`DELETE FROM "ApiKey" WHERE name = $1`, [apiKeyName]);
     await pool.query(`DELETE FROM "User" WHERE email = $1`, [adminEmail]);
     await pool.end();
     rmSync(dir, { force: true, recursive: true });
