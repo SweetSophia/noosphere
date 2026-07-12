@@ -6,7 +6,12 @@ import {
   fallbackLimiter,
   _fallbackLimiterTestHooks,
 } from "@/lib/rate-limit-fallback";
-import { getReadyRedisClient, _redisTestHooks } from "@/lib/cache/redis";
+import {
+  disconnectRedisClientOnce,
+  getRedisClient,
+  getReadyRedisClient,
+  _redisTestHooks,
+} from "@/lib/cache/redis";
 import { NextRequest } from "next/server";
 import { FakeRedisClient } from "./_helpers/fake-redis";
 
@@ -93,7 +98,7 @@ describe("Redis Rate Limiter", () => {
     assert.deepStrictEqual(result, { allowed: true });
   });
 
-  it("hashes invalid proxy identifiers before storing rate-limit keys", async () => {
+  it("bounds attacker-controlled proxy identifiers in rate-limit keys", async () => {
     const maliciousIdentifier = "x".repeat(12_000);
     const request = makeRequest(maliciousIdentifier);
 
@@ -240,11 +245,32 @@ describe("Redis Rate Limiter", () => {
           assert.match(String(result.reason), /Redis eval timed out/);
         }
       }
-      assert.equal(fakeRedis.disconnectCalls, 1);
+      // Both concurrent timeout paths may retry because every cleanup attempt
+      // throws; neither failure may permanently poison the once-guard.
+      assert.equal(fakeRedis.disconnectCalls, 2);
       assert.equal(await getReadyRedisClient(), null);
     } finally {
       console.error = originalConsoleError;
     }
+  });
+
+  it("allows disconnect cleanup to retry after a synchronous failure", () => {
+    let disconnectCalls = 0;
+    const client = {
+      disconnect(): void {
+        disconnectCalls += 1;
+        if (disconnectCalls === 1) {
+          throw new Error("disconnect failed once");
+        }
+      },
+    };
+
+    assert.throws(
+      () => disconnectRedisClientOnce(client as never),
+      /disconnect failed once/
+    );
+    assert.doesNotThrow(() => disconnectRedisClientOnce(client as never));
+    assert.equal(disconnectCalls, 2);
   });
 
   it("does not issue EVAL when NOSCRIPT arrives after the timeout", async () => {
@@ -564,6 +590,35 @@ describe("Rate Limiter Edge Cases", () => {
     }
   });
 
+  it("does not let a stale failed connect evict a replacement singleton", async () => {
+    const staleClient = new FakeRedisClient({
+      connectDelayMs: 20,
+      rejectConnect: true,
+    });
+    const replacementClient = new FakeRedisClient({ connectDelayMs: 40 });
+    _redisTestHooks.setClientForTesting(staleClient as never);
+    const originalConsoleError = console.error;
+    console.error = () => {};
+
+    try {
+      const staleAttempt = getReadyRedisClient();
+      _redisTestHooks.setClientForTesting(replacementClient as never);
+      const replacementAttempts = [
+        getReadyRedisClient(),
+        getReadyRedisClient(),
+      ];
+
+      assert.equal(await staleAttempt, null);
+      assert.strictEqual(getRedisClient(), replacementClient);
+      const recovered = await Promise.all(replacementAttempts);
+      assert.deepStrictEqual(recovered, [replacementClient, replacementClient]);
+      assert.equal(replacementClient.connectCalls, 1);
+      assert.strictEqual(getRedisClient(), replacementClient);
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
   it("falls back to in-process limiter and suppresses immediate retries when the lazy Redis connect fails", async () => {
     const failingRedis = new FakeRedisClient({ rejectConnect: true });
     _redisTestHooks.setClientForTesting(failingRedis as never);
@@ -591,6 +646,28 @@ describe("Rate Limiter Edge Cases", () => {
       // The second call should short-circuit on the reconnect cooldown instead
       // of attempting, and logging, another failed Redis connection.
       assert.equal(errorLogs.length, 1);
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
+  it("fails safely and clears the singleton when connect and disconnect both throw", async () => {
+    const failingRedis = new FakeRedisClient({
+      rejectConnect: true,
+      disconnectError: new Error("disconnect failed"),
+    });
+    _redisTestHooks.setClientForTesting(failingRedis as never);
+    const originalConsoleError = console.error;
+    console.error = () => {};
+
+    try {
+      assert.equal(await getReadyRedisClient(), null);
+      assert.equal(failingRedis.connectCalls, 1);
+      assert.equal(failingRedis.disconnectCalls, 1);
+      // The reconnect cooldown and cleared singleton prevent the same failed
+      // client from being handed out again.
+      assert.equal(await getReadyRedisClient(), null);
+      assert.equal(failingRedis.connectCalls, 1);
     } finally {
       console.error = originalConsoleError;
     }

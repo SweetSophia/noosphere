@@ -147,10 +147,17 @@ async function timeoutRace(
   onTimeout?: () => void
 ): Promise<number | string> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let timedOut = false;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      timedOut = true;
+      // Abort and invalidate before settling the race. Promise reactions run
+      // after this timer callback returns, so no queued NOSCRIPT handler or
+      // subsequent caller can observe the abandoned client as usable.
+      try {
+        onTimeout?.();
+      } catch (error) {
+        // Cleanup must not replace the command-timeout error seen by callers.
+        console.error("Redis timeout cleanup error:", error);
+      }
       reject(new Error(`Redis eval timed out after ${timeoutMs}ms (key: ${key})`));
     }, timeoutMs);
   });
@@ -159,8 +166,6 @@ async function timeoutRace(
     return await Promise.race([promise, timeoutPromise]);
   } finally {
     if (timer) clearTimeout(timer);
-    // Only fire the timeout callback when the timeout actually won the race.
-    if (timedOut) onTimeout?.();
     // The race is over.  Silently consume any late rejection from the loser
     // so it doesn't surface as an unhandled promise rejection.
     promise.catch(() => {});

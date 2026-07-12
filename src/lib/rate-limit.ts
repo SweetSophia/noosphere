@@ -76,7 +76,7 @@ function rateLimitExceeded(
   windowMs: number
 ): { allowed: false; response: NextResponse } {
   const response = apiError("Too many requests", 429);
-  // Tell clients when to retry..ceil ensures we never under-report
+  // Tell clients when to retry. ceil ensures we never under-report
   // the wait time due to sub-second rounding.
   response.headers.set("Retry-After", String(Math.ceil(windowMs / 1000)));
   return { allowed: false, response };

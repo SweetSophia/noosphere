@@ -51,6 +51,9 @@ export class FakeRedisClient {
 
   async connect() {
     this.connectCalls += 1;
+    // ioredis leaves "wait" synchronously when connect() starts. Preserve
+    // that transition so concurrent-connection tests exercise real behavior.
+    this.status = "connecting";
     if (this.connectDelayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, this.connectDelayMs));
     }

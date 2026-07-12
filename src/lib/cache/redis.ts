@@ -21,7 +21,14 @@ export function disconnectRedisClientOnce(
   if (disconnectingRedisClients.has(identity)) return;
 
   disconnectingRedisClients.add(identity);
-  client.disconnect();
+  try {
+    client.disconnect();
+  } catch (error) {
+    // A failed cleanup must not permanently poison the identity guard. A
+    // later recovery path may be able to disconnect the same client.
+    disconnectingRedisClients.delete(identity);
+    throw error;
+  }
 }
 
 /**
@@ -47,12 +54,25 @@ export function invalidateRedisClient(
   }
 }
 
-function resetRedisClient(client: Redis | null = redisClient): void {
-  if (client && !TERMINAL_REDIS_STATUSES.has(client.status)) {
-    disconnectRedisClientOnce(client);
+function resetRedisClient(
+  client: Redis | null = redisClient,
+  connectPromise: Promise<void> | null = redisConnectPromise
+): void {
+  // Clear shared state before best-effort socket cleanup. If disconnect throws,
+  // callers must still fail safely instead of retaining a broken singleton.
+  if (redisClient === client) {
+    redisClient = null;
   }
-  redisClient = null;
-  redisConnectPromise = null;
+  if (redisConnectPromise === connectPromise) {
+    redisConnectPromise = null;
+  }
+  if (!client) return;
+
+  try {
+    disconnectRedisClientOnce(client);
+  } catch (error) {
+    console.error("Redis disconnect error:", error);
+  }
 }
 
 /**
@@ -119,21 +139,33 @@ export async function getReadyRedisClient(): Promise<Redis | null> {
     return client;
   }
 
-  if (client.status !== "wait") {
-    return null;
-  }
-
+  let connectPromise = redisConnectPromise;
   try {
-    redisConnectPromise ??= client.connect().finally(() => {
-      redisConnectPromise = null;
-    });
-    await redisConnectPromise;
+    if (!connectPromise) {
+      if (client.status !== "wait") {
+        return null;
+      }
+      connectPromise = client.connect();
+      redisConnectPromise = connectPromise;
+    }
+    await connectPromise;
+    if (redisClient !== client) {
+      resetRedisClient(client, connectPromise);
+      return null;
+    }
     return (client.status as string) === "ready" ? client : null;
   } catch (error) {
     console.error("Redis connection error:", error);
-    nextConnectAttemptAt = Date.now() + REDIS_RECONNECT_COOLDOWN_MS;
-    resetRedisClient(client);
+    if (redisClient === client) {
+      nextConnectAttemptAt = Date.now() + REDIS_RECONNECT_COOLDOWN_MS;
+    }
+    resetRedisClient(client, connectPromise);
     return null;
+  } finally {
+    // A stale connect attempt must not erase a replacement client's promise.
+    if (redisConnectPromise === connectPromise) {
+      redisConnectPromise = null;
+    }
   }
 }
 

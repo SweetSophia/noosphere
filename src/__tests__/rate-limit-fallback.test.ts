@@ -153,13 +153,18 @@ describe("Rate Limiter Fallback (Redis failures)", () => {
   });
 
   it("falls back to in-process limiter when the atomic check returns invalid data", async () => {
-    fakeRedis.eval = async () => null as never;
+    let evalshaCalled = false;
+    fakeRedis.evalsha = async () => {
+      evalshaCalled = true;
+      return null as never;
+    };
 
     const request = makeRequest("10.0.0.60");
     const options = { windowMs: 60_000, maxRequests: 1, keyPrefix: "pipe-null" };
 
     // First request: invalid Redis response → warmed fallback allows.
     assert.deepStrictEqual(await rateLimit(request, options), { allowed: true });
+    assert.equal(evalshaCalled, true);
 
     // Second request: fallback blocks (bucket full).
     const result2 = await rateLimit(request, options);
@@ -167,7 +172,9 @@ describe("Rate Limiter Fallback (Redis failures)", () => {
   });
 
   it("falls back to in-process limiter when the atomic check throws", async () => {
-    fakeRedis.eval = async () => {
+    let evalshaCalled = false;
+    fakeRedis.evalsha = async () => {
+      evalshaCalled = true;
       throw new Error("Redis connection lost");
     };
 
@@ -181,6 +188,7 @@ describe("Rate Limiter Fallback (Redis failures)", () => {
     try {
       // First request: Redis throws → warmed fallback allows.
       assert.deepStrictEqual(await rateLimit(request, options), { allowed: true });
+      assert.equal(evalshaCalled, true);
 
       // Second request: fallback blocks (bucket full).
       const result2 = await rateLimit(request, options);
