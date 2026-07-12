@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-07-12
+
+Minor release adding rich math and diagram rendering while hardening memory
+recall, rate limiting, bootstrap secret handling, and markdown rendering. There
+are no database schema changes or intentional API breaking changes.
+
+### Added
+
+- **KaTeX math and Mermaid diagrams in wiki Markdown
+  ([#275](https://github.com/SweetSophia/noosphere/pull/275))**: article
+  rendering now supports inline and display math plus fenced Mermaid diagrams.
+  Mermaid output is rendered client-side with Mermaid's strict security mode.
+
 ### Changed
 
 - **Rate limiter fails degraded under Redis outage ([#276](https://github.com/SweetSophia/noosphere/pull/276))**: all rate-limited
@@ -22,6 +35,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The local guard now runs ahead of every Redis call (warm-fallback-leading-
   guard); under heavy single-worker skew the local cap may deny requests that
   Redis would globally allow.
+- **Rate-limit reliability follow-up
+  ([#277](https://github.com/SweetSophia/noosphere/pull/277))**: Redis scripts
+  now use `EVALSHA` with a safe `NOSCRIPT` fallback, Redis calls have a bounded
+  1.5-second timeout, oversized forwarded identifiers are bounded and collapsed
+  to a shared invalid bucket before hashing, and 429 responses provide
+  consistent `Retry-After` guidance. A timed-out Redis client enters a five-
+  second reconnect cooldown; rate limiting uses the per-process fallback during
+  that interval.
+
+### Security
+
+- **Keep generated bootstrap secrets out of logs
+  ([#238](https://github.com/SweetSophia/noosphere/pull/238))**: permission and
+  validation failures retain actionable context without printing raw generated
+  credentials to container logs. Generated credentials are written with mode
+  `0600` inside an approved private directory, staged before the bootstrap
+  transaction commits, and atomically published afterward. Failed or interrupted
+  publication preserves a `.pending` recovery file and blocks overwrite on
+  retry. The default path is ephemeral with the init container; set
+  `NOOSPHERE_BOOTSTRAP_SECRETS_FILE` to the documented
+  `/app/uploads/bootstrap-secrets/` path when generated credentials must persist.
+
+### Fixed
+
+- **Keep automatic recall payloads bounded
+  ([#278](https://github.com/SweetSophia/noosphere/pull/278))**: auto mode no
+  longer returns the conflict-analysis payload, which could duplicate full
+  article bodies and exceed OpenClaw's response-size limit. Inspection mode
+  remains unchanged.
+- **Clarify empty topic states and use generated Prisma path types
+  ([#239](https://github.com/SweetSophia/noosphere/pull/239))**: topic pages
+  distinguish empty leaves from empty branches and no longer depend on a
+  hand-maintained path type.
+- **Improve light-theme Markdown contrast
+  ([#274](https://github.com/SweetSophia/noosphere/pull/274))**: code blocks,
+  tables, block quotes, and inline code remain legible in light mode.
+
+### Tests
+
+- Added auth proxy rate-limit coverage
+  ([#236](https://github.com/SweetSophia/noosphere/pull/236)) and article PATCH
+  rate/body-limit integration coverage
+  ([#237](https://github.com/SweetSophia/noosphere/pull/237)); the security
+  suite is now part of CI.
+- Centralized the existing Markdown sanitization configuration and added
+  server-rendered regression coverage for unsafe links and raw HTML
+  ([#274](https://github.com/SweetSophia/noosphere/pull/274)).
 
 ## [1.10.3] - 2026-06-30
 
@@ -201,7 +261,10 @@ changes.
   backfill pipeline, and the memory provider refactor. Refer to the commit
   history (`git log v1.8.0..v1.9.0`) for the full set of changes.
 
-[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.10.1...HEAD
+[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/SweetSophia/noosphere/compare/v1.10.3...v1.11.0
+[1.10.3]: https://github.com/SweetSophia/noosphere/compare/v1.10.2...v1.10.3
+[1.10.2]: https://github.com/SweetSophia/noosphere/compare/v1.10.1...v1.10.2
 [1.10.1]: https://github.com/SweetSophia/noosphere/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/SweetSophia/noosphere/compare/v1.9.1...v1.10.0
 [1.9.1]: https://github.com/SweetSophia/noosphere/compare/v1.9.0...v1.9.1

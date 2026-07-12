@@ -1,6 +1,19 @@
 import crypto from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, resolve, sep } from "node:path";
+import {
+  chmodSync,
+  closeSync,
+  fsyncSync,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
 import process from "node:process";
 import bcrypt from "bcryptjs";
 import pg from "pg";
@@ -68,9 +81,37 @@ function isWithinDirectory(path, root) {
   return path === root || path.startsWith(`${root}${sep}`);
 }
 
+function ensureDirectoryTreeWithoutSymlinks(directory) {
+  const resolvedDirectory = resolve(directory);
+  let current = sep;
+  for (const segment of resolvedDirectory.split(sep).filter(Boolean)) {
+    current = join(current, segment);
+    let stat;
+    try {
+      stat = lstatSync(current);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      mkdirSync(current, { mode: 0o700 });
+      // Persist both the new directory entry and its initial metadata before a
+      // later database commit can depend on files stored below it.
+      fsyncPath(dirname(current));
+      fsyncPath(current);
+      stat = lstatSync(current);
+    }
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      throw new SafeBootstrapError(
+        `Bootstrap secrets directory components must be real directories: ${current}`,
+      );
+    }
+  }
+  return realpathSync(resolvedDirectory);
+}
+
 function ensurePrivateSecretsParent(parentDir) {
   const resolvedParentDir = resolve(parentDir);
-  if (!ALLOWED_BOOTSTRAP_SECRETS_PARENT_ROOTS.some((root) => isWithinDirectory(resolvedParentDir, root))) {
+  const allowedRoot = ALLOWED_BOOTSTRAP_SECRETS_PARENT_ROOTS.find((root) =>
+    isWithinDirectory(resolvedParentDir, root));
+  if (!allowedRoot) {
     throw new SafeBootstrapError(
       "NOOSPHERE_BOOTSTRAP_SECRETS_FILE must point inside a dedicated private directory, " +
         "for example /tmp/noosphere-bootstrap-secrets/secrets.json or " +
@@ -78,20 +119,52 @@ function ensurePrivateSecretsParent(parentDir) {
     );
   }
 
-  mkdirSync(resolvedParentDir, { recursive: true, mode: 0o700 });
-  chmodSync(resolvedParentDir, 0o700);
+  const realParentDir = ensureDirectoryTreeWithoutSymlinks(resolvedParentDir);
+  const realAllowedRoot = realpathSync(resolve(allowedRoot));
+  if (!isWithinDirectory(realParentDir, realAllowedRoot)) {
+    throw new SafeBootstrapError(
+      "NOOSPHERE_BOOTSTRAP_SECRETS_FILE cannot traverse symbolic links outside its private directory.",
+    );
+  }
+  chmodSync(realParentDir, 0o700);
+  return realParentDir;
 }
 
-export function writeGeneratedSecretsFile(credentials) {
+function fsyncPath(path) {
+  const fd = openSync(path, "r");
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function rejectUnsafeExistingSecretsFile(secretsFile) {
+  try {
+    const stat = lstatSync(secretsFile);
+    if (stat.isSymbolicLink() || !stat.isFile()) {
+      throw new SafeBootstrapError(
+        `Existing bootstrap secrets path must be a regular file: ${secretsFile}`,
+      );
+    }
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+}
+
+export function stageGeneratedSecretsFile(credentials) {
   if (Object.keys(credentials).length === 0) return null;
 
   const secretsFile = process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE || DEFAULT_BOOTSTRAP_SECRETS_FILE;
-  ensurePrivateSecretsParent(dirname(secretsFile));
+  const parentDir = ensurePrivateSecretsParent(dirname(secretsFile));
+  rejectUnsafeExistingSecretsFile(secretsFile);
+  const pendingFile = `${secretsFile}.pending`;
   const mergedCredentials = {
     ...readExistingGeneratedCredentials(secretsFile),
     ...credentials,
   };
-  const tmpFile = `${secretsFile}.${process.pid}.${crypto.randomBytes(8).toString("hex")}.tmp`;
+  const tmpFile = `${pendingFile}.${process.pid}.${crypto.randomBytes(8).toString("hex")}.tmp`;
+  let pendingClaimed = false;
   try {
     writeFileSync(
       tmpFile,
@@ -102,12 +175,62 @@ export function writeGeneratedSecretsFile(credentials) {
       { flag: "wx", mode: 0o600 },
     );
     chmodSync(tmpFile, 0o600);
-    renameSync(tmpFile, secretsFile);
+    fsyncPath(tmpFile);
+    // Hard-link creation is an atomic no-replace claim: concurrent bootstrap
+    // processes cannot replace an existing recovery artifact.
+    linkSync(tmpFile, pendingFile);
+    pendingClaimed = true;
+    rmSync(tmpFile);
+    fsyncPath(parentDir);
   } catch (error) {
     rmSync(tmpFile, { force: true });
+    if (error?.code === "EEXIST") {
+      throw new SafeBootstrapError(
+        `Generated credentials are already staged at ${pendingFile}. ` +
+          "Recover or remove that file before retrying bootstrap.",
+        { cause: error },
+      );
+    }
+    if (pendingClaimed) {
+      throw new SafeBootstrapError(
+        `Generated credentials remain staged at ${pendingFile}, but durability ` +
+          "could not be confirmed. Verify that file before retrying bootstrap.",
+        { cause: error },
+      );
+    }
     throw error;
   }
-  return secretsFile;
+  return { pendingFile, secretsFile };
+}
+
+export function publishGeneratedSecretsFile(stagedSecrets) {
+  if (!stagedSecrets) return null;
+  const parentDir = dirname(stagedSecrets.secretsFile);
+  const publishFile = `${stagedSecrets.secretsFile}.${process.pid}.` +
+    `${crypto.randomBytes(8).toString("hex")}.publish`;
+  try {
+    // Keep the pending hard link until the final rename is durable. A crash or
+    // rename failure therefore leaves at least one path to the committed bytes.
+    linkSync(stagedSecrets.pendingFile, publishFile);
+    renameSync(publishFile, stagedSecrets.secretsFile);
+    fsyncPath(parentDir);
+    // The final name is durable at this point. Pending removal is cleanup only;
+    // if a crash resurrects that entry, the next bootstrap blocks safely.
+    rmSync(stagedSecrets.pendingFile);
+  } catch (error) {
+    rmSync(publishFile, { force: true });
+    throw new SafeBootstrapError(
+      `Database bootstrap committed, but generated credentials remain staged at ` +
+        `${stagedSecrets.pendingFile}. Move that file to ${stagedSecrets.secretsFile} ` +
+        "before starting Noosphere.",
+      { cause: error },
+    );
+  }
+  return stagedSecrets.secretsFile;
+}
+
+export function writeGeneratedSecretsFile(credentials) {
+  return publishGeneratedSecretsFile(stageGeneratedSecretsFile(credentials));
 }
 
 function formatBootstrapError(error) {
@@ -165,6 +288,7 @@ async function main() {
   const pool = new Pool({ connectionString: databaseUrl });
   const client = await pool.connect();
   let transactionOpen = false;
+  let stagedGeneratedSecrets = null;
   try {
     await client.query("BEGIN");
     transactionOpen = true;
@@ -215,16 +339,21 @@ async function main() {
     const adminPasswordAutoGenerated = !process.env.NOOSPHERE_ADMIN_PASSWORD;
     const apiKeyAutoGenerated = !process.env.NOOSPHERE_BOOTSTRAP_API_KEY;
 
-    await client.query("COMMIT");
-    transactionOpen = false;
-
-    const generatedSecretsFile = writeGeneratedSecretsFile(collectGeneratedSecrets({
+    // Stage generated credentials before committing the rows that require
+    // them. The final file is published only after COMMIT succeeds, so neither
+    // side of the database/filesystem boundary overwrites the last recovery path.
+    stagedGeneratedSecrets = stageGeneratedSecretsFile(collectGeneratedSecrets({
       adminPassword,
       adminPasswordAutoGenerated,
       adminPasswordApplied,
       apiKey: rawApiKey,
       apiKeyAutoGenerated,
     }));
+
+    await client.query("COMMIT");
+    transactionOpen = false;
+    const generatedSecretsFile = publishGeneratedSecretsFile(stagedGeneratedSecrets);
+    stagedGeneratedSecrets = null;
 
     console.log(JSON.stringify({
       ok: true,
@@ -242,6 +371,12 @@ async function main() {
     }
   } catch (error) {
     if (transactionOpen) await client.query("ROLLBACK");
+    if (stagedGeneratedSecrets) {
+      console.error(
+        `[bootstrap] Generated credentials remain staged at ` +
+          `${stagedGeneratedSecrets.pendingFile}; bootstrap did not complete.`,
+      );
+    }
     throw error;
   } finally {
     client.release();
