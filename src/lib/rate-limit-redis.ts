@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type Redis from "ioredis";
+import { disconnectRedisClientOnce } from "@/lib/cache/redis";
 
 interface RedisRateLimitOptions {
   key: string;
@@ -7,6 +8,7 @@ interface RedisRateLimitOptions {
   maxRequests: number;
   now: number;
   member?: string;
+  timeoutMs?: number;
 }
 
 /** Grace period (seconds) added to the TTL so the EXPIRE window always
@@ -74,11 +76,12 @@ export async function checkRedisRateLimit(
 
   const evalPromise = evalWithFallback(redis, args, ctx);
 
-  const result = await timeoutRace(evalPromise, EVAL_TIMEOUT_MS, options.key, () => {
+  const timeoutMs = options.timeoutMs ?? EVAL_TIMEOUT_MS;
+  const result = await timeoutRace(evalPromise, timeoutMs, options.key, () => {
     ctx.aborted = true;
     // Force the client to reconnect on next call.  Without this, a wedged
     // but status="ready" socket silently queues every subsequent command (H1).
-    redis.disconnect();
+    disconnectRedisClientOnce(redis);
   });
 
   if (result === 1 || result === "1") return true;
@@ -108,7 +111,20 @@ async function evalWithFallback(
     if (ctx.aborted) throw err;
     // NOSCRIPT means Redis doesn't have the script cached.  Fall back to EVAL.
     if (err instanceof Error && /NOSCRIPT/i.test(err.message)) {
-      return (await redis.eval(REDIS_RATE_LIMIT_SCRIPT, 1, ...args)) as number | string;
+      // Keep this check next to the mutating fallback call. It makes the
+      // invariant explicit and prevents a later refactor from inserting an
+      // async boundary between the catch-level guard and EVAL.
+      if (ctx.aborted) throw err;
+      const result = (await redis.eval(
+        REDIS_RATE_LIMIT_SCRIPT,
+        1,
+        ...args
+      )) as number | string;
+      // A command already written to Redis cannot be recalled. If the timeout
+      // fired while EVAL was in flight, discard its late result and keep the
+      // request on the degraded, fail-closed path.
+      if (ctx.aborted) throw err;
+      return result;
     }
     throw err;
   }

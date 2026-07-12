@@ -7,10 +7,31 @@ let redisConnectPromise: Promise<void> | null = null;
 
 const REDIS_RECONNECT_COOLDOWN_MS = 5000;
 const TERMINAL_REDIS_STATUSES = new Set(["close", "end"]);
+const disconnectingRedisClients = new WeakSet<object>();
+
+/**
+ * Start disconnecting a client at most once. ioredis does not transition
+ * `status` synchronously, so status checks alone cannot deduplicate concurrent
+ * timeout and recovery paths that share the singleton.
+ */
+export function disconnectRedisClientOnce(
+  client: Pick<Redis, "disconnect">
+): void {
+  const identity = client as object;
+  if (disconnectingRedisClients.has(identity)) return;
+
+  disconnectingRedisClients.add(identity);
+  try {
+    client.disconnect();
+  } catch (error) {
+    disconnectingRedisClients.delete(identity);
+    throw error;
+  }
+}
 
 function resetRedisClient(client: Redis | null = redisClient): void {
-  if (client) {
-    client.disconnect();
+  if (client && !TERMINAL_REDIS_STATUSES.has(client.status)) {
+    disconnectRedisClientOnce(client);
   }
   redisClient = null;
   redisConnectPromise = null;

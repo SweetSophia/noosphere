@@ -10,23 +10,40 @@ type PipelineCommand =
 interface FakeRedisClientOptions {
   connectDelayMs?: number;
   rejectConnect?: boolean;
+  evalshaDelayMs?: number;
+  evalshaError?: Error;
+  evalDelayMs?: number;
+  evalResultAfterDelay?: number;
+  disconnectKeepsStatus?: boolean;
 }
 
 export class FakeRedisClient {
   status = "wait";
   connectCalls = 0;
+  disconnectCalls = 0;
   readonly evalKeys: string[] = [];
   evalshaCalls = 0;
+  evalCalls = 0;
 
   private readonly values = new Map<string, string>();
   private readonly expires = new Map<string, number>();
   private readonly sortedSets = new Map<string, Array<{ score: number; member: string }>>();
   private readonly connectDelayMs: number;
   private readonly rejectConnect: boolean;
+  private readonly evalshaDelayMs: number;
+  private readonly evalshaError: Error | undefined;
+  private readonly evalDelayMs: number;
+  private readonly evalResultAfterDelay: number | undefined;
+  private readonly disconnectKeepsStatus: boolean;
 
   constructor(options: FakeRedisClientOptions = {}) {
     this.connectDelayMs = options.connectDelayMs ?? 0;
     this.rejectConnect = options.rejectConnect ?? false;
+    this.evalshaDelayMs = options.evalshaDelayMs ?? 0;
+    this.evalshaError = options.evalshaError;
+    this.evalDelayMs = options.evalDelayMs ?? 0;
+    this.evalResultAfterDelay = options.evalResultAfterDelay;
+    this.disconnectKeepsStatus = options.disconnectKeepsStatus ?? false;
   }
 
   async connect() {
@@ -41,7 +58,10 @@ export class FakeRedisClient {
   }
 
   disconnect() {
-    this.status = "end";
+    this.disconnectCalls += 1;
+    if (!this.disconnectKeepsStatus) {
+      this.status = "end";
+    }
   }
 
   async get(key: string): Promise<string | null> {
@@ -104,6 +124,11 @@ export class FakeRedisClient {
   ): Promise<number> {
     this.assertReady();
     this.evalshaCalls++;
+    await delay(this.evalshaDelayMs);
+    if (this.evalshaError) {
+      throw this.evalshaError;
+    }
+    this.assertReady();
     if (sha1 !== FakeRedisClient.SCRIPT_SHA) {
       throw new Error("NOSCRIPT No matching script. Please use EVAL.");
     }
@@ -117,6 +142,13 @@ export class FakeRedisClient {
     numberOfKeys: number,
     ...args: Array<string | number>
   ): Promise<number> {
+    this.assertReady();
+    this.evalCalls += 1;
+    await delay(this.evalDelayMs);
+    if (this.evalResultAfterDelay !== undefined) {
+      this.evalKeys.push(args[0] as string);
+      return this.evalResultAfterDelay;
+    }
     this.assertReady();
     if (numberOfKeys !== 1) {
       throw new Error("FakeRedisClient only supports one-key rate-limit scripts");
@@ -200,5 +232,11 @@ export class FakeRedisClient {
     if (this.status !== "ready") {
       throw new Error("Redis command executed before client was ready");
     }
+  }
+}
+
+async function delay(ms: number): Promise<void> {
+  if (ms > 0) {
+    await new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
