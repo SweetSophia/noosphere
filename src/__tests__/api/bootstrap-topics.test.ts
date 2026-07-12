@@ -308,6 +308,31 @@ test("bootstrap keeps pending credentials when final publication fails", async (
   }
 });
 
+test("bootstrap reports a missing staged file accurately after database commit", async () => {
+  const { publishGeneratedSecretsFile, stageGeneratedSecretsFile } = await importBootstrapHelpers();
+  const originalSecretsFile = process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+  const dir = makeAllowedSecretsDir("missing-pending-");
+  const target = join(dir, "secrets.json");
+
+  try {
+    process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = target;
+    const staged = stageGeneratedSecretsFile({ apiKey: "noo_missing_pending" });
+    assert.ok(staged);
+    rmSync(staged.pendingFile);
+    assert.throws(
+      () => publishGeneratedSecretsFile(staged),
+      /staged credentials file is missing or unavailable/,
+    );
+  } finally {
+    if (originalSecretsFile === undefined) {
+      delete process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+    } else {
+      process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = originalSecretsFile;
+    }
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
 test("bootstrap generated-secret helper rejects shared parent directories", async () => {
   const { writeGeneratedSecretsFile } = await importBootstrapHelpers();
   const originalSecretsFile = process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;

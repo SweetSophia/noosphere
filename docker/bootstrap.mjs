@@ -216,9 +216,27 @@ export function publishGeneratedSecretsFile(stagedSecrets) {
     fsyncPath(parentDir);
     // The final name is durable at this point. Pending removal is cleanup only;
     // if a crash resurrects that entry, the next bootstrap blocks safely.
-    rmSync(stagedSecrets.pendingFile);
+    try {
+      rmSync(stagedSecrets.pendingFile);
+    } catch (cleanupError) {
+      const cleanupCode = cleanupError && typeof cleanupError === "object" &&
+        "code" in cleanupError && typeof cleanupError.code === "string"
+        ? ` (code=${cleanupError.code})`
+        : "";
+      console.error(
+        `[bootstrap] Credentials were published, but stale recovery cleanup failed${cleanupCode}. ` +
+          `Remove ${stagedSecrets.pendingFile} before the next bootstrap run.`,
+      );
+    }
   } catch (error) {
     rmSync(publishFile, { force: true });
+    if (error?.code === "ENOENT") {
+      throw new SafeBootstrapError(
+        `Database bootstrap committed, but the staged credentials file is missing or unavailable: ` +
+          stagedSecrets.pendingFile,
+        { cause: error },
+      );
+    }
     throw new SafeBootstrapError(
       `Database bootstrap committed, but generated credentials remain staged at ` +
         `${stagedSecrets.pendingFile}. Move that file to ${stagedSecrets.secretsFile} ` +
@@ -370,7 +388,17 @@ async function main() {
       );
     }
   } catch (error) {
-    if (transactionOpen) await client.query("ROLLBACK");
+    if (transactionOpen) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        const rollbackCode = rollbackError && typeof rollbackError === "object" &&
+          "code" in rollbackError && typeof rollbackError.code === "string"
+          ? ` (code=${rollbackError.code})`
+          : "";
+        console.error(`[bootstrap] Database rollback could not be confirmed${rollbackCode}.`);
+      }
+    }
     if (stagedGeneratedSecrets) {
       console.error(
         `[bootstrap] Generated credentials remain staged at ` +
