@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type Redis from "ioredis";
-import { disconnectRedisClientOnce } from "@/lib/cache/redis";
+import { invalidateRedisClient } from "@/lib/cache/redis";
 
 interface RedisRateLimitOptions {
   key: string;
@@ -81,7 +81,7 @@ export async function checkRedisRateLimit(
     ctx.aborted = true;
     // Force the client to reconnect on next call.  Without this, a wedged
     // but status="ready" socket silently queues every subsequent command (H1).
-    disconnectRedisClientOnce(redis);
+    invalidateRedisClient(redis);
   });
 
   if (result === 1 || result === "1") return true;
@@ -121,8 +121,11 @@ async function evalWithFallback(
         ...args
       )) as number | string;
       // A command already written to Redis cannot be recalled. If the timeout
-      // fired while EVAL was in flight, discard its late result and keep the
-      // request on the degraded, fail-closed path.
+      // fired while EVAL was in flight, discard its late result and let the
+      // warmed per-process limiter decide the request. The script may consume
+      // one Redis slot even if that local decision differs, but removing it
+      // would be unsafe: the local path may have allowed this request, and
+      // other instances rely on the shared counter.
       if (ctx.aborted) throw err;
       return result;
     }

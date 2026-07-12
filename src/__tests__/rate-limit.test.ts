@@ -6,7 +6,7 @@ import {
   fallbackLimiter,
   _fallbackLimiterTestHooks,
 } from "@/lib/rate-limit-fallback";
-import { _redisTestHooks } from "@/lib/cache/redis";
+import { getReadyRedisClient, _redisTestHooks } from "@/lib/cache/redis";
 import { NextRequest } from "next/server";
 import { FakeRedisClient } from "./_helpers/fake-redis";
 
@@ -205,9 +205,46 @@ describe("Redis Rate Limiter", () => {
 
     assert.equal(results[0].status, "rejected");
     assert.equal(results[1].status, "rejected");
-    // Exercise the singleton recovery cleanup while status still reads ready.
-    _redisTestHooks.reset();
     assert.equal(fakeRedis.disconnectCalls, 1);
+    // The singleton is removed synchronously and the cooldown suppresses an
+    // immediate reconnect even though the fake still reports status="ready".
+    assert.equal(await getReadyRedisClient(), null);
+  });
+
+  it("preserves concurrent timeout errors when disconnect cleanup throws", async () => {
+    fakeRedis = new FakeRedisClient({
+      evalshaDelayMs: 40,
+      disconnectError: new Error("disconnect failed"),
+    });
+    await fakeRedis.connect();
+    _redisTestHooks.setClientForTesting(fakeRedis as never);
+    const originalConsoleError = console.error;
+    console.error = () => {};
+
+    try {
+      const options = {
+        key: "ratelimit:disconnect-error:10.0.0.26",
+        windowMs: 60_000,
+        maxRequests: 5,
+        now: Date.now(),
+        timeoutMs: 25,
+      };
+      const results = await Promise.allSettled([
+        checkRedisRateLimit(fakeRedis as never, options),
+        checkRedisRateLimit(fakeRedis as never, options),
+      ]);
+
+      for (const result of results) {
+        assert.equal(result.status, "rejected");
+        if (result.status === "rejected") {
+          assert.match(String(result.reason), /Redis eval timed out/);
+        }
+      }
+      assert.equal(fakeRedis.disconnectCalls, 1);
+      assert.equal(await getReadyRedisClient(), null);
+    } finally {
+      console.error = originalConsoleError;
+    }
   });
 
   it("does not issue EVAL when NOSCRIPT arrives after the timeout", async () => {
@@ -231,11 +268,11 @@ describe("Redis Rate Limiter", () => {
     assert.equal(fakeRedis.evalKeys.length, 0);
   });
 
-  it("discards a successful EVAL response that settles after the timeout", async () => {
+  it("discards a late EVAL response that settles after the timeout", async () => {
     fakeRedis = new FakeRedisClient({
       evalshaError: new Error("NOSCRIPT No matching script. Please use EVAL."),
       evalDelayMs: 40,
-      evalResultAfterDelay: 0,
+      evalReturnValue: 0,
     });
     await fakeRedis.connect();
 

@@ -13,8 +13,9 @@ interface FakeRedisClientOptions {
   evalshaDelayMs?: number;
   evalshaError?: Error;
   evalDelayMs?: number;
-  evalResultAfterDelay?: number;
+  evalReturnValue?: number;
   disconnectKeepsStatus?: boolean;
+  disconnectError?: Error;
 }
 
 export class FakeRedisClient {
@@ -33,8 +34,9 @@ export class FakeRedisClient {
   private readonly evalshaDelayMs: number;
   private readonly evalshaError: Error | undefined;
   private readonly evalDelayMs: number;
-  private readonly evalResultAfterDelay: number | undefined;
+  private readonly evalReturnValue: number | undefined;
   private readonly disconnectKeepsStatus: boolean;
+  private readonly disconnectError: Error | undefined;
 
   constructor(options: FakeRedisClientOptions = {}) {
     this.connectDelayMs = options.connectDelayMs ?? 0;
@@ -42,8 +44,9 @@ export class FakeRedisClient {
     this.evalshaDelayMs = options.evalshaDelayMs ?? 0;
     this.evalshaError = options.evalshaError;
     this.evalDelayMs = options.evalDelayMs ?? 0;
-    this.evalResultAfterDelay = options.evalResultAfterDelay;
+    this.evalReturnValue = options.evalReturnValue;
     this.disconnectKeepsStatus = options.disconnectKeepsStatus ?? false;
+    this.disconnectError = options.disconnectError;
   }
 
   async connect() {
@@ -59,6 +62,9 @@ export class FakeRedisClient {
 
   disconnect() {
     this.disconnectCalls += 1;
+    if (this.disconnectError) {
+      throw this.disconnectError;
+    }
     if (!this.disconnectKeepsStatus) {
       this.status = "end";
     }
@@ -145,9 +151,9 @@ export class FakeRedisClient {
     this.assertReady();
     this.evalCalls += 1;
     await delay(this.evalDelayMs);
-    if (this.evalResultAfterDelay !== undefined) {
+    if (this.evalReturnValue !== undefined) {
       this.evalKeys.push(args[0] as string);
-      return this.evalResultAfterDelay;
+      return this.evalReturnValue;
     }
     this.assertReady();
     if (numberOfKeys !== 1) {

@@ -21,11 +21,29 @@ export function disconnectRedisClientOnce(
   if (disconnectingRedisClients.has(identity)) return;
 
   disconnectingRedisClients.add(identity);
+  client.disconnect();
+}
+
+/**
+ * Disconnect a timed-out client and synchronously remove it from the shared
+ * singleton. ioredis updates `status` only after the socket close event, so
+ * waiting for a terminal status could hand the same wedged client to another
+ * request. The cooldown also prevents a reconnect storm during an outage.
+ */
+export function invalidateRedisClient(
+  client: Pick<Redis, "disconnect">
+): void {
+  if (redisClient === client) {
+    redisClient = null;
+    redisConnectPromise = null;
+    nextConnectAttemptAt = Date.now() + REDIS_RECONNECT_COOLDOWN_MS;
+  }
   try {
-    client.disconnect();
+    disconnectRedisClientOnce(client);
   } catch (error) {
-    disconnectingRedisClients.delete(identity);
-    throw error;
+    // The singleton was already invalidated above. Preserve the original
+    // command-timeout error rather than replacing it with cleanup failure.
+    console.error("Redis disconnect error:", error);
   }
 }
 
