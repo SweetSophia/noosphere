@@ -2,6 +2,11 @@ import { after, before, describe, it } from "node:test";
 import assert from "assert";
 import Redis from "ioredis";
 import { checkRedisRateLimit } from "@/lib/rate-limit-redis";
+import {
+  getReadyRedisClient,
+  _redisTestHooks,
+} from "@/lib/cache/redis";
+import { FakeRedisClient } from "./_helpers/fake-redis";
 
 const redisUrl = process.env.REDIS_URL;
 
@@ -69,5 +74,57 @@ describe("Redis rate limiter integration", { skip: !redisUrl }, () => {
       }),
       true
     );
+  });
+
+  it("rebuilds the timed-out singleton after the reconnect cooldown", async () => {
+    const originalDateNow = Date.now;
+    let currentTime = originalDateNow();
+    const wedgedClient = new FakeRedisClient({
+      evalshaDelayMs: 40,
+      disconnectKeepsStatus: true,
+    });
+    await wedgedClient.connect();
+    _redisTestHooks.setClientForTesting(wedgedClient as never);
+    Date.now = () => currentTime;
+
+    try {
+      await assert.rejects(
+        checkRedisRateLimit(wedgedClient as never, {
+          key: `test:ratelimit:recovery-timeout:${crypto.randomUUID()}`,
+          windowMs: 60_000,
+          maxRequests: 5,
+          now: currentTime,
+          timeoutMs: 25,
+        }),
+        /Redis eval timed out/
+      );
+
+      assert.equal(await getReadyRedisClient(), null);
+      currentTime += 5_001;
+      // getReadyRedisClient checks the mocked clock synchronously before its
+      // first await. Restore the real clock immediately afterward so ioredis
+      // internals do not inherit the test clock while connecting.
+      const recoveryPromise = getReadyRedisClient();
+      Date.now = originalDateNow;
+      const recoveredClient = await recoveryPromise;
+      assert.ok(recoveredClient);
+      assert.notStrictEqual(recoveredClient, wedgedClient);
+
+      const key = `test:ratelimit:recovered:${crypto.randomUUID()}`;
+      keys.add(key);
+      assert.equal(
+        await checkRedisRateLimit(recoveredClient, {
+          key,
+          windowMs: 60_000,
+          maxRequests: 5,
+          now: Date.now(),
+          member: "after-recovery",
+        }),
+        true
+      );
+    } finally {
+      Date.now = originalDateNow;
+      _redisTestHooks.reset();
+    }
   });
 });

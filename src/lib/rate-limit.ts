@@ -15,19 +15,28 @@ interface RateLimitOptions {
   keyPrefix?: string;
 }
 
+const MAX_IDENTIFIER_LENGTH = 256;
+
 function getClientIdentifier(request: NextRequest): string {
+  const xff = request.headers.get("x-forwarded-for");
+  // Cap before parsing so a multi-kilobyte x-forwarded-for doesn't waste CPU
+  // on split/trim.  1 024 bytes is generous for any legitimate proxy chain.
   const rawIdentifier = (
     request.headers.get("x-real-ip") ??
     request.headers.get("cf-connecting-ip") ??
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    (xff ? xff.slice(0, 1024).split(",")[0]?.trim() : null) ??
     "unknown"
   ).trim();
 
   if (!rawIdentifier) return "unknown";
   if (isIP(rawIdentifier)) return rawIdentifier.toLowerCase();
 
-  // Proxy headers are untrusted. Hash invalid values so a request cannot pin
-  // many kilobytes of attacker-controlled text in every fallback Map key.
+  // Proxy headers are untrusted. Short-circuit oversized values before
+  // hashing to avoid wasting CPU on attacker-controlled kilobyte-scale headers.
+  if (rawIdentifier.length > MAX_IDENTIFIER_LENGTH) return "invalid:oversized";
+
+  // Hash remaining invalid values so a request cannot pin many kilobytes of
+  // attacker-controlled text in every fallback Map key.
   return `invalid:${createHash("sha256")
     .update(rawIdentifier)
     .digest("base64url")}`;
@@ -63,20 +72,24 @@ function markRedisResponded(): void {
   firstErrorLogged = false;
 }
 
-function rateLimitExceeded(): { allowed: false; response: NextResponse } {
-  return {
-    allowed: false,
-    response: apiError("Too many requests", 429),
-  };
+function rateLimitExceeded(
+  windowMs: number
+): { allowed: false; response: NextResponse } {
+  const response = apiError("Too many requests", 429);
+  // Tell clients when to retry. ceil ensures we never under-report
+  // the wait time due to sub-second rounding.
+  response.headers.set("Retry-After", String(Math.ceil(windowMs / 1000)));
+  return { allowed: false, response };
 }
 
 function degradedResult(
-  fallbackDecision: FallbackDecision
+  fallbackDecision: FallbackDecision,
+  windowMs: number
 ): { allowed: true } | { allowed: false; response: NextResponse } {
   // A saturated map cannot safely track a previously unseen key. Healthy
   // Redis can still decide it, but during degradation we must fail closed.
   return fallbackDecision === "capacity-saturated"
-    ? rateLimitExceeded()
+    ? rateLimitExceeded(windowMs)
     : { allowed: true };
 }
 
@@ -97,14 +110,14 @@ export async function rateLimit(
     now
   );
   if (fallbackDecision === "limit-exceeded") {
-    return rateLimitExceeded();
+    return rateLimitExceeded(options.windowMs);
   }
 
   const redis = await getReadyRedisClient();
 
   if (!redis) {
     warnFallbackEngaged("client not ready");
-    return degradedResult(fallbackDecision);
+    return degradedResult(fallbackDecision, options.windowMs);
   }
 
   try {
@@ -117,7 +130,7 @@ export async function rateLimit(
 
     if (redisAllowed === null) {
       warnFallbackEngaged("atomic check returned invalid result");
-      return degradedResult(fallbackDecision);
+      return degradedResult(fallbackDecision, options.windowMs);
     }
 
     markRedisResponded();
@@ -126,13 +139,13 @@ export async function rateLimit(
       if (fallbackDecision === "allowed") {
         fallbackLimiter.rollback(key, now);
       }
-      return rateLimitExceeded();
+      return rateLimitExceeded(options.windowMs);
     }
 
     return { allowed: true };
   } catch (error) {
     warnFallbackEngaged("atomic check threw", error);
-    return degradedResult(fallbackDecision);
+    return degradedResult(fallbackDecision, options.windowMs);
   }
 }
 

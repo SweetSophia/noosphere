@@ -1,11 +1,17 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "assert";
 import { rateLimit, _rateLimitTestHooks } from "@/lib/rate-limit";
+import { checkRedisRateLimit } from "@/lib/rate-limit-redis";
 import {
   fallbackLimiter,
   _fallbackLimiterTestHooks,
 } from "@/lib/rate-limit-fallback";
-import { _redisTestHooks } from "@/lib/cache/redis";
+import {
+  disconnectRedisClientOnce,
+  getRedisClient,
+  getReadyRedisClient,
+  _redisTestHooks,
+} from "@/lib/cache/redis";
 import { NextRequest } from "next/server";
 import { FakeRedisClient } from "./_helpers/fake-redis";
 
@@ -92,7 +98,7 @@ describe("Redis Rate Limiter", () => {
     assert.deepStrictEqual(result, { allowed: true });
   });
 
-  it("hashes invalid proxy identifiers before storing rate-limit keys", async () => {
+  it("bounds attacker-controlled proxy identifiers in rate-limit keys", async () => {
     const maliciousIdentifier = "x".repeat(12_000);
     const request = makeRequest(maliciousIdentifier);
 
@@ -108,6 +114,206 @@ describe("Redis Rate Limiter", () => {
     assert.equal(fakeRedis.evalKeys.length, 1);
     assert.equal(fakeRedis.evalKeys[0].includes(maliciousIdentifier), false);
     assert.ok(fakeRedis.evalKeys[0].length < 128);
+  });
+
+  it("short-circuits oversized identifiers without hashing", async () => {
+    const oversized = "x".repeat(512);
+    const request = makeRequest(oversized);
+
+    assert.deepStrictEqual(
+      await rateLimit(request, {
+        windowMs: 60_000,
+        maxRequests: 5,
+        keyPrefix: "oversized-identifier",
+      }),
+      { allowed: true }
+    );
+
+    // The key should use the "invalid:oversized" short-circuit, not a hash.
+    assert.equal(fakeRedis.evalKeys.length, 1);
+    assert.ok(fakeRedis.evalKeys[0].includes("invalid:oversized"));
+    assert.ok(fakeRedis.evalKeys[0].length < 80);
+  });
+
+  it("includes a Retry-After header on 429 responses", async () => {
+    const request = makeRequest("10.0.0.20");
+    const options = { windowMs: 30_000, maxRequests: 1, keyPrefix: "retry-after" };
+
+    await rateLimit(request, options); // First request OK
+    const result = await rateLimit(request, options); // Second blocked
+
+    assert.equal(result.allowed, false);
+    if (!result.allowed) {
+      assert.equal(result.response.status, 429);
+      assert.equal(result.response.headers.get("Retry-After"), "30");
+    }
+  });
+
+  it("uses EVALSHA and falls back to EVAL on NOSCRIPT", async () => {
+    // Phase 1: normal call — EVALSHA succeeds with the correct SHA.
+    const request = makeRequest("10.0.0.21");
+    await rateLimit(request, { windowMs: 60_000, maxRequests: 5, keyPrefix: "evalsha-test" });
+    assert.ok(fakeRedis.evalshaCalls > 0, "EVALSHA should be called first");
+
+    // Phase 2: force NOSCRIPT by overriding evalsha to always throw.
+    // The EVAL fallback should kick in and the request should still succeed.
+    const originalEvalsha = fakeRedis.evalsha.bind(fakeRedis);
+    const evalKeysBefore = fakeRedis.evalKeys.length;
+    fakeRedis.evalsha = async () => {
+      throw new Error("NOSCRIPT No matching script. Please use EVAL.");
+    };
+    try {
+      const result = await rateLimit(makeRequest("10.0.0.22"), {
+        windowMs: 60_000,
+        maxRequests: 5,
+        keyPrefix: "evalsha-noscript",
+      });
+      assert.deepStrictEqual(result, { allowed: true });
+      // EVAL fallback must have actually run — a new evalKey entry for this IP
+      // proves the Lua script executed (not just degradedResult allowing it).
+      assert.equal(
+        fakeRedis.evalKeys.length,
+        evalKeysBefore + 1,
+        "EVAL fallback should have added a new eval key"
+      );
+      assert.ok(
+        fakeRedis.evalKeys[fakeRedis.evalKeys.length - 1].includes("evalsha-noscript"),
+        "EVAL fallback key should match the request's keyPrefix"
+      );
+    } finally {
+      fakeRedis.evalsha = originalEvalsha;
+    }
+  });
+
+  it("disconnects a wedged Redis client once when concurrent checks time out", async () => {
+    fakeRedis = new FakeRedisClient({
+      evalshaDelayMs: 40,
+      // Real ioredis stays "ready" until the socket emits close, so status
+      // cannot be used as the synchronous disconnect-once guard.
+      disconnectKeepsStatus: true,
+    });
+    await fakeRedis.connect();
+    _redisTestHooks.setClientForTesting(fakeRedis as never);
+
+    const options = {
+      key: "ratelimit:evalsha-timeout:10.0.0.23",
+      windowMs: 60_000,
+      maxRequests: 5,
+      now: Date.now(),
+      timeoutMs: 25,
+    };
+    const results = await Promise.allSettled([
+      checkRedisRateLimit(fakeRedis as never, options),
+      checkRedisRateLimit(fakeRedis as never, options),
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    assert.equal(results[0].status, "rejected");
+    assert.equal(results[1].status, "rejected");
+    assert.equal(fakeRedis.disconnectCalls, 1);
+    // The singleton is removed synchronously and the cooldown suppresses an
+    // immediate reconnect even though the fake still reports status="ready".
+    assert.equal(await getReadyRedisClient(), null);
+  });
+
+  it("preserves concurrent timeout errors when disconnect cleanup throws", async () => {
+    fakeRedis = new FakeRedisClient({
+      evalshaDelayMs: 40,
+      disconnectError: new Error("disconnect failed"),
+    });
+    await fakeRedis.connect();
+    _redisTestHooks.setClientForTesting(fakeRedis as never);
+    const originalConsoleError = console.error;
+    console.error = () => {};
+
+    try {
+      const options = {
+        key: "ratelimit:disconnect-error:10.0.0.26",
+        windowMs: 60_000,
+        maxRequests: 5,
+        now: Date.now(),
+        timeoutMs: 25,
+      };
+      const results = await Promise.allSettled([
+        checkRedisRateLimit(fakeRedis as never, options),
+        checkRedisRateLimit(fakeRedis as never, options),
+      ]);
+
+      for (const result of results) {
+        assert.equal(result.status, "rejected");
+        if (result.status === "rejected") {
+          assert.match(String(result.reason), /Redis eval timed out/);
+        }
+      }
+      // Both concurrent timeout paths may retry because every cleanup attempt
+      // throws; neither failure may permanently poison the once-guard.
+      assert.equal(fakeRedis.disconnectCalls, 2);
+      assert.equal(await getReadyRedisClient(), null);
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
+  it("allows disconnect cleanup to retry after a synchronous failure", () => {
+    let disconnectCalls = 0;
+    const client = {
+      disconnect(): void {
+        disconnectCalls += 1;
+        if (disconnectCalls === 1) {
+          throw new Error("disconnect failed once");
+        }
+      },
+    };
+
+    assert.throws(
+      () => disconnectRedisClientOnce(client as never),
+      /disconnect failed once/
+    );
+    assert.doesNotThrow(() => disconnectRedisClientOnce(client as never));
+    assert.equal(disconnectCalls, 2);
+  });
+
+  it("does not issue EVAL when NOSCRIPT arrives after the timeout", async () => {
+    fakeRedis = new FakeRedisClient({
+      evalshaDelayMs: 40,
+      evalshaError: new Error("NOSCRIPT No matching script. Please use EVAL."),
+    });
+    await fakeRedis.connect();
+
+    await assert.rejects(checkRedisRateLimit(fakeRedis as never, {
+      key: "ratelimit:late-noscript:10.0.0.24",
+      windowMs: 60_000,
+      maxRequests: 5,
+      now: Date.now(),
+      timeoutMs: 25,
+    }), /Redis eval timed out/);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    assert.equal(fakeRedis.disconnectCalls, 1);
+    assert.equal(fakeRedis.evalCalls, 0);
+    assert.equal(fakeRedis.evalKeys.length, 0);
+  });
+
+  it("discards a late EVAL response that settles after the timeout", async () => {
+    fakeRedis = new FakeRedisClient({
+      evalshaError: new Error("NOSCRIPT No matching script. Please use EVAL."),
+      evalDelayMs: 40,
+      evalReturnValue: 0,
+    });
+    await fakeRedis.connect();
+
+    await assert.rejects(checkRedisRateLimit(fakeRedis as never, {
+      key: "ratelimit:late-eval:10.0.0.25",
+      windowMs: 60_000,
+      maxRequests: 5,
+      now: Date.now(),
+      timeoutMs: 25,
+    }), /Redis eval timed out/);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    assert.equal(fakeRedis.evalCalls, 1);
+    assert.equal(fakeRedis.disconnectCalls, 1);
+    assert.equal(fakeRedis.evalKeys.length, 1);
   });
 
   it("falls back to in-process limiter when Redis client is unavailable", async () => {
@@ -257,6 +463,7 @@ describe("Redis Rate Limiter", () => {
       _fallbackLimiterTestHooks.reset();
       // Swap in a fresh FakeRedis so Phase 1's ZSET entries are gone.
       fakeRedis = new FakeRedisClient();
+      await fakeRedis.connect();
       _redisTestHooks.setClientForTesting(fakeRedis as never);
       const recovered = await rateLimit(request, options);
       assert.deepStrictEqual(recovered, { allowed: true });
@@ -383,6 +590,35 @@ describe("Rate Limiter Edge Cases", () => {
     }
   });
 
+  it("does not let a stale failed connect evict a replacement singleton", async () => {
+    const staleClient = new FakeRedisClient({
+      connectDelayMs: 20,
+      rejectConnect: true,
+    });
+    const replacementClient = new FakeRedisClient({ connectDelayMs: 40 });
+    _redisTestHooks.setClientForTesting(staleClient as never);
+    const originalConsoleError = console.error;
+    console.error = () => {};
+
+    try {
+      const staleAttempt = getReadyRedisClient();
+      _redisTestHooks.setClientForTesting(replacementClient as never);
+      const replacementAttempts = [
+        getReadyRedisClient(),
+        getReadyRedisClient(),
+      ];
+
+      assert.equal(await staleAttempt, null);
+      assert.strictEqual(getRedisClient(), replacementClient);
+      const recovered = await Promise.all(replacementAttempts);
+      assert.deepStrictEqual(recovered, [replacementClient, replacementClient]);
+      assert.equal(replacementClient.connectCalls, 1);
+      assert.strictEqual(getRedisClient(), replacementClient);
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
   it("falls back to in-process limiter and suppresses immediate retries when the lazy Redis connect fails", async () => {
     const failingRedis = new FakeRedisClient({ rejectConnect: true });
     _redisTestHooks.setClientForTesting(failingRedis as never);
@@ -410,6 +646,28 @@ describe("Rate Limiter Edge Cases", () => {
       // The second call should short-circuit on the reconnect cooldown instead
       // of attempting, and logging, another failed Redis connection.
       assert.equal(errorLogs.length, 1);
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
+  it("fails safely and clears the singleton when connect and disconnect both throw", async () => {
+    const failingRedis = new FakeRedisClient({
+      rejectConnect: true,
+      disconnectError: new Error("disconnect failed"),
+    });
+    _redisTestHooks.setClientForTesting(failingRedis as never);
+    const originalConsoleError = console.error;
+    console.error = () => {};
+
+    try {
+      assert.equal(await getReadyRedisClient(), null);
+      assert.equal(failingRedis.connectCalls, 1);
+      assert.equal(failingRedis.disconnectCalls, 1);
+      // The reconnect cooldown and cleared singleton prevent the same failed
+      // client from being handed out again.
+      assert.equal(await getReadyRedisClient(), null);
+      assert.equal(failingRedis.connectCalls, 1);
     } finally {
       console.error = originalConsoleError;
     }

@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { REDIS_RATE_LIMIT_SCRIPT } from "@/lib/rate-limit-redis";
+
 type PipelineCommand =
   | { method: "zremrangebyscore"; args: [string, string, string] }
   | { method: "zcard"; args: [string] }
@@ -7,26 +10,50 @@ type PipelineCommand =
 interface FakeRedisClientOptions {
   connectDelayMs?: number;
   rejectConnect?: boolean;
+  evalshaDelayMs?: number;
+  evalshaError?: Error;
+  evalDelayMs?: number;
+  evalReturnValue?: number;
+  disconnectKeepsStatus?: boolean;
+  disconnectError?: Error;
 }
 
 export class FakeRedisClient {
   status = "wait";
   connectCalls = 0;
+  disconnectCalls = 0;
   readonly evalKeys: string[] = [];
+  evalshaCalls = 0;
+  evalCalls = 0;
 
   private readonly values = new Map<string, string>();
   private readonly expires = new Map<string, number>();
   private readonly sortedSets = new Map<string, Array<{ score: number; member: string }>>();
   private readonly connectDelayMs: number;
   private readonly rejectConnect: boolean;
+  private readonly evalshaDelayMs: number;
+  private readonly evalshaError: Error | undefined;
+  private readonly evalDelayMs: number;
+  private readonly evalReturnValue: number | undefined;
+  private readonly disconnectKeepsStatus: boolean;
+  private readonly disconnectError: Error | undefined;
 
   constructor(options: FakeRedisClientOptions = {}) {
     this.connectDelayMs = options.connectDelayMs ?? 0;
     this.rejectConnect = options.rejectConnect ?? false;
+    this.evalshaDelayMs = options.evalshaDelayMs ?? 0;
+    this.evalshaError = options.evalshaError;
+    this.evalDelayMs = options.evalDelayMs ?? 0;
+    this.evalReturnValue = options.evalReturnValue;
+    this.disconnectKeepsStatus = options.disconnectKeepsStatus ?? false;
+    this.disconnectError = options.disconnectError;
   }
 
   async connect() {
     this.connectCalls += 1;
+    // ioredis leaves "wait" synchronously when connect() starts. Preserve
+    // that transition so concurrent-connection tests exercise real behavior.
+    this.status = "connecting";
     if (this.connectDelayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, this.connectDelayMs));
     }
@@ -37,7 +64,13 @@ export class FakeRedisClient {
   }
 
   disconnect() {
-    this.status = "end";
+    this.disconnectCalls += 1;
+    if (this.disconnectError) {
+      throw this.disconnectError;
+    }
+    if (!this.disconnectKeepsStatus) {
+      this.status = "end";
+    }
   }
 
   async get(key: string): Promise<string | null> {
@@ -90,12 +123,58 @@ export class FakeRedisClient {
     return 1;
   }
 
+  private static readonly SCRIPT_SHA =
+    createHash("sha1").update(REDIS_RATE_LIMIT_SCRIPT).digest("hex");
+
+  async evalsha(
+    sha1: string,
+    numberOfKeys: number,
+    ...args: Array<string | number>
+  ): Promise<number> {
+    this.assertReady();
+    this.evalshaCalls++;
+    await delay(this.evalshaDelayMs);
+    if (this.evalshaError) {
+      throw this.evalshaError;
+    }
+    this.assertReady();
+    if (sha1 !== FakeRedisClient.SCRIPT_SHA) {
+      throw new Error("NOSCRIPT No matching script. Please use EVAL.");
+    }
+    // Delegate to the existing eval logic (skip the script body arg).
+    this.evalKeys.push(args[0] as string);
+    return this.runRateLimitScript(numberOfKeys, args);
+  }
+
   async eval(
     _script: string,
     numberOfKeys: number,
     ...args: Array<string | number>
   ): Promise<number> {
     this.assertReady();
+    this.evalCalls += 1;
+    await delay(this.evalDelayMs);
+    if (this.evalReturnValue !== undefined) {
+      this.evalKeys.push(args[0] as string);
+      return this.evalReturnValue;
+    }
+    this.assertReady();
+    if (numberOfKeys !== 1) {
+      throw new Error("FakeRedisClient only supports one-key rate-limit scripts");
+    }
+
+    // Validate basic types (runRateLimitScript does full validation).
+    if (typeof args[0] !== "string" || typeof args[4] !== "string") {
+      throw new Error("Invalid rate-limit script arguments");
+    }
+    this.evalKeys.push(args[0] as string);
+    return this.runRateLimitScript(numberOfKeys, args);
+  }
+
+  private runRateLimitScript(
+    numberOfKeys: number,
+    args: Array<string | number>
+  ): number {
     if (numberOfKeys !== 1) {
       throw new Error("FakeRedisClient only supports one-key rate-limit scripts");
     }
@@ -104,7 +183,6 @@ export class FakeRedisClient {
     if (typeof key !== "string" || typeof member !== "string") {
       throw new Error("Invalid rate-limit script arguments");
     }
-    this.evalKeys.push(key);
 
     this.zremrangebyscore(key, "-inf", String(windowStart));
     const count = this.zcard(key);
@@ -163,5 +241,11 @@ export class FakeRedisClient {
     if (this.status !== "ready") {
       throw new Error("Redis command executed before client was ready");
     }
+  }
+}
+
+async function delay(ms: number): Promise<void> {
+  if (ms > 0) {
+    await new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
