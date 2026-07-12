@@ -1,6 +1,6 @@
 {
   "name": "@sweetsophia/opencode-noosphere-memory",
-  "version": "1.10.3",
+  "version": "1.11.0",
   "private": false,
   "description": "Opencode plugin for Noosphere memory: prompt-time auto-recall, optional idle auto-save, and explicit memory tools.",
   "type": "module",

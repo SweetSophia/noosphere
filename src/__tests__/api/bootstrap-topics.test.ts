@@ -1,10 +1,23 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import pg from "pg";
+
+const { Pool } = pg;
 
 interface BootstrapTopic {
   name: string;
@@ -163,6 +176,163 @@ test("bootstrap generated-secret helpers omit unapplied and empty credentials", 
   }
 });
 
+test("bootstrap stages new credentials without replacing the last recoverable file", async () => {
+  const {
+    publishGeneratedSecretsFile,
+    stageGeneratedSecretsFile,
+    writeGeneratedSecretsFile,
+  } = await importBootstrapHelpers();
+  const originalSecretsFile = process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+  const dir = makeAllowedSecretsDir("staged-");
+  const target = join(dir, "secrets.json");
+
+  try {
+    process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = target;
+    assert.equal(writeGeneratedSecretsFile({
+      adminPassword: "last-known-password",
+      apiKey: "noo_last_known_key",
+    }), target);
+
+    const staged = stageGeneratedSecretsFile({ apiKey: "noo_candidate_key" });
+    assert.ok(staged);
+    assert.deepEqual(JSON.parse(readFileSync(target, "utf8")).credentials, {
+      adminPassword: "last-known-password",
+      apiKey: "noo_last_known_key",
+    });
+    assert.deepEqual(JSON.parse(readFileSync(staged.pendingFile, "utf8")).credentials, {
+      adminPassword: "last-known-password",
+      apiKey: "noo_candidate_key",
+    });
+    assert.throws(
+      () => stageGeneratedSecretsFile({ apiKey: "noo_must_not_overwrite_pending" }),
+      /already staged/,
+    );
+
+    assert.equal(publishGeneratedSecretsFile(staged), target);
+    assert.deepEqual(JSON.parse(readFileSync(target, "utf8")).credentials, {
+      adminPassword: "last-known-password",
+      apiKey: "noo_candidate_key",
+    });
+  } finally {
+    if (originalSecretsFile === undefined) {
+      delete process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+    } else {
+      process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = originalSecretsFile;
+    }
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("bootstrap atomically preserves one pending artifact across concurrent staging", async () => {
+  const originalSecretsFile = process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+  const dir = makeAllowedSecretsDir("concurrent-");
+  const target = join(dir, "secrets.json");
+  const barrier = join(dir, "start");
+  const moduleUrl = pathToFileURL(resolve(repoRoot, "docker", "bootstrap.mjs")).href;
+  const childScript = `
+    import { existsSync } from "node:fs";
+    import { stageGeneratedSecretsFile } from ${JSON.stringify(moduleUrl)};
+    const wait = new Int32Array(new SharedArrayBuffer(4));
+    while (!existsSync(process.env.BOOTSTRAP_TEST_BARRIER)) Atomics.wait(wait, 0, 0, 10);
+    try {
+      stageGeneratedSecretsFile({ apiKey: process.env.BOOTSTRAP_TEST_KEY });
+      process.exit(0);
+    } catch (error) {
+      if (String(error?.message).includes("already staged")) process.exit(2);
+      throw error;
+    }
+  `;
+
+  try {
+    process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = target;
+    const children = ["noo_concurrent_one", "noo_concurrent_two"].map((apiKey) =>
+      spawn(process.execPath, ["--input-type=module", "--eval", childScript], {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          BOOTSTRAP_TEST_BARRIER: barrier,
+          BOOTSTRAP_TEST_KEY: apiKey,
+          NOOSPHERE_BOOTSTRAP_SECRETS_FILE: target,
+        },
+        stdio: ["ignore", "ignore", "pipe"],
+      }));
+    writeFileSync(barrier, "go\n");
+
+    const results = await Promise.all(children.map((child) => new Promise<{
+      code: number | null;
+      stderr: string;
+    }>((resolveExit) => {
+      let stderr = "";
+      child.stderr?.setEncoding("utf8");
+      child.stderr?.on("data", (chunk) => { stderr += chunk; });
+      child.on("exit", (code) => resolveExit({ code, stderr }));
+    })));
+    assert.deepEqual(results.map(({ code }) => code).sort(), [0, 2],
+      results.map(({ stderr }) => stderr).join("\n"));
+    const staged = JSON.parse(readFileSync(`${target}.pending`, "utf8"));
+    assert.ok(["noo_concurrent_one", "noo_concurrent_two"].includes(staged.credentials.apiKey));
+  } finally {
+    if (originalSecretsFile === undefined) {
+      delete process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+    } else {
+      process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = originalSecretsFile;
+    }
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("bootstrap keeps pending credentials when final publication fails", async () => {
+  const { publishGeneratedSecretsFile, stageGeneratedSecretsFile } = await importBootstrapHelpers();
+  const originalSecretsFile = process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+  const dir = makeAllowedSecretsDir("publish-failure-");
+  const target = join(dir, "secrets.json");
+
+  try {
+    process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = target;
+    const staged = stageGeneratedSecretsFile({ apiKey: "noo_recoverable_after_publish_failure" });
+    assert.ok(staged);
+    mkdirSync(target);
+    assert.throws(() => publishGeneratedSecretsFile(staged), /remain staged/);
+    assert.equal(existsSync(staged.pendingFile), true);
+    assert.equal(
+      JSON.parse(readFileSync(staged.pendingFile, "utf8")).credentials.apiKey,
+      "noo_recoverable_after_publish_failure",
+    );
+  } finally {
+    if (originalSecretsFile === undefined) {
+      delete process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+    } else {
+      process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = originalSecretsFile;
+    }
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("bootstrap reports a missing staged file accurately after database commit", async () => {
+  const { publishGeneratedSecretsFile, stageGeneratedSecretsFile } = await importBootstrapHelpers();
+  const originalSecretsFile = process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+  const dir = makeAllowedSecretsDir("missing-pending-");
+  const target = join(dir, "secrets.json");
+
+  try {
+    process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = target;
+    const staged = stageGeneratedSecretsFile({ apiKey: "noo_missing_pending" });
+    assert.ok(staged);
+    rmSync(staged.pendingFile);
+    assert.throws(
+      () => publishGeneratedSecretsFile(staged),
+      /staged credentials file is missing or unavailable/,
+    );
+  } finally {
+    if (originalSecretsFile === undefined) {
+      delete process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+    } else {
+      process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = originalSecretsFile;
+    }
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
 test("bootstrap generated-secret helper rejects shared parent directories", async () => {
   const { writeGeneratedSecretsFile } = await importBootstrapHelpers();
   const originalSecretsFile = process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
@@ -186,6 +356,112 @@ test("bootstrap generated-secret helper rejects shared parent directories", asyn
       process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = originalSecretsFile;
     }
   }
+});
+
+test("bootstrap generated-secret helper rejects symlink traversal", async () => {
+  const { writeGeneratedSecretsFile } = await importBootstrapHelpers();
+  const originalSecretsFile = process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+  const dir = makeAllowedSecretsDir("symlink-");
+  const outside = mkdtempSync(join(tmpdir(), "noosphere-bootstrap-outside-"));
+  const link = join(dir, "redirect");
+
+  try {
+    symlinkSync(outside, link, "dir");
+    process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = join(link, "secrets.json");
+    assert.throws(
+      () => writeGeneratedSecretsFile({ apiKey: "noo_must_stay_private" }),
+      /must be real directories|cannot traverse symbolic links/,
+    );
+    assert.equal(existsSync(join(outside, "secrets.json")), false);
+  } finally {
+    if (originalSecretsFile === undefined) {
+      delete process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+    } else {
+      process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = originalSecretsFile;
+    }
+    rmSync(dir, { force: true, recursive: true });
+    rmSync(outside, { force: true, recursive: true });
+  }
+});
+
+test("bootstrap generated-secret helper rejects a symlink at the final secrets path", async () => {
+  const { writeGeneratedSecretsFile } = await importBootstrapHelpers();
+  const originalSecretsFile = process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+  const dir = makeAllowedSecretsDir("file-symlink-");
+  const outside = join(dir, "outside.json");
+  const target = join(dir, "secrets.json");
+
+  try {
+    writeFileSync(outside, "outside-content\n");
+    symlinkSync(outside, target, "file");
+    process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = target;
+    assert.throws(
+      () => writeGeneratedSecretsFile({ apiKey: "noo_must_not_follow_final_symlink" }),
+      /must be a regular file/,
+    );
+    assert.equal(readFileSync(outside, "utf8"), "outside-content\n");
+    assert.equal(existsSync(`${target}.pending`), false);
+  } finally {
+    if (originalSecretsFile === undefined) {
+      delete process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+    } else {
+      process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = originalSecretsFile;
+    }
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("bootstrap rolls back when generated credentials cannot be persisted", { timeout: 15_000 }, async () => {
+  assert.ok(process.env.DATABASE_URL, "DATABASE_URL must be set for the bootstrap rollback test");
+
+  const dir = makeAllowedSecretsDir("rollback-");
+  const blockedParent = join(dir, "not-a-directory");
+  const adminEmail = `bootstrap-rollback-${randomUUID()}@noosphere.test`;
+  const apiKey = `noo_bootstrap_rollback_${randomUUID()}`;
+  const apiKeyName = `Bootstrap rollback ${randomUUID()}`;
+  writeFileSync(blockedParent, "blocks creation of the secrets directory\n");
+
+  const result = spawnSync(
+    process.execPath,
+    [resolve(repoRoot, "docker", "bootstrap.mjs")],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: 10_000,
+      env: {
+        ...process.env,
+        NOOSPHERE_ADMIN_EMAIL: adminEmail,
+        NOOSPHERE_ADMIN_PASSWORD: "",
+        NOOSPHERE_BOOTSTRAP_API_KEY: apiKey,
+        NOOSPHERE_API_KEY_NAME: apiKeyName,
+        NOOSPHERE_BOOTSTRAP_SECRETS_FILE: join(blockedParent, "secrets.json"),
+      },
+    },
+  );
+
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  let userCount = -1;
+  let apiKeyCount = -1;
+  try {
+    userCount = Number((await pool.query(
+      `SELECT COUNT(*)::int AS count FROM "User" WHERE email = $1`,
+      [adminEmail],
+    )).rows[0]?.count ?? -1);
+    apiKeyCount = Number((await pool.query(
+      `SELECT COUNT(*)::int AS count FROM "ApiKey" WHERE name = $1`,
+      [apiKeyName],
+    )).rows[0]?.count ?? -1);
+  } finally {
+    await pool.query(`DELETE FROM "ApiKey" WHERE name = $1`, [apiKeyName]);
+    await pool.query(`DELETE FROM "User" WHERE email = $1`, [adminEmail]);
+    await pool.end();
+    rmSync(dir, { force: true, recursive: true });
+  }
+
+  assert.notEqual(result.status, 0);
+  assert.match(`${result.stdout}\n${result.stderr}`, /must be real directories/);
+  assert.equal(userCount, 0, "failed secret persistence must roll back the admin user");
+  assert.equal(apiKeyCount, 0, "failed secret persistence must roll back the API key");
 });
 
 test("bootstrap process output does not include supplied secrets or database credentials on failure", () => {
