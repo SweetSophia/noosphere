@@ -93,9 +93,11 @@ Topic and tag metadata are excluded so topic/tag edits do not fan out embedding 
 
 Embedding providers receive article text; query embeddings receive user query text. Remote egress is therefore opt-in and disabled by default. Credentials remain in environment or secret storage and never enter database rows, cache keys, logs, metrics, or error bodies.
 
-Restricted articles are local-only by default. Sending them to a remote profile requires a second, explicit restricted-content egress consent. When an article becomes restricted, ready remote vectors are disabled and pending remote jobs are cancelled unless that consent is active. When it becomes eligible again, it is re-enqueued. Remote clients must enforce bounded connection and response timeouts, response-size limits, finite values, exact dimensions, and sanitized error categories.
+Restricted articles are local-only by default. Sending them to a remote profile requires a second, explicit restricted-content egress consent. When an article transitions from unrestricted to restricted, every existing remote-profile vector row for that article is hard-deleted in the same transaction; zeroing or soft deletion is not sufficient. If restricted-content remote egress consent is active, the trigger enqueues the new restricted revision; otherwise pending remote jobs are cancelled. Local-profile vectors may be retained when the local profile remains eligible. When an article becomes eligible for a remote profile again, it is re-enqueued rather than restoring retained vector bytes. Remote clients must enforce bounded connection and response timeouts, response-size limits, finite values, exact dimensions, and sanitized error categories.
 
-Consent is checked dynamically, not only when a job is created. Revoking general remote egress disables remote-profile readiness; revoking restricted-content egress makes affected articles and vectors ineligible. Revocation cancels queued work and prevents new provider calls. Workers recheck consent immediately before dispatch and again before publication, including for leased work. A request that has already reached a remote provider cannot be recalled, but its response is not persisted after revocation. Re-enabling consent requires an explicit readiness transition and re-enqueues eligible work rather than silently resuming stale leases.
+Consent is checked dynamically, not only when a job is created. Revoking general remote egress hard-deletes all vectors for the affected remote profile; revoking restricted-content egress hard-deletes the affected restricted-article vector rows. Revocation also cancels queued work and prevents new provider calls. Workers recheck consent immediately before dispatch and again before publication, including for leased work. A request that has already reached a remote provider cannot be recalled, but its response is not persisted after revocation. Re-enabling consent requires an explicit readiness transition and re-enqueues eligible work rather than silently resuming stale leases or vector bytes.
+
+Soft-deleting an article hard-deletes all of its local- and remote-profile vector rows and cancels its pending jobs in the same transaction. Restore creates new work for the current embedding revision; it never restores retained vector bytes.
 
 ### 5. Atomic dirty tracking and worker ownership
 
@@ -127,7 +129,9 @@ Lexical and vector candidates must originate from one shared authorized base rel
 - the caller's restricted-tag scopes; and
 - for the vector leg only, the active profile plus ready and current revision/hash state.
 
-The hybrid query must preserve current semantics: it does not silently add a published-only filter when the caller did not request one. Final hydration re-applies authorization and deletion checks to close time-of-check/time-of-use gaps. Candidate generation, fusion, final authorized hydration, normalization, and pagination execute in one database statement/snapshot. The complete fused set is filtered by final authorization before it supplies the normalization denominator or page rows.
+Restricted-scope semantics remain canonically defined by `buildScopeFilter()` and `canAccessScopes()` in `src/lib/api/scope-filter.ts`, publicly re-exported through `src/lib/api/auth.ts`. `buildArticleSearchFilters()` in `src/lib/memory/article-search.ts` is the existing raw-SQL adapter for those semantics; it is not a second source of truth. The authorization-conformance matrix covers unrestricted articles; `undefined` scopes; empty `[]` scopes; non-empty disjoint-scope denial; overlapping-scope access; and `"*"` bypass across the canonical predicate, Prisma filter, raw-SQL adapter, candidate generation, and final hydration. Phase A3 establishes shared adapters and proves the predicate/Prisma/raw-SQL cases; Phase C must run the complete matrix against hybrid candidate generation and final hydration before merge. Hybrid retrieval must not introduce another scope interpretation.
+
+The hybrid query must preserve current semantics: it does not silently add a published-only filter when the caller did not request one. Final hydration re-applies authorization and deletion checks to close time-of-check/time-of-use gaps. On a cache miss, candidate generation, fusion, final authorized hydration, normalization, and pagination execute in one database statement/snapshot. The complete fused set is filtered by final authorization before it supplies the normalization denominator or page rows.
 
 The first RRF version is deterministic:
 
@@ -144,6 +148,8 @@ Hybrid mode is limited to requests where `offset + limit <= 200`. Deeper inspect
 After final authorization, the fused candidate list is normalized before pagination. Its highest non-zero raw RRF score becomes the denominator for the provider's existing 0–1 relevance contract: `relevanceScore = rawRrfScore / maxRawRrfScore`. The top authorized fused result therefore remains 1.0, matching current Noosphere-provider behavior. Raw RRF score, lexical rank, and vector rank are retained as bounded provider metadata for inspection and are not used as cross-provider scores directly.
 
 Cache identity includes the embedding profile ID, document-schema version, hybrid algorithm version, RRF parameters, candidate depth, and all existing filters and scopes.
+
+Cache entries contain the complete bounded fused candidate set as article IDs and bounded rank metadata only, never a single page. They never contain article title, excerpt, content, vector bytes, canonical-document bytes, or article revision. The serialized value is authenticated with a server-held, domain-separated MAC covering its complete cache identity, ordered IDs, and rank metadata; a missing, invalid, incomplete, or version-mismatched value is a cache miss and emits only bounded, content-free diagnostics. A cache hit is not an authorization decision: one current database statement must hydrate the entire cached candidate set, re-apply authorization and deletion checks, discard ineligible rows, renormalize the remaining complete set, and only then paginate. The highest remaining authorized non-zero score therefore retains the 1.0 contract, and removed rows cannot leave a short page when enough authorized cached candidates remain.
 
 ### 7. Failure policy
 
@@ -170,6 +176,15 @@ The implementation requires:
 - a versioned relevance benchmark with an approved lexical baseline and hybrid acceptance threshold.
 
 Metrics cover coverage, queue depth, age, latency, classified errors, fallback rate, and RRF overlap. Labels must be bounded and must not contain article IDs, queries, content, endpoints, or credentials.
+
+### Phase acceptance criteria
+
+The deferred security and operations details are merge gates for their implementation phases:
+
+- **Phase A3:** define and test separate least-privilege database roles for feature activation and worker runtime; the activation role may perform only the required feature DDL, while the worker role receives narrowly bounded job/vector DML and eligible article reads. Establish shared authorization adapters and prove canonical predicate, Prisma-filter, and raw-SQL conformance. Enforce profile immutability in the database; restrict profile creation and activation to an explicit administrative permission; set and validate a numeric upper bound for `maxInputBytes`; and record pgvector source, license, and redistribution evidence for the activated feature schema.
+- **Phase B:** set numeric defaults and hard limits for worker concurrency, lease duration, and maximum attempts, plus numeric warning and critical thresholds for durable pending queue depth and age. Backpressure limits claims and chunks operator-initiated backfills; it never rejects article writes or drops/coalesces away the latest dirty revision. Authenticate the worker with the A3 runtime role, and define authenticated transport plus response-validation requirements for local and remote provider endpoints.
+- **Phase C:** store the complete bounded fused set as only IDs and rank metadata in authenticated cache entries and require one-statement authorized hydration, post-hydration renormalization, and pagination on every hit. Run the complete authorization-conformance matrix against hybrid candidate generation and final hydration; derive cache identity from a cryptographic hash of normalized query text rather than raw text; HMAC the canonical scope set with a server-held secret rather than exposing plaintext scopes in cache keys; and test invalid/missing MACs, incomplete values, cache tampering, scope changes, deletion, and revocation transitions.
+- **Phase D:** suppress aggregate coverage and overlap metrics below a documented anonymity floor; audit consent and eligibility revocations without content-bearing fields; and alert on abrupt eligible-denominator or coverage changes so a write-capable actor cannot silently hold activation below the 95% gate.
 
 ## Delivery sequence
 
