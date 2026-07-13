@@ -8,6 +8,8 @@ configuration model used by the memory modules.
 
 Related issue: [#18 — Document architecture and config model](https://github.com/SweetSophia/noosphere/issues/18)
 
+Planned semantic retrieval is specified separately in the [authorization-safe hybrid retrieval ADR](HYBRID-RETRIEVAL-ADR.md) for [issue #261](https://github.com/SweetSophia/noosphere/issues/261). The ADR is proposed and does not describe current runtime behavior.
+
 ---
 
 ## 1. Scope and Constraints
@@ -35,7 +37,7 @@ Operational constraints:
 
 | Concern | Main entry points | File |
 | --- | --- | --- |
-| Access control | `buildScopeFilter()`, `canAccessScopes()` | `src/lib/api/auth.ts` |
+| Access control | `buildScopeFilter()`, `canAccessScopes()` | `src/lib/api/scope-filter.ts` (re-exported by `src/lib/api/auth.ts`) |
 | Article search (SQL CTE) | `buildArticleSearchFilters()`, `searchArticleIds()`, `countSearchArticles()` | `src/lib/memory/article-search.ts`, `src/lib/wiki.ts` |
 | Normalized schema/scoring | `MemoryResult`, `computeBaseCompositeScore()` | `src/lib/memory/types.ts` |
 | Provider contract | `MemoryProvider`, `MemoryProviderConfig`, `getEffectiveAutoRecall()` | `src/lib/memory/provider.ts` |
@@ -174,9 +176,12 @@ whose `restrictedTags` are either empty or overlap with the caller's allowed sco
 - `allowedScopes = ["financial", "...*"]` (scoped key) — unrestricted articles **or**
   articles tagged with at least one of the caller's scopes.
 
-The filtering is applied in `buildArticleSearchFilters()` (SQL CTE for full-text
-search) and `buildScopeWhere()` (Prisma `where` clause for direct lookups). Both
-use `buildScopeFilter()` in `src/lib/api/auth.ts` as the canonical source of truth.
+The filtering is applied by independently implemented adapters:
+`buildArticleSearchFilters()` for the full-text SQL CTE and `buildScopeWhere()`
+for Noosphere-provider Prisma lookups. `buildScopeFilter()` and
+`canAccessScopes()` in `src/lib/api/scope-filter.ts` (re-exported by
+`src/lib/api/auth.ts`) define the canonical semantics that both adapters must
+remain conformant with.
 See the restricted-tags implementation docs in the codebase for the full access
 control model.
 
