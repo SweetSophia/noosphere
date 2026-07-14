@@ -1007,6 +1007,110 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     assert.match(warnings[0], /auto-recall skipped: .*failing open/);
   });
 
+  it("does not cache a malformed DB settings response", async () => {
+    let settingsCalls = 0;
+    let recallCalls = 0;
+    const warnings: string[] = [];
+    const validSettings: NoosphereSettingsResponse = {
+      autoRecallEnabled: true,
+      maxInjectedMemories: 5,
+      maxInjectedTokens: 1000,
+      recallVerbosity: "standard",
+      deduplicationStrategy: "best-score",
+      enabledProviders: ["noosphere"],
+      providerPriorityWeights: {},
+      summaryFirst: true,
+      conflictStrategy: "surface",
+      conflictThreshold: 0.1,
+    };
+    const context = {
+      config: {
+        baseUrl: "https://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
+      client: {
+        async settings(): Promise<NoosphereSettingsResponse> {
+          settingsCalls += 1;
+          if (settingsCalls === 1) {
+            return {
+              ...validSettings,
+              enabledProviders: null,
+            } as unknown as NoosphereSettingsResponse;
+          }
+          return validSettings;
+        },
+        async recall(): Promise<NoosphereRecallResponse> {
+          recallCalls += 1;
+          return {
+            results: [],
+            totalBeforeCap: 0,
+            mode: "auto",
+            providerMeta: successfulProviderMeta(0),
+          };
+        },
+      },
+    } as unknown as NoosphereClientContext;
+    const hook = createNoosphereAutoRecallHook({ autoRecall: true }, context, {
+      warn: (message) => warnings.push(message),
+    });
+
+    const firstResult = await hook(
+      { prompt: "Malformed settings should not be cached", messages: [] },
+      {},
+    );
+    const secondResult = await hook(
+      { prompt: "A valid retry should run immediately", messages: [] },
+      {},
+    );
+
+    assert.equal(firstResult, undefined);
+    assert.ok(secondResult?.prependContext?.includes("<noosphere_memory_capture>"));
+    assert.equal(settingsCalls, 2);
+    assert.equal(recallCalls, 1);
+    assert.equal(warnings.length, 1);
+  });
+
+  it("fails open when provider priority weights are negative", async () => {
+    let recallCalls = 0;
+    const context = {
+      config: {
+        baseUrl: "https://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
+      client: {
+        async settings(): Promise<NoosphereSettingsResponse> {
+          return {
+            autoRecallEnabled: true,
+            maxInjectedMemories: 5,
+            maxInjectedTokens: 1000,
+            recallVerbosity: "standard",
+            deduplicationStrategy: "best-score",
+            enabledProviders: ["noosphere"],
+            providerPriorityWeights: { noosphere: -1 },
+            summaryFirst: true,
+            conflictStrategy: "surface",
+            conflictThreshold: 0.1,
+          };
+        },
+        async recall(): Promise<NoosphereRecallResponse> {
+          recallCalls += 1;
+          throw new Error("recall should not be called");
+        },
+      },
+    } as unknown as NoosphereClientContext;
+    const hook = createNoosphereAutoRecallHook({ autoRecall: true }, context);
+
+    const result = await hook(
+      { prompt: "Negative provider weights are malformed", messages: [] },
+      {},
+    );
+
+    assert.equal(result, undefined);
+    assert.equal(recallCalls, 0);
+  });
+
   it("fails open when the client-context resolver throws", async () => {
     const warnings: string[] = [];
     const hook = createNoosphereAutoRecallHook(

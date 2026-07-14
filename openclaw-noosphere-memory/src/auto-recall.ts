@@ -239,19 +239,25 @@ export function createNoosphereAutoRecallHook(
     if (typeof context.client.settings !== "function") {
       return null;
     }
+    let dbSettings: NoosphereSettingsResponse;
     try {
-      const dbSettings = await context.client.settings({
+      dbSettings = await context.client.settings({
         timeoutMs: staticConfig.timeoutMs,
       });
-      settingsCache.settings = dbSettings;
-      settingsCache.fetchedAt = now;
-      settingsCaches.set(cacheKey, settingsCache);
-      return dbSettings;
     } catch (err) {
       logger?.warn?.(`noosphere-memory: failed to fetch recall settings from DB: ${formatHookError(err)}`);
       // Return cached settings if available (even if stale), otherwise null
       return settingsCache.settings ?? null;
     }
+    // Never put an untrusted payload into the normal TTL cache. Otherwise one
+    // malformed response is replayed on every prompt until the cache expires.
+    if (!isValidSettingsResponse(dbSettings)) {
+      throw new Error("malformed recall settings response");
+    }
+    settingsCache.settings = dbSettings;
+    settingsCache.fetchedAt = now;
+    settingsCaches.set(cacheKey, settingsCache);
+    return dbSettings;
   }
 
   /**
@@ -705,7 +711,10 @@ function isValidSettingsResponse(settings: unknown): settings is NoosphereSettin
   if (!isRecord(settings.providerPriorityWeights)) return false;
   if (
     Object.values(settings.providerPriorityWeights).some(
-      (weight) => typeof weight !== "number" || !Number.isFinite(weight),
+      (weight) =>
+        typeof weight !== "number" ||
+        !Number.isFinite(weight) ||
+        weight < 0,
     )
   ) {
     return false;
