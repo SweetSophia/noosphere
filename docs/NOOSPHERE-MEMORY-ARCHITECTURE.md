@@ -594,8 +594,9 @@ Key groups:
 
 When `memoryCaptureInstructionsEnabled: true`, the `before_prompt_build` hook injects
 a `<noosphere_memory_capture>` XML block containing guidance on when and how to use
-`noosphere_save`. This block is appended only when auto-recall succeeds and returns
-non-empty prompt injection text. The default instructions tell agents:
+`noosphere_save`. The guidance is independent of recall result content: an eligible
+auto-recall turn still receives capture guidance when recall returns zero matches or
+omits prompt-injection text. The default instructions tell agents:
 
 **WHEN TO SAVE:**
 - After completing a significant task (deployment, bug fix, feature implementation)
@@ -624,12 +625,11 @@ before_prompt_build hook
   → fetchRecallSettings() from DB (with 30s cache)
   → executeMemoryRecallRequest() via HTTP API
   → extractPromptInjectionText() from response
-  → IF recall text exists AND memoryCaptureInstructionsEnabled:
-      → inject <noosphere_memory_capture> + <noosphere_auto_recall> blocks
-    ELSE IF recall text exists:
-      → inject <noosphere_auto_recall> only
-    ELSE:
-      → return undefined (no injection)
+  → Build injection parts independently:
+      → IF memoryCaptureInstructionsEnabled: add <noosphere_memory_capture>
+      → IF recall text exists: add <noosphere_auto_recall>
+      → IF neither exists: return undefined
+      → ELSE inject the available part(s)
 ```
 
 ### OpenClaw CLI Helpers

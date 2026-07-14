@@ -199,7 +199,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     assert.equal(calls[0].tokenBudget, 1200);
   });
 
-  it("returns nothing when recall is empty", async () => {
+  it("keeps capture guidance when recall is empty", async () => {
     const calls: NoosphereRecallRequest[] = [];
     const context = {
       config: {
@@ -229,8 +229,47 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
       {},
     );
 
-    assert.equal(result, undefined);
+    assert.equal(
+      result?.prependContext?.includes("<noosphere_memory_capture>"),
+      true,
+    );
+    assert.equal(
+      result?.prependContext?.includes("<noosphere_auto_recall>"),
+      false,
+    );
     assert.equal(calls.length, 1);
+  });
+
+  it("returns nothing on an empty recall when capture guidance is disabled", async () => {
+    const context = {
+      config: {
+        baseUrl: "https://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
+      client: {
+        async recall(): Promise<NoosphereRecallResponse> {
+          return {
+            results: [],
+            totalBeforeCap: 0,
+            mode: "auto",
+            providerMeta: [],
+            promptInjectionText: "   ",
+          };
+        },
+      },
+    } as unknown as NoosphereClientContext;
+    const hook = createNoosphereAutoRecallHook(
+      { autoRecall: true, memoryCaptureInstructionsEnabled: false },
+      context,
+    );
+
+    const result = await hook(
+      { prompt: "No matching durable memory", messages: [] },
+      {},
+    );
+
+    assert.equal(result, undefined);
   });
 
   it("fails open and logs a warning on recall errors", async () => {
@@ -430,7 +469,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     );
   });
 
-  it("returns nothing when promptInjectionText is missing", async () => {
+  it("keeps capture guidance when promptInjectionText is missing", async () => {
     const calls: NoosphereRecallRequest[] = [];
     const context = {
       config: {
@@ -456,11 +495,18 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
 
     const result = await hook({ prompt: "Noosphere bridge", messages: [] }, {});
 
-    assert.equal(result, undefined);
+    assert.equal(
+      result?.prependContext?.includes("<noosphere_memory_capture>"),
+      true,
+    );
+    assert.equal(
+      result?.prependContext?.includes("<noosphere_auto_recall>"),
+      false,
+    );
     assert.equal(calls.length, 1);
   });
 
-  it("skips injection when Noosphere does not return auto-mode prompt text", async () => {
+  it("keeps capture guidance when Noosphere does not return auto-mode prompt text", async () => {
     const calls: NoosphereRecallRequest[] = [];
     const context = {
       config: {
@@ -488,7 +534,14 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
 
     const result = await hook({ prompt: "Noosphere bridge", messages: [] }, {});
 
-    assert.equal(result, undefined);
+    assert.equal(
+      result?.prependContext?.includes("<noosphere_memory_capture>"),
+      true,
+    );
+    assert.equal(
+      result?.prependContext?.includes("<noosphere_auto_recall>"),
+      false,
+    );
     assert.equal(calls.length, 1);
   });
 

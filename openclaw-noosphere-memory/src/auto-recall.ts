@@ -347,17 +347,20 @@ export function createNoosphereAutoRecallHook(
 
       const response = await recallPromise;
 
-      // Build injection parts: instructions (if enabled) + recall results
+      // Build capture guidance independently from recalled content. A recall
+      // miss is often the strongest signal that the current turn may contain
+      // knowledge Noosphere does not have yet; hiding save guidance on an empty
+      // result made memory capture least reliable exactly when it was needed.
       const recallText = extractPromptInjectionText(response, effectiveConfig);
-
-      // Only inject if there's actual recall text to return
-      if (!recallText) return;
-
       const injectionParts: string[] = [];
       if (effectiveConfig.memoryCaptureInstructionsEnabled) {
         injectionParts.push(effectiveConfig.memoryCaptureInstructions);
       }
-      injectionParts.push(recallText);
+      if (recallText) {
+        injectionParts.push(recallText);
+      }
+
+      if (injectionParts.length === 0) return;
 
       return buildInjectionResult(
         injectionParts.join("\n\n"),
