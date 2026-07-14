@@ -268,7 +268,7 @@ value used by the plugin when no config is supplied. "Installer value" is what
 | `allowedChatTypes` | `[]` | unset | Optional chat/provider allowlist. Empty/unset means all chat types. |
 | `includeRecentTurns` | `true` | default | Include recent user turns in the recall query. |
 | `recentTurnLimit` | `4` | default | Recent turn cap. Max `10`. |
-| `memoryCaptureInstructionsEnabled` | `true` | default | Adds guidance for when/how to call `noosphere_save` only when auto-recall succeeds and returns non-empty prompt text. |
+| `memoryCaptureInstructionsEnabled` | `true` | default | Adds advisory guidance for when/how to call `noosphere_save`. Guidance remains available on successful clean misses even when recall returns no injectable prompt text; provider or malformed-response failures still fail open. |
 | `memoryCaptureInstructions` | built-in text | default | Optional custom guidance override. |
 | `allowDefaultCorpusSupplement` | `false` | unset | Registers the shared memory corpus supplement using the default API key. Keep false unless a default corpus key is intentionally scoped for all agents. Use a READ-only key with the narrowest shared `allowedScopes` when corpus search does not need writes. |
 | `ignoreSessionPatterns` | `[]` | unset | Glob patterns for sessions to skip. |

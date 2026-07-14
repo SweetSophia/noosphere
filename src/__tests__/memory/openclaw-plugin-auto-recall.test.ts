@@ -29,11 +29,23 @@ import {
 import type {
   NoosphereRecallRequest,
   NoosphereRecallResponse,
+  NoosphereSettingsResponse,
 } from "../../../openclaw-noosphere-memory/src/client.js";
 import { createNoosphereGetTool } from "../../../openclaw-noosphere-memory/src/tools/get.js";
 import { createNoosphereSaveTool } from "../../../openclaw-noosphere-memory/src/tools/save.js";
 import { createNoosphereTopicCreateTool } from "../../../openclaw-noosphere-memory/src/tools/topic-create.js";
 import type { NoosphereClientContext } from "../../../openclaw-noosphere-memory/src/shared-init.js";
+
+function successfulProviderMeta(resultCount: number): NoosphereRecallResponse["providerMeta"] {
+  return [
+    {
+      providerId: "noosphere",
+      resultCount,
+      enabled: true,
+      durationMs: 1,
+    },
+  ];
+}
 
 function makeContext(
   overrides: Partial<NoosphereClientContext["config"]> = {},
@@ -44,7 +56,7 @@ function makeContext(
     totalBeforeCap: 1,
     mode: "auto",
     tokenBudgetUsed: 12,
-    providerMeta: [],
+    providerMeta: successfulProviderMeta(1),
     promptInjectionText:
       "<recall>\n  <item>Remember the Omnissiah.</item>\n</recall>",
   };
@@ -232,7 +244,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
             results: [],
             totalBeforeCap: 0,
             mode: "auto",
-            providerMeta: [],
+            providerMeta: successfulProviderMeta(0),
             promptInjectionText: "   ",
           };
         },
@@ -270,7 +282,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
             results: [],
             totalBeforeCap: 0,
             mode: "auto",
-            providerMeta: [],
+            providerMeta: successfulProviderMeta(0),
             promptInjectionText: "",
           };
         },
@@ -325,7 +337,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
             results: [],
             totalBeforeCap: 0,
             mode: "auto",
-            providerMeta: [],
+            providerMeta: successfulProviderMeta(0),
             promptInjectionText: "   ",
           };
         },
@@ -473,6 +485,89 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     );
   });
 
+  it("fails open when recall text is paired with malformed provider metadata", async () => {
+    const warnings: string[] = [];
+    const context = {
+      config: {
+        baseUrl: "https://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
+      client: {
+        async recall(): Promise<NoosphereRecallResponse> {
+          return {
+            results: [],
+            totalBeforeCap: 1,
+            mode: "auto",
+            providerMeta: { error: "malformed response" } as unknown as unknown[],
+            promptInjectionText: "<recall>stale text</recall>",
+          };
+        },
+      },
+    } as unknown as NoosphereClientContext;
+    const hook = createNoosphereAutoRecallHook({ autoRecall: true }, context, {
+      warn: (message) => warnings.push(message),
+    });
+
+    const result = await hook(
+      { prompt: "Malformed metadata with stale recall text", messages: [] },
+      {},
+    );
+
+    assert.equal(result, undefined);
+    assert.deepEqual(warnings, [
+      "noosphere-memory: auto-recall skipped: malformed providerMeta; failing open",
+    ]);
+  });
+
+  it("fails open when recall text has no successful provider result", async () => {
+    for (const providerMeta of [
+      [],
+      [
+        {
+          providerId: "noosphere",
+          resultCount: 0,
+          enabled: true,
+          error: "provider unavailable",
+          durationMs: 10,
+        },
+      ],
+    ]) {
+      const warnings: string[] = [];
+      const context = {
+        config: {
+          baseUrl: "https://noosphere.local",
+          apiKey: "noo_test",
+          timeoutMs: 5000,
+        },
+        client: {
+          async recall(): Promise<NoosphereRecallResponse> {
+            return {
+              results: [],
+              totalBeforeCap: 1,
+              mode: "auto",
+              providerMeta,
+              promptInjectionText: "<recall>stale text</recall>",
+            };
+          },
+        },
+      } as unknown as NoosphereClientContext;
+      const hook = createNoosphereAutoRecallHook({ autoRecall: true }, context, {
+        warn: (message) => warnings.push(message),
+      });
+
+      const result = await hook(
+        { prompt: "No successful provider result", messages: [] },
+        {},
+      );
+
+      assert.equal(result, undefined);
+      assert.deepEqual(warnings, [
+        "noosphere-memory: auto-recall skipped: recall text has no successful provider result; failing open",
+      ]);
+    }
+  });
+
   it("fails open with an actionable warning when providerMeta is not an array", async () => {
     const warnings: string[] = [];
     const context = {
@@ -561,6 +656,126 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     }
   });
 
+  it("fails open when providerMeta is semantically inconsistent", async () => {
+    const inconsistentProviderMeta = [
+      [
+        {
+          providerId: "noosphere",
+          resultCount: 1,
+          enabled: true,
+          durationMs: 1,
+        },
+        {
+          providerId: "hindsight",
+          resultCount: 1,
+          enabled: true,
+          durationMs: 1,
+          error: "provider failed",
+        },
+      ],
+      [
+        {
+          providerId: "noosphere",
+          resultCount: 0,
+          enabled: false,
+          durationMs: 0,
+        },
+      ],
+      [
+        {
+          providerId: "noosphere",
+          resultCount: 1,
+          enabled: true,
+          durationMs: 1,
+        },
+        {
+          providerId: "noosphere",
+          resultCount: 0,
+          enabled: true,
+          durationMs: 1,
+        },
+      ],
+    ];
+
+    for (const providerMeta of inconsistentProviderMeta) {
+      const warnings: string[] = [];
+      const context = {
+        config: {
+          baseUrl: "https://noosphere.local",
+          apiKey: "noo_test",
+          timeoutMs: 5000,
+        },
+        client: {
+          async recall(): Promise<NoosphereRecallResponse> {
+            return {
+              results: [],
+              totalBeforeCap: 1,
+              mode: "auto",
+              providerMeta,
+              promptInjectionText: "<recall>untrusted text</recall>",
+            };
+          },
+        },
+      } as unknown as NoosphereClientContext;
+      const hook = createNoosphereAutoRecallHook({ autoRecall: true }, context, {
+        warn: (message) => warnings.push(message),
+      });
+
+      const result = await hook(
+        { prompt: "Inconsistent provider metadata", messages: [] },
+        {},
+      );
+
+      assert.equal(result, undefined);
+      assert.deepEqual(warnings, [
+        "noosphere-memory: auto-recall skipped: malformed providerMeta; failing open",
+      ]);
+    }
+  });
+
+  it("fails open when every provider was skipped", async () => {
+    const warnings: string[] = [];
+    const context = {
+      config: {
+        baseUrl: "https://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
+      client: {
+        async recall(): Promise<NoosphereRecallResponse> {
+          return {
+            results: [],
+            totalBeforeCap: 0,
+            mode: "auto",
+            providerMeta: [
+              {
+                providerId: "noosphere",
+                resultCount: 0,
+                enabled: false,
+                durationMs: 0,
+                skippedReason: "disabled",
+              },
+            ],
+            promptInjectionText: "",
+          };
+        },
+      },
+    } as unknown as NoosphereClientContext;
+    const hook = createNoosphereAutoRecallHook({ autoRecall: true }, context, {
+      warn: (message) => warnings.push(message),
+    });
+
+    const result = await hook(
+      { prompt: "All recall providers skipped", messages: [] },
+      {},
+    );
+
+    assert.equal(result, undefined);
+    assert.deepEqual(warnings, [
+      "noosphere-memory: auto-recall skipped: no provider completed successfully; failing open",
+    ]);
+  });
+
   it("keeps wrapped recall text within the approximate character budget", async () => {
     const context = {
       config: {
@@ -574,7 +789,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
             results: [],
             totalBeforeCap: 1,
             mode: "auto",
-            providerMeta: [],
+            providerMeta: successfulProviderMeta(1),
             promptInjectionText: "x".repeat(1_000),
           };
         },
@@ -699,6 +914,119 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     assert.equal(settingsCalls.length, 0);
   });
 
+  it("fails open when DB recall settings have a malformed provider list", async () => {
+    const warnings: string[] = [];
+    const context = {
+      config: {
+        baseUrl: "https://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
+      client: {
+        async settings() {
+          return {
+            autoRecallEnabled: true,
+            maxInjectedMemories: 10,
+            maxInjectedTokens: 1000,
+            recallVerbosity: "standard",
+            deduplicationStrategy: "hybrid",
+            enabledProviders: null,
+            providerPriorityWeights: {},
+            summaryFirst: true,
+            conflictStrategy: "newest",
+            conflictThreshold: 0.85,
+          } as unknown as NoosphereSettingsResponse;
+        },
+        async recall(): Promise<NoosphereRecallResponse> {
+          throw new Error("recall should not be called");
+        },
+      },
+    } as unknown as NoosphereClientContext;
+    const hook = createNoosphereAutoRecallHook({ autoRecall: true }, context, {
+      warn: (message) => warnings.push(message),
+    });
+
+    const result = await hook(
+      { prompt: "Malformed DB recall settings", messages: [] },
+      {},
+    );
+
+    assert.equal(result, undefined);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /auto-recall skipped: .*failing open/);
+  });
+
+  it("fails open when DB recall settings have malformed scalar fields", async () => {
+    let recallCalls = 0;
+    const warnings: string[] = [];
+    const context = {
+      config: {
+        baseUrl: "https://noosphere.local",
+        apiKey: "noo_test",
+        timeoutMs: 5000,
+      },
+      client: {
+        async settings() {
+          return {
+            autoRecallEnabled: "false",
+            maxInjectedMemories: 10,
+            maxInjectedTokens: 1000,
+            recallVerbosity: "standard",
+            deduplicationStrategy: "hybrid",
+            enabledProviders: ["noosphere"],
+            providerPriorityWeights: {},
+            summaryFirst: true,
+            conflictStrategy: "newest",
+            conflictThreshold: 0.85,
+          } as unknown as NoosphereSettingsResponse;
+        },
+        async recall(): Promise<NoosphereRecallResponse> {
+          recallCalls += 1;
+          return {
+            results: [],
+            totalBeforeCap: 1,
+            mode: "auto",
+            providerMeta: successfulProviderMeta(1),
+            promptInjectionText: "<recall>must not inject</recall>",
+          };
+        },
+      },
+    } as unknown as NoosphereClientContext;
+    const hook = createNoosphereAutoRecallHook({ autoRecall: true }, context, {
+      warn: (message) => warnings.push(message),
+    });
+
+    const result = await hook(
+      { prompt: "Malformed DB recall settings", messages: [] },
+      {},
+    );
+
+    assert.equal(result, undefined);
+    assert.equal(recallCalls, 0);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /auto-recall skipped: .*failing open/);
+  });
+
+  it("fails open when the client-context resolver throws", async () => {
+    const warnings: string[] = [];
+    const hook = createNoosphereAutoRecallHook(
+      { autoRecall: true },
+      () => {
+        throw new Error("resolver failed");
+      },
+      { warn: (message) => warnings.push(message) },
+    );
+
+    const result = await hook(
+      { prompt: "Resolver failure must not block the prompt", messages: [] },
+      {},
+    );
+
+    assert.equal(result, undefined);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /auto-recall skipped: resolver failed; failing open/);
+  });
+
   it("resolves the auto-recall client per agent invocation", async () => {
     const callsByAgent = new Map<string, NoosphereRecallRequest[]>();
     const makeAgentContext = (agentId: string): NoosphereClientContext => ({
@@ -717,7 +1045,14 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
             totalBeforeCap: 1,
             mode: "auto",
             tokenBudgetUsed: 12,
-            providerMeta: [],
+            providerMeta: [
+              {
+                providerId: "noosphere",
+                resultCount: 1,
+                enabled: true,
+                durationMs: 1,
+              },
+            ],
             promptInjectionText: `<recall>${agentId}</recall>`,
           };
         },
@@ -813,7 +1148,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
             results: [],
             totalBeforeCap: 0,
             mode: "auto",
-            providerMeta: [],
+            providerMeta: successfulProviderMeta(0),
           } as NoosphereRecallResponse;
         },
       },
@@ -892,7 +1227,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
             totalBeforeCap: 1,
             mode: "auto",
             tokenBudgetUsed: 12,
-            providerMeta: [],
+            providerMeta: successfulProviderMeta(1),
             promptInjectionText: "<recall>timeout text</recall>",
           };
         },

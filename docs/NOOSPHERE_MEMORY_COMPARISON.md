@@ -52,7 +52,7 @@ Noosphere rows marked as planned or partial below are staged in the
 | **Token Budget Manager** | ✅ Prompt-safe recall blocks | ✅ `recallMaxTokens` | ❌ | ❌ | ❌ | ❌ |
 | **Promotion (ephemeral → curated)** | ⚠️ Pure threshold/review scaffolding; durable statistics and worker wiring planned | ❌ | ❌ | ❌ | ❌ | ⚠️ Decay model (Weibull) |
 | **Backfill / Synthesis** | ⚠️ Pure job/content helpers; durable execution wiring planned | ✅ Historical backfill CLI | ❌ | ❌ | ❌ | ❌ |
-| **Local Scheduler** | ✅ Built-in memory job runner | ❌ | ❌ | ✅ Continuous sync loop | ❌ | ❌ |
+| **Local Scheduler** | ⚠️ Scheduler framework; only the health job is currently wired | ❌ | ❌ | ✅ Continuous sync loop | ❌ | ❌ |
 | **Revision History** | ✅ Per-article | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Topic Hierarchy** | ✅ Unlimited depth | ❌ | ❌ | ✅ Category hierarchy | ❌ | ❌ |
 | **Tags / Relations** | ✅ Tags + article edges | ❌ | ❌ | ✅ Cross-references | ✅ Entity linking (v3) | ❌ |

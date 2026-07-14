@@ -4,6 +4,10 @@
 **Date:** 2026-07-14
 **Scope:** Noosphere server, OpenClaw memory plugin, recall providers, and curation lifecycle
 
+Current implemented OpenClaw settings are documented in the
+[official plugin setup guide](OPENCLAW-OFFICIAL-PLUGIN-SETUP.md). Configuration
+examples introduced below for later phases are proposed and are not live keys.
+
 ## 1. Decision summary
 
 Noosphere should add two connected but independently deployable capabilities:
@@ -35,8 +39,9 @@ hard-coded synonym groups. This works when the query and article share words,
 but ordinary paraphrases can still miss the correct article and force an agent
 to search manually.
 
-The approved hybrid-retrieval ADR addresses the broader semantic problem with
-embeddings and reciprocal-rank fusion. Recall enrichment remains useful because:
+The [proposed hybrid-retrieval ADR](HYBRID-RETRIEVAL-ADR.md) addresses the
+broader semantic problem with embeddings and reciprocal-rank fusion. Recall
+enrichment remains useful because:
 
 - lexical search must continue to work when hybrid retrieval is disabled;
 - exact names, aliases, acronyms, paths, and error strings remain lexical
@@ -94,7 +99,7 @@ promotion service.
 | Synthesis helpers | `src/lib/memory/backfill.ts` | Preserve pure helpers; add a durable worker and validated model-output contract. |
 | Scheduler foundation | `LocalMemoryScheduler` | Keep for local development only; production work needs durable leases/jobs. |
 | Scope authorization | API-key scopes and `restrictedTags` | Apply to capture, candidate search, enrichment, and promotion. |
-| Hybrid retrieval | `docs/HYBRID-RETRIEVAL-ADR.md` | Treat enrichment as a complementary lexical/document layer. |
+| Hybrid retrieval | [Hybrid Retrieval ADR](HYBRID-RETRIEVAL-ADR.md) | Treat enrichment as a complementary lexical/document layer. |
 
 ## 6. Architecture
 
@@ -135,17 +140,23 @@ required.
 ### 7.1 `MemoryCapture`
 
 A capture is private temporary evidence, not a wiki page.
+No current `ApiKey` row carries the required immutable agent-principal binding,
+and automatic capture remains disabled until Phase A adds that server-managed
+identity contract.
 
 Required fields:
 
 - `id`
-- `dedupeKey` — unique HMAC or hash over canonical source identity and content
+- `dedupeKey` — unique, domain-separated, versioned keyed HMAC over canonical
+  source identity and content; an unkeyed content hash is forbidden
 - `agentId` — server-derived from the authenticated API key's immutable agent
   principal binding; never accepted from request data
 - `privateScopeTag` — required non-empty restricted tag authorized for the
   caller; capture is rejected if the key cannot write it
-- `sourceSessionHash` — keyed hash; never store raw session keys
-- `sourceRunHash` — keyed hash when a run ID is available
+- `sourceSessionHash` — domain-separated, versioned keyed HMAC; never store raw
+  session keys
+- `sourceRunHash` — domain-separated, versioned keyed HMAC when a run ID is
+  available
 - `sourceType` — initially `openclaw_agent_end`
 - `userText` and `assistantText` — bounded, sanitized text only
 - `restrictedTags` — inherited from the narrow agent key/config
@@ -165,7 +176,8 @@ A candidate is sanitized, searchable, and still ephemeral.
 Required fields:
 
 - `id`
-- `dedupeKey`
+- `dedupeKey` — domain-separated, versioned keyed HMAC over canonical sanitized
+  candidate content
 - `title`
 - `content` — concise durable facts, not the full transcript
 - `recallSummary` — two to four factual sentences for prompt injection
@@ -217,7 +229,8 @@ the recall summary is machine-generated retrieval metadata.
 
 Promotion inputs must be durable. Record the final selected memory, provider,
 retrieval mode, normalized relevance, and bounded source context. Do not store
-the raw query. Use a keyed query hash if correlation is necessary.
+the raw query. If correlation is necessary, use a domain-separated, versioned
+keyed HMAC and retain only its algorithm/key-version identifier with the digest.
 
 Statistics must distinguish:
 
