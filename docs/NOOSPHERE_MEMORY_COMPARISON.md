@@ -25,7 +25,7 @@
 | Feature | **Noosphere** | **Hindsight** | **QMD** | **memU** | **mem0** | **LanceDB Pro** |
 |---|---|---|---|---|---|---|
 | **Auto-Capture** | ⚠️ Explicit draft save + advisory capture guidance; deterministic turn capture planned | ✅ Every turn | ❌ Manual indexing | ✅ Continuous learning | ✅ `memory.add()` | ✅ Smart extraction |
-| **Auto-Recall** | ✅ Hook injection with dual-block (memory capture guidance + recall results) | ✅ Before each turn | ✅ Keyword search only | ✅ Proactive context loading | ✅ `memory.search()` | ✅ Before prompt build |
+| **Auto-Recall** | ✅ Capture guidance on clean misses + recall results when available; provider errors fail open | ✅ Before each turn | ✅ Keyword search only | ✅ Proactive context loading | ✅ `memory.search()` | ✅ Before prompt build |
 | **Manual Recall** | ✅ REST API + tools | ✅ MCP tools | ✅ CLI / tool query | ✅ REST API | ✅ SDK + REST | ✅ CLI + MCP tools |
 | **Semantic Search** | ✅ PostgreSQL FTS (live) + vector (planned) | ✅ Vector + biomimetic | ⚠️ Keyword + pending vector | ✅ pgvector | ✅ Semantic + BM25 + entity fusion | ✅ Vector + BM25 hybrid |
 | **Keyword Search** | ✅ PostgreSQL full-text | ✅ | ✅ Primary mode | ✅ | ✅ BM25 | ✅ BM25 |

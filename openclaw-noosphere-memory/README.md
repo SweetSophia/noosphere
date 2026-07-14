@@ -95,10 +95,11 @@ Auto-recall resolves the API key per agent for each hook invocation. This keeps
 prompt-time recall within the same scope boundaries as explicit tool calls.
 
 When `memoryCaptureInstructionsEnabled` is enabled, the hook keeps the static
-`noosphere_save` guidance in the prompt even when recall returns no matches.
-This closes the recall-miss gap where agents previously received no reminder to
-save genuinely new durable information. The guidance remains advisory; it does
-not perform an automatic save.
+`noosphere_save` guidance in the prompt when a successful recall returns no
+matches. Empty responses that report a provider error still fail open and inject
+nothing. This closes the clean recall-miss gap where agents previously received
+no reminder to save genuinely new durable information. The guidance remains
+advisory; it does not perform an automatic save.
 
 ## Corpus Supplement
 

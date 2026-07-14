@@ -228,6 +228,8 @@ export function createNoosphereAutoRecallHook(rawConfig, clientContextOrResolver
             // knowledge Noosphere does not have yet; hiding save guidance on an empty
             // result made memory capture least reliable exactly when it was needed.
             const recallText = extractPromptInjectionText(response, effectiveConfig);
+            if (!recallText && hasProviderError(response.providerMeta))
+                return;
             const injectionParts = [];
             if (effectiveConfig.memoryCaptureInstructionsEnabled) {
                 injectionParts.push(effectiveConfig.memoryCaptureInstructions);
@@ -413,6 +415,9 @@ function extractPromptInjectionText(response, config) {
     if (!trimmed)
         return undefined;
     return wrapPromptInjectionText(trimmed.slice(0, config.tokenBudget * 4));
+}
+function hasProviderError(providerMeta) {
+    return providerMeta.some((entry) => isRecord(entry) && readString(entry.error) !== undefined);
 }
 function wrapPromptInjectionText(promptText) {
     return [
