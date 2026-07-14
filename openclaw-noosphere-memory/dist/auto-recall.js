@@ -228,8 +228,14 @@ export function createNoosphereAutoRecallHook(rawConfig, clientContextOrResolver
             // knowledge Noosphere does not have yet; hiding save guidance on an empty
             // result made memory capture least reliable exactly when it was needed.
             const recallText = extractPromptInjectionText(response, effectiveConfig);
-            if (!recallText && hasProviderError(response.providerMeta))
-                return;
+            if (!recallText) {
+                if (!isValidProviderMeta(response.providerMeta)) {
+                    logger?.warn?.("noosphere-memory: auto-recall skipped: malformed providerMeta; failing open");
+                    return;
+                }
+                if (hasProviderError(response.providerMeta))
+                    return;
+            }
             const injectionParts = [];
             if (effectiveConfig.memoryCaptureInstructionsEnabled) {
                 injectionParts.push(effectiveConfig.memoryCaptureInstructions);
@@ -239,6 +245,9 @@ export function createNoosphereAutoRecallHook(rawConfig, clientContextOrResolver
             }
             if (injectionParts.length === 0)
                 return;
+            if (!recallText) {
+                logger?.debug?.("[Noosphere] Injecting capture guidance without recall text");
+            }
             return buildInjectionResult(injectionParts.join("\n\n"), effectiveConfig.recallInjectionPosition);
         }
         catch (error) {
@@ -414,10 +423,42 @@ function extractPromptInjectionText(response, config) {
     const trimmed = response.promptInjectionText.trim();
     if (!trimmed)
         return undefined;
-    return wrapPromptInjectionText(trimmed.slice(0, config.tokenBudget * 4));
+    const contentCharBudget = config.tokenBudget * 4 - wrapPromptInjectionText("").length;
+    if (contentCharBudget <= 0)
+        return undefined;
+    return wrapPromptInjectionText(trimmed.slice(0, contentCharBudget));
 }
 function hasProviderError(providerMeta) {
     return providerMeta.some((entry) => isRecord(entry) && readString(entry.error) !== undefined);
+}
+function isValidProviderMeta(providerMeta) {
+    if (!Array.isArray(providerMeta))
+        return false;
+    return providerMeta.every((entry) => {
+        if (!isRecord(entry))
+            return false;
+        if (!readString(entry.providerId))
+            return false;
+        if (typeof entry.resultCount !== "number" ||
+            !Number.isInteger(entry.resultCount) ||
+            entry.resultCount < 0) {
+            return false;
+        }
+        if (typeof entry.enabled !== "boolean")
+            return false;
+        if (typeof entry.durationMs !== "number" ||
+            !Number.isFinite(entry.durationMs) ||
+            entry.durationMs < 0) {
+            return false;
+        }
+        if (entry.error !== undefined && typeof entry.error !== "string")
+            return false;
+        if (entry.skippedReason !== undefined &&
+            typeof entry.skippedReason !== "string") {
+            return false;
+        }
+        return true;
+    });
 }
 function wrapPromptInjectionText(promptText) {
     return [

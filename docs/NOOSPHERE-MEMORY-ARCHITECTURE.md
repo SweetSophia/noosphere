@@ -592,6 +592,11 @@ Key groups:
 
 ### Memory Capture Instructions
 
+The implemented advisory hook behavior is documented below. The proposed
+deterministic capture, recall-enrichment, ephemeral-candidate, and promotion
+pipeline is specified separately in
+[`AUTOMATIC-MEMORY-CAPTURE-AND-ENRICHMENT-ADR.md`](AUTOMATIC-MEMORY-CAPTURE-AND-ENRICHMENT-ADR.md).
+
 When `memoryCaptureInstructionsEnabled: true`, the `before_prompt_build` hook injects
 a `<noosphere_memory_capture>` XML block containing guidance on when and how to use
 `noosphere_save`. The guidance is independent of recall result content: an eligible

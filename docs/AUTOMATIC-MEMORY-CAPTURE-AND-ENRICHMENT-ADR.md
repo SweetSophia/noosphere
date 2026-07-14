@@ -271,7 +271,10 @@ configuration:
   autoCaptureChatTypes: ["telegram"],
   autoCaptureRestrictedTags: ["cylena-private"],
   autoCaptureTimeoutMs: 1500,
-  autoCaptureMaxTurnChars: 12000
+  autoCaptureMaxTurnChars: 12000,
+  autoCaptureExtractionProvider: "local",
+  autoCaptureAllowRemoteExtraction: false,
+  autoCaptureAllowRestrictedRemoteExtraction: false
 }
 ```
 
@@ -293,6 +296,13 @@ Required behavior:
 - submit once per run ID, with a local in-flight dedupe guard;
 - enforce a short timeout and fail open;
 - never delay or alter the delivered assistant response.
+
+The three extraction settings above are proposed Phase C fields, not current
+plugin configuration. The README must not advertise them until implementation.
+Remote extraction requires both `autoCaptureAllowRemoteExtraction: true` and a
+non-local provider. A restricted capture additionally requires
+`autoCaptureAllowRestrictedRemoteExtraction: true`; the general remote-consent
+flag alone is insufficient.
 
 The plugin submits evidence; it does not decide what is true or publishable.
 
@@ -443,7 +453,10 @@ promotion until resolved. A newer statement is not automatically more correct.
 ## 14. Privacy and security invariants
 
 - Automatic capture is opt-in and agent-scoped.
-- Narrow per-agent keys are the default; ADMIN/`*` keys are discouraged.
+- For the automatic capture endpoint and hook (§8–§9), extraction workers
+  (§10), and promotion worker (§12), narrow agent-bound keys are the default;
+  ADMIN/`*` keys are discouraged. This is not a global key-provisioning rule
+  for unrelated Noosphere APIs.
 - Each automatic-capture key has an immutable server-managed agent-principal
   binding used for capture and candidate retrieval; client identity is ignored.
 - Raw session IDs and queries are never stored.

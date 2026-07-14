@@ -22,6 +22,10 @@
 
 ## Core Memory Features
 
+Noosphere rows marked as planned or partial below are staged in the
+[Automatic Memory Capture and Recall Enrichment ADR](AUTOMATIC-MEMORY-CAPTURE-AND-ENRICHMENT-ADR.md)
+(status: **Proposed**; Phases A–E are pending).
+
 | Feature | **Noosphere** | **Hindsight** | **QMD** | **memU** | **mem0** | **LanceDB Pro** |
 |---|---|---|---|---|---|---|
 | **Auto-Capture** | ⚠️ Explicit draft save + advisory capture guidance; deterministic turn capture planned | ✅ Every turn | ❌ Manual indexing | ✅ Continuous learning | ✅ `memory.add()` | ✅ Smart extraction |
