@@ -19,6 +19,7 @@ const DEFAULT_MIN_QUERY_LENGTH = 8;
 const MAX_RESULT_CAP = 10;
 const MAX_TOKEN_BUDGET = 2_000;
 export const MAX_QUERY_LENGTH = 1_000;
+const AUTO_RECALL_WRAPPER_CHAR_OVERHEAD = wrapPromptInjectionText("").length;
 
 // Settings cache TTL in milliseconds (30 seconds)
 const SETTINGS_CACHE_TTL_MS = 30_000;
@@ -238,19 +239,25 @@ export function createNoosphereAutoRecallHook(
     if (typeof context.client.settings !== "function") {
       return null;
     }
+    let dbSettings: NoosphereSettingsResponse;
     try {
-      const dbSettings = await context.client.settings({
+      dbSettings = await context.client.settings({
         timeoutMs: staticConfig.timeoutMs,
       });
-      settingsCache.settings = dbSettings;
-      settingsCache.fetchedAt = now;
-      settingsCaches.set(cacheKey, settingsCache);
-      return dbSettings;
     } catch (err) {
       logger?.warn?.(`noosphere-memory: failed to fetch recall settings from DB: ${formatHookError(err)}`);
       // Return cached settings if available (even if stale), otherwise null
       return settingsCache.settings ?? null;
     }
+    // Never put an untrusted payload into the normal TTL cache. Otherwise one
+    // malformed response is replayed on every prompt until the cache expires.
+    if (!isValidSettingsResponse(dbSettings)) {
+      throw new Error("malformed recall settings response");
+    }
+    settingsCache.settings = dbSettings;
+    settingsCache.fetchedAt = now;
+    settingsCaches.set(cacheKey, settingsCache);
+    return dbSettings;
   }
 
   /**
@@ -268,6 +275,9 @@ export function createNoosphereAutoRecallHook(
       // No DB settings — fall back entirely to static config
       return staticConfig;
     }
+    if (!isValidSettingsResponse(dbSettings)) {
+      throw new Error("malformed recall settings response");
+    }
     // Merge: DB values override static config for the fields it manages
     return {
       ...staticConfig,
@@ -284,9 +294,19 @@ export function createNoosphereAutoRecallHook(
   ): Promise<PromptInjectionResult | void> => {
     if (!staticConfig.autoRecall) return;
 
-    const clientContext = resolveClientContext(ctx);
-    const contextCacheKey = getContextCacheKey(clientContext);
-    const effectiveConfig = await getEffectiveConfig(clientContext, contextCacheKey);
+    let clientContext: NoosphereClientContext;
+    let contextCacheKey: string;
+    let effectiveConfig: NoosphereAutoRecallConfig;
+    try {
+      clientContext = resolveClientContext(ctx);
+      contextCacheKey = getContextCacheKey(clientContext);
+      effectiveConfig = await getEffectiveConfig(clientContext, contextCacheKey);
+    } catch (error) {
+      logger?.warn?.(
+        `noosphere-memory: auto-recall skipped: ${formatHookError(error)}; failing open`,
+      );
+      return;
+    }
 
     // Session pattern filtering (Hindsight-inspired) with cached regexes
     const sessionKey = ctx.sessionKey;
@@ -347,17 +367,56 @@ export function createNoosphereAutoRecallHook(
 
       const response = await recallPromise;
 
-      // Build injection parts: instructions (if enabled) + recall results
-      const recallText = extractPromptInjectionText(response, effectiveConfig);
+      // The hook only requests auto mode. Treat any other mode as an
+      // unexpected server payload and fail open before composing guidance.
+      if (response.mode !== "auto") {
+        logger?.warn?.(
+          "noosphere-memory: auto-recall skipped: unexpected response mode; failing open",
+        );
+        return;
+      }
 
-      // Only inject if there's actual recall text to return
-      if (!recallText) return;
+      // Build capture guidance independently from recalled content. A recall
+      // miss is often the strongest signal that the current turn may contain
+      // knowledge Noosphere does not have yet; hiding save guidance on an empty
+      // result made memory capture least reliable exactly when it was needed.
+      const recallText = extractPromptInjectionText(response, effectiveConfig);
+      if (!isValidProviderMeta(response.providerMeta)) {
+        logger?.warn?.(
+          "noosphere-memory: auto-recall skipped: malformed providerMeta; failing open",
+        );
+        return;
+      }
+      if (recallText && !hasSuccessfulProviderResult(response.providerMeta)) {
+        logger?.warn?.(
+          "noosphere-memory: auto-recall skipped: recall text has no successful provider result; failing open",
+        );
+        return;
+      }
+      if (!recallText) {
+        if (hasProviderError(response.providerMeta)) return;
+        if (!hasSuccessfulProviderExecution(response.providerMeta)) {
+          logger?.warn?.(
+            "noosphere-memory: auto-recall skipped: no provider completed successfully; failing open",
+          );
+          return;
+        }
+      }
 
       const injectionParts: string[] = [];
       if (effectiveConfig.memoryCaptureInstructionsEnabled) {
         injectionParts.push(effectiveConfig.memoryCaptureInstructions);
       }
-      injectionParts.push(recallText);
+      if (recallText) {
+        injectionParts.push(recallText);
+      }
+
+      if (injectionParts.length === 0) return;
+      if (!recallText) {
+        logger?.debug?.(
+          "[Noosphere] Injecting capture guidance without recall text",
+        );
+      }
 
       return buildInjectionResult(
         injectionParts.join("\n\n"),
@@ -553,7 +612,122 @@ function extractPromptInjectionText(response: NoosphereRecallResponse, config: N
   if (typeof response.promptInjectionText !== "string") return undefined;
   const trimmed = response.promptInjectionText.trim();
   if (!trimmed) return undefined;
-  return wrapPromptInjectionText(trimmed.slice(0, config.tokenBudget * 4));
+  const contentCharBudget =
+    config.tokenBudget * 4 - AUTO_RECALL_WRAPPER_CHAR_OVERHEAD;
+  if (contentCharBudget <= 0) return undefined;
+  return wrapPromptInjectionText(trimmed.slice(0, contentCharBudget));
+}
+
+function hasProviderError(providerMeta: unknown[]): boolean {
+  return providerMeta.some((entry) =>
+    isRecord(entry) && readString(entry.error) !== undefined
+  );
+}
+
+function hasSuccessfulProviderResult(providerMeta: unknown[]): boolean {
+  return providerMeta.some((entry) =>
+    isRecord(entry) &&
+    entry.enabled === true &&
+    typeof entry.resultCount === "number" &&
+    entry.resultCount > 0 &&
+    readString(entry.error) === undefined &&
+    readString(entry.skippedReason) === undefined
+  );
+}
+
+function hasSuccessfulProviderExecution(providerMeta: unknown[]): boolean {
+  return providerMeta.some((entry) =>
+    isRecord(entry) &&
+    entry.enabled === true &&
+    readString(entry.error) === undefined &&
+    readString(entry.skippedReason) === undefined
+  );
+}
+
+function isValidProviderMeta(providerMeta: unknown): providerMeta is unknown[] {
+  if (!Array.isArray(providerMeta)) return false;
+  const providerIds = new Set<string>();
+  return providerMeta.every((entry) => {
+    if (!isRecord(entry)) return false;
+    const providerId = readString(entry.providerId);
+    if (!providerId || providerIds.has(providerId)) return false;
+    providerIds.add(providerId);
+    if (
+      typeof entry.resultCount !== "number" ||
+      !Number.isInteger(entry.resultCount) ||
+      entry.resultCount < 0
+    ) {
+      return false;
+    }
+    if (typeof entry.enabled !== "boolean") return false;
+    if (
+      typeof entry.durationMs !== "number" ||
+      !Number.isFinite(entry.durationMs) ||
+      entry.durationMs < 0
+    ) {
+      return false;
+    }
+    if (entry.error !== undefined && typeof entry.error !== "string") return false;
+    if (
+      entry.skippedReason !== undefined &&
+      typeof entry.skippedReason !== "string"
+    ) {
+      return false;
+    }
+    const error = readString(entry.error);
+    const skippedReason = readString(entry.skippedReason);
+    if (!entry.enabled) {
+      return entry.resultCount === 0 && error === undefined && skippedReason !== undefined;
+    }
+    if (skippedReason !== undefined) return false;
+    if (error !== undefined && entry.resultCount !== 0) return false;
+    return true;
+  });
+}
+
+function isValidSettingsResponse(settings: unknown): settings is NoosphereSettingsResponse {
+  if (!isRecord(settings)) return false;
+  if (typeof settings.autoRecallEnabled !== "boolean") return false;
+  if (
+    typeof settings.maxInjectedMemories !== "number" ||
+    !Number.isFinite(settings.maxInjectedMemories)
+  ) {
+    return false;
+  }
+  if (
+    typeof settings.maxInjectedTokens !== "number" ||
+    !Number.isFinite(settings.maxInjectedTokens)
+  ) {
+    return false;
+  }
+  if (!readString(settings.recallVerbosity)) return false;
+  if (!readString(settings.deduplicationStrategy)) return false;
+  if (
+    !Array.isArray(settings.enabledProviders) ||
+    settings.enabledProviders.some((provider) => !readString(provider))
+  ) {
+    return false;
+  }
+  if (!isRecord(settings.providerPriorityWeights)) return false;
+  if (
+    Object.values(settings.providerPriorityWeights).some(
+      (weight) =>
+        typeof weight !== "number" ||
+        !Number.isFinite(weight) ||
+        weight < 0,
+    )
+  ) {
+    return false;
+  }
+  if (typeof settings.summaryFirst !== "boolean") return false;
+  if (!readString(settings.conflictStrategy)) return false;
+  if (
+    typeof settings.conflictThreshold !== "number" ||
+    !Number.isFinite(settings.conflictThreshold)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function wrapPromptInjectionText(promptText: string): string {

@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Keep memory-capture guidance available on clean auto-recall misses
+  ([#281](https://github.com/SweetSophia/noosphere/pull/281))**: the OpenClaw
+  hook now keeps advisory `noosphere_save` guidance when an eligible recall
+  succeeds without injectable memory text, while dependency and malformed
+  response failures continue to fail open. The staged automatic-capture and
+  recall-enrichment plan is documented in the
+  [architecture ADR](docs/AUTOMATIC-MEMORY-CAPTURE-AND-ENRICHMENT-ADR.md).
+
 ## [1.11.0] - 2026-07-12
 
 Minor release adding rich math and diagram rendering while hardening memory

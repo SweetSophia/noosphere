@@ -94,6 +94,17 @@ turn it on when the plugin config has `autoRecall: false`.
 Auto-recall resolves the API key per agent for each hook invocation. This keeps
 prompt-time recall within the same scope boundaries as explicit tool calls.
 
+When `memoryCaptureInstructionsEnabled` is enabled, the hook keeps the static
+`noosphere_save` guidance in the prompt when a successful recall returns no
+matches. Empty responses that report a provider error still fail open and inject
+nothing. This closes the clean recall-miss gap where agents previously received
+no reminder to save genuinely new durable information. The guidance remains
+advisory; it does not perform an automatic save.
+
+This is the implemented Phase 0 behavior. The opt-in automatic-capture and
+recall-enrichment phases are tracked in the
+[Automatic Memory Capture and Recall Enrichment ADR](../docs/AUTOMATIC-MEMORY-CAPTURE-AND-ENRICHMENT-ADR.md).
+
 ## Corpus Supplement
 
 The shared memory corpus supplement is disabled by default because some OpenClaw

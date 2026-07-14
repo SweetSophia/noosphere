@@ -5,6 +5,10 @@
 - Date: 2026-07-12
 - Decision owners: Noosphere maintainers
 
+Related decision: [Automatic Memory Capture and Recall Enrichment](AUTOMATIC-MEMORY-CAPTURE-AND-ENRICHMENT-ADR.md), which treats enrichment as a
+complementary lexical/document layer and defines how enrichment participates in
+embedding-profile versioning.
+
 ## Context
 
 Noosphere currently retrieves its own articles with PostgreSQL full-text search. The Noosphere memory provider builds one weighted document from the title, excerpt, content, and tags, applies article and restricted-scope filters, and ranks matches with `ts_rank`. This is precise for shared terms but cannot recover semantically related articles that use different language.

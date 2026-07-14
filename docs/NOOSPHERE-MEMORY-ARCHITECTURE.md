@@ -592,10 +592,18 @@ Key groups:
 
 ### Memory Capture Instructions
 
+The implemented advisory hook behavior is documented below. The proposed
+deterministic capture, recall-enrichment, ephemeral-candidate, and promotion
+pipeline is specified separately in
+[`AUTOMATIC-MEMORY-CAPTURE-AND-ENRICHMENT-ADR.md`](AUTOMATIC-MEMORY-CAPTURE-AND-ENRICHMENT-ADR.md).
+
 When `memoryCaptureInstructionsEnabled: true`, the `before_prompt_build` hook injects
 a `<noosphere_memory_capture>` XML block containing guidance on when and how to use
-`noosphere_save`. This block is appended only when auto-recall succeeds and returns
-non-empty prompt injection text. The default instructions tell agents:
+`noosphere_save`. The guidance is independent of recall result content: an eligible
+auto-recall turn still receives capture guidance when a successful recall returns
+zero matches or omits prompt-injection text. If an empty response reports a provider
+error, the hook fails open and injects neither guidance nor recall content. The
+default instructions tell agents:
 
 **WHEN TO SAVE:**
 - After completing a significant task (deployment, bug fix, feature implementation)
@@ -624,12 +632,12 @@ before_prompt_build hook
   → fetchRecallSettings() from DB (with 30s cache)
   → executeMemoryRecallRequest() via HTTP API
   → extractPromptInjectionText() from response
-  → IF recall text exists AND memoryCaptureInstructionsEnabled:
-      → inject <noosphere_memory_capture> + <noosphere_auto_recall> blocks
-    ELSE IF recall text exists:
-      → inject <noosphere_auto_recall> only
-    ELSE:
-      → return undefined (no injection)
+  → IF recall text is absent AND provider metadata reports an error: return undefined
+  → Build injection parts independently:
+      → IF memoryCaptureInstructionsEnabled: add <noosphere_memory_capture>
+      → IF recall text exists: add <noosphere_auto_recall>
+      → IF neither exists: return undefined
+      → ELSE inject the available part(s)
 ```
 
 ### OpenClaw CLI Helpers
@@ -664,7 +672,8 @@ The plugin guards against older config shapes that may not have new fields:
 ### Safety Properties
 
 - **Fails open**: if the recall request times out or the server is unreachable,
-  the hook returns `undefined` and the prompt proceeds without memory injection.
+  or an empty response reports a provider error, the hook returns `undefined` and
+  the prompt proceeds without memory injection.
 - **Instructions are informational**: they guide agent behavior but do not execute
   saves. Agents must explicitly call `noosphere_save` to persist anything.
 - **No forced saves**: even with instructions enabled, saves only happen when the
