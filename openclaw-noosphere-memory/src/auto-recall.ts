@@ -347,6 +347,13 @@ export function createNoosphereAutoRecallHook(
 
       const response = await recallPromise;
 
+      if (response.mode !== "auto") {
+        logger?.warn?.(
+          "noosphere-memory: auto-recall skipped: unexpected response mode; failing open",
+        );
+        return;
+      }
+
       // Build capture guidance independently from recalled content. A recall
       // miss is often the strongest signal that the current turn may contain
       // knowledge Noosphere does not have yet; hiding save guidance on an empty

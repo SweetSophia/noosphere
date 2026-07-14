@@ -833,8 +833,9 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     assert.equal(calls.length, 1);
   });
 
-  it("keeps capture guidance when Noosphere does not return auto-mode prompt text", async () => {
+  it("fails open when Noosphere returns a non-auto response mode", async () => {
     const calls: NoosphereRecallRequest[] = [];
+    const warnings: string[] = [];
     const context = {
       config: {
         baseUrl: "https://noosphere.local",
@@ -857,19 +858,17 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
         },
       },
     } as unknown as NoosphereClientContext;
-    const hook = createNoosphereAutoRecallHook({ autoRecall: true }, context);
+    const hook = createNoosphereAutoRecallHook({ autoRecall: true }, context, {
+      warn: (message) => warnings.push(message),
+    });
 
     const result = await hook({ prompt: "Noosphere bridge", messages: [] }, {});
 
-    assert.equal(
-      result?.prependContext?.includes("<noosphere_memory_capture>"),
-      true,
-    );
-    assert.equal(
-      result?.prependContext?.includes("<noosphere_auto_recall>"),
-      false,
-    );
+    assert.equal(result, undefined);
     assert.equal(calls.length, 1);
+    assert.deepEqual(warnings, [
+      "noosphere-memory: auto-recall skipped: unexpected response mode; failing open",
+    ]);
   });
 
   it("uses autoRecallTimeoutMs instead of the shared HTTP timeout", async () => {
