@@ -3,7 +3,8 @@ import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
 import { getJsonBodyError, readBoundedJsonObject } from "@/lib/api/body";
-import { generateApiKey } from "@/lib/api/keys";
+import { createApiKeyRecord } from "@/lib/api/key-mutations";
+import { MemoryCaptureError } from "@/lib/memory/capture/repository";
 import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/keys — List all API keys (metadata only)
@@ -25,6 +26,10 @@ export async function GET(_request: NextRequest) {
       keyPrefix: true,
       permissions: true,
       allowedScopes: true,
+      agentPrincipalId: true,
+      agentPrincipal: {
+        select: { name: true, privateScopeTag: true, status: true },
+      },
       lastUsedAt: true,
       createdAt: true,
     },
@@ -56,7 +61,7 @@ export async function POST(request: NextRequest) {
         { status: bodyError.status },
       );
     }
-    const { name, permissions, allowedScopes } = body;
+    const { name, permissions, allowedScopes, agentPrincipalId } = body;
 
     if (!name || typeof name !== "string" || !name.trim()) {
       return NextResponse.json({ error: "name is required and must be a non-empty string" }, { status: 400 });
@@ -98,32 +103,34 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const { raw, hash, prefix } = generateApiKey(name);
+    if (
+      agentPrincipalId !== undefined &&
+      agentPrincipalId !== null &&
+      (typeof agentPrincipalId !== "string" || !agentPrincipalId.trim())
+    ) {
+      return NextResponse.json(
+        { error: "agentPrincipalId must be a non-empty string or null" },
+        { status: 400 },
+      );
+    }
 
-    const key = await prisma.apiKey.create({
-      data: {
-        name: name.trim(),
-        keyHash: hash,
-        keyPrefix: prefix,
-        permissions: (permissions as Permissions) ?? Permissions.WRITE,
-        allowedScopes: (allowedScopes as string[] | undefined) ?? [],
-      },
-      select: {
-        id: true,
-        name: true,
-        keyPrefix: true,
-        permissions: true,
-        allowedScopes: true,
-        createdAt: true,
-      },
+    const created = await createApiKeyRecord({
+      name: name.trim(),
+      permissions: (permissions as Permissions) ?? Permissions.WRITE,
+      allowedScopes: (allowedScopes as string[] | undefined) ?? [],
+      agentPrincipalId:
+        typeof agentPrincipalId === "string" ? agentPrincipalId.trim() : null,
     });
 
     // Return raw key ONCE — it cannot be recovered
     return NextResponse.json(
-      { ...key, key: raw },
+      { ...created.key, key: created.raw },
       { status: 201 }
     );
   } catch (error) {
+    if (error instanceof MemoryCaptureError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error("[Keys] POST error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

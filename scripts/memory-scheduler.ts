@@ -13,6 +13,7 @@ import {
   createLocalMemoryScheduler,
   createSchedulerHealthJob,
 } from "../src/lib/memory/scheduler";
+import { createDurableMemoryMaintenanceJob } from "../src/lib/memory/capture/maintenance";
 
 main().catch((err) => {
   console.error("Fatal error in scheduler:", err);
@@ -28,9 +29,14 @@ async function main(): Promise<void> {
     process.env.MEMORY_SCHEDULER_HEALTH_INTERVAL_MS,
     60_000,
   );
+  const maintenanceIntervalMs = parsePositiveInt(
+    process.env.MEMORY_DURABLE_MAINTENANCE_INTERVAL_MS,
+    60_000,
+  );
 
   const scheduler = createLocalMemoryScheduler([
     createSchedulerHealthJob(healthIntervalMs),
+    createDurableMemoryMaintenanceJob(maintenanceIntervalMs),
   ]);
 
   if (status) {
@@ -39,9 +45,11 @@ async function main(): Promise<void> {
   }
 
   if (once) {
-    const snapshot = await scheduler.runJob("memory.scheduler.health");
+    const snapshots = [];
+    snapshots.push(await scheduler.runJob("memory.scheduler.health"));
+    snapshots.push(await scheduler.runJob("memory.durable-maintenance"));
     printStatus(scheduler);
-    if (snapshot.status === "failed") {
+    if (snapshots.some(({ status: jobStatus }) => jobStatus === "failed")) {
       process.exitCode = 1;
     }
     return;

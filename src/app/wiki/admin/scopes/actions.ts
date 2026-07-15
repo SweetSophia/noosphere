@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { deleteMemoryRestrictedScope } from "@/lib/memory/capture/lifecycle";
 
 async function requireAdmin() {
   const session = await getServerSession(authOptions);
@@ -57,26 +58,7 @@ export async function deleteScopeAction(formData: FormData) {
     throw new Error("Scope tag is required.");
   }
 
-  const scope = await prisma.restrictedScope.findUnique({ where: { tag } });
-  if (!scope) {
-    throw new Error(`Scope '${tag}' not found.`);
-  }
-
-  if (scope.isSystem) {
-    throw new Error(`System scope '${tag}' cannot be deleted.`);
-  }
-
-  // Check if any articles use this scope
-  const articleCount = await prisma.article.count({
-    where: { restrictedTags: { has: tag } },
-  });
-  if (articleCount > 0) {
-    throw new Error(
-      `Cannot delete scope '${tag}' — ${articleCount} article(s) still use it. Remove the scope from those articles first.`
-    );
-  }
-
-  await prisma.restrictedScope.delete({ where: { tag } });
+  await deleteMemoryRestrictedScope(tag);
   revalidatePath("/wiki/admin/scopes");
   redirect("/wiki/admin/scopes");
 }

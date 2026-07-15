@@ -4,6 +4,11 @@ import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
 import { getJsonBodyError, readBoundedJsonObject } from "@/lib/api/body";
 import { rateLimit } from "@/lib/rate-limit";
+import {
+  revokeApiKeyCredential,
+  updateApiKeyRecord,
+} from "@/lib/api/key-mutations";
+import { MemoryCaptureError } from "@/lib/memory/capture/repository";
 
 // GET /api/keys/[id] — Get a single key's metadata
 // Auth: ADMIN only
@@ -28,6 +33,10 @@ export async function GET(
       keyPrefix: true,
       permissions: true,
       allowedScopes: true,
+      agentPrincipalId: true,
+      agentPrincipal: {
+        select: { name: true, privateScopeTag: true, status: true },
+      },
       lastUsedAt: true,
       createdAt: true,
     },
@@ -67,6 +76,13 @@ export async function PATCH(
       );
     }
     const { allowedScopes, permissions, name } = body;
+
+    if (Object.prototype.hasOwnProperty.call(body, "agentPrincipalId")) {
+      return NextResponse.json(
+        { error: "agentPrincipalId is immutable and may only be set when a key is created" },
+        { status: 400 },
+      );
+    }
 
     const existing = await prisma.apiKey.findFirst({
       where: { id, revokedAt: null },
@@ -123,22 +139,13 @@ export async function PATCH(
       return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
     }
 
-    const updated = await prisma.apiKey.update({
-      where: { id },
-      data: updateData,
-      select: {
-        id: true,
-        name: true,
-        keyPrefix: true,
-        permissions: true,
-        allowedScopes: true,
-        lastUsedAt: true,
-        createdAt: true,
-      },
-    });
+    const updated = await updateApiKeyRecord(id, updateData);
 
     return NextResponse.json({ key: updated });
   } catch (error) {
+    if (error instanceof MemoryCaptureError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error("[Keys] PATCH error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
@@ -167,10 +174,13 @@ export async function DELETE(
     return NextResponse.json({ error: "API key not found" }, { status: 404 });
   }
 
-  await prisma.apiKey.update({
-    where: { id },
-    data: { revokedAt: new Date() },
-  });
-
-  return NextResponse.json({ success: true });
+  try {
+    await revokeApiKeyCredential(id);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    if (error instanceof MemoryCaptureError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
+  }
 }

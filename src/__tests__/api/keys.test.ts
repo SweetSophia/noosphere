@@ -51,6 +51,7 @@ test("validateApiKey looks up by unique key hash and updates active keys", async
         name: "Active test key",
         permissions: Permissions.READ,
         allowedScopes: ["scope-a"],
+        agentPrincipalId: "principal-a",
         revokedAt: null,
       };
     },
@@ -69,6 +70,7 @@ test("validateApiKey looks up by unique key hash and updates active keys", async
   assert.equal(result.name, "Active test key");
   assert.equal(result.permissions, Permissions.READ);
   assert.deepEqual(result.allowedScopes, ["scope-a"]);
+  assert.equal(result.agentPrincipalId, "principal-a");
   assert.ok(updateManyArgs);
   const updateWhere: Prisma.ApiKeyUpdateManyArgs["where"] = updateManyArgs.where;
   assert.equal(updateWhere?.id, "key-active");
@@ -94,6 +96,7 @@ test("validateApiKey rejects revoked records after unique hash lookup", async ()
         name: "Revoked test key",
         permissions: Permissions.ADMIN,
         allowedScopes: ["*"],
+        agentPrincipalId: null,
         revokedAt: new Date(),
       };
       return record;
@@ -157,6 +160,7 @@ test("validateApiKey propagates last-used update errors", async () => {
         name: "Update error test key",
         permissions: Permissions.READ,
         allowedScopes: [],
+        agentPrincipalId: null,
         revokedAt: null,
       };
     },
@@ -176,6 +180,7 @@ test("validateApiKey stays valid when last-used update is debounced", async () =
         name: "Debounced test key",
         permissions: Permissions.READ,
         allowedScopes: [],
+        agentPrincipalId: null,
         revokedAt: null,
       };
     },

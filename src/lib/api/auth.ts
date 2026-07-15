@@ -9,6 +9,7 @@ export interface AuthResult {
   authorized: boolean;
   permissions?: Permissions;
   keyId?: string;
+  agentPrincipalId?: string | null;
   /** Scopes this key is allowed to access. Empty = only unrestricted articles.
    *  Sessions always get ["*"] (full access). */
   allowedScopes?: string[];
@@ -30,6 +31,7 @@ export async function checkRouteAuth(
       authorized: true,
       permissions: apiAuth.permissions,
       keyId: apiAuth.keyId,
+      agentPrincipalId: apiAuth.agentPrincipalId,
       name: apiAuth.name,
       allowedScopes: apiAuth.allowedScopes,
     };

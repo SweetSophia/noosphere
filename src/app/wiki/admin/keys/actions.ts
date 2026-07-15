@@ -5,8 +5,14 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { generateApiKey } from "@/lib/api/keys";
 import { cookies } from "next/headers";
+import {
+  createApiKeyRecord,
+  deleteRevokedApiKey,
+  revokeApiKeyCredential,
+  rotateApiKeyCredential,
+  updateApiKeyRecord,
+} from "@/lib/api/key-mutations";
 
 async function requireAdmin() {
   const session = await getServerSession(authOptions);
@@ -23,6 +29,7 @@ export async function createApiKeyAction(formData: FormData) {
 
   const name = String(formData.get("name") ?? "").trim();
   const permissions = String(formData.get("permissions") ?? "WRITE").trim();
+  const agentPrincipalId = String(formData.get("agentPrincipalId") ?? "").trim();
 
   if (!name) {
     throw new Error("Key name is required.");
@@ -53,21 +60,16 @@ export async function createApiKeyAction(formData: FormData) {
     }
   }
 
-  const { raw, hash, prefix } = generateApiKey(name);
-
-  await prisma.apiKey.create({
-    data: {
-      name,
-      keyHash: hash,
-      keyPrefix: prefix,
-      permissions: permissions as "READ" | "WRITE" | "ADMIN",
-      allowedScopes: rawScopes,
-    },
+  const created = await createApiKeyRecord({
+    name,
+    permissions: permissions as "READ" | "WRITE" | "ADMIN",
+    allowedScopes: rawScopes,
+    agentPrincipalId: agentPrincipalId || null,
   });
 
   // Flash the raw key via HttpOnly cookie instead of URL query param
   // so it never appears in server logs, browser history, or Referer headers
-  (await cookies()).set("api_key_flash", raw, {
+  (await cookies()).set("api_key_flash", created.raw, {
     httpOnly: true,
     secure: true,
     maxAge: 60,
@@ -116,10 +118,7 @@ export async function updateApiKeyScopesAction(formData: FormData) {
     }
   }
 
-  await prisma.apiKey.update({
-    where: { id },
-    data: { allowedScopes: rawScopes },
-  });
+  await updateApiKeyRecord(id, { allowedScopes: rawScopes });
 
   revalidatePath("/wiki/admin/keys");
   redirect("/wiki/admin/keys");
@@ -133,10 +132,7 @@ export async function revokeApiKeyAction(formData: FormData) {
     throw new Error("Key ID missing.");
   }
 
-  await prisma.apiKey.update({
-    where: { id },
-    data: { revokedAt: new Date() },
-  });
+  await revokeApiKeyCredential(id);
 
   revalidatePath("/wiki/admin/keys");
   redirect("/wiki/admin/keys");
@@ -150,39 +146,10 @@ export async function rotateApiKeyAction(formData: FormData) {
     throw new Error("Key ID missing.");
   }
 
-  const oldKey = await prisma.apiKey.findUnique({ where: { id } });
-  if (!oldKey) {
-    throw new Error("Key not found.");
-  }
-  if (oldKey.revokedAt) {
-    throw new Error("Cannot rotate an already revoked key.");
-  }
-
-  // Create new key with same name + rotated suffix
-  const rotatedName = oldKey.name.includes(" (rotated)")
-    ? oldKey.name
-    : `${oldKey.name} (rotated)`;
-  const { raw, hash, prefix } = generateApiKey(rotatedName);
-
-  // Atomically: create new key + revoke old
-  await prisma.$transaction([
-    prisma.apiKey.create({
-      data: {
-        name: rotatedName,
-        keyHash: hash,
-        keyPrefix: prefix,
-        permissions: oldKey.permissions,
-        allowedScopes: oldKey.allowedScopes,
-      },
-    }),
-    prisma.apiKey.update({
-      where: { id: oldKey.id },
-      data: { revokedAt: new Date() },
-    }),
-  ]);
+  const rotated = await rotateApiKeyCredential(id);
 
   // Flash the new raw key so it can be shown to the user
-  (await cookies()).set("api_key_flash", raw, {
+  (await cookies()).set("api_key_flash", rotated.raw, {
     httpOnly: true,
     secure: true,
     maxAge: 60,
@@ -191,7 +158,7 @@ export async function rotateApiKeyAction(formData: FormData) {
   });
 
   revalidatePath("/wiki/admin/keys");
-  redirect(`/wiki/admin/keys?flash=1&name=${encodeURIComponent(rotatedName)}`);
+  redirect(`/wiki/admin/keys?flash=1&name=${encodeURIComponent(rotated.key.name)}`);
 }
 
 export async function deleteApiKeyAction(formData: FormData) {
@@ -210,7 +177,7 @@ export async function deleteApiKeyAction(formData: FormData) {
     throw new Error("Only revoked keys can be permanently deleted.");
   }
 
-  await prisma.apiKey.delete({ where: { id } });
+  await deleteRevokedApiKey(id);
 
   revalidatePath("/wiki/admin/keys");
   redirect("/wiki/admin/keys");

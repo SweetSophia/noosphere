@@ -13,13 +13,13 @@ datasource db {
 // Topics — hierarchical: Main Topic → Sub Topics → Pages
 // ─────────────────────────────────────────────
 model Topic {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  parentId  String?
-  parent    Topic?   @relation("TopicHierarchy", fields: [parentId], references: [id])
-  children  Topic[]  @relation("TopicHierarchy")
-  articles  Article[]
+  id       String    @id @default(cuid())
+  name     String
+  slug     String    @unique
+  parentId String?
+  parent   Topic?    @relation("TopicHierarchy", fields: [parentId], references: [id])
+  children Topic[]   @relation("TopicHierarchy")
+  articles Article[]
 
   description String?
 
@@ -34,42 +34,53 @@ model Topic {
 // Articles — the core content unit
 // ─────────────────────────────────────────────
 model Article {
-  id        String   @id @default(cuid())
-  title     String
-  slug      String
-  content   String   @db.Text
+  id      String @id @default(cuid())
+  title   String
+  slug    String
+  content String @db.Text
 
-  excerpt   String?
+  excerpt String?
 
-  authorId  String?
-  author    User?    @relation(fields: [authorId], references: [id])
+  authorId   String?
+  author     User?   @relation(fields: [authorId], references: [id])
   authorName String?
 
-  topicId   String
-  topic     Topic    @relation(fields: [topicId], references: [id])
+  topicId String
+  topic   Topic  @relation(fields: [topicId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tags      ArticleTag[]
-  revisions ArticleRevision[]
-  syncConflictReviews SyncConflictReview[]
-  syncImportAudits SyncImportAudit[]
+  tags                     ArticleTag[]
+  revisions                ArticleRevision[]
+  syncConflictReviews      SyncConflictReview[]
+  syncImportAudits         SyncImportAudit[]
+  recallEnrichment         ArticleRecallEnrichment?
+  promotedMemoryCandidates MemoryCandidate[]        @relation("PromotedMemoryCandidate")
+  memoryRetrievalStats     MemoryRetrievalStat[]
+  memoryProvenanceEdges    MemoryProvenanceEdge[]
+  memoryPrivacyReviews     MemoryPrivacyReview[]
 
   // Source tracking — where this article's content originated
   sourceUrl  String?
-  sourceType String?   // "url", "text", "manual"
+  sourceType String? // "url", "text", "manual"
 
   // Article lifecycle and quality metadata
-  confidence        String?   // "low", "medium", "high"
-  status           String    @default("published")  // "draft", "reviewed", "published"
-  lastReviewed     DateTime?
+  confidence   String? // "low", "medium", "high"
+  status       String    @default("published") // "draft", "reviewed", "published"
+  lastReviewed DateTime?
 
   // Proper many-to-many relation for article cross-references
   relatedTo   ArticleRelation[] @relation("ArticleRelatedTo")
   relatedFrom ArticleRelation[] @relation("ArticleRelatedFrom")
 
   deletedAt DateTime?
+
+  // Automatic-memory privacy quarantine. Quarantined rows are excluded from
+  // every recall path until an explicit privacy review resolves them.
+  recallQuarantinedAt        DateTime?
+  recallQuarantineReason     String?
+  memoryRevocationGeneration Int       @default(0)
 
   // Restricted access scopes — empty array = unrestricted (visible to all keys)
   // Non-empty = only keys with at least one matching scope can access
@@ -83,7 +94,8 @@ model Article {
   @@index([status])
   @@index([confidence])
   @@index([deletedAt])
-  @@index([updatedAt(sort: Desc), id(sort: Asc)])
+  @@index([recallQuarantinedAt])
+  @@index([updatedAt(sort: Desc), id(sort: Asc)], name: "Article_updatedAt_idx")
   // GIN index for array-containment (`hasSome` / `&&`) queries on restrictedTags.
   // The live DB index was hand-rolled in 20260514220000_add_restricted_tags_scope;
   // declaring it here keeps `prisma migrate diff` from wanting to drop it on the
@@ -95,9 +107,9 @@ model Article {
 // Tags — cross-cutting labels
 // ─────────────────────────────────────────────
 model Tag {
-  id      String       @id @default(cuid())
-  name    String       @unique
-  slug    String       @unique
+  id       String       @id @default(cuid())
+  name     String       @unique
+  slug     String       @unique
   articles ArticleTag[]
 
   createdAt DateTime @default(now())
@@ -123,13 +135,13 @@ model ArticleTag {
 // Article Revisions — version history
 // ─────────────────────────────────────────────
 model ArticleRevision {
-  id        String   @id @default(cuid())
+  id        String  @id @default(cuid())
   articleId String
-  article   Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
   authorId  String?
-  author    User?    @relation(fields: [authorId], references: [id])
+  author    User?   @relation(fields: [authorId], references: [id])
   title     String
-  content   String   @db.Text
+  content   String  @db.Text
 
   createdAt DateTime @default(now())
 
@@ -141,18 +153,18 @@ model ArticleRevision {
 // Users — human accounts (session-based auth)
 // ─────────────────────────────────────────────
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  name          String?
-  passwordHash  String
-  role          Role      @default(EDITOR)
+  id           String  @id @default(cuid())
+  email        String  @unique
+  name         String?
+  passwordHash String
+  role         Role    @default(EDITOR)
 
-  articles      Article[]
-  revisions     ArticleRevision[]
-  sessions      Session[]
+  articles  Article[]
+  revisions ArticleRevision[]
+  sessions  Session[]
 
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([email])
 }
@@ -181,10 +193,10 @@ model Session {
 // API Keys — agent authentication
 // ─────────────────────────────────────────────
 model ApiKey {
-  id          String   @id @default(cuid())
-  name        String
-  keyHash     String   @unique
-  keyPrefix   String
+  id        String @id @default(cuid())
+  name      String
+  keyHash   String @unique
+  keyPrefix String
 
   permissions Permissions @default(WRITE)
 
@@ -192,11 +204,19 @@ model ApiKey {
   // "*" = admin access to all restricted articles.
   allowedScopes String[] @default([])
 
-  createdAt   DateTime @default(now())
+  // Optional for backward compatibility. Automatic capture requires this
+  // immutable server-managed binding; ordinary APIs continue to accept
+  // unbound keys. A database trigger forbids changing it after INSERT.
+  agentPrincipalId String?
+  agentPrincipal   MemoryAgentPrincipal? @relation(fields: [agentPrincipalId], references: [id], onDelete: Restrict)
+
+  createdAt  DateTime  @default(now())
   lastUsedAt DateTime?
   revokedAt  DateTime?
 
   @@index([keyPrefix])
+  @@index([agentPrincipalId])
+  @@index([allowedScopes(ops: ArrayOps)], type: Gin, name: "ApiKey_allowedScopes_idx")
 }
 
 enum Permissions {
@@ -209,27 +229,369 @@ enum Permissions {
 // Restricted Scopes — registry of valid restricted tag values
 // ─────────────────────────────────────────────
 model RestrictedScope {
-  id          String   @id @default(cuid())
-  tag         String   @unique  // "health", "intimate", "company-x", etc.
+  id          String  @id @default(dbgenerated("replace((gen_random_uuid())::text, '-'::text, ''::text)"))
+  tag         String  @unique // "health", "intimate", "company-x", etc.
   description String?
-  isSystem    Boolean  @default(false)  // system scopes cannot be deleted
+  isSystem    Boolean @default(false) // system scopes cannot be deleted
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   @@index([tag])
+}
+
+// ─────────────────────────────────────────────
+// Automatic memory — durable Phase A contracts
+// ─────────────────────────────────────────────
+
+model MemoryAgentPrincipal {
+  id                   String                @id @default(cuid())
+  name                 String                @unique
+  privateScopeTag      String
+  status               MemoryPrincipalStatus @default(ACTIVE)
+  revocationGeneration Int                   @default(0)
+  revokedAt            DateTime?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  apiKeys        ApiKey[]
+  captures       MemoryCapture[]
+  candidates     MemoryCandidate[]
+  retrievalStats MemoryRetrievalStat[]
+  lineages       MemoryLineageState[]
+  tombstones     MemoryTombstone[]
+  jobs           MemoryDurableJob[]
+
+  @@index([privateScopeTag])
+  @@index([status])
+}
+
+enum MemoryPrincipalStatus {
+  ACTIVE
+  REVOKED
+}
+
+model MemoryCapture {
+  id                      String               @id @default(cuid())
+  dedupeKey               String               @unique
+  dedupeKeyVersion        Int
+  hmacAlgorithm           String
+  agentPrincipalId        String
+  agentPrincipal          MemoryAgentPrincipal @relation(fields: [agentPrincipalId], references: [id], onDelete: Restrict)
+  privateScopeTag         String
+  sourceSessionHash       String
+  sourceSessionKeyVersion Int
+  sourceRunHash           String?
+  sourceRunKeyVersion     Int?
+  sourceType              String               @default("openclaw_agent_end")
+  userText                String               @db.Text
+  assistantText           String               @db.Text
+  restrictedTags          String[]             @default([])
+  status                  MemoryCaptureStatus  @default(PENDING)
+  occurrenceCount         Int                  @default(1)
+  firstSeenAt             DateTime             @default(now())
+  lastSeenAt              DateTime             @default(now())
+  leaseOwner              String?
+  leaseExpiresAt          DateTime?
+  attemptCount            Int                  @default(0)
+  nextAttemptAt           DateTime?
+  expiresAt               DateTime
+  quarantinedAt           DateTime?
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+
+  candidates      MemoryCandidate[]
+  retrievalStats  MemoryRetrievalStat[]
+  provenanceEdges MemoryProvenanceEdge[]
+
+  @@index([agentPrincipalId, privateScopeTag, status, expiresAt])
+  @@index([sourceSessionHash])
+  @@index([sourceRunHash])
+  @@index([leaseExpiresAt, nextAttemptAt])
+  @@index([quarantinedAt])
+}
+
+enum MemoryCaptureStatus {
+  PENDING
+  PROCESSING
+  CONVERTED
+  IGNORED
+  FAILED
+  EXPIRED
+  QUARANTINED
+}
+
+model MemoryCandidate {
+  id                   String                @id @default(cuid())
+  dedupeKey            String                @unique
+  dedupeKeyVersion     Int
+  hmacAlgorithm        String
+  title                String
+  content              String                @db.Text
+  recallSummary        String                @db.Text
+  searchTerms          String[]              @default([])
+  confidence           String
+  restrictedTags       String[]              @default([])
+  agentPrincipalId     String
+  agentPrincipal       MemoryAgentPrincipal  @relation(fields: [agentPrincipalId], references: [id], onDelete: Restrict)
+  privateScopeTag      String
+  sourceCaptureId      String?
+  sourceCapture        MemoryCapture?        @relation(fields: [sourceCaptureId], references: [id], onDelete: SetNull)
+  status               MemoryCandidateStatus @default(EPHEMERAL)
+  occurrenceCount      Int                   @default(1)
+  retrievedCount       Int                   @default(0)
+  injectedCount        Int                   @default(0)
+  explicitGetCount     Int                   @default(0)
+  relevanceSum         Float                 @default(0)
+  distinctSessionCount Int                   @default(0)
+  distinctDayCount     Int                   @default(0)
+  firstSeenAt          DateTime              @default(now())
+  lastSeenAt           DateTime              @default(now())
+  lastRetrievedAt      DateTime?
+  expiresAt            DateTime
+  promotedArticleId    String?
+  promotedArticle      Article?              @relation("PromotedMemoryCandidate", fields: [promotedArticleId], references: [id], onDelete: SetNull)
+  quarantinedAt        DateTime?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  retrievalStats  MemoryRetrievalStat[]
+  provenanceEdges MemoryProvenanceEdge[]
+
+  @@index([agentPrincipalId, privateScopeTag, status, expiresAt])
+  @@index([sourceCaptureId])
+  @@index([promotedArticleId])
+  @@index([quarantinedAt])
+}
+
+enum MemoryCandidateStatus {
+  EPHEMERAL
+  PENDING_REVIEW
+  REJECTED
+  PROMOTED
+  EXPIRED
+  QUARANTINED
+}
+
+model ArticleRecallEnrichment {
+  articleId     String                 @id
+  article       Article                @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  sourceHash    String
+  recallSummary String                 @db.Text
+  searchTerms   String[]               @default([])
+  generatorKind String
+  generatorId   String
+  promptVersion String
+  status        MemoryEnrichmentStatus @default(PENDING)
+  attemptCount  Int                    @default(0)
+  errorCode     String?
+  generatedAt   DateTime?
+  quarantinedAt DateTime?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  provenanceEdges MemoryProvenanceEdge[]
+
+  @@index([status, updatedAt])
+  @@index([sourceHash])
+  @@index([quarantinedAt])
+}
+
+enum MemoryEnrichmentStatus {
+  PENDING
+  READY
+  FAILED
+  STALE
+  QUARANTINED
+}
+
+model MemoryRetrievalStat {
+  id                         String                @id @default(cuid())
+  eventType                  MemoryRetrievalEvent
+  provider                   String
+  retrievalMode              String
+  normalizedRelevance        Float?
+  queryCorrelationHash       String?
+  queryCorrelationKeyVersion Int?
+  sourceSessionHash          String?
+  sourceSessionKeyVersion    Int?
+  dayBucket                  DateTime?             @db.Date
+  boundedContext             Json                  @default("{}")
+  agentPrincipalId           String?
+  agentPrincipal             MemoryAgentPrincipal? @relation(fields: [agentPrincipalId], references: [id], onDelete: SetNull)
+  captureId                  String?
+  capture                    MemoryCapture?        @relation(fields: [captureId], references: [id], onDelete: SetNull)
+  candidateId                String?
+  candidate                  MemoryCandidate?      @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  articleId                  String?
+  article                    Article?              @relation(fields: [articleId], references: [id], onDelete: SetNull)
+  quarantinedAt              DateTime?
+  createdAt                  DateTime              @default(now())
+
+  provenanceEdges MemoryProvenanceEdge[]
+
+  @@index([candidateId, eventType, createdAt])
+  @@index([articleId, eventType, createdAt])
+  @@index([captureId])
+  @@index([agentPrincipalId, sourceSessionHash])
+  @@index([quarantinedAt])
+}
+
+enum MemoryRetrievalEvent {
+  PROVIDER_HIT
+  FINAL_RANKED
+  INJECTED
+  EXPLICIT_RECALL
+  EXPLICIT_GET
+}
+
+model MemoryLineageState {
+  id               String                @id @default(cuid())
+  kind             MemoryLineageKind
+  subjectHash      String
+  hmacKeyVersion   Int?
+  agentPrincipalId String?
+  agentPrincipal   MemoryAgentPrincipal? @relation(fields: [agentPrincipalId], references: [id], onDelete: SetNull)
+  generation       Int                   @default(0)
+  revokedAt        DateTime?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  provenanceEdges MemoryProvenanceEdge[]
+  tombstones      MemoryTombstone[]
+  jobs            MemoryDurableJob[]
+  privacyReviews  MemoryPrivacyReview[]
+
+  @@unique([kind, subjectHash])
+  @@index([agentPrincipalId, kind])
+  @@index([revokedAt])
+}
+
+enum MemoryLineageKind {
+  CAPTURE
+  PRINCIPAL
+  SESSION
+  SCOPE
+  CONSENT
+}
+
+model MemoryProvenanceEdge {
+  id                  String                   @id @default(cuid())
+  // All edges in one source group are conjunctive requirements. Separate
+  // groups represent independent authorized sources for the same artifact.
+  sourceGroupId       String
+  lineageStateId      String
+  lineageState        MemoryLineageState       @relation(fields: [lineageStateId], references: [id], onDelete: Cascade)
+  generationSnapshot  Int
+  captureId           String?
+  capture             MemoryCapture?           @relation(fields: [captureId], references: [id], onDelete: Cascade)
+  candidateId         String?
+  candidate           MemoryCandidate?         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  enrichmentArticleId String?
+  enrichment          ArticleRecallEnrichment? @relation(fields: [enrichmentArticleId], references: [articleId], onDelete: Cascade)
+  retrievalStatId     String?
+  retrievalStat       MemoryRetrievalStat?     @relation(fields: [retrievalStatId], references: [id], onDelete: Cascade)
+  articleId           String?
+  article             Article?                 @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  createdAt           DateTime                 @default(now())
+
+  @@index([lineageStateId, generationSnapshot])
+  @@index([sourceGroupId])
+  @@index([captureId])
+  @@index([candidateId])
+  @@index([enrichmentArticleId])
+  @@index([retrievalStatId])
+  @@index([articleId])
+}
+
+model MemoryTombstone {
+  id               String                @id @default(cuid())
+  lineageStateId   String
+  lineageState     MemoryLineageState    @relation(fields: [lineageStateId], references: [id], onDelete: Cascade)
+  kind             MemoryLineageKind
+  subjectHash      String
+  hmacKeyVersion   Int?
+  generation       Int
+  agentPrincipalId String?
+  agentPrincipal   MemoryAgentPrincipal? @relation(fields: [agentPrincipalId], references: [id], onDelete: SetNull)
+  reasonCode       String
+  expiresAt        DateTime
+  createdAt        DateTime              @default(now())
+
+  @@unique([lineageStateId, generation])
+  @@index([kind, subjectHash])
+  @@index([expiresAt])
+  @@index([agentPrincipalId])
+}
+
+model MemoryDurableJob {
+  id               String                @id @default(cuid())
+  kind             String
+  status           MemoryJobStatus       @default(PENDING)
+  idempotencyKey   String                @unique
+  payload          Json                  @default("{}")
+  lineageStateId   String?
+  lineageState     MemoryLineageState?   @relation(fields: [lineageStateId], references: [id], onDelete: SetNull)
+  agentPrincipalId String?
+  agentPrincipal   MemoryAgentPrincipal? @relation(fields: [agentPrincipalId], references: [id], onDelete: SetNull)
+  leaseOwner       String?
+  leaseExpiresAt   DateTime?
+  attemptCount     Int                   @default(0)
+  nextAttemptAt    DateTime              @default(now())
+  maxAttempts      Int                   @default(8)
+  lastErrorCode    String?
+  completedAt      DateTime?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  @@index([status, nextAttemptAt, leaseExpiresAt])
+  @@index([lineageStateId])
+  @@index([agentPrincipalId])
+}
+
+enum MemoryJobStatus {
+  PENDING
+  LEASED
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+model MemoryPrivacyReview {
+  id             String                    @id @default(cuid())
+  articleId      String
+  article        Article                   @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  lineageStateId String
+  lineageState   MemoryLineageState        @relation(fields: [lineageStateId], references: [id], onDelete: Cascade)
+  generation     Int
+  status         MemoryPrivacyReviewStatus @default(OPEN)
+  reasonCode     String
+  resolvedAt     DateTime?
+  resolvedBy     String?
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+
+  @@unique([articleId, lineageStateId, generation])
+  @@index([status, createdAt])
+  @@index([lineageStateId])
+}
+
+enum MemoryPrivacyReviewStatus {
+  OPEN
+  RESOLVED_RETAINED
+  RESOLVED_PURGED
 }
 
 // ─────────────────────────────────────────────
 // Activity Log — append-only timeline of wiki events
 // ─────────────────────────────────────────────
 model ActivityLog {
-  id          String   @id @default(cuid())
-  type        String   // "ingest", "create", "update", "delete", "lint"
-  title       String   // Human-readable summary
-  details     Json?    // Structured payload
-  sourceUrl   String?  // Origin URL if applicable
-  authorName  String?
-  createdAt   DateTime @default(now())
+  id         String   @id @default(cuid())
+  type       String // "ingest", "create", "update", "delete", "lint"
+  title      String // Human-readable summary
+  details    Json? // Structured payload
+  sourceUrl  String? // Origin URL if applicable
+  authorName String?
+  createdAt  DateTime @default(now())
 
   @@index([type])
   @@index([createdAt])
@@ -240,11 +602,11 @@ model ActivityLog {
 // Article Relations — proper join table for article cross-references
 // ─────────────────────────────────────────────
 model ArticleRelation {
-  id        String   @id @default(cuid())
-  sourceId  String   // Article that declares the relation
-  targetId  String   // Article that is related
-  source    Article  @relation("ArticleRelatedTo", fields: [sourceId], references: [id], onDelete: Cascade)
-  target    Article  @relation("ArticleRelatedFrom", fields: [targetId], references: [id], onDelete: Cascade)
+  id       String  @id @default(cuid())
+  sourceId String // Article that declares the relation
+  targetId String // Article that is related
+  source   Article @relation("ArticleRelatedTo", fields: [sourceId], references: [id], onDelete: Cascade)
+  target   Article @relation("ArticleRelatedFrom", fields: [targetId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
 
@@ -257,31 +619,31 @@ model ArticleRelation {
 // Recall Settings — singleton config for memory recall behavior
 // ─────────────────────────────────────────────
 model RecallSettings {
-  id        String   @id @default("singleton")
+  id String @id @default("singleton")
 
   // Auto-recall
-  autoRecallEnabled     Boolean   @default(true)
+  autoRecallEnabled Boolean @default(true)
 
   // Budget limits
-  maxInjectedMemories   Int       @default(20)
-  maxInjectedTokens     Int       @default(2000)
+  maxInjectedMemories Int @default(20)
+  maxInjectedTokens   Int @default(2000)
 
   // Output control
-  recallVerbosity      String    @default("standard")  // "minimal" | "standard" | "detailed"
-  summaryFirst          Boolean   @default(true)
+  recallVerbosity String  @default("standard") // "minimal" | "standard" | "detailed"
+  summaryFirst    Boolean @default(true)
 
   // Dedup
-  deduplicationStrategy String    @default("best-score")  // "best-score" | "provider-priority" | "most-recent"
+  deduplicationStrategy String @default("best-score") // "best-score" | "provider-priority" | "most-recent"
 
   // Provider config
-  enabledProviders      String[]  @default([])
-  providerPriorityWeights Json    @default("{}")
+  enabledProviders        String[] @default([])
+  providerPriorityWeights Json     @default("{}")
 
   // Conflict resolution
-  conflictStrategy      String    @default("surface")  // "accept-highest" | "accept-recent" | "accept-curated" | "surface" | "suppress-low"
-  conflictThreshold     Float     @default(0.1)
+  conflictStrategy  String @default("surface") // "accept-highest" | "accept-recent" | "accept-curated" | "surface" | "suppress-low"
+  conflictThreshold Float  @default(0.1)
 
-  updatedAt            DateTime  @updatedAt
+  updatedAt DateTime @updatedAt
 
   @@unique([id])
 }
@@ -290,7 +652,7 @@ model RecallSettings {
 // Sync Conflict Preferences — singleton config for markdown sync conflicts
 // ─────────────────────────────────────────────
 model SyncConflictPreferences {
-  id        String   @id @default("singleton")
+  id String @id @default("singleton")
 
   // Conflict behavior values: "preserve" | "overwrite" | "manual-review"
   defaultBehavior String @default("manual-review")
@@ -307,7 +669,7 @@ model SyncConflictPreferences {
 // Sync Conflict Reviews — admin queue for markdown sync conflicts
 // ─────────────────────────────────────────────
 model SyncConflictReview {
-  id        String   @id @default(cuid())
+  id String @id @default(cuid())
 
   articleId String?
   article   Article? @relation(fields: [articleId], references: [id], onDelete: SetNull)
@@ -334,8 +696,8 @@ model SyncConflictReview {
 
   summary Json @default("{}")
 
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @default(now()) @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @default(now()) @updatedAt
   resolvedAt DateTime?
   resolvedBy String?
 
@@ -350,7 +712,7 @@ model SyncConflictReview {
 // Sync Import Audit — records every vault-to-noosphere import action
 // ─────────────────────────────────────────────
 model SyncImportAudit {
-  id        String   @id @default(cuid())
+  id String @id @default(cuid())
 
   // The article that was created/updated. Null if the import created no article
   // (e.g., skipped or conflict).
@@ -375,11 +737,11 @@ model SyncImportAudit {
   dryRun         Boolean
   forceOverwrite Boolean @default(false)
   // "create" | "update" | "upsert"
-  mode String
+  mode           String
 
   // Hashes for verification.
-  markdownHash String?
-  noosphereHash String?  // hash of DB state before import (for updates)
+  markdownHash  String?
+  noosphereHash String? // hash of DB state before import (for updates)
 
   // For conflicts: why the import was skipped.
   conflictReason String?
