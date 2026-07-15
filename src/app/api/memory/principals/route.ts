@@ -9,21 +9,23 @@ import { createMemoryAgentPrincipal } from "@/lib/memory/capture/lifecycle";
 import { MemoryCaptureError } from "@/lib/memory/capture/repository";
 
 export async function GET(request: NextRequest) {
-  const rate = await rateLimit(request, {
-    windowMs: 60_000,
-    maxRequests: 30,
-    keyPrefix: "memory-principals-get",
+  return withApiErrorBoundary("MemoryPrincipals GET", async () => {
+    const rate = await rateLimit(request, {
+      windowMs: 60_000,
+      maxRequests: 30,
+      keyPrefix: "memory-principals-get",
+    });
+    if (!rate.allowed) return rate.response;
+    const auth = await requirePermission(request, [Permissions.ADMIN]);
+    if (!auth.success) return auth.response;
+    const principals = await prisma.memoryAgentPrincipal.findMany({
+      orderBy: [{ status: "asc" }, { name: "asc" }],
+      include: {
+        _count: { select: { apiKeys: true, captures: true, candidates: true } },
+      },
+    });
+    return NextResponse.json({ principals });
   });
-  if (!rate.allowed) return rate.response;
-  const auth = await requirePermission(request, [Permissions.ADMIN]);
-  if (!auth.success) return auth.response;
-  const principals = await prisma.memoryAgentPrincipal.findMany({
-    orderBy: [{ status: "asc" }, { name: "asc" }],
-    include: {
-      _count: { select: { apiKeys: true, captures: true, candidates: true } },
-    },
-  });
-  return NextResponse.json({ principals });
 }
 
 export async function POST(request: NextRequest) {

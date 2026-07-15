@@ -493,6 +493,8 @@ MEMORY_DURABLE_MAINTENANCE_INTERVAL_MS=60000
 
 Default interval is 60 seconds. `SIGINT` and `SIGTERM` trigger graceful shutdown:
 timers are cleared, in-flight jobs are awaited, and final status is printed.
+Durable maintenance intervals below one second are rejected and fall back to
+the 60-second default to prevent accidental hot loops.
 
 ---
 
@@ -553,7 +555,7 @@ scheduler.start();
 npm run test:memory
 
 # Scheduler-only tests
-npm run test:scheduler
+npx tsx --test src/__tests__/memory/scheduler.test.ts
 
 # TypeScript validation
 npx tsc --noEmit

@@ -11,38 +11,40 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const rate = await rateLimit(request, {
-    windowMs: 60_000,
-    maxRequests: 30,
-    keyPrefix: "memory-capture-detail-get",
-  });
-  if (!rate.allowed) return rate.response;
-  const auth = await requirePermission(request, [Permissions.WRITE]);
-  if (!auth.success) return auth.response;
-  const { id } = await params;
-  const capture = await prisma.memoryCapture.findUnique({
-    where: { id },
-    include: {
-      agentPrincipal: {
-        select: { id: true, name: true, status: true, revokedAt: true },
-      },
-      provenanceEdges: {
-        select: {
-          generationSnapshot: true,
-          lineageState: {
-            select: { id: true, kind: true, generation: true, revokedAt: true },
+  return withApiErrorBoundary("MemoryCaptures GET", async () => {
+    const rate = await rateLimit(request, {
+      windowMs: 60_000,
+      maxRequests: 30,
+      keyPrefix: "memory-capture-detail-get",
+    });
+    if (!rate.allowed) return rate.response;
+    const auth = await requirePermission(request, [Permissions.WRITE]);
+    if (!auth.success) return auth.response;
+    const { id } = await params;
+    const capture = await prisma.memoryCapture.findUnique({
+      where: { id },
+      include: {
+        agentPrincipal: {
+          select: { id: true, name: true, status: true, revokedAt: true },
+        },
+        provenanceEdges: {
+          select: {
+            generationSnapshot: true,
+            lineageState: {
+              select: { id: true, kind: true, generation: true, revokedAt: true },
+            },
           },
         },
       },
-    },
+    });
+    if (!capture) return NextResponse.json({ error: "Memory capture not found" }, { status: 404 });
+    if (!canInspectMemoryCapture(auth.auth, capture)) {
+      return NextResponse.json({ error: "Insufficient scope" }, { status: 403 });
+    }
+    const response = NextResponse.json({ capture });
+    response.headers.set("Cache-Control", "private, no-store");
+    return response;
   });
-  if (!capture) return NextResponse.json({ error: "Memory capture not found" }, { status: 404 });
-  if (!canInspectMemoryCapture(auth.auth, capture)) {
-    return NextResponse.json({ error: "Insufficient scope" }, { status: 403 });
-  }
-  const response = NextResponse.json({ capture });
-  response.headers.set("Cache-Control", "private, no-store");
-  return response;
 }
 
 export async function DELETE(

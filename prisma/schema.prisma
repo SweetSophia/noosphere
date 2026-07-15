@@ -285,7 +285,7 @@ model MemoryCapture {
   sourceType              String               @default("openclaw_agent_end")
   userText                String               @db.Text
   assistantText           String               @db.Text
-  restrictedTags          String[]             @default([])
+  restrictedTags          String[]
   status                  MemoryCaptureStatus  @default(PENDING)
   occurrenceCount         Int                  @default(1)
   firstSeenAt             DateTime             @default(now())
@@ -330,7 +330,7 @@ model MemoryCandidate {
   recallSummary        String                @db.Text
   searchTerms          String[]              @default([])
   confidence           String
-  restrictedTags       String[]              @default([])
+  restrictedTags       String[]
   agentPrincipalId     String
   agentPrincipal       MemoryAgentPrincipal  @relation(fields: [agentPrincipalId], references: [id], onDelete: Restrict)
   privateScopeTag      String

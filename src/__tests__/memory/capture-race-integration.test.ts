@@ -145,6 +145,73 @@ test("a principal revocation waiting behind the key boundary defeats capture", a
   }
 });
 
+test("same-principal concurrent duplicates serialize to one capture", async () => {
+  const scopeTag = `${prefix}-dedupe-private`;
+  await prisma.restrictedScope.create({ data: { tag: scopeTag } });
+  const principal = await createMemoryAgentPrincipal({
+    name: `${prefix} dedupe-race`,
+    privateScopeTag: scopeTag,
+  });
+  const credentials = await Promise.all(
+    ["one", "two"].map((suffix) =>
+      createApiKeyRecord({
+        name: `${prefix} dedupe-race-key-${suffix}`,
+        permissions: Permissions.WRITE,
+        allowedScopes: [scopeTag],
+        agentPrincipalId: principal.id,
+      }),
+    ),
+  );
+  const capture = {
+    sourceSessionId: "dedupe-race-session",
+    sourceRunId: "dedupe-race-run",
+    userText: "Remember the concurrency-safe dedupe contract.",
+    assistantText: "Concurrent duplicates must increment one durable capture.",
+    strippedBlocks: [] as string[],
+  };
+
+  const blocker = await pool.connect();
+  let pending: Array<ReturnType<typeof repository.createOrIncrement>> = [];
+  try {
+    await blocker.query("BEGIN");
+    await blocker.query(
+      'SELECT id FROM "MemoryAgentPrincipal" WHERE id = $1 FOR UPDATE',
+      [principal.id],
+    );
+
+    pending = credentials.map((credential) =>
+      repository.createOrIncrement({
+        auth: { keyId: credential.key.id, agentPrincipalId: principal.id },
+        capture,
+        keyring,
+      }),
+    );
+    // Distinct keys remove the earlier ApiKey-lock serialization shortcut. Both
+    // transactions must reach the shared principal lock statement before release.
+    await waitForLockWaiters(blocker, 1);
+    await waitForPrincipalBoundaryWaiters(blocker, 2);
+    await blocker.query("COMMIT");
+
+    const results = await Promise.all(pending);
+    assert.equal(new Set(results.map(({ id }) => id)).size, 1);
+    assert.deepEqual(
+      results.map(({ occurrenceCount }) => occurrenceCount).sort((a, b) => a - b),
+      [1, 2],
+    );
+    assert.equal(results.filter(({ created }) => created).length, 1);
+
+    const stored = await prisma.memoryCapture.findMany({
+      where: { agentPrincipalId: principal.id },
+      select: { occurrenceCount: true },
+    });
+    assert.deepEqual(stored, [{ occurrenceCount: 2 }]);
+  } finally {
+    await rollbackIfNeeded(blocker);
+    blocker.release();
+    await Promise.allSettled(pending);
+  }
+});
+
 test("a queued session revocation defeats concurrent recall hydration", async () => {
   const scopeTag = `${prefix}-recall-private`;
   await prisma.restrictedScope.create({ data: { tag: scopeTag } });
@@ -323,6 +390,7 @@ async function waitForLockWaiters(
   const pid = blockerPid.rows[0]!.pid;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    await observer.query("SELECT pg_stat_clear_snapshot()");
     const result = await observer.query<{ count: number }>(
       `
         SELECT count(*)::int AS count
@@ -338,6 +406,30 @@ async function waitForLockWaiters(
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`Timed out waiting for ${minimum} database lock waiter(s)`);
+}
+
+async function waitForPrincipalBoundaryWaiters(
+  observer: PoolClient,
+  minimum: number,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await observer.query("SELECT pg_stat_clear_snapshot()");
+    const result = await observer.query<{ count: number }>(
+      `
+        SELECT count(*)::int AS count
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND pid <> pg_backend_pid()
+          AND wait_event_type = 'Lock'
+          AND query LIKE '%MemoryAgentPrincipal%'
+      `,
+    );
+    if ((result.rows[0]?.count ?? 0) >= minimum) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for ${minimum} principal-boundary waiter(s)`);
 }
 
 async function rollbackIfNeeded(client: PoolClient): Promise<void> {

@@ -11,6 +11,7 @@ import {
   createLocalMemoryScheduler,
   createSchedulerHealthJob,
   LocalMemoryScheduler,
+  parseSchedulerIntervalMs,
   type SchedulerJobDefinition,
 } from "@/lib/memory/scheduler";
 
@@ -517,6 +518,14 @@ describe("local memory scheduler", () => {
     assert.equal(snapshots[0].failCount, 1);
     assert.equal(snapshots[0].lastError, "boom from runDueJobs");
     assert.deepEqual(errors, ["job.fail-via-due:boom from runDueJobs"]);
+  });
+
+  test("[18] maintenance intervals reject hot-loop values", () => {
+    assert.equal(parseSchedulerIntervalMs(undefined, 60_000, 1_000), 60_000);
+    assert.equal(parseSchedulerIntervalMs("1000", 60_000, 1_000), 1_000);
+    assert.equal(parseSchedulerIntervalMs("999", 60_000, 1_000), 60_000);
+    assert.equal(parseSchedulerIntervalMs("1", 60_000, 1_000), 60_000);
+    assert.equal(parseSchedulerIntervalMs("invalid", 60_000, 1_000), 60_000);
   });
 });
 

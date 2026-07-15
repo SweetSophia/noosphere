@@ -3,50 +3,80 @@ import crypto from "node:crypto";
 import test from "node:test";
 import { NextRequest } from "next/server";
 import { Permissions } from "@prisma/client";
-import { DELETE as deleteKey } from "@/app/api/keys/[id]/route";
-import { DELETE as deleteCapture } from "@/app/api/memory/captures/[id]/route";
-import { DELETE as deletePrincipal } from "@/app/api/memory/principals/[id]/route";
-import { POST as createPrincipal } from "@/app/api/memory/principals/route";
+import {
+  DELETE as deleteKey,
+  PATCH as updateKey,
+} from "@/app/api/keys/[id]/route";
+import { POST as createKey } from "@/app/api/keys/route";
+import {
+  DELETE as deleteCapture,
+  GET as getCapture,
+} from "@/app/api/memory/captures/[id]/route";
+import {
+  DELETE as deletePrincipal,
+  GET as getPrincipal,
+} from "@/app/api/memory/principals/[id]/route";
+import {
+  GET as listPrincipals,
+  POST as createPrincipal,
+} from "@/app/api/memory/principals/route";
 import { POST as createRevocation } from "@/app/api/memory/revocations/route";
 import { DELETE as deleteScope } from "@/app/api/scopes/[tag]/route";
 import { generateApiKey } from "@/lib/api/keys";
 import { prisma } from "@/lib/prisma";
 
-type MutationHandler = (
+type RouteHandler = (
   request: NextRequest,
   context?: unknown,
 ) => Promise<Response>;
 
 const handlers: Array<{
   name: string;
-  handler: MutationHandler;
+  handler: RouteHandler;
   context?: unknown;
 }> = [
+  { name: "key creation", handler: createKey as RouteHandler },
   {
-    name: "key deletion",
-    handler: deleteKey as MutationHandler,
+    name: "key update",
+    handler: updateKey as RouteHandler,
     context: { params: Promise.resolve({ id: "missing-key" }) },
   },
   {
-    name: "capture deletion",
-    handler: deleteCapture as MutationHandler,
+    name: "key deletion",
+    handler: deleteKey as RouteHandler,
+    context: { params: Promise.resolve({ id: "missing-key" }) },
+  },
+  {
+    name: "capture detail",
+    handler: getCapture as RouteHandler,
     context: { params: Promise.resolve({ id: "missing-capture" }) },
   },
   {
-    name: "principal deletion",
-    handler: deletePrincipal as MutationHandler,
+    name: "capture deletion",
+    handler: deleteCapture as RouteHandler,
+    context: { params: Promise.resolve({ id: "missing-capture" }) },
+  },
+  {
+    name: "principal detail",
+    handler: getPrincipal as RouteHandler,
     context: { params: Promise.resolve({ id: "missing-principal" }) },
   },
-  { name: "principal creation", handler: createPrincipal as MutationHandler },
-  { name: "session revocation", handler: createRevocation as MutationHandler },
+  {
+    name: "principal deletion",
+    handler: deletePrincipal as RouteHandler,
+    context: { params: Promise.resolve({ id: "missing-principal" }) },
+  },
+  { name: "principal listing", handler: listPrincipals as RouteHandler },
+  { name: "principal creation", handler: createPrincipal as RouteHandler },
+  { name: "session revocation", handler: createRevocation as RouteHandler },
   {
     name: "scope deletion",
-    handler: deleteScope as MutationHandler,
+    handler: deleteScope as RouteHandler,
     context: { params: Promise.resolve({ tag: "missing-scope" }) },
   },
 ];
 
-test("Phase A mutation routes bound failures before rate limiting or auth", async () => {
+test("Phase A routes bound failures before rate limiting or auth", async () => {
   const secret = "noo_route-boundary-secret";
   const calls: unknown[][] = [];
   const original = console.error;
