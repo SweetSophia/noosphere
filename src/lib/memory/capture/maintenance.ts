@@ -288,12 +288,18 @@ async function processPrivacyCleanup(
             } else {
               const article = await tx.article.findUnique({
                 where: { id: target.id },
-                select: { status: true },
+                select: { status: true, sourceType: true, authorId: true },
               });
-              if (article?.status === "draft" && activeGroups.size === 0) {
+              const isUnreviewedAutomaticDraft =
+                article?.status === "draft" &&
+                article.sourceType === "automatic-memory" &&
+                article.authorId == null;
+              if (isUnreviewedAutomaticDraft && activeGroups.size === 0) {
                 await tx.article.delete({ where: { id: target.id } });
               } else if (article?.status === "draft") {
-                await removeInactiveProvenanceGroups(tx, target, targetEdges, activeGroups);
+                if (activeGroups.size > 0) {
+                  await removeInactiveProvenanceGroups(tx, target, targetEdges, activeGroups);
+                }
                 await tx.memoryPrivacyReview.upsert({
                   where: {
                     articleId_lineageStateId_generation: {
@@ -306,7 +312,10 @@ async function processPrivacyCleanup(
                     articleId: target.id,
                     lineageStateId: job.lineageStateId!,
                     generation,
-                    reasonCode: "independent_provenance_requires_resynthesis",
+                    reasonCode:
+                      activeGroups.size > 0
+                        ? "independent_provenance_requires_resynthesis"
+                        : "non_automatic_draft_requires_human_review",
                   },
                   update: {},
                 });

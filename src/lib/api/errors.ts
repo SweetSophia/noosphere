@@ -29,3 +29,24 @@ export function withRequestId(response: NextResponse): NextResponse {
   response.headers.set("x-request-id", nextRequestId());
   return response;
 }
+
+/**
+ * Keep an entire API handler inside one fail-closed response boundary. Error
+ * messages are deliberately omitted from both the response and the log so a
+ * database or provider exception cannot disclose request data or credentials.
+ */
+export async function withApiErrorBoundary(
+  context: string,
+  handler: () => Promise<NextResponse>,
+): Promise<NextResponse> {
+  try {
+    return await handler();
+  } catch (error) {
+    // Never inspect arbitrary exception properties here. Error.name/message
+    // are writable (and may be hostile getters), so even "classification"
+    // must remain a fixed, non-secret-bearing value.
+    const errorKind = error === null ? "null" : typeof error;
+    console.error(`[${context}] unexpected route failure`, { errorKind });
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}

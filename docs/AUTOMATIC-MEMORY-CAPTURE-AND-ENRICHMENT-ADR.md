@@ -448,6 +448,11 @@ vector publication. Reviewed or published articles are never silently rewritten
 by this automatic path; they enter an explicit privacy-review queue and are
 excluded from recall until resolved.
 
+An article is eligible for automatic hard deletion only when it remains a
+`draft`, has no bound human author, and carries the explicit
+`sourceType=automatic-memory` origin marker. Any other draft is retained under
+recall quarantine and routed to the privacy-review queue.
+
 ## 11. Search integration
 
 The lexical search document should use these relative weights:

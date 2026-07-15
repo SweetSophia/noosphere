@@ -449,9 +449,9 @@ ALTER TABLE "MemoryPrivacyReview" ADD CONSTRAINT "MemoryPrivacyReview_lineageSta
 -- the HTTP handlers.
 ALTER TABLE "Article"
   ADD CONSTRAINT "Article_memoryRevocationGeneration_nonnegative"
-    CHECK ("memoryRevocationGeneration" >= 0),
+    CHECK ("memoryRevocationGeneration" >= 0) NOT VALID,
   ADD CONSTRAINT "Article_recallQuarantine_reason"
-    CHECK ("recallQuarantinedAt" IS NULL OR length(trim(coalesce("recallQuarantineReason", ''))) > 0);
+    CHECK ("recallQuarantinedAt" IS NULL OR length(trim(coalesce("recallQuarantineReason", ''))) > 0) NOT VALID;
 
 ALTER TABLE "MemoryAgentPrincipal"
   ADD CONSTRAINT "MemoryAgentPrincipal_privateScopeTag_private"

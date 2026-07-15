@@ -3,6 +3,7 @@ import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/api/auth";
 import { getJsonBodyError, readBoundedJsonObject } from "@/lib/api/body";
+import { withApiErrorBoundary } from "@/lib/api/errors";
 import { rateLimit } from "@/lib/rate-limit";
 import {
   revokeApiKeyCredential,
@@ -157,30 +158,32 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const rl = await rateLimit(_request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-delete" });
-  if (!rl.allowed) return rl.response;
+  return withApiErrorBoundary("Keys DELETE", async () => {
+    const rl = await rateLimit(_request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-delete" });
+    if (!rl.allowed) return rl.response;
 
-  const { id } = await params;
-  const auth = await requirePermission(_request, [Permissions.ADMIN]);
-  if (!auth.success) {
-    return auth.response;
-  }
-
-  const existing = await prisma.apiKey.findFirst({
-    where: { id, revokedAt: null },
-  });
-
-  if (!existing) {
-    return NextResponse.json({ error: "API key not found" }, { status: 404 });
-  }
-
-  try {
-    await revokeApiKeyCredential(id);
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    if (error instanceof MemoryCaptureError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+    const { id } = await params;
+    const auth = await requirePermission(_request, [Permissions.ADMIN]);
+    if (!auth.success) {
+      return auth.response;
     }
-    throw error;
-  }
+
+    const existing = await prisma.apiKey.findFirst({
+      where: { id, revokedAt: null },
+    });
+
+    if (!existing) {
+      return NextResponse.json({ error: "API key not found" }, { status: 404 });
+    }
+
+    try {
+      await revokeApiKeyCredential(id);
+      return NextResponse.json({ success: true });
+    } catch (error) {
+      if (error instanceof MemoryCaptureError) {
+        return NextResponse.json({ error: error.message }, { status: error.status });
+      }
+      throw error;
+    }
+  });
 }

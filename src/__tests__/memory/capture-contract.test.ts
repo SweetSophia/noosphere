@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 import {
   digestWithActiveKey,
@@ -158,4 +160,30 @@ test("article recall source hashes are canonical and scope-independent", () => {
   assert.equal(first, equivalent);
   assert.notEqual(first, changed);
   assert.match(first, /^sha256:[a-f0-9]{64}$/);
+});
+
+test("Phase A Article checks are added without an immediate table validation scan", async () => {
+  const migration = await readFile(
+    path.join(
+      process.cwd(),
+      "prisma/migrations/20260715132950_automatic_memory_phase_a/migration.sql",
+    ),
+    "utf8",
+  );
+
+  for (const constraint of [
+    "Article_recallQuarantine_reason",
+    "Article_memoryRevocationGeneration_nonnegative",
+  ]) {
+    const start = migration.indexOf(`ADD CONSTRAINT "${constraint}"`);
+    assert.notEqual(start, -1, `${constraint} must exist`);
+    const nextConstraint = migration.indexOf("ADD CONSTRAINT", start + 1);
+    const nextSemicolon = migration.indexOf(";", start);
+    const end =
+      nextConstraint !== -1 && nextConstraint < nextSemicolon
+        ? nextConstraint
+        : nextSemicolon + 1;
+    const clause = migration.slice(start, end).trim().replace(/,$/, "");
+    assert.match(clause, /NOT VALID;?$/);
+  }
 });

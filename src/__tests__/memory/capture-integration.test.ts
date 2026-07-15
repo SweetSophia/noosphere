@@ -13,6 +13,7 @@ import { GET as getCaptureDetail } from "@/app/api/memory/captures/[id]/route";
 import {
   createApiKeyRecord,
   rotateApiKeyCredential,
+  updateApiKeyRecord,
 } from "@/lib/api/key-mutations";
 import { readAutomaticMemoryCaptureConfig } from "@/lib/memory/capture/config";
 import type { CaptureHmacKeyring } from "@/lib/memory/capture/crypto";
@@ -113,6 +114,95 @@ after(async () => {
   await integrationLockPool.end();
 });
 
+test("Article revocation generations reject negative creates and updates", async () => {
+  const topic = await prisma.topic.create({
+    data: {
+      name: `${prefix} generation constraint topic`,
+      slug: `${prefix}-generation-constraint-topic`,
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      prisma.article.create({
+        data: {
+          title: `${prefix} invalid negative generation`,
+          slug: `${prefix}-invalid-negative-generation`,
+          content: "This row must be rejected by the database constraint.",
+          topicId: topic.id,
+          memoryRevocationGeneration: -1,
+        },
+      }),
+    /Article_memoryRevocationGeneration_nonnegative|check constraint|23514/i,
+  );
+
+  const article = await prisma.article.create({
+    data: {
+      title: `${prefix} valid generation`,
+      slug: `${prefix}-valid-generation`,
+      content: "This row begins with a valid generation.",
+      topicId: topic.id,
+    },
+  });
+  await assert.rejects(
+    () =>
+      prisma.article.update({
+        where: { id: article.id },
+        data: { memoryRevocationGeneration: -1 },
+      }),
+    /Article_memoryRevocationGeneration_nonnegative|check constraint|23514/i,
+  );
+  await prisma.article.delete({ where: { id: article.id } });
+  await prisma.topic.delete({ where: { id: topic.id } });
+});
+
+test("Article quarantine requires a nonblank reason on creates and updates", async () => {
+  const topic = await prisma.topic.create({
+    data: {
+      name: `${prefix} quarantine constraint topic`,
+      slug: `${prefix}-quarantine-constraint-topic`,
+    },
+  });
+  const quarantinedAt = new Date();
+
+  await assert.rejects(
+    () =>
+      prisma.article.create({
+        data: {
+          title: `${prefix} invalid quarantine create`,
+          slug: `${prefix}-invalid-quarantine-create`,
+          content: "A quarantined row without a reason must be rejected.",
+          topicId: topic.id,
+          recallQuarantinedAt: quarantinedAt,
+          recallQuarantineReason: "   ",
+        },
+      }),
+    /Article_recallQuarantine_reason|check constraint|23514/i,
+  );
+
+  const article = await prisma.article.create({
+    data: {
+      title: `${prefix} valid quarantine candidate`,
+      slug: `${prefix}-valid-quarantine-candidate`,
+      content: "This row starts outside quarantine.",
+      topicId: topic.id,
+    },
+  });
+  await assert.rejects(
+    () =>
+      prisma.article.update({
+        where: { id: article.id },
+        data: {
+          recallQuarantinedAt: quarantinedAt,
+          recallQuarantineReason: null,
+        },
+      }),
+    /Article_recallQuarantine_reason|check constraint|23514/i,
+  );
+  await prisma.article.delete({ where: { id: article.id } });
+  await prisma.topic.delete({ where: { id: topic.id } });
+});
+
 test("Phase A preserves private lineage, immutable identity, rotation, and disabled-mode cleanup", async () => {
   await prisma.restrictedScope.create({
     data: { tag: scopeTag, description: `${prefix} private memory` },
@@ -165,6 +255,12 @@ test("Phase A preserves private lineage, immutable identity, rotation, and disab
     permissions: Permissions.ADMIN,
     allowedScopes: [scopeTag],
   });
+  assert.equal("keyHash" in firstCredential.key, false);
+  assert.equal("keyHash" in scopedAdminCredential.key, false);
+  const updatedCredential = await updateApiKeyRecord(firstCredential.key.id, {
+    name: firstCredential.key.name,
+  });
+  assert.equal("keyHash" in updatedCredential, false);
 
   await assert.rejects(
     () =>
@@ -293,6 +389,7 @@ test("Phase A preserves private lineage, immutable identity, rotation, and disab
 
   const rotatedCredential = await rotateApiKeyCredential(firstCredential.key.id);
   assert.equal(rotatedCredential.key.agentPrincipalId, principal.id);
+  assert.equal("keyHash" in rotatedCredential.key, false);
   const originalExpiry = stored.expiresAt;
   const deduplicatedAcrossHmacRotation = await repository.createOrIncrement({
     auth: {
@@ -685,6 +782,7 @@ test("Phase A preserves private lineage, immutable identity, rotation, and disab
       slug: `${prefix}-reviewed-memory`,
       content: "Reviewed memory derived from the private calibration session.",
       status: "reviewed",
+      sourceType: "automatic-memory",
       topicId: topic.id,
       restrictedTags: [scopeTag],
       memoryProvenanceEdges: {
@@ -702,6 +800,7 @@ test("Phase A preserves private lineage, immutable identity, rotation, and disab
       slug: `${prefix}-multi-source-draft`,
       content: "A generated draft with one independently authorized source group.",
       status: "draft",
+      sourceType: "automatic-memory",
       topicId: topic.id,
       restrictedTags: [scopeTag],
       memoryProvenanceEdges: {
@@ -717,6 +816,68 @@ test("Phase A preserves private lineage, immutable identity, rotation, and disab
             generationSnapshot: lineage.generation,
           })),
         ],
+      },
+    },
+  });
+  const generatedDraft = await prisma.article.create({
+    data: {
+      title: `${prefix} generated single-source draft`,
+      slug: `${prefix}-generated-single-source-draft`,
+      content: "An unreviewed generated draft with no independent authorized source.",
+      status: "draft",
+      sourceType: "automatic-memory",
+      topicId: topic.id,
+      restrictedTags: [scopeTag],
+      memoryProvenanceEdges: {
+        create: [sessionLineage!, principalLineage!, scopeLineage!].map((lineage) => ({
+          sourceGroupId,
+          lineageStateId: lineage.id,
+          generationSnapshot: lineage.generation,
+        })),
+      },
+    },
+  });
+  const humanAuthor = await prisma.user.create({
+    data: {
+      email: `${prefix}@example.invalid`,
+      name: "Human reviewer",
+      passwordHash: "test-only-not-a-real-credential",
+    },
+  });
+  const humanDraft = await prisma.article.create({
+    data: {
+      title: `${prefix} human single-source draft`,
+      slug: `${prefix}-human-single-source-draft`,
+      content: "A human-authored draft must never be hard-deleted by automatic cleanup.",
+      status: "draft",
+      sourceType: "automatic-memory",
+      authorId: humanAuthor.id,
+      topicId: topic.id,
+      restrictedTags: [scopeTag],
+      memoryProvenanceEdges: {
+        create: [sessionLineage!, principalLineage!, scopeLineage!].map((lineage) => ({
+          sourceGroupId,
+          lineageStateId: lineage.id,
+          generationSnapshot: lineage.generation,
+        })),
+      },
+    },
+  });
+  const manualDraft = await prisma.article.create({
+    data: {
+      title: `${prefix} manual single-source draft`,
+      slug: `${prefix}-manual-single-source-draft`,
+      content: "A manual draft without a bound author still requires human privacy review.",
+      status: "draft",
+      sourceType: "manual",
+      topicId: topic.id,
+      restrictedTags: [scopeTag],
+      memoryProvenanceEdges: {
+        create: [sessionLineage!, principalLineage!, scopeLineage!].map((lineage) => ({
+          sourceGroupId,
+          lineageStateId: lineage.id,
+          generationSnapshot: lineage.generation,
+        })),
       },
     },
   });
@@ -904,6 +1065,29 @@ test("Phase A preserves private lineage, immutable identity, rotation, and disab
     await prisma.articleRecallEnrichment.findUnique({ where: { articleId: article.id } }),
     null,
   );
+  assert.equal(
+    await prisma.article.findUnique({ where: { id: generatedDraft.id } }),
+    null,
+    "cleanup deletes only an unreviewed draft explicitly marked as automatic memory",
+  );
+  assert.ok(
+    (await prisma.article.findUniqueOrThrow({ where: { id: humanDraft.id } }))
+      .recallQuarantinedAt,
+    "human-authored drafts remain quarantined for explicit privacy review",
+  );
+  assert.equal(
+    await prisma.memoryPrivacyReview.count({ where: { articleId: humanDraft.id } }),
+    1,
+  );
+  assert.ok(
+    (await prisma.article.findUniqueOrThrow({ where: { id: manualDraft.id } }))
+      .recallQuarantinedAt,
+    "manual drafts remain quarantined even without a bound human author",
+  );
+  assert.equal(
+    await prisma.memoryPrivacyReview.count({ where: { articleId: manualDraft.id } }),
+    1,
+  );
   assert.ok(
     (await prisma.article.findUniqueOrThrow({ where: { id: article.id } }))
       .recallQuarantinedAt,
@@ -924,6 +1108,9 @@ test("Phase A preserves private lineage, immutable identity, rotation, and disab
     1,
     "a retained multi-source draft is queued for explicit re-synthesis review",
   );
+  await prisma.article.delete({ where: { id: humanDraft.id } });
+  await prisma.article.delete({ where: { id: manualDraft.id } });
+  await prisma.user.delete({ where: { id: humanAuthor.id } });
 
   const unrelatedLineage = await prisma.memoryLineageState.create({
     data: {

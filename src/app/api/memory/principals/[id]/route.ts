@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { requirePermission } from "@/lib/api/auth";
+import { withApiErrorBoundary } from "@/lib/api/errors";
 import { prisma } from "@/lib/prisma";
 import { rateLimit } from "@/lib/rate-limit";
 import { revokeMemoryAgentPrincipal } from "@/lib/memory/capture/lifecycle";
@@ -43,22 +44,24 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const rate = await rateLimit(request, {
-    windowMs: 60_000,
-    maxRequests: 20,
-    keyPrefix: "memory-principal-delete",
-  });
-  if (!rate.allowed) return rate.response;
-  const auth = await requirePermission(request, [Permissions.ADMIN]);
-  if (!auth.success) return auth.response;
-  const { id } = await params;
-  try {
-    const result = await revokeMemoryAgentPrincipal(id);
-    return NextResponse.json({ success: true, ...result });
-  } catch (error) {
-    if (error instanceof MemoryCaptureError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+  return withApiErrorBoundary("MemoryPrincipals DELETE", async () => {
+    const rate = await rateLimit(request, {
+      windowMs: 60_000,
+      maxRequests: 20,
+      keyPrefix: "memory-principal-delete",
+    });
+    if (!rate.allowed) return rate.response;
+    const auth = await requirePermission(request, [Permissions.ADMIN]);
+    if (!auth.success) return auth.response;
+    const { id } = await params;
+    try {
+      const result = await revokeMemoryAgentPrincipal(id);
+      return NextResponse.json({ success: true, ...result });
+    } catch (error) {
+      if (error instanceof MemoryCaptureError) {
+        return NextResponse.json({ error: error.message }, { status: error.status });
+      }
+      throw error;
     }
-    throw error;
-  }
+  });
 }

@@ -3,6 +3,18 @@ import { prisma } from "@/lib/prisma";
 import { generateApiKey } from "./keys";
 import { MemoryCaptureError, withSerializableRetry } from "@/lib/memory/capture/repository";
 
+const API_KEY_METADATA_SELECT = {
+  id: true,
+  name: true,
+  keyPrefix: true,
+  permissions: true,
+  allowedScopes: true,
+  agentPrincipalId: true,
+  createdAt: true,
+  lastUsedAt: true,
+  revokedAt: true,
+} satisfies Prisma.ApiKeySelect;
+
 export type ApiKeyCreationInput = {
   name: string;
   permissions: Permissions;
@@ -26,6 +38,7 @@ export async function createApiKeyRecord(input: ApiKeyCreationInput) {
             allowedScopes: input.allowedScopes,
             agentPrincipalId: input.agentPrincipalId ?? null,
           },
+          select: API_KEY_METADATA_SELECT,
         });
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
@@ -59,7 +72,11 @@ export async function updateApiKeyRecord(
           agentPrincipalId: current.agentPrincipalId,
         };
         await validatePrincipalBinding(tx, next);
-        return tx.apiKey.update({ where: { id }, data });
+        return tx.apiKey.update({
+          where: { id },
+          data,
+          select: API_KEY_METADATA_SELECT,
+        });
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     ),
@@ -107,6 +124,7 @@ export async function rotateApiKeyCredential(id: string) {
             allowedScopes: current.allowedScopes,
             agentPrincipalId: current.agentPrincipalId,
           },
+          select: API_KEY_METADATA_SELECT,
         });
         // Credential invalidation is not a privacy-lineage revocation. Existing
         // captures remain attached to the unchanged principal.
