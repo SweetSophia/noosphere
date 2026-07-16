@@ -12,3 +12,8 @@ coverage
 uploads
 AGENTS.md
 CLAUDE.md
+.lean-ctx
+.pi
+.planning
+.codegraph
+.opencode
