@@ -1,0 +1,80 @@
+name: Rehearse PostgreSQL pgvector volume upgrade
+
+on:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - ".github/workflows/postgres-pgvector-rehearsal.yml"
+      - "docker/migrate-or-baseline.mjs"
+      - "docker/postgres-pgvector/rehearsal-*"
+      - "package.json"
+      - "package-lock.json"
+      - "prisma.config.ts"
+      - "prisma/migrations/**"
+      - "prisma/schema.prisma"
+      - "scripts/rehearse-pgvector-volume-upgrade.sh"
+  push:
+    branches: [main, master]
+    paths:
+      - ".github/workflows/postgres-pgvector-rehearsal.yml"
+      - "docker/migrate-or-baseline.mjs"
+      - "docker/postgres-pgvector/rehearsal-*"
+      - "package.json"
+      - "package-lock.json"
+      - "prisma.config.ts"
+      - "prisma/migrations/**"
+      - "prisma/schema.prisma"
+      - "scripts/rehearse-pgvector-volume-upgrade.sh"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: postgres-pgvector-rehearsal-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  QEMU_IMAGE: tonistiigi/binfmt:qemu-v9.2.0@sha256:ea2f0dd74e74f101df59f9a6b31d0960994060c7982a921cbceecee0f1841125
+  BUILDX_VERSION: v0.35.0
+  BUILDKIT_IMAGE: moby/buildkit:v0.26.3@sha256:5601811fde88bb9e8a577bfe804af82bccb712e1cd07ff94663bded5e628cf75
+
+jobs:
+  rehearse-volume-upgrade:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+          - platform: linux/arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+
+      - name: Install pinned migration tooling
+        run: npm ci
+
+      - name: Set up QEMU
+        if: matrix.platform == 'linux/arm64'
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          image: ${{ env.QEMU_IMAGE }}
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+        with:
+          version: ${{ env.BUILDX_VERSION }}
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
+
+      # The candidate package is public. Do not authenticate before executing
+      # a pull-request-controlled rehearsal script.
+      - name: Rehearse volume upgrade and rollback
+        run: scripts/rehearse-pgvector-volume-upgrade.sh ${{ matrix.platform }}
