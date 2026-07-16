@@ -187,3 +187,34 @@ test("Phase A Article checks are added without an immediate table validation sca
     assert.match(clause, /NOT VALID;?$/);
   }
 });
+
+test("candidate source-edge validation batches dependent candidates with covering indexes", async () => {
+  const migration = await readFile(
+    path.join(
+      process.cwd(),
+      "prisma/migrations/20260715132950_automatic_memory_phase_a/migration.sql",
+    ),
+    "utf8",
+  );
+
+  assert.doesNotMatch(
+    migration,
+    /FOR dependent_candidate IN/,
+    "deferred edge validation must not call the candidate validator in a row loop",
+  );
+  assert.match(
+    migration,
+    /assert_memory_capture_group_candidates_have_source/,
+    "capture-edge changes must use the set-based dependent-candidate validator",
+  );
+  assert.match(
+    migration,
+    /CREATE INDEX "MemoryProvEdge_capture_lineage_generation_idx"/,
+    "capture source-group matching requires a composite provenance index",
+  );
+  assert.match(
+    migration,
+    /CREATE INDEX "MemoryCandidate_sourceCaptureId_idx"/,
+    "dependent-candidate lookup must remain indexed",
+  );
+});

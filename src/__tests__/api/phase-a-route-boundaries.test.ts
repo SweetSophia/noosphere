@@ -208,6 +208,7 @@ test("Phase A routes bound late failures and preserve domain error mappings", as
       adminRequest(generated.raw, "/api/memory/principals", "POST", createBody),
     );
     assert.equal(firstCreate.status, 201);
+    assert.equal(firstCreate.headers.get("cache-control"), "private, no-store");
     const duplicateCreate = await createPrincipal(
       adminRequest(generated.raw, "/api/memory/principals", "POST", createBody),
     );
@@ -215,6 +216,28 @@ test("Phase A routes bound late failures and preserve domain error mappings", as
     assert.deepEqual(await duplicateCreate.json(), {
       error: "Principal name already exists",
     });
+
+    const deleteCreate = await createPrincipal(
+      adminRequest(generated.raw, "/api/memory/principals", "POST", {
+        ...createBody,
+        name: `${principalName}-delete`,
+      }),
+    );
+    assert.equal(deleteCreate.status, 201);
+    const deletePrincipalId = (await deleteCreate.json()).principal.id as string;
+    const deletedPrincipal = await deletePrincipal(
+      adminRequest(
+        generated.raw,
+        `/api/memory/principals/${deletePrincipalId}`,
+        "DELETE",
+      ),
+      { params: Promise.resolve({ id: deletePrincipalId }) },
+    );
+    assert.equal(deletedPrincipal.status, 200);
+    assert.equal(
+      deletedPrincipal.headers.get("cache-control"),
+      "private, no-store",
+    );
 
     const principalMissing = await deletePrincipal(
       adminRequest(generated.raw, "/api/memory/principals/missing", "DELETE"),
@@ -248,11 +271,14 @@ test("Phase A routes bound late failures and preserve domain error mappings", as
   } finally {
     console.error = original;
     const principals = await prisma.memoryAgentPrincipal.findMany({
-      where: { name: principalName },
+      where: { name: { in: [principalName, `${principalName}-delete`] } },
       select: { id: true },
     });
     const principalIds = principals.map(({ id }) => id);
     if (principalIds.length > 0) {
+      await prisma.memoryDurableJob.deleteMany({
+        where: { agentPrincipalId: { in: principalIds } },
+      });
       await prisma.memoryLineageState.deleteMany({
         where: { agentPrincipalId: { in: principalIds } },
       });

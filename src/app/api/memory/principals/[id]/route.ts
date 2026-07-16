@@ -89,7 +89,9 @@ export async function DELETE(
     }
     try {
       const result = await revokeMemoryAgentPrincipal(id);
-      return NextResponse.json({ success: true, ...result });
+      return privateMemoryAdminResponse(
+        NextResponse.json({ success: true, ...result }),
+      );
     } catch (error) {
       if (error instanceof MemoryCaptureError) {
         return NextResponse.json({ error: error.message }, { status: error.status });

@@ -324,6 +324,9 @@ CREATE INDEX "MemoryProvenanceEdge_sourceGroupId_idx" ON "MemoryProvenanceEdge"(
 CREATE INDEX "MemoryProvenanceEdge_captureId_idx" ON "MemoryProvenanceEdge"("captureId");
 
 -- CreateIndex
+CREATE INDEX "MemoryProvEdge_capture_lineage_generation_idx" ON "MemoryProvenanceEdge"("captureId", "lineageStateId", "generationSnapshot");
+
+-- CreateIndex
 CREATE INDEX "MemoryProvenanceEdge_candidateId_idx" ON "MemoryProvenanceEdge"("candidateId");
 
 -- CreateIndex
@@ -842,12 +845,12 @@ EXECUTE FUNCTION "validate_memory_capture_source"();
 -- not itself authority: revocation and cleanup traverse provenance edges.
 -- The deferred check supports Prisma nested writes and lets cleanup remove an
 -- inactive group and null a deleted raw-capture relation in one transaction.
-CREATE FUNCTION "assert_memory_candidate_has_source"(candidate_id text)
-RETURNS void
-LANGUAGE plpgsql
+CREATE FUNCTION "memory_candidate_source_is_valid"(candidate_id text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
 AS $$
-BEGIN
-  IF EXISTS (
+  SELECT NOT EXISTS (
     SELECT 1
     FROM "MemoryCandidate" candidate
     WHERE candidate.id = candidate_id
@@ -931,7 +934,15 @@ BEGIN
           )
         )
       )
-  ) THEN
+  );
+$$;
+
+CREATE FUNCTION "assert_memory_candidate_has_source"(candidate_id text)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NOT "memory_candidate_source_is_valid"(candidate_id) THEN
     RAISE EXCEPTION 'MemoryCandidate requires complete active principal-scoped provenance'
       USING ERRCODE = '23514';
   END IF;
@@ -954,12 +965,61 @@ DEFERRABLE INITIALLY DEFERRED
 FOR EACH ROW
 EXECUTE FUNCTION "validate_memory_candidate_source"();
 
+-- Revalidate all candidates that inherit the changed capture source group in
+-- one set-based query. The current CAPTURE edge identifies ordinary group
+-- changes; the changed edge parameters preserve that identity when the
+-- canonical CAPTURE edge itself was deleted or moved before deferred checks.
+CREATE FUNCTION "assert_memory_capture_group_candidates_have_source"(
+  capture_id text,
+  source_group_id text,
+  changed_lineage_state_id text,
+  changed_generation_snapshot integer
+)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM "MemoryCandidate" candidate
+    WHERE candidate."sourceCaptureId" = capture_id
+      AND (
+        EXISTS (
+          SELECT 1
+          FROM "MemoryProvenanceEdge" source_anchor
+          JOIN "MemoryLineageState" anchor_lineage
+            ON anchor_lineage.id = source_anchor."lineageStateId"
+          JOIN "MemoryProvenanceEdge" candidate_anchor
+            ON candidate_anchor."candidateId" = candidate.id
+            AND candidate_anchor."lineageStateId" = source_anchor."lineageStateId"
+            AND candidate_anchor."generationSnapshot" = source_anchor."generationSnapshot"
+          WHERE source_anchor."captureId" = capture_id
+            AND source_anchor."sourceGroupId" = source_group_id
+            AND anchor_lineage.kind = 'CAPTURE'
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM "MemoryLineageState" changed_lineage
+          JOIN "MemoryProvenanceEdge" candidate_anchor
+            ON candidate_anchor."candidateId" = candidate.id
+            AND candidate_anchor."lineageStateId" = changed_lineage.id
+            AND candidate_anchor."generationSnapshot" = changed_generation_snapshot
+          WHERE changed_lineage.id = changed_lineage_state_id
+            AND changed_lineage.kind = 'CAPTURE'
+        )
+      )
+      AND NOT "memory_candidate_source_is_valid"(candidate.id)
+  ) THEN
+    RAISE EXCEPTION 'MemoryCandidate requires complete active principal-scoped provenance'
+      USING ERRCODE = '23514';
+  END IF;
+END;
+$$;
+
 CREATE FUNCTION "validate_memory_candidate_source_edge"()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
-DECLARE
-  dependent_candidate record;
 BEGIN
   IF TG_OP IN ('UPDATE', 'DELETE') AND OLD."candidateId" IS NOT NULL THEN
     PERFORM "assert_memory_candidate_has_source"(OLD."candidateId");
@@ -970,23 +1030,21 @@ BEGIN
 
   IF TG_OP IN ('UPDATE', 'DELETE') AND OLD."captureId" IS NOT NULL THEN
     PERFORM "assert_memory_capture_has_source"(OLD."captureId");
-    FOR dependent_candidate IN
-      SELECT id
-      FROM "MemoryCandidate"
-      WHERE "sourceCaptureId" = OLD."captureId"
-    LOOP
-      PERFORM "assert_memory_candidate_has_source"(dependent_candidate.id);
-    END LOOP;
+    PERFORM "assert_memory_capture_group_candidates_have_source"(
+      OLD."captureId",
+      OLD."sourceGroupId",
+      OLD."lineageStateId",
+      OLD."generationSnapshot"
+    );
   END IF;
   IF TG_OP IN ('INSERT', 'UPDATE') AND NEW."captureId" IS NOT NULL THEN
     PERFORM "assert_memory_capture_has_source"(NEW."captureId");
-    FOR dependent_candidate IN
-      SELECT id
-      FROM "MemoryCandidate"
-      WHERE "sourceCaptureId" = NEW."captureId"
-    LOOP
-      PERFORM "assert_memory_candidate_has_source"(dependent_candidate.id);
-    END LOOP;
+    PERFORM "assert_memory_capture_group_candidates_have_source"(
+      NEW."captureId",
+      NEW."sourceGroupId",
+      NEW."lineageStateId",
+      NEW."generationSnapshot"
+    );
   END IF;
   RETURN NULL;
 END;

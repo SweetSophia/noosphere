@@ -647,6 +647,125 @@ test("Phase A preserves private lineage, immutable identity, rotation, and disab
     "direct capture deletion cannot orphan active derived candidates",
   );
 
+  // Keep a second complete capture group so removing or moving the original
+  // group leaves the capture itself valid. Any deferred failure must therefore
+  // come from revalidating the multiple candidates that inherited that group.
+  const captureSourceGroupId = stored.provenanceEdges[0].sourceGroupId;
+  const secondaryCaptureGroupId = `${sourceGroupId}:secondary`;
+  const secondaryConsentLineage = await prisma.memoryLineageState.create({
+    data: {
+      kind: "CONSENT",
+      subjectHash: `${prefix}-secondary-capture-consent`,
+      agentPrincipalId: principal.id,
+    },
+  });
+  await prisma.memoryProvenanceEdge.createMany({
+    data: [
+      ...stored.provenanceEdges.map(({ lineageStateId, generationSnapshot }) => ({
+        sourceGroupId: secondaryCaptureGroupId,
+        lineageStateId,
+        generationSnapshot,
+        captureId: created.id,
+      })),
+      {
+        sourceGroupId: secondaryCaptureGroupId,
+        lineageStateId: secondaryConsentLineage.id,
+        generationSnapshot: secondaryConsentLineage.generation,
+        captureId: created.id,
+      },
+    ],
+  });
+  const secondaryCaptureEdges = await prisma.memoryProvenanceEdge.findMany({
+    where: { captureId: created.id, sourceGroupId: secondaryCaptureGroupId },
+  });
+  const createBatchCandidate = async (
+    suffix: string,
+    inheritedSourceGroupId: string,
+    sourceEdges: ReadonlyArray<{
+      lineageStateId: string;
+      generationSnapshot: number;
+    }>,
+  ) =>
+    prisma.memoryCandidate.create({
+      data: {
+        dedupeKey: `${prefix}-batch-candidate-${suffix}`,
+        dedupeKeyVersion: 1,
+        hmacAlgorithm: "HMAC-SHA-256",
+        title: `Batch candidate ${suffix}`,
+        content: "Candidate used to exercise set-based deferred provenance validation.",
+        recallSummary: "Set-based provenance validation regression candidate.",
+        confidence: "high",
+        restrictedTags: [scopeTag],
+        agentPrincipalId: principal.id,
+        privateScopeTag: scopeTag,
+        sourceCaptureId: created.id,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        provenanceEdges: {
+          create: sourceEdges.map(({ lineageStateId, generationSnapshot }) => ({
+            sourceGroupId: inheritedSourceGroupId,
+            lineageStateId,
+            generationSnapshot,
+          })),
+        },
+      },
+    });
+  const batchPrimaryOne = await createBatchCandidate(
+    "primary-one",
+    `${prefix}-batch-primary-one`,
+    stored.provenanceEdges,
+  );
+  const batchPrimaryTwo = await createBatchCandidate(
+    "primary-two",
+    `${prefix}-batch-primary-two`,
+    stored.provenanceEdges,
+  );
+  const batchSecondary = await createBatchCandidate(
+    "secondary",
+    `${prefix}-batch-secondary`,
+    secondaryCaptureEdges,
+  );
+
+  await assert.rejects(
+    () =>
+      prisma.$transaction(async (tx) => {
+        await tx.memoryProvenanceEdge.updateMany({
+          where: { captureId: created.id, sourceGroupId: captureSourceGroupId },
+          data: {
+            captureId: null,
+            candidateId: batchSecondary.id,
+            sourceGroupId: `${prefix}-moved-capture-group`,
+          },
+        });
+        await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+      }),
+    /requires complete active principal-scoped provenance|23514/i,
+    "moving a capture group must revalidate every candidate that inherited it",
+  );
+  await assert.rejects(
+    () =>
+      prisma.$transaction(async (tx) => {
+        await tx.memoryProvenanceEdge.deleteMany({
+          where: { captureId: created.id, sourceGroupId: captureSourceGroupId },
+        });
+        await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+      }),
+    /requires complete active principal-scoped provenance|23514/i,
+    "deleting a capture group must use the old CAPTURE anchor to revalidate inheriting candidates",
+  );
+  assert.equal(
+    await prisma.memoryProvenanceEdge.count({
+      where: { captureId: created.id, sourceGroupId: captureSourceGroupId },
+    }),
+    stored.provenanceEdges.length,
+    "failed deferred mutations roll back the complete source group",
+  );
+  await prisma.memoryCandidate.deleteMany({
+    where: { id: { in: [batchPrimaryOne.id, batchPrimaryTwo.id, batchSecondary.id] } },
+  });
+  await prisma.memoryProvenanceEdge.deleteMany({
+    where: { captureId: created.id, sourceGroupId: secondaryCaptureGroupId },
+  });
+
   const otherScopeTurn = {
     sourceSessionId: "other-scope-session",
     sourceRunId: "other-scope-run",

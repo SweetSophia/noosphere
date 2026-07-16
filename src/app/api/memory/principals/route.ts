@@ -85,7 +85,9 @@ export async function POST(request: NextRequest) {
         name: body.name,
         privateScopeTag: body.privateScopeTag,
       });
-      return NextResponse.json({ principal }, { status: 201 });
+      return privateMemoryAdminResponse(
+        NextResponse.json({ principal }, { status: 201 }),
+      );
     } catch (error) {
       if (error instanceof MemoryCaptureError) {
         return NextResponse.json({ error: error.message }, { status: error.status });

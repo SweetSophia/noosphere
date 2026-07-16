@@ -497,6 +497,7 @@ model MemoryProvenanceEdge {
   @@index([lineageStateId, generationSnapshot])
   @@index([sourceGroupId])
   @@index([captureId])
+  @@index([captureId, lineageStateId, generationSnapshot], map: "MemoryProvEdge_capture_lineage_generation_idx")
   @@index([candidateId])
   @@index([enrichmentArticleId])
   @@index([retrievalStatId])
