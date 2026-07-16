@@ -139,17 +139,18 @@ required.
 
 ### 7.1 `MemoryCapture`
 
-A capture is private temporary evidence, not a wiki page.
-No current `ApiKey` row carries the required immutable agent-principal binding,
-and automatic capture remains disabled until Phase A adds that server-managed
-identity contract.
+A capture is private temporary evidence, not a wiki page. Phase A adds an
+optional `ApiKey.agentPrincipalId` binding backed by a database trigger that
+rejects every post-creation change, including `NULL → principal`. Existing keys
+remain unbound for compatibility; automatic capture remains disabled by default
+and rejects unbound keys.
 
 Required fields:
 
 - `id`
 - `dedupeKey` — unique, domain-separated, versioned keyed HMAC over canonical
   source identity and content; an unkeyed content hash is forbidden
-- `agentId` — server-derived from the authenticated API key's immutable agent
+- `agentPrincipalId` — server-derived from the authenticated API key's immutable agent
   principal binding; never accepted from request data
 - `privateScopeTag` — required non-empty restricted tag authorized for the
   caller; capture is rejected if the key cannot write it
@@ -166,8 +167,13 @@ Required fields:
 - `expiresAt`
 - `createdAt`, `updatedAt`
 
-Raw capture must have a short configurable TTL. Thirty days is the proposed
-initial maximum; successful conversion may delete raw text sooner.
+Raw capture has a 30-day Phase A TTL; successful conversion may delete raw text
+sooner. A database constraint enforces the upper bound, so a later configuration
+option may shorten but cannot extend it through a direct or worker write.
+
+Each capture schedules a durable expiry job. Disabling new ingestion never
+disables expiry, revocation, or privacy cleanup; `npm run memory:scheduler`
+continues to lease those jobs independently of the capture flag.
 
 ### 7.2 `MemoryCandidate`
 
@@ -186,7 +192,8 @@ Required fields:
 - `restrictedTags`
 - `agentId` — inherited from the authenticated source-capture principal
 - `privateScopeTag` — inherited unchanged from the source capture
-- `sourceCaptureId` or non-sensitive provenance reference
+- optional `sourceCaptureId` plus at least one complete, current, unrevoked
+  principal-and-scope provenance group; the foreign key alone is not authority
 - `status` — `ephemeral`, `pending_review`, `rejected`, `promoted`, `expired`
 - `occurrenceCount`
 - `retrievedCount`, `injectedCount`, `explicitGetCount`
@@ -244,6 +251,53 @@ Only final injected or explicitly fetched results count strongly toward
 promotion. A provider returning the same broad result repeatedly is not evidence
 of usefulness by itself.
 
+### 7.5 Principal, lineage, tombstone, job, and privacy-review state
+
+Phase A also adds:
+
+- `MemoryAgentPrincipal` for server-managed active/revoked identity and one
+  immutable concrete private scope;
+- `MemoryLineageState` plus `MemoryProvenanceEdge` for principal, scope,
+  session, capture, and future consent generations;
+- `MemoryTombstone` to prevent a deleted lineage from being recreated by a
+  late worker or a repeated event;
+- `MemoryDurableJob` for bounded leases, retries, expiry, and privacy cleanup;
+- `MemoryPrivacyReview` for reviewed/published articles that depend on revoked
+  provenance and therefore require an explicit human decision.
+
+The global lock order is API key, principal, lineage ordered by
+`(kind, subjectHash, id)`, artifact, then durable job. Capture, revocation,
+cleanup, and final recall hydration use the same order. Final publication paths
+must call the shared provenance-generation check in the transaction that writes
+the artifact.
+
+Each provenance edge also carries a `sourceGroupId`. Lineages inside one source
+group are conjunctive requirements; separate groups represent genuinely
+independent authorized sources. Privacy cleanup removes an invalid group but
+preserves a quarantined derived artifact when another complete group remains.
+Raw captures and retrieval correlations are source-specific and are always
+deleted when any required source lineage is revoked. A raw-capture group is
+canonical only when its current principal, exact private scope, session HMAC,
+and capture HMAC match the capture row. `SCOPE` lineage has no principal owner.
+A candidate that references a raw capture must inherit one complete canonical
+source group; the relation cannot be detached before quarantine, and direct
+capture deletion is blocked while any derived candidate remains active.
+
+### 7.6 HMAC rotation contract
+
+Session, run, capture-dedupe, candidate-dedupe, and query-correlation digests
+are domain-separated and include the immutable principal ID. The configured
+keyring contains one to three numbered keys and one active write version.
+Deduplication and session deletion compute every retained version; new rows use
+only the active version.
+
+Because raw session IDs are never stored, an old key must remain available
+until every capture written with it has exceeded the 30-day capture TTL and any
+resulting tombstone has exceeded its 90-day TTL. The minimum safe retirement
+window is therefore 120 days after the old key's last possible write. Rotation
+adds a new active key first; retirement happens only after that bounded window
+and after pending cleanup jobs are drained.
+
 ## 8. Capture endpoint
 
 Add `POST /api/memory/captures` rather than overloading `/api/memory/save`.
@@ -268,8 +322,16 @@ The endpoint should:
 12. return `202 Accepted` with a capture ID and status URL;
 13. apply rate limits and bounded structured logging without content.
 
+Credential rotation creates a new key with the same immutable principal binding
+and revokes the old credential in one transaction. Credential invalidation is
+not privacy revocation and does not quarantine prior captures. Principal,
+session, scope, capture, and consent revocations use the separate lineage path.
+
 The API must never accept a client request to mark a capture as promoted or
 published.
+
+Duplicate delivery increments occurrence metadata without extending the raw
+capture's fixed 30-day expiry. An overdue row cannot be revived by replay.
 
 ## 9. OpenClaw `agent_end` hook
 
@@ -391,6 +453,11 @@ vector publication. Reviewed or published articles are never silently rewritten
 by this automatic path; they enter an explicit privacy-review queue and are
 excluded from recall until resolved.
 
+An article is eligible for automatic hard deletion only when it remains a
+`draft`, has no bound human author, and carries the explicit
+`sourceType=automatic-memory` origin marker. Any other draft is retained under
+recall quarantine and routed to the privacy-review queue.
+
 ## 11. Search integration
 
 The lexical search document should use these relative weights:
@@ -500,6 +567,11 @@ promotion until resolved. A newer statement is not automatically more correct.
 - Stale article enrichment never removes the article from lexical search; the
   base title/excerpt/content/tags document remains available.
 - Promotion-worker outages stop promotion but not recall or explicit saves.
+- `NOOSPHERE_AUTO_MEMORY_CAPTURE_ENABLED=false` stops only new ingestion; the
+  durable maintenance scheduler still expires and deletes retained private data.
+- Redis search entries contain only article IDs and bounded relevance scores.
+  Every hit is transactionally rehydrated from PostgreSQL while current lineage
+  and article rows are locked; cached article text is never returned or stored.
 
 ## 16. Staged delivery
 
@@ -516,7 +588,31 @@ promotion until resolved. A newer statement is not automatically more correct.
 - add source hashing, scope tests, and lifecycle invariants;
 - add API-key agent-principal binding and server-derived identity enforcement;
 - add provenance-graph deletion, tombstone, and revocation-generation jobs;
-- keep all new behavior disabled.
+- keep all new ingestion behavior disabled by default.
+
+Phase A implementation status in this change: complete pending PR review. It
+includes principal administration, creation-time key binding, safe credential
+rotation, private capture persistence, content-free recall caches with locked DB
+rehydration, durable expiry/privacy jobs, and capture/candidate/job/tombstone/
+privacy-review inspection APIs. Exact private-scope arrays are non-null at the
+database boundary; database triggers require canonical raw-capture lineage,
+bind capture/candidate scope to the principal, and require every candidate
+source group to carry active matching canonical-principal/scope provenance
+while the principal remains active.
+Candidates that identify a source capture must inherit one complete source
+group, including its capture and session lineage, so source revocation cannot
+leave the derived candidate active; active candidates cannot detach from or
+outlive a directly deleted source capture. All Phase A inspection APIs filter
+by the caller's exact allowed scopes; API ADMIN permission alone reveals no
+private memory metadata, principal detail redacts unauthorized scope names, and
+all private inspection responses explicitly disable storage in caches.
+Independent provenance
+groups survive only in quarantine. Lock-barrier regressions cover revocation
+racing capture/recall and scope deletion racing key creation/update. Capture
+detail is available to its bound creator only while capture and principal remain
+eligible; scope-authorized administrators retain privacy-review access, while
+API administrators still need the private scope. This phase does not register
+the OpenClaw `agent_end` hook or generate candidates; those remain Phase C.
 
 ### Phase B — article recall enrichment
 
@@ -531,7 +627,7 @@ promotion until resolved. A newer statement is not automatically more correct.
 - register the `agent_end` hook;
 - enable capture for selected agents/chats only;
 - run extraction into searchable ephemeral candidates;
-- add TTL deletion, deduplication, rate limits, and operations metrics.
+- activate the Phase A TTL/deduplication foundation and add operations metrics.
 
 ### Phase D — useful-recall promotion
 
@@ -577,6 +673,24 @@ promotion until resolved. A newer statement is not automatically more correct.
 - descendants become recall-ineligible atomically before asynchronous privacy
   cleanup begins;
 - retry and late-response races cannot resurrect expired or revoked content.
+
+Phase A additionally verifies that direct `NULL → principal` and
+`principal → NULL` key updates fail at the database boundary; key rotation
+preserves principal identity without quarantining memory; the same raw session
+ID under two principals produces different HMACs and deletion blast radii;
+historical HMAC versions deduplicate and tombstone correctly; reviewed articles
+enter recall quarantine plus privacy review; creator/cross-principal/admin
+capture-detail authorization preserves both identity and scope and removes
+creator access immediately on capture/session/principal revocation; forged
+capture/candidate scope, source relations, source-only candidates, and
+unrelated/revoked/synthetic-principal candidate provenance fail at the database
+boundary, including noncanonical raw-capture provenance, source-edge mutation,
+active source detachment/deletion, and late publication after principal
+revocation; mixed-scope API administration proves concrete-scope isolation and
+wildcard visibility across lists, detail, and mutation boundaries;
+scope deletion cannot be undone by a queued key create/update; raw expiry cannot
+exceed 30 days; cleanup still runs with ingestion disabled; and a clean database
+can apply the complete migration chain.
 
 ### Recall enrichment
 

@@ -11,7 +11,9 @@ import type { MemoryResult } from "@/lib/memory/types";
 import {
   createMockPrisma,
   createSequentialQueryRaw,
+  mockArticle,
   mockSearchRow,
+  withRecallHydrationQueries,
 } from "../memory/noosphere-provider-helpers";
 import assert from "assert";
 
@@ -56,6 +58,10 @@ class FakeRedisClient {
     return new Promise<void>((resolve) => {
       this.setexWaiters.push(resolve);
     });
+  }
+
+  peek(key: string) {
+    return this.store.get(key);
   }
 
   private assertReady() {
@@ -141,10 +147,48 @@ describe("Search Cache Redis Operations", () => {
       const cached = await getCachedSearchResults(cacheKey);
 
       assert.strictEqual(redis.status, "ready");
-      assert.deepStrictEqual(cached, [cachedResult]);
+      assert.deepStrictEqual(cached, [{ id: cachedResult.id }]);
+      const raw = redis.peek(cacheKey);
+      assert.ok(raw);
+      assert.equal(raw!.includes("Cached content"), false);
+      assert.equal(raw!.includes("Cached Article"), false);
     } finally {
       _redisTestHooks.reset();
     }
+  });
+
+  it("rehydrates cache hits and drops articles that became ineligible", async () => {
+    await withRestoredDatabaseUrl(async () => {
+      const redis = new FakeRedisClient();
+      _redisTestHooks.setClientForTesting(redis as never);
+      try {
+        const { NoosphereProvider } = await import("@/lib/memory/noosphere");
+        let hydrationCount = 0;
+        const provider = new NoosphereProvider({
+          prisma: createMockPrisma({
+            $queryRaw: withRecallHydrationQueries(() =>
+              Promise.resolve([mockSearchRow()]),
+            ),
+            article: {
+              findMany: () => {
+                hydrationCount++;
+                return Promise.resolve(
+                  hydrationCount === 1
+                    ? [mockArticle({ id: "article-1" })]
+                    : [],
+                );
+              },
+            },
+          }),
+        });
+
+        assert.equal((await provider.search("quarantine race")).length, 1);
+        await redis.waitForSetexCall(1);
+        assert.equal((await provider.search("quarantine race")).length, 0);
+      } finally {
+        _redisTestHooks.reset();
+      }
+    });
   });
 
   it("does not write stale search results when the invalidation version changed", async () => {
@@ -177,7 +221,7 @@ describe("Search Cache Redis Operations", () => {
       });
       await setCachedSearchResults(staleCacheKey, [cachedResult], initialVersion);
       assert.deepStrictEqual(await getCachedSearchResults(staleCacheKey), [
-        cachedResult,
+        { id: cachedResult.id },
       ]);
 
       await invalidateSearchCache();
@@ -202,12 +246,24 @@ describe("Search Cache Redis Operations", () => {
 
       try {
         const { NoosphereProvider } = await import("@/lib/memory/noosphere");
+        let hydrationCount = 0;
         const provider = new NoosphereProvider({
           prisma: createMockPrisma({
-            $queryRaw: createSequentialQueryRaw([
-              [mockSearchRow({ title: "Before invalidation" })],
-              [mockSearchRow({ title: "After invalidation" })],
-            ]),
+            $queryRaw: withRecallHydrationQueries(
+              createSequentialQueryRaw([
+                [mockSearchRow({ title: "Before invalidation" })],
+                [mockSearchRow({ title: "After invalidation" })],
+              ]),
+            ),
+            article: {
+              findMany: () => {
+                hydrationCount++;
+                const title = hydrationCount < 3
+                  ? "Before invalidation"
+                  : "After invalidation";
+                return Promise.resolve([mockArticle({ id: "article-1", title })]);
+              },
+            },
           }),
         });
 

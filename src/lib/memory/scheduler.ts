@@ -414,6 +414,17 @@ export function createSchedulerHealthJob(
   };
 }
 
+export function parseSchedulerIntervalMs(
+  value: string | undefined,
+  fallback: number,
+  minimum = 1,
+): number {
+  if (value === undefined) return fallback;
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed >= minimum ? parsed : fallback;
+}
+
 function validateJobDefinition(job: SchedulerJobDefinition): void {
   if (typeof job.id !== "string" || !job.id.trim()) {
     throw new Error("Scheduler job id is required");

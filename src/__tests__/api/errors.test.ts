@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import { NextResponse } from "next/server";
-import { apiError, withRequestId } from "@/lib/api/errors";
+import {
+  apiError,
+  withApiErrorBoundary,
+  withRequestId,
+} from "@/lib/api/errors";
 
 // ─── apiError ───────────────────────────────────────────────────────────────
 
@@ -65,5 +69,42 @@ describe("withRequestId", () => {
       r1.headers.get("x-request-id"),
       r2.headers.get("x-request-id"),
     );
+  });
+});
+
+describe("withApiErrorBoundary", () => {
+  test("preserves successful responses", async () => {
+    const expected = NextResponse.json({ ok: true }, { status: 201 });
+    assert.equal(
+      await withApiErrorBoundary("test-route", async () => expected),
+      expected,
+    );
+  });
+
+  test("logs only a safe error classification and returns bounded JSON", async () => {
+    const secret = "noo_this-must-not-leak";
+    const calls: unknown[][] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => calls.push(args);
+    try {
+      const response = await withApiErrorBoundary("test-route", async () => {
+        const hostile = new Error(secret);
+        Object.defineProperty(hostile, "name", {
+          get() {
+            throw new Error(`${secret}-name-getter`);
+          },
+        });
+        throw hostile;
+      });
+      assert.equal(response.status, 500);
+      const body = await response.json();
+      assert.deepEqual(body, { error: "Internal server error" });
+      assert.doesNotMatch(JSON.stringify(body), new RegExp(secret));
+      assert.doesNotMatch(JSON.stringify(calls), new RegExp(secret));
+      assert.match(JSON.stringify(calls), /test-route/);
+      assert.match(JSON.stringify(calls), /object/);
+    } finally {
+      console.error = original;
+    }
   });
 });

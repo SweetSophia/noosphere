@@ -35,12 +35,22 @@ export default async function ApiKeysPage({ searchParams }: Props) {
   const cookieStore = await cookies();
   const flashKey = cookieStore.get("api_key_flash")?.value ?? null;
 
-  const [keys, scopes] = await Promise.all([
+  const [keys, scopes, memoryPrincipals] = await Promise.all([
     prisma.apiKey.findMany({
       orderBy: [{ revokedAt: "asc" }, { createdAt: "desc" }],
+      include: {
+        agentPrincipal: {
+          select: { id: true, name: true, privateScopeTag: true, status: true },
+        },
+      },
     }),
     prisma.restrictedScope.findMany({
       orderBy: [{ isSystem: "desc" }, { tag: "asc" }],
+    }),
+    prisma.memoryAgentPrincipal.findMany({
+      where: { status: "ACTIVE" },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, privateScopeTag: true },
     }),
   ]);
 
@@ -117,6 +127,22 @@ export default async function ApiKeysPage({ searchParams }: Props) {
             </p>
             <ScopePicker scopes={scopes} selected={[]} />
           </div>
+          <div className="form-group form-group-wide">
+            <label className="form-label" htmlFor="agentPrincipalId">
+              Automatic-memory principal <span className="text-muted">(optional, immutable)</span>
+            </label>
+            <p className="form-hint">
+              Bound keys can submit private automatic-memory captures. The selected principal&apos;s private scope must also be checked above. Rotation preserves this binding.
+            </p>
+            <select id="agentPrincipalId" name="agentPrincipalId" className="form-select" defaultValue="">
+              <option value="">No automatic-memory binding</option>
+              {memoryPrincipals.map((principal) => (
+                <option key={principal.id} value={principal.id}>
+                  {principal.name} — {principal.privateScopeTag}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="admin-form-actions">
             <button type="submit" className="btn btn-primary">Create Key</button>
           </div>
@@ -141,6 +167,7 @@ export default async function ApiKeysPage({ searchParams }: Props) {
                   <th>Prefix</th>
                   <th>Permissions</th>
                   <th>Scopes</th>
+                  <th>Memory Principal</th>
                   <th>Created</th>
                   <th>Last Used</th>
                   <th>Status</th>
@@ -155,6 +182,15 @@ export default async function ApiKeysPage({ searchParams }: Props) {
                     <td data-label="Permissions">{key.permissions}</td>
                     <td data-label="Scopes">
                       <ScopeBadges scopes={key.allowedScopes} />
+                    </td>
+                    <td data-label="Memory Principal">
+                      {key.agentPrincipal ? (
+                        <span>
+                          {key.agentPrincipal.name} <code className="scope-tag">{key.agentPrincipal.privateScopeTag}</code>
+                        </span>
+                      ) : (
+                        <span className="text-muted">Unbound</span>
+                      )}
                     </td>
                     <td data-label="Created">{new Date(key.createdAt).toLocaleDateString()}</td>
                     <td data-label="Last Used">{key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleDateString() : "Never"}</td>

@@ -12,7 +12,9 @@
 import {
   createLocalMemoryScheduler,
   createSchedulerHealthJob,
+  parseSchedulerIntervalMs,
 } from "../src/lib/memory/scheduler";
+import { createDurableMemoryMaintenanceJob } from "../src/lib/memory/capture/maintenance";
 
 main().catch((err) => {
   console.error("Fatal error in scheduler:", err);
@@ -24,13 +26,19 @@ async function main(): Promise<void> {
   const once = args.has("--once");
   const status = args.has("--status");
 
-  const healthIntervalMs = parsePositiveInt(
+  const healthIntervalMs = parseSchedulerIntervalMs(
     process.env.MEMORY_SCHEDULER_HEALTH_INTERVAL_MS,
     60_000,
+  );
+  const maintenanceIntervalMs = parseSchedulerIntervalMs(
+    process.env.MEMORY_DURABLE_MAINTENANCE_INTERVAL_MS,
+    60_000,
+    1_000,
   );
 
   const scheduler = createLocalMemoryScheduler([
     createSchedulerHealthJob(healthIntervalMs),
+    createDurableMemoryMaintenanceJob(maintenanceIntervalMs),
   ]);
 
   if (status) {
@@ -39,9 +47,11 @@ async function main(): Promise<void> {
   }
 
   if (once) {
-    const snapshot = await scheduler.runJob("memory.scheduler.health");
+    const snapshots = [];
+    snapshots.push(await scheduler.runJob("memory.scheduler.health"));
+    snapshots.push(await scheduler.runJob("memory.durable-maintenance"));
     printStatus(scheduler);
-    if (snapshot.status === "failed") {
+    if (snapshots.some(({ status: jobStatus }) => jobStatus === "failed")) {
       process.exitCode = 1;
     }
     return;
@@ -70,17 +80,4 @@ function printStatus(
   scheduler: ReturnType<typeof createLocalMemoryScheduler>,
 ): void {
   console.log(JSON.stringify(scheduler.getStatus(), null, 2));
-}
-
-function parsePositiveInt(value: string | undefined, fallback: number): number {
-  if (value === undefined) {
-    return fallback;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  if (Number.isNaN(parsed)) {
-    return fallback;
-  }
-
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }

@@ -3,7 +3,8 @@ import type { PrismaClient } from "@prisma/client";
 export function createMockPrisma(
   overrides: Record<string, unknown> = {},
 ): PrismaClient {
-  return {
+  const { article: articleOverride, ...clientOverrides } = overrides;
+  const client = {
     article: {
       findFirst: (() =>
         Promise.resolve(null)) as unknown as PrismaClient["article"]["findFirst"],
@@ -11,11 +12,18 @@ export function createMockPrisma(
         Promise.resolve(
           [],
         )) as unknown as PrismaClient["article"]["findMany"],
+      ...((articleOverride as Record<string, unknown> | undefined) ?? {}),
     },
     $queryRaw: (() =>
       Promise.resolve([])) as unknown as PrismaClient["$queryRaw"],
-    ...overrides,
+    ...clientOverrides,
   } as unknown as PrismaClient;
+  if (!("$transaction" in overrides)) {
+    Object.assign(client, {
+      $transaction: (callback: (tx: PrismaClient) => unknown) => callback(client),
+    });
+  }
+  return client;
 }
 
 export function createSequentialQueryRaw(rowsByCall: unknown[][]) {
@@ -24,6 +32,35 @@ export function createSequentialQueryRaw(rowsByCall: unknown[][]) {
     const rows = rowsByCall[Math.min(callIndex, rowsByCall.length - 1)] ?? [];
     callIndex++;
     return Promise.resolve(rows);
+  };
+}
+
+/** Keep unit tests explicit about the provider's mandatory DB rehydration. */
+export function withRecallHydrationQueries(
+  queryRaw: (...args: unknown[]) => Promise<unknown>,
+) {
+  return (...args: unknown[]) => {
+    const query = args[0] as { strings?: readonly string[]; values?: unknown[] };
+    const sql = query.strings?.join(" ") ?? "";
+    if (sql.includes('FROM "MemoryProvenanceEdge"')) {
+      return Promise.resolve([]);
+    }
+    if (sql.includes('SELECT article.id') && sql.includes('FOR SHARE OF article')) {
+      const ids = (query.values ?? []).filter(
+        (value): value is string => typeof value === "string",
+      );
+      return Promise.resolve(ids.map((id) => ({ id })));
+    }
+    return queryRaw(...args);
+  };
+}
+
+export function findManyFromArticles(
+  articles: Array<ReturnType<typeof mockArticle>>,
+) {
+  return (args: { where?: { id?: { in?: string[] } } }) => {
+    const ids = new Set(args.where?.id?.in ?? []);
+    return Promise.resolve(articles.filter(({ id }) => ids.has(id)));
   };
 }
 

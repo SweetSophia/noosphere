@@ -50,8 +50,36 @@ Operational constraints:
 | User settings | `RecallSettings`, `normalizeRecallSettings()`, `mergeRecallSettings()`, `toConflictConfig()` | `src/lib/memory/settings.ts` |
 | Promotion | `scanForCandidates()`, `recordRecall()` | `src/lib/memory/promotion.ts` |
 | Backfill/synthesis | `createSynthesisJob()`, `synthesize()` | `src/lib/memory/backfill.ts` |
-| Local jobs | `LocalMemoryScheduler`, `createSchedulerHealthJob()` | `src/lib/memory/scheduler.ts` |
+| Local jobs | `LocalMemoryScheduler`, `createSchedulerHealthJob()`, `createDurableMemoryMaintenanceJob()` | `src/lib/memory/scheduler.ts`, `src/lib/memory/capture/maintenance.ts` |
+| Automatic-memory capture | `executeMemoryCaptureRequest()`, `PrismaMemoryCaptureRepository` | `src/lib/memory/capture/api.ts`, `src/lib/memory/capture/repository.ts` |
+| Privacy lineage | principal/session/scope/capture revocation, tombstones, cleanup | `src/lib/memory/capture/lifecycle.ts` |
 | CLI | `npm run memory:scheduler` | `scripts/memory-scheduler.ts` |
+
+Phase A provenance is grouped. All lineage edges sharing a `sourceGroupId` are
+required together, while a different group represents an independent source.
+Revocation quarantines the artifact immediately; cleanup deletes invalid groups
+and preserves a derived artifact only when another complete group remains. Raw
+captures and retrieval correlations are always removed on source revocation.
+Database triggers bind each capture/candidate principal to its immutable private
+scope. Every raw-capture source group must contain the exact current principal,
+scope, session HMAC, and capture HMAC recorded on the capture row; `SCOPE`
+lineage cannot claim principal ownership. Candidate source groups must contain
+current, unrevoked canonical-principal and exact-scope provenance while the
+principal is active. A
+candidate that names a raw source capture must also inherit one complete source
+group, including its CAPTURE and SESSION lineage, so either revocation reaches
+the derived candidate. The source relation is immutable until quarantine, and
+an active derived candidate prevents direct source-capture deletion. A raw
+source-capture relation is not a substitute for those revocation-traversable
+edges. Phase A inspection lists and principal detail apply the same exact-scope
+rule as capture detail; API ADMIN permission never widens the key's private
+scopes, principal detail redacts scope names outside that boundary, and every
+private inspection response is `Cache-Control: private, no-store`. The raw-capture expiry
+constraint caps retention at 30 days.
+Capture detail requires both permission and scope: its bound creator may read
+its own status/raw detail only while the capture and principal remain eligible.
+Scope-authorized administrators retain explicit privacy-review access; API
+administrators do not bypass restricted scopes.
 
 ---
 
@@ -184,6 +212,13 @@ for Noosphere-provider Prisma lookups. `buildScopeFilter()` and
 remain conformant with.
 See the restricted-tags implementation docs in the codebase for the full access
 control model.
+
+Recall quarantine is an additional mandatory eligibility gate. Search SQL
+excludes `recallQuarantinedAt` rows. Redis stores only IDs and bounded rank
+metadata, and `NoosphereProvider` locks current lineage/article state and
+rehydrates current content from PostgreSQL on every cache hit and direct get.
+Best-effort cache invalidation is therefore an optimization, not a privacy
+boundary.
 
 ---
 
@@ -399,8 +434,10 @@ Important functions:
 Source: `src/lib/memory/scheduler.ts`
 
 `LocalMemoryScheduler` is the local-only scheduling foundation for maintenance
-jobs. It uses in-process `setTimeout` scheduling and has no database, queue,
-network, Vercel, or hosted scheduler dependency.
+jobs. The scheduler core uses in-process `setTimeout` scheduling and has no
+database, queue, network, Vercel, or hosted scheduler dependency. The CLI now
+registers one database-backed durable automatic-memory maintenance job alongside
+the pure health job.
 
 Job definition:
 
@@ -434,6 +471,9 @@ idle | running | succeeded | failed | disabled
 
 The baseline health job is `createSchedulerHealthJob(intervalMs)`. It is a no-op
 that proves the scheduler event loop can execute and report job status.
+`createDurableMemoryMaintenanceJob(intervalMs)` leases due
+`MemoryDurableJob` rows with `FOR UPDATE SKIP LOCKED` and runs capture expiry or
+privacy cleanup. It does not consult the capture-ingestion feature flag.
 
 ---
 
@@ -447,7 +487,7 @@ Commands:
 # Long-running local scheduler process
 npm run memory:scheduler
 
-# Run health job once and print JSON status
+# Run health plus one durable-maintenance batch and print JSON status
 npm run memory:scheduler -- --once
 
 # Print a status snapshot without running jobs
@@ -458,10 +498,13 @@ Environment:
 
 ```bash
 MEMORY_SCHEDULER_HEALTH_INTERVAL_MS=60000
+MEMORY_DURABLE_MAINTENANCE_INTERVAL_MS=60000
 ```
 
 Default interval is 60 seconds. `SIGINT` and `SIGTERM` trigger graceful shutdown:
 timers are cleared, in-flight jobs are awaited, and final status is printed.
+Durable maintenance intervals below one second are rejected and fall back to
+the 60-second default to prevent accidental hot loops.
 
 ---
 
@@ -522,7 +565,7 @@ scheduler.start();
 npm run test:memory
 
 # Scheduler-only tests
-npm run test:scheduler
+npx tsx --test src/__tests__/memory/scheduler.test.ts
 
 # TypeScript validation
 npx tsc --noEmit

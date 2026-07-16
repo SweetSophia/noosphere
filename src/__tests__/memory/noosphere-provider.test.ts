@@ -20,8 +20,10 @@ import type { MemoryCurationLevel } from "@/lib/memory/types";
 import {
   createMockPrisma,
   createSequentialQueryRaw,
+  findManyFromArticles,
   mockArticle,
   mockSearchRow,
+  withRecallHydrationQueries,
 } from "./noosphere-provider-helpers";
 
 let testCounter = 0;
@@ -154,12 +156,14 @@ async function main() {
 
   test("search does not retry fallback when strict query returns results", async () => {
     let queryCount = 0;
+    const article = mockArticle({ id: "strict-1" });
     const provider = new NoosphereProvider({
       prisma: createMockPrisma({
-        $queryRaw: () => {
+        $queryRaw: withRecallHydrationQueries(() => {
           queryCount++;
           return Promise.resolve([mockSearchRow({ id: "strict-1" })]);
-        },
+        }),
+        article: { findMany: findManyFromArticles([article]) },
       }),
     });
 
@@ -191,10 +195,23 @@ async function main() {
     ]);
     const provider = new NoosphereProvider({
       prisma: createMockPrisma({
-        $queryRaw: (...args: unknown[]) => {
+        $queryRaw: withRecallHydrationQueries((...args: unknown[]) => {
           void args;
           queryCount++;
           return queryRaw();
+        }),
+        article: {
+          findMany: findManyFromArticles([
+            mockArticle({
+              id: "portrait-1",
+              title: "Cybera avatar portrait",
+              content: "Telegram profile picture and avatar portrait reference.",
+              tags: [
+                { tag: { name: "avatar" } },
+                { tag: { name: "portrait" } },
+              ],
+            }),
+          ]),
         },
       }),
     });
@@ -253,7 +270,8 @@ async function main() {
   test("getById returns null when article not found", async () => {
     const provider = new NoosphereProvider({
       prisma: createMockPrisma({
-        article: { findFirst: () => Promise.resolve(null) },
+        $queryRaw: withRecallHydrationQueries(() => Promise.resolve([])),
+        article: { findMany: () => Promise.resolve([]) },
       }),
     });
     const result = await provider.getById("nonexistent-id");
@@ -275,11 +293,11 @@ async function main() {
     let capturedId: string | undefined;
     const provider = new NoosphereProvider({
       prisma: createMockPrisma({
+        $queryRaw: withRecallHydrationQueries(() => Promise.resolve([])),
         article: {
-          findFirst: (args: Record<string, unknown>) => {
-            const where = args.where as { id: string };
-            capturedId = where.id;
-            return Promise.resolve(mockArticle({ id: "abc123" }));
+          findMany: (args: { where: { id: { in: string[] } } }) => {
+            capturedId = args.where.id.in[0];
+            return Promise.resolve([mockArticle({ id: "abc123" })]);
           },
         },
       }),
@@ -308,14 +326,16 @@ async function main() {
   test("getById maps confidence and recency from article fields", async () => {
     const provider = new NoosphereProvider({
       prisma: createMockPrisma({
+        $queryRaw: withRecallHydrationQueries(() => Promise.resolve([])),
         article: {
-          findFirst: () =>
-            Promise.resolve(
+          findMany: () =>
+            Promise.resolve([
               mockArticle({
+                id: "test",
                 confidence: "high",
                 updatedAt: new Date(),
               }),
-            ),
+            ]),
         },
       }),
     });
@@ -440,9 +460,10 @@ async function main() {
     for (const [confidence, expected] of cases) {
       const provider = new NoosphereProvider({
         prisma: createMockPrisma({
+          $queryRaw: withRecallHydrationQueries(() => Promise.resolve([])),
           article: {
-            findFirst: () =>
-              Promise.resolve(mockArticle({ confidence })),
+            findMany: () =>
+              Promise.resolve([mockArticle({ id: "test", confidence })]),
           },
         }),
       });
@@ -477,8 +498,9 @@ async function main() {
     for (const [status, expected] of cases) {
       const provider = new NoosphereProvider({
         prisma: createMockPrisma({
+          $queryRaw: withRecallHydrationQueries(() => Promise.resolve([])),
           article: {
-            findFirst: () => Promise.resolve(mockArticle({ status })),
+            findMany: () => Promise.resolve([mockArticle({ id: "test", status })]),
           },
         }),
       });

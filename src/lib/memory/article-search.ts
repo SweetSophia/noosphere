@@ -118,12 +118,15 @@ export interface ArticleSearchFilters {
 
 /**
  * Build WHERE-clause filter fragments for article search.
- * Always includes `a."deletedAt" IS NULL`.
+ * Always excludes deleted and recall-quarantined articles.
  */
 export function buildArticleSearchFilters(
   options: ArticleSearchFilters = {},
 ): Prisma.Sql[] {
-  const clauses: Prisma.Sql[] = [Prisma.sql`a."deletedAt" IS NULL`];
+  const clauses: Prisma.Sql[] = [
+    Prisma.sql`a."deletedAt" IS NULL`,
+    Prisma.sql`a."recallQuarantinedAt" IS NULL`,
+  ];
 
   if (options.topicSlug) {
     clauses.push(Prisma.sql`tpc.slug = ${options.topicSlug}`);

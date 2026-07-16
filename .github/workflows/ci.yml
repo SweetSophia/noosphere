@@ -81,13 +81,14 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
-      - name: Push schema to test DB
-        run: npx prisma db push --force-reset --url="$DATABASE_URL"
-        env:
-          DATABASE_URL: postgresql://test:test@localhost:5432/test
+      - name: Apply database migrations
+        run: npx prisma migrate deploy
 
       - name: Create .env.test for test scripts
         run: echo "DATABASE_URL=postgresql://test:test@localhost:5432/test" > .env.test
+
+      - name: Run memory tests
+        run: npm run test:memory
 
       - name: Run persistence-layer tests
         run: npm run test:persistence-layer

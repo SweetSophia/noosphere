@@ -141,7 +141,7 @@ sync workflow through a versioned frontmatter codec. The sync design lives in
 
 | Feature | **Noosphere** | **Hindsight** | **QMD** | **memU** | **mem0** | **LanceDB Pro** |
 |---|---|---|---|---|---|---|
-| **Auto-Capture** | ⚠️ Explicit draft save + advisory capture guidance; deterministic turn capture planned | ✅ Every turn | ❌ Manual indexing | ✅ Continuous learning | ✅ `memory.add()` | ✅ Smart extraction |
+| **Auto-Capture** | ⚠️ Disabled-by-default private capture API, principal/lineage storage, and cleanup foundation; OpenClaw turn hook/extraction planned | ✅ Every turn | ❌ Manual indexing | ✅ Continuous learning | ✅ `memory.add()` | ✅ Smart extraction |
 | **Auto-Recall** | ✅ Capture guidance on clean misses + recall results when available; provider errors fail open | ✅ Before each turn | ✅ Keyword search only | ✅ Proactive context loading | ✅ `memory.search()` | ✅ Before prompt build |
 | **Manual Recall** | ✅ REST API + tools | ✅ MCP tools | ✅ CLI / tool query | ✅ REST API | ✅ SDK + REST | ✅ CLI + MCP tools |
 | **Semantic Search** | ✅ PostgreSQL FTS (live) + vector (planned) | ✅ Vector + biomimetic | ⚠️ Keyword + pending vector | ✅ pgvector | ✅ Semantic + BM25 + entity fusion | ✅ Vector + BM25 hybrid |
@@ -165,7 +165,7 @@ sync workflow through a versioned frontmatter codec. The sync design lives in
 | **Token Budget Manager** | ✅ Prompt-safe recall blocks | ✅ `recallMaxTokens` | ❌ | ❌ | ❌ | ❌ |
 | **Promotion (ephemeral → curated)** | ⚠️ Pure threshold/review scaffolding; durable statistics and worker wiring planned | ❌ | ❌ | ❌ | ❌ | ⚠️ Decay model (Weibull) |
 | **Backfill / Synthesis** | ⚠️ Pure job/content helpers; durable execution wiring planned | ✅ Historical backfill CLI | ❌ | ❌ | ❌ | ❌ |
-| **Local Scheduler** | ⚠️ Scheduler framework; only the health job is currently wired | ❌ | ❌ | ✅ Continuous sync loop | ❌ | ❌ |
+| **Local Scheduler** | ⚠️ Health plus durable automatic-memory expiry/privacy cleanup; extraction/promotion workers planned | ❌ | ❌ | ✅ Continuous sync loop | ❌ | ❌ |
 | **Revision History** | ✅ Per-article | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Topic Hierarchy** | ✅ Unlimited depth | ❌ | ❌ | ✅ Category hierarchy | ❌ | ❌ |
 | **Tags / Relations** | ✅ Tags + article edges | ❌ | ❌ | ✅ Cross-references | ✅ Entity linking (v3) | ❌ |
@@ -205,6 +205,12 @@ Common endpoints:
 | `POST` | `/api/memory/recall` | Recall ranked memory results |
 | `POST` | `/api/memory/get` | Fetch one memory by canonical ref or ID |
 | `POST` | `/api/memory/save` | Save a draft memory candidate |
+| `POST` | `/api/memory/captures` | Accept one private automatic-memory observation when explicitly enabled |
+| `GET` | `/api/memory/captures` | Admin capture inspection (raw text is detail-only) |
+| `GET` | `/api/memory/captures/:id` | Read eligible capture status/raw detail as its bound creator, or inspect quarantined evidence as a scope-authorized administrator |
+| `GET/POST` | `/api/memory/principals` | Admin principal inspection/provisioning |
+| `POST` | `/api/memory/revocations` | Admin session-lineage revocation |
+| `GET` | `/api/memory/{candidates,jobs,tombstones,privacy-reviews}` | Admin Phase A lifecycle inspection |
 
 JSON write endpoints reject malformed or excessively nested payloads and return
 `413` when their route-specific body-size limit is exceeded. Most routes allow

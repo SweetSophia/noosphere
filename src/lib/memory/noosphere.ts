@@ -30,10 +30,12 @@ import {
 } from "./noosphere-descriptor";
 import {
   buildSearchCacheKey,
+  type CachedSearchResultRef,
   getCachedSearchResults,
   getSearchCacheVersion,
   setCachedSearchResults,
 } from "@/lib/cache/search-cache";
+import { withSerializableRetry } from "@/lib/memory/capture/repository";
 
 export interface NoosphereProviderSettings {
   /** Optional Prisma client override for scripts, tests, or alternate runtimes. */
@@ -176,12 +178,12 @@ export class NoosphereProvider implements MemoryProvider {
     if (cacheKey) {
       const cachedResults = await getCachedSearchResults(cacheKey);
       if (cachedResults !== null) {
-        return cachedResults;
+        return this.hydrateEligibleArticleRefs(cachedResults);
       }
     }
 
     // Cache miss - proceed with database query
-    const articles = await this.searchArticles(normalizedQuery, {
+    const rankedArticles = await this.searchArticles(normalizedQuery, {
       limit,
       offset: normalizeOffset(metadata.offset),
       topicSlug: metadata.topicSlug ?? options.scope,
@@ -190,6 +192,9 @@ export class NoosphereProvider implements MemoryProvider {
       confidence: metadata.confidence,
       allowedScopes: this.allowedScopes,
     });
+    const articles = await this.hydrateEligibleArticleRefs(
+      rankedArticles.map(({ id, relevanceScore }) => ({ id, relevanceScore })),
+    );
 
     if (cacheKey && cacheVersion !== null) {
       // Start best-effort cache population if the invalidation version is unchanged.
@@ -211,25 +216,10 @@ export class NoosphereProvider implements MemoryProvider {
       return null;
     }
 
-    const articleId = parseNoosphereArticleId(id);
-    const scopeWhere = this.buildScopeWhere();
-    const article = await this.prisma.article.findFirst({
-      where: {
-        id: articleId,
-        deletedAt: null,
-        ...(scopeWhere ?? {}),
-      },
-      include: {
-        topic: true,
-        tags: {
-          include: {
-            tag: true,
-          },
-        },
-      },
-    });
-
-    return article ? this.toMemoryResult(article) : null;
+    const results = await this.hydrateEligibleArticleRefs([
+      { id: parseNoosphereArticleId(id) },
+    ]);
+    return results[0] ?? null;
   }
 
   score(
@@ -366,6 +356,112 @@ export class NoosphereProvider implements MemoryProvider {
     }
 
     return results;
+  }
+
+  /**
+   * Treat search/cache records only as ranking hints. The final article and all
+   * provenance lineages are locked in one transaction before current content is
+   * hydrated. This gives recall the same lineage -> article lock order as
+   * privacy revocation: whichever transaction acquires the lineage lock first
+   * wins serialization, and a winning revocation cannot leak through Redis.
+   */
+  private async hydrateEligibleArticleRefs(
+    refs: CachedSearchResultRef[],
+  ): Promise<MemoryResult[]> {
+    if (refs.length === 0) return [];
+
+    const ids = [...new Set(refs.map(({ id }) => parseNoosphereArticleId(id)))];
+    const relevanceById = new Map(
+      refs.map(({ id, relevanceScore }) => [
+        parseNoosphereArticleId(id),
+        relevanceScore,
+      ]),
+    );
+
+    return withSerializableRetry(() =>
+      this.prisma.$transaction(
+        async (tx) => {
+        const lineageRows = await tx.$queryRaw<
+          Array<{
+            articleId: string;
+            sourceGroupId: string;
+            generation: number;
+            generationSnapshot: number;
+            revokedAt: Date | null;
+          }>
+        >(Prisma.sql`
+          SELECT edge."articleId", edge."sourceGroupId", lineage."generation",
+                 edge."generationSnapshot", lineage."revokedAt"
+          FROM "MemoryProvenanceEdge" edge
+          INNER JOIN "MemoryLineageState" lineage
+            ON lineage.id = edge."lineageStateId"
+          WHERE edge."articleId" IN (${Prisma.join(ids)})
+          ORDER BY lineage."kind"::text, lineage."subjectHash", lineage.id
+          FOR SHARE OF lineage
+        `);
+        const provenanceByArticle = new Map<
+          string,
+          Map<string, typeof lineageRows>
+        >();
+        for (const row of lineageRows) {
+          const groups = provenanceByArticle.get(row.articleId) ?? new Map();
+          const group = groups.get(row.sourceGroupId) ?? [];
+          group.push(row);
+          groups.set(row.sourceGroupId, group);
+          provenanceByArticle.set(row.articleId, groups);
+        }
+        const blockedIds = new Set(
+          [...provenanceByArticle.entries()]
+            .filter(([, groups]) =>
+              [...groups.values()].every((group) =>
+                group.some(
+                  ({ generation, generationSnapshot, revokedAt }) =>
+                    revokedAt !== null || generation !== generationSnapshot,
+                ),
+              ),
+            )
+            .map(([articleId]) => articleId),
+        );
+        const candidateIds = ids.filter((articleId) => !blockedIds.has(articleId));
+        if (candidateIds.length === 0) return [];
+
+        const lockedRows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT article.id
+          FROM "Article" article
+          WHERE article.id IN (${Prisma.join(candidateIds)})
+            AND article."deletedAt" IS NULL
+            AND article."recallQuarantinedAt" IS NULL
+          ORDER BY article.id
+          FOR SHARE OF article
+        `);
+        const eligibleIds = lockedRows.map(({ id: articleId }) => articleId);
+        if (eligibleIds.length === 0) return [];
+
+        const scopeWhere = this.buildScopeWhere();
+        const articles = await tx.article.findMany({
+          where: {
+            id: { in: eligibleIds },
+            deletedAt: null,
+            recallQuarantinedAt: null,
+            ...(scopeWhere ?? {}),
+          },
+          include: {
+            topic: true,
+            tags: { include: { tag: true } },
+          },
+        });
+        const byId = new Map(articles.map((article) => [article.id, article]));
+
+        return ids.flatMap((articleId) => {
+          const article = byId.get(articleId);
+          return article
+            ? [this.toMemoryResult(article, relevanceById.get(articleId))]
+            : [];
+        });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      ),
+    );
   }
 
   private async hasSearchMatches(
