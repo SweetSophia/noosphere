@@ -1,0 +1,259 @@
+name: Build PostgreSQL pgvector image
+
+on:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - ".github/workflows/postgres-pgvector-image.yml"
+      - "docker/postgres-pgvector/**"
+      - "scripts/test-pgvector-image.sh"
+      - "scripts/test-verify-pgvector-image-index.sh"
+      - "scripts/verify-pgvector-image-index.sh"
+  push:
+    branches: [main, master]
+    paths:
+      - ".github/workflows/postgres-pgvector-image.yml"
+      - "docker/postgres-pgvector/**"
+      - "scripts/test-pgvector-image.sh"
+      - "scripts/test-verify-pgvector-image-index.sh"
+      - "scripts/verify-pgvector-image-index.sh"
+
+concurrency:
+  group: postgres-pgvector-image-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'publish' }}
+  # PR rebuilds may supersede one another. Publication runs queue instead so a
+  # newer push cannot interrupt a verified candidate during final promotion.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE_NAME: ghcr.io/sweetsophia/noosphere-postgres-pgvector
+  QEMU_IMAGE: tonistiigi/binfmt:qemu-v9.2.0@sha256:ea2f0dd74e74f101df59f9a6b31d0960994060c7982a921cbceecee0f1841125
+  BUILDX_VERSION: v0.35.0
+  BUILDKIT_IMAGE: moby/buildkit:v0.26.3@sha256:5601811fde88bb9e8a577bfe804af82bccb712e1cd07ff94663bded5e628cf75
+
+jobs:
+  verify-index-script:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Test index verifier fail-closed behavior
+        run: scripts/test-verify-pgvector-image-index.sh
+
+  test-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            slug: amd64
+          - platform: linux/arm64
+            slug: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up QEMU
+        if: matrix.platform == 'linux/arm64'
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          image: ${{ env.QEMU_IMAGE }}
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+        with:
+          version: ${{ env.BUILDX_VERSION }}
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
+
+      - name: Build target-platform image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: docker/postgres-pgvector
+          file: docker/postgres-pgvector/Dockerfile
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: noosphere-postgres-pgvector:pr-${{ matrix.slug }}
+
+      - name: Smoke-test exact local image
+        run: scripts/test-pgvector-image.sh noosphere-postgres-pgvector:pr-${{ matrix.slug }} ${{ matrix.platform }}
+
+  build-test-push-platform:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            slug: amd64
+          - platform: linux/arm64
+            slug: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up QEMU
+        if: matrix.platform == 'linux/arm64'
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          image: ${{ env.QEMU_IMAGE }}
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+        with:
+          version: ${{ env.BUILDX_VERSION }}
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push target platform by digest
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: docker/postgres-pgvector
+          file: docker/postgres-pgvector/Dockerfile
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          provenance: mode=max
+          sbom: true
+
+      - name: Smoke-test exact pushed digest
+        run: scripts/test-pgvector-image.sh "${IMAGE_NAME}@${{ steps.build.outputs.digest }}" ${{ matrix.platform }}
+
+      - name: Export tested digest
+        run: |
+          mkdir -p /tmp/digests
+          digest='${{ steps.build.outputs.digest }}'
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload tested digest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pgvector-digest-${{ matrix.slug }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-index:
+    if: github.event_name == 'push'
+    needs: [verify-index-script, build-test-push-platform]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Download tested digests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: pgvector-digest-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+        with:
+          version: ${{ env.BUILDX_VERSION }}
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assemble candidate index from tested platform digests
+        run: |
+          sources=()
+          for digest_path in /tmp/digests/*; do
+            sources+=("${IMAGE_NAME}@sha256:$(basename "$digest_path")")
+          done
+          if [[ ${#sources[@]} -ne 2 ]]; then
+            printf 'expected two tested platform digests, found %s\n' "${#sources[@]}" >&2
+            exit 1
+          fi
+          candidate_tag="candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA:0:12}"
+          docker buildx imagetools create \
+            --tag "${IMAGE_NAME}:${candidate_tag}" \
+            --metadata-file /tmp/candidate-metadata.json \
+            "${sources[@]}"
+          candidate_digest=$(jq -er '
+            .["containerimage.descriptor"].digest
+            | select(test("^sha256:[0-9a-f]{64}$"))
+          ' /tmp/candidate-metadata.json)
+          printf 'CANDIDATE_DIGEST=%s\n' "$candidate_digest" >> "$GITHUB_ENV"
+          printf 'CANDIDATE_DIGEST_REF=%s@%s\n' "$IMAGE_NAME" "$candidate_digest" >> "$GITHUB_ENV"
+
+      - name: Verify candidate platforms and attestations
+        run: scripts/verify-pgvector-image-index.sh "$CANDIDATE_DIGEST_REF"
+
+      - name: Promote the verified digest to an immutable release tag
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          source docker/postgres-pgvector/metadata.env
+          release_tag="${IMAGE_VERSION_PREFIX}-sha-${GITHUB_SHA:0:12}"
+          release_ref="${IMAGE_NAME}:${release_tag}"
+          registry_path=${IMAGE_NAME#ghcr.io/}
+          manifest_url="https://ghcr.io/v2/${registry_path}/manifests/${release_tag}"
+          registry_token=$(
+            curl --fail --silent --show-error \
+              --user "${GITHUB_ACTOR}:${GHCR_TOKEN}" \
+              "https://ghcr.io/token?service=ghcr.io&scope=repository:${registry_path}:pull" |
+              jq -er '.token'
+          )
+          manifest_status=$(curl --silent --show-error \
+            --head \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${registry_token}" \
+            --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+            "$manifest_url")
+
+          case "$manifest_status" in
+            200)
+              existing_digest=$(
+                docker buildx imagetools inspect "$release_ref" --format '{{json .Manifest}}' |
+                  jq -er '.digest'
+              )
+              if [[ "$existing_digest" != "$CANDIDATE_DIGEST" ]]; then
+                printf 'refusing to replace immutable tag %s (%s != %s)\n' \
+                  "$release_ref" "$existing_digest" "$CANDIDATE_DIGEST" >&2
+                exit 1
+              fi
+              ;;
+            404)
+              docker buildx imagetools create --tag "$release_ref" "$CANDIDATE_DIGEST_REF"
+              ;;
+            *)
+              printf 'refusing release promotion after registry lookup returned HTTP %s: %s\n' \
+                "$manifest_status" "$release_ref" >&2
+              exit 1
+              ;;
+          esac
+
+          release_digest=$(docker buildx imagetools inspect "$release_ref" --format '{{json .Manifest}}' | jq -er '.digest')
+          if [[ "$release_digest" != "$CANDIDATE_DIGEST" ]]; then
+            printf 'immutable release tag changed during promotion: %s (%s != %s)\n' \
+              "$release_ref" "$release_digest" "$CANDIDATE_DIGEST" >&2
+            exit 1
+          fi
