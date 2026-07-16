@@ -31,11 +31,13 @@ if [[ ! "$CANDIDATE_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
   exit 1
 fi
 
-command -v docker >/dev/null
-command -v jq >/dev/null
-command -v node >/dev/null
-command -v sha256sum >/dev/null
-command -v od >/dev/null
+log() { printf '[pgvector-rehearsal:%s] %s\n' "$platform" "$*"; }
+die() { printf '[pgvector-rehearsal:%s] ERROR: %s\n' "$platform" "$*" >&2; exit 1; }
+
+for required_command in docker jq node sha256sum od; do
+  command -v "$required_command" >/dev/null || die "required command is missing: $required_command"
+done
+docker buildx version >/dev/null 2>&1 || die 'Docker Buildx plugin is missing'
 
 run_id=$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')
 password=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
@@ -63,9 +65,6 @@ containers=(
   "$candidate_restore_container" "$source_restore_container" "$copy_container"
   "$control_container"
 )
-
-log() { printf '[pgvector-rehearsal:%s] %s\n' "$platform" "$*"; }
-die() { printf '[pgvector-rehearsal:%s] ERROR: %s\n' "$platform" "$*" >&2; exit 1; }
 
 [[ -f "$repo_root/node_modules/prisma/build/index.js" ]] ||
   die 'Prisma CLI is missing; run npm ci before the rehearsal'
@@ -135,14 +134,18 @@ docker pull --platform "$platform" "$CANDIDATE_IMAGE" >/dev/null
 candidate_provenance=$(
   docker buildx imagetools inspect "$CANDIDATE_IMAGE" --format '{{ json .Provenance }}'
 )
-provenance_source=$(jq -er --arg platform "$platform" '
-  .[$platform].SLSA.metadata["https://mobyproject.org/buildkit@v1#metadata"].vcs.source
+if ! provenance_source=$(jq -er --arg platform "$platform" '
+  .[$platform]?.SLSA?.metadata?["https://mobyproject.org/buildkit@v1#metadata"]?.vcs?.source
   | select(type == "string" and length > 0)
-' <<<"$candidate_provenance")
-provenance_revision=$(jq -er --arg platform "$platform" '
-  .[$platform].SLSA.metadata["https://mobyproject.org/buildkit@v1#metadata"].vcs.revision
-  | select(test("^[0-9a-f]{40}$"))
-' <<<"$candidate_provenance")
+' <<<"$candidate_provenance"); then
+  die "candidate provenance is missing a source for $platform"
+fi
+if ! provenance_revision=$(jq -er --arg platform "$platform" '
+  .[$platform]?.SLSA?.metadata?["https://mobyproject.org/buildkit@v1#metadata"]?.vcs?.revision
+  | select(type == "string" and test("^[0-9a-f]{40}$"))
+' <<<"$candidate_provenance"); then
+  die "candidate provenance is missing a valid revision for $platform"
+fi
 [[ "$provenance_source" == "$CANDIDATE_SOURCE_REPOSITORY" ]] ||
   die "candidate provenance source is $provenance_source"
 [[ "$provenance_revision" == "$CANDIDATE_SOURCE_COMMIT" ]] ||
@@ -176,7 +179,7 @@ start_database() {
 
   owned_container "$name" || die "container ownership label mismatch: $name"
   local attempt
-  for attempt in $(seq 1 90); do
+  for ((attempt = 1; attempt <= 90; attempt++)); do
     # pg_isready can succeed against the temporary initdb server before the
     # requested database exists. Require a real query against the final DB.
     if [[ "$(docker exec "$name" cat /proc/1/comm 2>/dev/null || true)" == postgres ]] &&
