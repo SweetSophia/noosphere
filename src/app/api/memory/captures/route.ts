@@ -8,6 +8,10 @@ import { MemoryCaptureStatus, Permissions, Prisma } from "@prisma/client";
 import { requirePermission } from "@/lib/api/auth";
 import { prisma } from "@/lib/prisma";
 import { parsePagination } from "@/lib/pagination";
+import {
+  authorizedMemoryPrivateScopes,
+  privateMemoryAdminResponse,
+} from "@/lib/memory/capture/admin-list";
 
 const CAPTURE_STATUSES = new Set([
   "PENDING",
@@ -39,7 +43,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "principalId is too long" }, { status: 400 });
   }
   const pagination = parsePagination(searchParams, { limit: 25, maxLimit: 100 });
-  const where: Prisma.MemoryCaptureWhereInput = {};
+  const authorizedScopes = authorizedMemoryPrivateScopes(auth.auth.allowedScopes);
+  const where: Prisma.MemoryCaptureWhereInput = authorizedScopes
+    ? { privateScopeTag: { in: authorizedScopes } }
+    : {};
   if (status) where.status = status as MemoryCaptureStatus;
   if (principalId) where.agentPrincipalId = principalId;
 
@@ -70,7 +77,9 @@ export async function GET(request: NextRequest) {
     }),
     prisma.memoryCapture.count({ where }),
   ]);
-  return NextResponse.json({ captures, total, ...pagination });
+  return privateMemoryAdminResponse(
+    NextResponse.json({ captures, total, ...pagination }),
+  );
 }
 
 export async function POST(request: NextRequest) {

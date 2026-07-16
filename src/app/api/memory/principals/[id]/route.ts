@@ -6,6 +6,11 @@ import { prisma } from "@/lib/prisma";
 import { rateLimit } from "@/lib/rate-limit";
 import { revokeMemoryAgentPrincipal } from "@/lib/memory/capture/lifecycle";
 import { MemoryCaptureError } from "@/lib/memory/capture/repository";
+import {
+  canAccessMemoryPrivateScope,
+  privateMemoryAdminResponse,
+  visibleMemoryApiKeyScopes,
+} from "@/lib/memory/capture/admin-list";
 
 export async function GET(
   request: NextRequest,
@@ -38,7 +43,23 @@ export async function GET(
       },
     });
     if (!principal) return NextResponse.json({ error: "Memory principal not found" }, { status: 404 });
-    return NextResponse.json({ principal });
+    if (!canAccessMemoryPrivateScope(auth.auth.allowedScopes, principal.privateScopeTag)) {
+      return NextResponse.json({ error: "Insufficient scope" }, { status: 403 });
+    }
+    return privateMemoryAdminResponse(
+      NextResponse.json({
+        principal: {
+          ...principal,
+          apiKeys: principal.apiKeys.map((apiKey) => ({
+            ...apiKey,
+            allowedScopes: visibleMemoryApiKeyScopes(
+              auth.auth.allowedScopes,
+              apiKey.allowedScopes,
+            ),
+          })),
+        },
+      }),
+    );
   });
 }
 
@@ -56,6 +77,16 @@ export async function DELETE(
     const auth = await requirePermission(request, [Permissions.ADMIN]);
     if (!auth.success) return auth.response;
     const { id } = await params;
+    const principal = await prisma.memoryAgentPrincipal.findUnique({
+      where: { id },
+      select: { privateScopeTag: true },
+    });
+    if (!principal) {
+      return NextResponse.json({ error: "Memory principal not found" }, { status: 404 });
+    }
+    if (!canAccessMemoryPrivateScope(auth.auth.allowedScopes, principal.privateScopeTag)) {
+      return NextResponse.json({ error: "Insufficient scope" }, { status: 403 });
+    }
     try {
       const result = await revokeMemoryAgentPrincipal(id);
       return NextResponse.json({ success: true, ...result });

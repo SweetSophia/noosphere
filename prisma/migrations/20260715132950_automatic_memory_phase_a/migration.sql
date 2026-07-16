@@ -539,6 +539,11 @@ ALTER TABLE "MemoryRetrievalStat"
 ALTER TABLE "MemoryLineageState"
   ADD CONSTRAINT "MemoryLineageState_generation_nonnegative"
     CHECK ("generation" >= 0),
+  ADD CONSTRAINT "MemoryLineageState_kind_principal_ownership"
+    CHECK (
+      ("kind" = 'SCOPE' AND "agentPrincipalId" IS NULL)
+      OR ("kind" <> 'SCOPE' AND "agentPrincipalId" IS NOT NULL)
+    ),
   ADD CONSTRAINT "MemoryLineageState_hmac_version"
     CHECK (
       ("kind" NOT IN ('CAPTURE', 'SESSION') AND ("hmacKeyVersion" IS NULL OR "hmacKeyVersion" > 0))
@@ -653,6 +658,14 @@ DECLARE
   capture_principal_id text;
   capture_scope text;
 BEGIN
+  IF TG_OP = 'UPDATE'
+    AND NEW."sourceCaptureId" IS DISTINCT FROM OLD."sourceCaptureId"
+    AND OLD.status <> 'QUARANTINED'
+  THEN
+    RAISE EXCEPTION 'MemoryCandidate source capture is immutable until quarantine'
+      USING ERRCODE = '23514';
+  END IF;
+
   IF TG_OP = 'UPDATE' AND (
     NEW."agentPrincipalId" IS DISTINCT FROM OLD."agentPrincipalId"
     OR NEW."privateScopeTag" IS DISTINCT FROM OLD."privateScopeTag"
@@ -696,6 +709,134 @@ ON "MemoryCandidate"
 FOR EACH ROW
 EXECUTE FUNCTION "validate_memory_candidate_identity_scope"();
 
+-- A raw capture is privacy-sensitive source material. The only safe direct
+-- deletion path first quarantines every derived candidate; otherwise the
+-- source relation could be nulled by the foreign key while an active derived
+-- artifact survives.
+CREATE FUNCTION "prevent_active_memory_capture_delete"()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM "MemoryCandidate" candidate
+    WHERE candidate."sourceCaptureId" = OLD.id
+      AND candidate.status <> 'QUARANTINED'
+  ) THEN
+    RAISE EXCEPTION 'MemoryCapture cannot be deleted while derived candidates are active'
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN OLD;
+END;
+$$;
+
+CREATE TRIGGER "MemoryCapture_active_candidate_delete_guard"
+BEFORE DELETE ON "MemoryCapture"
+FOR EACH ROW
+EXECUTE FUNCTION "prevent_active_memory_capture_delete"();
+
+-- Every capture source group must contain the exact current principal, scope,
+-- session, and capture lineage recorded on the capture row. Extra lineage
+-- (for example a future consent edge) is permitted only when it is active and
+-- bound to the same principal. This turns the source group into canonical
+-- revocation authority instead of trusting whichever CAPTURE edge was added.
+CREATE FUNCTION "assert_memory_capture_has_source"(capture_id text)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM "MemoryCapture" capture
+    WHERE capture.id = capture_id
+      AND (
+        NOT EXISTS (
+          SELECT 1
+          FROM "MemoryAgentPrincipal" principal
+          WHERE principal.id = capture."agentPrincipalId"
+            AND principal.status = 'ACTIVE'
+            AND principal."revokedAt" IS NULL
+        )
+        OR NOT EXISTS (
+          SELECT 1
+          FROM "MemoryProvenanceEdge" edge
+          WHERE edge."captureId" = capture.id
+        )
+        OR EXISTS (
+          SELECT edge."sourceGroupId"
+          FROM "MemoryProvenanceEdge" edge
+          JOIN "MemoryLineageState" lineage
+            ON lineage.id = edge."lineageStateId"
+          WHERE edge."captureId" = capture.id
+          GROUP BY edge."sourceGroupId"
+          HAVING NOT (
+            bool_and(
+              lineage."revokedAt" IS NULL
+              AND lineage.generation = edge."generationSnapshot"
+              AND (
+                (
+                  lineage.kind = 'SCOPE'
+                  AND lineage."agentPrincipalId" IS NULL
+                  AND lineage."subjectHash" = 'scope:' || capture."privateScopeTag"
+                )
+                OR (
+                  lineage.kind <> 'SCOPE'
+                  AND lineage."agentPrincipalId" = capture."agentPrincipalId"
+                )
+              )
+            )
+            AND bool_or(
+              lineage.kind = 'PRINCIPAL'
+              AND lineage."subjectHash" = 'principal:' || capture."agentPrincipalId"
+              AND lineage."agentPrincipalId" = capture."agentPrincipalId"
+              AND lineage."hmacKeyVersion" IS NULL
+            )
+            AND bool_or(
+              lineage.kind = 'SCOPE'
+              AND lineage."subjectHash" = 'scope:' || capture."privateScopeTag"
+              AND lineage."agentPrincipalId" IS NULL
+              AND lineage."hmacKeyVersion" IS NULL
+            )
+            AND bool_or(
+              lineage.kind = 'SESSION'
+              AND lineage."subjectHash" = capture."sourceSessionHash"
+              AND lineage."hmacKeyVersion" = capture."sourceSessionKeyVersion"
+              AND lineage."agentPrincipalId" = capture."agentPrincipalId"
+            )
+            AND bool_or(
+              lineage.kind = 'CAPTURE'
+              AND lineage."subjectHash" = capture."dedupeKey"
+              AND lineage."hmacKeyVersion" = capture."dedupeKeyVersion"
+              AND lineage."agentPrincipalId" = capture."agentPrincipalId"
+            )
+          )
+        )
+      )
+  ) THEN
+    RAISE EXCEPTION 'MemoryCapture requires complete canonical active provenance'
+      USING ERRCODE = '23514';
+  END IF;
+END;
+$$;
+
+CREATE FUNCTION "validate_memory_capture_source"()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  PERFORM "assert_memory_capture_has_source"(NEW.id);
+  RETURN NULL;
+END;
+$$;
+
+CREATE CONSTRAINT TRIGGER "MemoryCapture_source_required"
+AFTER INSERT OR UPDATE OF "dedupeKey", "dedupeKeyVersion", "agentPrincipalId", "privateScopeTag", "sourceSessionHash", "sourceSessionKeyVersion"
+ON "MemoryCapture"
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW
+EXECUTE FUNCTION "validate_memory_capture_source"();
+
 -- Every candidate must carry one or more complete, currently authorized
 -- provenance groups. A raw capture relation is useful for processing, but is
 -- not itself authority: revocation and cleanup traverse provenance edges.
@@ -722,6 +863,39 @@ BEGIN
           SELECT 1
           FROM "MemoryProvenanceEdge" edge
           WHERE edge."candidateId" = candidate.id
+        )
+        OR (
+          candidate."sourceCaptureId" IS NOT NULL
+          AND NOT EXISTS (
+            -- At least one candidate source group must inherit every edge
+            -- from one complete source-capture group, including its canonical
+            -- CAPTURE lineage. This makes capture/session revocation traverse
+            -- every candidate that claims the raw capture as a source.
+            SELECT 1
+            FROM "MemoryProvenanceEdge" inherited_capture_edge
+            JOIN "MemoryLineageState" capture_lineage
+              ON capture_lineage.id = inherited_capture_edge."lineageStateId"
+            JOIN "MemoryProvenanceEdge" source_capture_edge
+              ON source_capture_edge."captureId" = candidate."sourceCaptureId"
+              AND source_capture_edge."lineageStateId" = inherited_capture_edge."lineageStateId"
+              AND source_capture_edge."generationSnapshot" = inherited_capture_edge."generationSnapshot"
+            WHERE inherited_capture_edge."candidateId" = candidate.id
+              AND capture_lineage.kind = 'CAPTURE'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM "MemoryProvenanceEdge" source_edge
+                WHERE source_edge."captureId" = candidate."sourceCaptureId"
+                  AND source_edge."sourceGroupId" = source_capture_edge."sourceGroupId"
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM "MemoryProvenanceEdge" inherited_edge
+                    WHERE inherited_edge."candidateId" = candidate.id
+                      AND inherited_edge."sourceGroupId" = inherited_capture_edge."sourceGroupId"
+                      AND inherited_edge."lineageStateId" = source_edge."lineageStateId"
+                      AND inherited_edge."generationSnapshot" = source_edge."generationSnapshot"
+                  )
+              )
+          )
         )
         OR EXISTS (
           SELECT edge."sourceGroupId"
@@ -784,12 +958,35 @@ CREATE FUNCTION "validate_memory_candidate_source_edge"()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
+DECLARE
+  dependent_candidate record;
 BEGIN
   IF TG_OP IN ('UPDATE', 'DELETE') AND OLD."candidateId" IS NOT NULL THEN
     PERFORM "assert_memory_candidate_has_source"(OLD."candidateId");
   END IF;
   IF TG_OP IN ('INSERT', 'UPDATE') AND NEW."candidateId" IS NOT NULL THEN
     PERFORM "assert_memory_candidate_has_source"(NEW."candidateId");
+  END IF;
+
+  IF TG_OP IN ('UPDATE', 'DELETE') AND OLD."captureId" IS NOT NULL THEN
+    PERFORM "assert_memory_capture_has_source"(OLD."captureId");
+    FOR dependent_candidate IN
+      SELECT id
+      FROM "MemoryCandidate"
+      WHERE "sourceCaptureId" = OLD."captureId"
+    LOOP
+      PERFORM "assert_memory_candidate_has_source"(dependent_candidate.id);
+    END LOOP;
+  END IF;
+  IF TG_OP IN ('INSERT', 'UPDATE') AND NEW."captureId" IS NOT NULL THEN
+    PERFORM "assert_memory_capture_has_source"(NEW."captureId");
+    FOR dependent_candidate IN
+      SELECT id
+      FROM "MemoryCandidate"
+      WHERE "sourceCaptureId" = NEW."captureId"
+    LOOP
+      PERFORM "assert_memory_candidate_has_source"(dependent_candidate.id);
+    END LOOP;
   END IF;
   RETURN NULL;
 END;

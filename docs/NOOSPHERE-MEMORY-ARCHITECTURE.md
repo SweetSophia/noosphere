@@ -61,10 +61,20 @@ Revocation quarantines the artifact immediately; cleanup deletes invalid groups
 and preserves a derived artifact only when another complete group remains. Raw
 captures and retrieval correlations are always removed on source revocation.
 Database triggers bind each capture/candidate principal to its immutable private
-scope and require every candidate source group to contain current, unrevoked
-canonical-principal and exact-scope provenance while the principal is active. A
-raw source-capture relation is not a substitute for those revocation-traversable
-edges. The raw-capture expiry
+scope. Every raw-capture source group must contain the exact current principal,
+scope, session HMAC, and capture HMAC recorded on the capture row; `SCOPE`
+lineage cannot claim principal ownership. Candidate source groups must contain
+current, unrevoked canonical-principal and exact-scope provenance while the
+principal is active. A
+candidate that names a raw source capture must also inherit one complete source
+group, including its CAPTURE and SESSION lineage, so either revocation reaches
+the derived candidate. The source relation is immutable until quarantine, and
+an active derived candidate prevents direct source-capture deletion. A raw
+source-capture relation is not a substitute for those revocation-traversable
+edges. Phase A inspection lists and principal detail apply the same exact-scope
+rule as capture detail; API ADMIN permission never widens the key's private
+scopes, principal detail redacts scope names outside that boundary, and every
+private inspection response is `Cache-Control: private, no-store`. The raw-capture expiry
 constraint caps retention at 30 days.
 Capture detail requires both permission and scope: its bound creator may read
 its own status/raw detail only while the capture and principal remain eligible.

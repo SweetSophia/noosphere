@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { MemoryJobStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { authorizeMemoryAdminList, readBoundedFilter } from "@/lib/memory/capture/admin-list";
+import {
+  authorizeMemoryAdminList,
+  authorizedMemoryLineageWhere,
+  privateMemoryAdminResponse,
+  readBoundedFilter,
+} from "@/lib/memory/capture/admin-list";
 
 export async function GET(request: NextRequest) {
   const access = await authorizeMemoryAdminList(request, "memory-jobs-get");
@@ -13,7 +18,10 @@ export async function GET(request: NextRequest) {
   if (status.value && !Object.values(MemoryJobStatus).includes(status.value as MemoryJobStatus)) {
     return NextResponse.json({ error: "Invalid job status" }, { status: 400 });
   }
-  const where: Prisma.MemoryDurableJobWhereInput = {};
+  const lineageScope = authorizedMemoryLineageWhere(access.allowedScopes);
+  const where: Prisma.MemoryDurableJobWhereInput = lineageScope
+    ? { lineageState: lineageScope }
+    : {};
   if (status.value) where.status = status.value as MemoryJobStatus;
   if (kind.value) where.kind = kind.value;
   const [jobs, total] = await Promise.all([
@@ -25,5 +33,7 @@ export async function GET(request: NextRequest) {
     }),
     prisma.memoryDurableJob.count({ where }),
   ]);
-  return NextResponse.json({ jobs, total, ...access.pagination });
+  return privateMemoryAdminResponse(
+    NextResponse.json({ jobs, total, ...access.pagination }),
+  );
 }

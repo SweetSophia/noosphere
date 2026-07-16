@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { MemoryPrivacyReviewStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { authorizeMemoryAdminList, readBoundedFilter } from "@/lib/memory/capture/admin-list";
+import {
+  authorizeMemoryAdminList,
+  authorizedMemoryLineageWhere,
+  privateMemoryAdminResponse,
+  readBoundedFilter,
+} from "@/lib/memory/capture/admin-list";
 
 export async function GET(request: NextRequest) {
   const access = await authorizeMemoryAdminList(request, "memory-privacy-reviews-get");
@@ -11,7 +16,10 @@ export async function GET(request: NextRequest) {
   if (status.value && !Object.values(MemoryPrivacyReviewStatus).includes(status.value as MemoryPrivacyReviewStatus)) {
     return NextResponse.json({ error: "Invalid privacy review status" }, { status: 400 });
   }
-  const where: Prisma.MemoryPrivacyReviewWhereInput = {};
+  const lineageScope = authorizedMemoryLineageWhere(access.allowedScopes);
+  const where: Prisma.MemoryPrivacyReviewWhereInput = lineageScope
+    ? { lineageState: lineageScope }
+    : {};
   if (status.value) where.status = status.value as MemoryPrivacyReviewStatus;
   const [reviews, total] = await Promise.all([
     prisma.memoryPrivacyReview.findMany({
@@ -23,5 +31,7 @@ export async function GET(request: NextRequest) {
     }),
     prisma.memoryPrivacyReview.count({ where }),
   ]);
-  return NextResponse.json({ reviews, total, ...access.pagination });
+  return privateMemoryAdminResponse(
+    NextResponse.json({ reviews, total, ...access.pagination }),
+  );
 }

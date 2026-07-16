@@ -116,8 +116,12 @@ export async function quarantineMemoryCapture(
           SELECT e."lineageStateId"
           FROM "MemoryProvenanceEdge" e
           JOIN "MemoryLineageState" l ON l."id" = e."lineageStateId"
-          WHERE e."captureId" = ${captureId}
+          JOIN "MemoryCapture" capture ON capture.id = e."captureId"
+          WHERE capture.id = ${captureId}
             AND l."kind" = 'CAPTURE'
+            AND l."subjectHash" = capture."dedupeKey"
+            AND l."hmacKeyVersion" = capture."dedupeKeyVersion"
+            AND l."agentPrincipalId" = capture."agentPrincipalId"
           FOR UPDATE OF l
         `);
         if (!rows[0]) throw new MemoryCaptureError("Memory capture not found", 404);

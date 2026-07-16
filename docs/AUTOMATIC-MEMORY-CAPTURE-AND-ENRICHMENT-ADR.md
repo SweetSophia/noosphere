@@ -276,7 +276,12 @@ group are conjunctive requirements; separate groups represent genuinely
 independent authorized sources. Privacy cleanup removes an invalid group but
 preserves a quarantined derived artifact when another complete group remains.
 Raw captures and retrieval correlations are source-specific and are always
-deleted when any required source lineage is revoked.
+deleted when any required source lineage is revoked. A raw-capture group is
+canonical only when its current principal, exact private scope, session HMAC,
+and capture HMAC match the capture row. `SCOPE` lineage has no principal owner.
+A candidate that references a raw capture must inherit one complete canonical
+source group; the relation cannot be detached before quarantine, and direct
+capture deletion is blocked while any derived candidate remains active.
 
 ### 7.6 HMAC rotation contract
 
@@ -590,9 +595,17 @@ includes principal administration, creation-time key binding, safe credential
 rotation, private capture persistence, content-free recall caches with locked DB
 rehydration, durable expiry/privacy jobs, and capture/candidate/job/tombstone/
 privacy-review inspection APIs. Exact private-scope arrays are non-null at the
-database boundary; database triggers bind capture/candidate scope to the
-principal and require every candidate source group to carry active matching
-canonical-principal/scope provenance while the principal remains active.
+database boundary; database triggers require canonical raw-capture lineage,
+bind capture/candidate scope to the principal, and require every candidate
+source group to carry active matching canonical-principal/scope provenance
+while the principal remains active.
+Candidates that identify a source capture must inherit one complete source
+group, including its capture and session lineage, so source revocation cannot
+leave the derived candidate active; active candidates cannot detach from or
+outlive a directly deleted source capture. All Phase A inspection APIs filter
+by the caller's exact allowed scopes; API ADMIN permission alone reveals no
+private memory metadata, principal detail redacts unauthorized scope names, and
+all private inspection responses explicitly disable storage in caches.
 Independent provenance
 groups survive only in quarantine. Lock-barrier regressions cover revocation
 racing capture/recall and scope deletion racing key creation/update. Capture
@@ -671,7 +684,10 @@ capture-detail authorization preserves both identity and scope and removes
 creator access immediately on capture/session/principal revocation; forged
 capture/candidate scope, source relations, source-only candidates, and
 unrelated/revoked/synthetic-principal candidate provenance fail at the database
-boundary, including late publication after principal revocation;
+boundary, including noncanonical raw-capture provenance, source-edge mutation,
+active source detachment/deletion, and late publication after principal
+revocation; mixed-scope API administration proves concrete-scope isolation and
+wildcard visibility across lists, detail, and mutation boundaries;
 scope deletion cannot be undone by a queued key create/update; raw expiry cannot
 exceed 30 days; cleanup still runs with ingestion disabled; and a clean database
 can apply the complete migration chain.

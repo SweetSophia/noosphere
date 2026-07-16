@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { MemoryCandidateStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { authorizeMemoryAdminList, readBoundedFilter } from "@/lib/memory/capture/admin-list";
+import {
+  authorizeMemoryAdminList,
+  authorizedMemoryPrivateScopes,
+  privateMemoryAdminResponse,
+  readBoundedFilter,
+} from "@/lib/memory/capture/admin-list";
 
 export async function GET(request: NextRequest) {
   const access = await authorizeMemoryAdminList(request, "memory-candidates-get");
@@ -15,7 +20,10 @@ export async function GET(request: NextRequest) {
   if (status.value && !Object.values(MemoryCandidateStatus).includes(status.value as MemoryCandidateStatus)) {
     return NextResponse.json({ error: "Invalid candidate status" }, { status: 400 });
   }
-  const where: Prisma.MemoryCandidateWhereInput = {};
+  const authorizedScopes = authorizedMemoryPrivateScopes(access.allowedScopes);
+  const where: Prisma.MemoryCandidateWhereInput = authorizedScopes
+    ? { privateScopeTag: { in: authorizedScopes } }
+    : {};
   if (status.value) where.status = status.value as MemoryCandidateStatus;
   if (principalId.value) where.agentPrincipalId = principalId.value;
   const [candidates, total] = await Promise.all([
@@ -47,5 +55,7 @@ export async function GET(request: NextRequest) {
     }),
     prisma.memoryCandidate.count({ where }),
   ]);
-  return NextResponse.json({ candidates, total, ...access.pagination });
+  return privateMemoryAdminResponse(
+    NextResponse.json({ candidates, total, ...access.pagination }),
+  );
 }

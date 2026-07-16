@@ -7,6 +7,11 @@ import { prisma } from "@/lib/prisma";
 import { rateLimit } from "@/lib/rate-limit";
 import { createMemoryAgentPrincipal } from "@/lib/memory/capture/lifecycle";
 import { MemoryCaptureError } from "@/lib/memory/capture/repository";
+import {
+  authorizedMemoryPrivateScopes,
+  canAccessMemoryPrivateScope,
+  privateMemoryAdminResponse,
+} from "@/lib/memory/capture/admin-list";
 
 export async function GET(request: NextRequest) {
   return withApiErrorBoundary("MemoryPrincipals GET", async () => {
@@ -18,13 +23,19 @@ export async function GET(request: NextRequest) {
     if (!rate.allowed) return rate.response;
     const auth = await requirePermission(request, [Permissions.ADMIN]);
     if (!auth.success) return auth.response;
+    const authorizedScopes = authorizedMemoryPrivateScopes(
+      auth.auth.allowedScopes,
+    );
     const principals = await prisma.memoryAgentPrincipal.findMany({
+      where: authorizedScopes
+        ? { privateScopeTag: { in: authorizedScopes } }
+        : undefined,
       orderBy: [{ status: "asc" }, { name: "asc" }],
       include: {
         _count: { select: { apiKeys: true, captures: true, candidates: true } },
       },
     });
-    return NextResponse.json({ principals });
+    return privateMemoryAdminResponse(NextResponse.json({ principals }));
   });
 }
 
@@ -60,6 +71,14 @@ export async function POST(request: NextRequest) {
         { error: "name and privateScopeTag are required" },
         { status: 400 },
       );
+    }
+    if (
+      !canAccessMemoryPrivateScope(
+        auth.auth.allowedScopes,
+        body.privateScopeTag.trim(),
+      )
+    ) {
+      return NextResponse.json({ error: "Insufficient scope" }, { status: 403 });
     }
     try {
       const principal = await createMemoryAgentPrincipal({

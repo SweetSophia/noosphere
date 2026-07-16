@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { MemoryLineageKind, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { authorizeMemoryAdminList, readBoundedFilter } from "@/lib/memory/capture/admin-list";
+import {
+  authorizeMemoryAdminList,
+  authorizedMemoryLineageWhere,
+  privateMemoryAdminResponse,
+  readBoundedFilter,
+} from "@/lib/memory/capture/admin-list";
 
 export async function GET(request: NextRequest) {
   const access = await authorizeMemoryAdminList(request, "memory-tombstones-get");
@@ -11,7 +16,10 @@ export async function GET(request: NextRequest) {
   if (kind.value && !Object.values(MemoryLineageKind).includes(kind.value as MemoryLineageKind)) {
     return NextResponse.json({ error: "Invalid tombstone kind" }, { status: 400 });
   }
-  const where: Prisma.MemoryTombstoneWhereInput = {};
+  const lineageScope = authorizedMemoryLineageWhere(access.allowedScopes);
+  const where: Prisma.MemoryTombstoneWhereInput = lineageScope
+    ? { lineageState: lineageScope }
+    : {};
   if (kind.value) where.kind = kind.value as MemoryLineageKind;
   const [tombstones, total] = await Promise.all([
     prisma.memoryTombstone.findMany({
@@ -22,5 +30,7 @@ export async function GET(request: NextRequest) {
     }),
     prisma.memoryTombstone.count({ where }),
   ]);
-  return NextResponse.json({ tombstones, total, ...access.pagination });
+  return privateMemoryAdminResponse(
+    NextResponse.json({ tombstones, total, ...access.pagination }),
+  );
 }

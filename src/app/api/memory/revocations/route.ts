@@ -7,6 +7,8 @@ import { rateLimit } from "@/lib/rate-limit";
 import { readAutomaticMemoryCaptureConfig } from "@/lib/memory/capture/config";
 import { revokeMemorySession } from "@/lib/memory/capture/lifecycle";
 import { MemoryCaptureError } from "@/lib/memory/capture/repository";
+import { canAccessMemoryPrivateScope } from "@/lib/memory/capture/admin-list";
+import { prisma } from "@/lib/prisma";
 
 export async function POST(request: NextRequest) {
   return withApiErrorBoundary("MemoryRevocations POST", async () => {
@@ -47,6 +49,17 @@ export async function POST(request: NextRequest) {
         { error: "kind=session, principalId, and a bounded sourceSessionId are required" },
         { status: 400 },
       );
+    }
+
+    const principal = await prisma.memoryAgentPrincipal.findUnique({
+      where: { id: body.principalId.trim() },
+      select: { privateScopeTag: true },
+    });
+    if (!principal) {
+      return NextResponse.json({ error: "Memory principal not found" }, { status: 404 });
+    }
+    if (!canAccessMemoryPrivateScope(auth.auth.allowedScopes, principal.privateScopeTag)) {
+      return NextResponse.json({ error: "Insufficient scope" }, { status: 403 });
     }
 
     let config;
