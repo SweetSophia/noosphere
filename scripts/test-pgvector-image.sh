@@ -15,12 +15,22 @@ if [[ -n "$PLATFORM" ]]; then
   platform_args=(--platform "$PLATFORM")
 fi
 
+# The password only satisfies the upstream image's first-run requirement. It is
+# generated per invocation unless a caller explicitly supplies an override and
+# is never persisted outside the disposable smoke-test container.
+if [[ -n "${PGVECTOR_TEST_PASSWORD:-}" ]]; then
+  test_password=$PGVECTOR_TEST_PASSWORD
+else
+  printf -v test_password '%04x%04x%04x%04x' \
+    "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM"
+fi
+
 cleanup() {
   local status=$?
   if ((status != 0)); then
     printf 'pgvector image smoke test failed (exit %s): %s\n' "$status" "$IMAGE_REF" >&2
     docker inspect "$container" --format '{{json .State}}' >&2 2>/dev/null || true
-    docker logs "$container" >&2 2>/dev/null || true
+    docker logs --tail 200 "$container" >&2 2>/dev/null || true
   fi
   docker rm -f "$container" >/dev/null 2>&1 || true
 }
@@ -32,7 +42,7 @@ fail() {
 }
 
 assert_equal() {
-  local description=$1
+  local description="$1"
   local expected=$2
   local actual=$3
   [[ "$actual" == "$expected" ]] ||
@@ -59,6 +69,7 @@ assert_label org.opencontainers.image.licenses "$PGVECTOR_LICENSE"
 assert_label io.noosphere.postgresql.version "$POSTGRES_VERSION"
 assert_label io.noosphere.alpine.version "$ALPINE_VERSION"
 assert_label io.noosphere.pgvector.version "$PGVECTOR_VERSION"
+assert_label io.noosphere.pgvector.source.commit "$PGVECTOR_COMMIT_SHA"
 assert_label io.noosphere.pgvector.source.url "$PGVECTOR_SOURCE_URL"
 assert_label io.noosphere.pgvector.source.sha256 "$PGVECTOR_SOURCE_SHA256"
 assert_label io.noosphere.pgvector.license "$PGVECTOR_LICENSE"
@@ -69,7 +80,7 @@ docker run -d \
   --name "$container" \
   "${platform_args[@]}" \
   -e POSTGRES_USER=test \
-  -e POSTGRES_PASSWORD=test \
+  -e POSTGRES_PASSWORD="$test_password" \
   -e POSTGRES_DB=test \
   "$IMAGE_REF" >/dev/null
 

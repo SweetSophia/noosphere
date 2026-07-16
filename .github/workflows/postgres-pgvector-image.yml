@@ -7,6 +7,7 @@ on:
       - ".github/workflows/postgres-pgvector-image.yml"
       - "docker/postgres-pgvector/**"
       - "scripts/test-pgvector-image.sh"
+      - "scripts/test-verify-pgvector-image-index.sh"
       - "scripts/verify-pgvector-image-index.sh"
   push:
     branches: [main, master]
@@ -14,6 +15,7 @@ on:
       - ".github/workflows/postgres-pgvector-image.yml"
       - "docker/postgres-pgvector/**"
       - "scripts/test-pgvector-image.sh"
+      - "scripts/test-verify-pgvector-image-index.sh"
       - "scripts/verify-pgvector-image-index.sh"
 
 concurrency:
@@ -24,12 +26,22 @@ concurrency:
 
 env:
   IMAGE_NAME: ghcr.io/sweetsophia/noosphere-postgres-pgvector
-  IMAGE_VERSION_PREFIX: 16.14-pgvector0.8.1
   QEMU_IMAGE: tonistiigi/binfmt:qemu-v9.2.0@sha256:ea2f0dd74e74f101df59f9a6b31d0960994060c7982a921cbceecee0f1841125
   BUILDX_VERSION: v0.35.0
   BUILDKIT_IMAGE: moby/buildkit:v0.26.3@sha256:5601811fde88bb9e8a577bfe804af82bccb712e1cd07ff94663bded5e628cf75
 
 jobs:
+  verify-index-script:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Test index verifier fail-closed behavior
+        run: scripts/test-verify-pgvector-image-index.sh
+
   test-pr:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -48,6 +60,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Set up QEMU
+        if: matrix.platform == 'linux/arm64'
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
         with:
           image: ${{ env.QEMU_IMAGE }}
@@ -90,6 +103,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Set up QEMU
+        if: matrix.platform == 'linux/arm64'
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
         with:
           image: ${{ env.QEMU_IMAGE }}
@@ -138,7 +152,7 @@ jobs:
 
   publish-index:
     if: github.event_name == 'push'
-    needs: build-test-push-platform
+    needs: [verify-index-script, build-test-push-platform]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -180,28 +194,66 @@ jobs:
           candidate_tag="candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA:0:12}"
           docker buildx imagetools create \
             --tag "${IMAGE_NAME}:${candidate_tag}" \
+            --metadata-file /tmp/candidate-metadata.json \
             "${sources[@]}"
-          printf 'CANDIDATE_REF=%s:%s\n' "$IMAGE_NAME" "$candidate_tag" >> "$GITHUB_ENV"
+          candidate_digest=$(jq -er '
+            .["containerimage.descriptor"].digest
+            | select(test("^sha256:[0-9a-f]{64}$"))
+          ' /tmp/candidate-metadata.json)
+          printf 'CANDIDATE_DIGEST=%s\n' "$candidate_digest" >> "$GITHUB_ENV"
+          printf 'CANDIDATE_DIGEST_REF=%s@%s\n' "$IMAGE_NAME" "$candidate_digest" >> "$GITHUB_ENV"
 
       - name: Verify candidate platforms and attestations
-        run: scripts/verify-pgvector-image-index.sh "$CANDIDATE_REF"
+        run: scripts/verify-pgvector-image-index.sh "$CANDIDATE_DIGEST_REF"
 
       - name: Promote the verified digest to an immutable release tag
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          candidate_digest=$(docker buildx imagetools inspect "$CANDIDATE_REF" --format '{{json .Manifest}}' | jq -er '.digest')
-          release_ref="${IMAGE_NAME}:${IMAGE_VERSION_PREFIX}-sha-${GITHUB_SHA:0:12}"
+          source docker/postgres-pgvector/metadata.env
+          release_tag="${IMAGE_VERSION_PREFIX}-sha-${GITHUB_SHA:0:12}"
+          release_ref="${IMAGE_NAME}:${release_tag}"
+          registry_path=${IMAGE_NAME#ghcr.io/}
+          manifest_url="https://ghcr.io/v2/${registry_path}/manifests/${release_tag}"
+          registry_token=$(
+            curl --fail --silent --show-error \
+              --user "${GITHUB_ACTOR}:${GHCR_TOKEN}" \
+              "https://ghcr.io/token?service=ghcr.io&scope=repository:${registry_path}:pull" |
+              jq -er '.token'
+          )
+          manifest_status=$(curl --silent --show-error \
+            --head \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${registry_token}" \
+            --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+            "$manifest_url")
 
-          if existing_json=$(docker buildx imagetools inspect "$release_ref" --format '{{json .Manifest}}' 2>/dev/null); then
-            existing_digest=$(printf '%s' "$existing_json" | jq -er '.digest')
-            if [[ "$existing_digest" != "$candidate_digest" ]]; then
-              printf 'refusing to replace immutable tag %s (%s != %s)\n' \
-                "$release_ref" "$existing_digest" "$candidate_digest" >&2
+          case "$manifest_status" in
+            200)
+              existing_digest=$(
+                docker buildx imagetools inspect "$release_ref" --format '{{json .Manifest}}' |
+                  jq -er '.digest'
+              )
+              if [[ "$existing_digest" != "$CANDIDATE_DIGEST" ]]; then
+                printf 'refusing to replace immutable tag %s (%s != %s)\n' \
+                  "$release_ref" "$existing_digest" "$CANDIDATE_DIGEST" >&2
+                exit 1
+              fi
+              ;;
+            404)
+              docker buildx imagetools create --tag "$release_ref" "$CANDIDATE_DIGEST_REF"
+              ;;
+            *)
+              printf 'refusing release promotion after registry lookup returned HTTP %s: %s\n' \
+                "$manifest_status" "$release_ref" >&2
               exit 1
-            fi
-          else
-            docker buildx imagetools create --tag "$release_ref" "${IMAGE_NAME}@${candidate_digest}"
-          fi
+              ;;
+          esac
 
           release_digest=$(docker buildx imagetools inspect "$release_ref" --format '{{json .Manifest}}' | jq -er '.digest')
-          [[ "$release_digest" == "$candidate_digest" ]]
-          scripts/verify-pgvector-image-index.sh "$release_ref"
+          if [[ "$release_digest" != "$CANDIDATE_DIGEST" ]]; then
+            printf 'immutable release tag changed during promotion: %s (%s != %s)\n' \
+              "$release_ref" "$release_digest" "$CANDIDATE_DIGEST" >&2
+            exit 1
+          fi
