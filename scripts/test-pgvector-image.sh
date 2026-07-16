@@ -16,9 +16,28 @@ if [[ -n "$PLATFORM" ]]; then
 fi
 
 cleanup() {
+  local status=$?
+  if ((status != 0)); then
+    printf 'pgvector image smoke test failed (exit %s): %s\n' "$status" "$IMAGE_REF" >&2
+    docker inspect "$container" --format '{{json .State}}' >&2 2>/dev/null || true
+    docker logs "$container" >&2 2>/dev/null || true
+  fi
   docker rm -f "$container" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
+
+fail() {
+  printf '%s\n' "$*" >&2
+  return 1
+}
+
+assert_equal() {
+  local description=$1
+  local expected=$2
+  local actual=$3
+  [[ "$actual" == "$expected" ]] ||
+    fail "$description mismatch: expected '$expected', got '$actual'"
+}
 
 if ! docker image inspect "$IMAGE_REF" >/dev/null 2>&1; then
   docker pull "${platform_args[@]}" "$IMAGE_REF" >/dev/null
@@ -46,7 +65,7 @@ assert_label io.noosphere.pgvector.license "$PGVECTOR_LICENSE"
 assert_label io.noosphere.pgvector.optflags portable
 assert_label io.noosphere.pgvector.llvm-bitcode disabled
 
-docker run -d --rm \
+docker run -d \
   --name "$container" \
   "${platform_args[@]}" \
   -e POSTGRES_USER=test \
@@ -54,18 +73,28 @@ docker run -d --rm \
   -e POSTGRES_DB=test \
   "$IMAGE_REF" >/dev/null
 
-for _ in $(seq 1 60); do
-  if docker exec "$container" pg_isready -U test -d test >/dev/null 2>&1; then
+database_ready=false
+for _ in $(seq 1 120); do
+  # pg_isready only proves that the server socket accepts connections. During
+  # first-run initialization that can happen before POSTGRES_DB exists,
+  # especially under QEMU. The target database can also become queryable on
+  # the temporary init server before it shuts down. Require PID 1 to be the
+  # final postgres process and probe the actual target database.
+  init_process=$(docker exec "$container" cat /proc/1/comm 2>/dev/null || true)
+  if [[ "$init_process" == postgres ]] &&
+    docker exec "$container" psql -U test -d test -Atqc 'SELECT 1' >/dev/null 2>&1; then
+    database_ready=true
     break
   fi
   sleep 1
 done
-docker exec "$container" pg_isready -U test -d test >/dev/null
+[[ "$database_ready" == true ]] ||
+  fail "final PostgreSQL server with database 'test' did not become queryable within 120 seconds"
 
 postgres_version=$(docker exec "$container" psql -U test -d test -Atqc 'SHOW server_version')
 alpine_version=$(docker exec "$container" cat /etc/alpine-release)
-[[ "$postgres_version" == "$POSTGRES_VERSION" ]]
-[[ "$alpine_version" == "$ALPINE_VERSION" ]]
+assert_equal 'PostgreSQL version' "$POSTGRES_VERSION" "$postgres_version"
+assert_equal 'Alpine version' "$ALPINE_VERSION" "$alpine_version"
 
 case "$PLATFORM" in
   linux/amd64) expected_machine=x86_64 ;;
@@ -75,7 +104,7 @@ case "$PLATFORM" in
 esac
 if [[ -n "$expected_machine" ]]; then
   actual_machine=$(docker exec "$container" uname -m)
-  [[ "$actual_machine" == "$expected_machine" ]]
+  assert_equal 'container machine architecture' "$expected_machine" "$actual_machine"
 fi
 
 docker exec "$container" test -s /usr/share/doc/pgvector/LICENSE
@@ -88,12 +117,12 @@ extension_version=$(
   docker exec "$container" psql -U test -d test -Atqc \
     "SELECT extversion FROM pg_extension WHERE extname = 'vector'"
 )
-[[ "$extension_version" == "$PGVECTOR_VERSION" ]]
+assert_equal 'pgvector extension version' "$PGVECTOR_VERSION" "$extension_version"
 
 vector_result=$(
   docker exec "$container" psql -v ON_ERROR_STOP=1 -U test -d test -Atqc \
     "SELECT CASE WHEN vector_dims('[1,2,3]'::vector) = 3 AND ('[1,2,3]'::vector <-> '[1,2,3]'::vector) = 0 THEN 'ok' ELSE 'invalid' END"
 )
-[[ "$vector_result" == ok ]]
+assert_equal 'pgvector operation result' ok "$vector_result"
 
 printf 'pgvector image smoke test passed: %s (%s)\n' "$IMAGE_REF" "${PLATFORM:-native}"
