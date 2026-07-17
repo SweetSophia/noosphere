@@ -21,7 +21,7 @@ SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$HOME/.openclaw/secrets}"
 SECRETS_FILE="${NOOSPHERE_SECRETS_FILE:-$SECRETS_DIR/noosphere-memory.json}"
 SECRET_PROVIDER_ID="${NOOSPHERE_SECRET_PROVIDER_ID:-noosphere-memory}"
 PLUGIN_ID="noosphere-memory"
-POSTGRES_SWITCH_SCRIPT_SHA256='1794bd2312377bd00613dcf6f52673c45839b6c0595e93538045f87fb1ddf983'
+POSTGRES_SWITCH_SCRIPT_SHA256='3955e42859291ed1da8878d2c919678d28ce50f80f3c7116c47a59f98baf83a5'
 POSTGRES_SWITCH_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/master/scripts/switch-pgvector-compose.sh'
 POSTGRES_VERIFY_SCRIPT_SHA256='2e11e5f2fb8f549fad209eec59c5d2c57b0a2ca1c8f9998c8c1281d636da314c'
 POSTGRES_VERIFY_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/master/scripts/verify-deploy.sh'
@@ -89,6 +89,7 @@ write_runtime_env() {
   }
   cat > "$env_tmp" <<ENV
 NOOSPHERE_VERSION=${NOOSPHERE_VERSION}
+NOOSPHERE_IMAGE=${NOOSPHERE_IMAGE}
 NOOSPHERE_PORT=${NOOSPHERE_PORT}
 APP_URL=${APP_URL}
 BIND_ADDRESS=${BIND_ADDRESS}
@@ -116,6 +117,7 @@ resolve_runtime_config() {
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-$(env_get "$runtime_env" NOOSPHERE_VERSION)}"
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-latest}"
+  NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-$(env_get "$runtime_env" NOOSPHERE_IMAGE)}"
   APP_URL="${APP_URL:-$(env_get "$runtime_env" APP_URL)}"
   BIND_ADDRESS="${BIND_ADDRESS:-$(env_get "$runtime_env" BIND_ADDRESS)}"
   REDIS_URL="${REDIS_URL:-$(env_get "$runtime_env" REDIS_URL)}"

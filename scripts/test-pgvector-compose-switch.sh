@@ -268,7 +268,7 @@ NOOSPHERE_A2B_PAUSE_AFTER_PHASE=preparing \
   "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$log_file" 2>&1 &
 switch_pid=$!
 for _ in $(seq 1 240); do
-  rg -F 'test pause injected after journal phase preparing' "$log_file" >/dev/null 2>&1 && break
+  grep -F 'test pause injected after journal phase preparing' "$log_file" >/dev/null 2>&1 && break
   kill -0 "$switch_pid" 2>/dev/null || {
     cat "$log_file" >&2
     echo 'Guarded switch exited before the preparing SIGKILL checkpoint' >&2
@@ -276,7 +276,7 @@ for _ in $(seq 1 240); do
   }
   sleep 1
 done
-rg -F 'test pause injected after journal phase preparing' "$log_file" >/dev/null
+grep -F 'test pause injected after journal phase preparing' "$log_file" >/dev/null
 [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 kill -KILL "$switch_pid"
 wait "$switch_pid" 2>/dev/null || true
@@ -409,7 +409,7 @@ fi
   --mount type=tmpfs,destination=/var/lib/postgresql/data \
   --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'cat /authorization/writer-authorized 2>/dev/null || true') == "$SOURCE_IMAGE" ]]
 [[ $(docker compose -f "$compose_file" config --format json | jq -r '.services.db.image') == "$SOURCE_IMAGE" ]]
-rg -F "actual\" != '$SOURCE_IMAGE'" "$compose_file" >/dev/null
+grep -F "actual\" != '$SOURCE_IMAGE'" "$compose_file" >/dev/null
 
 # The restored source gate must remain restartable after recovery. This catches
 # a crash-safe marker change that would otherwise strand the source on its next
@@ -558,7 +558,7 @@ if docker compose -f "$new_compose_file" up -d db > "$new_gate_log" 2>&1; then
   echo 'Candidate Compose started without guarded volume authorization' >&2
   exit 1
 fi
-rg -F "external volume \"$new_authorization_volume\" not found" "$new_gate_log" >/dev/null
+grep -F "external volume \"$new_authorization_volume\" not found" "$new_gate_log" >/dev/null
 docker rm -f "$new_db_container" >/dev/null 2>&1 || true
 docker volume rm "$new_volume" >/dev/null 2>&1 || true
 

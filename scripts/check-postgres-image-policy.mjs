@@ -130,6 +130,12 @@ expect(
   installer.includes('if [[ ! -f "$NOOSPHERE_HOME/.env" ]]'),
   "install-openclaw.sh must preserve an existing runtime .env",
 );
+expect(
+  installer.includes("NOOSPHERE_IMAGE=${NOOSPHERE_IMAGE}") &&
+    installer.indexOf('env_get "$runtime_env" NOOSPHERE_IMAGE') <
+      installer.indexOf('ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION}'),
+  "install-openclaw.sh must persist and reload an explicit NOOSPHERE_IMAGE override",
+);
 for (const [runtimeKey, secretKey] of [
   ["POSTGRES_PASSWORD", "postgresPassword"],
   ["NEXTAUTH_SECRET", "nextAuthSecret"],
@@ -202,6 +208,10 @@ for (const relativePath of [
 }
 
 const switchScript = read("scripts/switch-pgvector-compose.sh");
+expect(
+  !switchScript.includes("imagetools") && !switchScript.includes("docker buildx"),
+  "switch-pgvector-compose.sh must verify guarded recovery from local immutable image evidence without registry lookups",
+);
 expect(
   switchScript.includes("--prepare-new-install") &&
     switchScript.includes("io.noosphere.pgvector-new-install-run") &&

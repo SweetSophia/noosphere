@@ -114,7 +114,6 @@ for command in docker jq sha256sum flock realpath readlink install awk sed node;
   need "$command"
 done
 docker compose version >/dev/null 2>&1 || die 'Docker Compose v2 is required'
-docker buildx version >/dev/null 2>&1 || die 'Docker Buildx is required'
 
 [[ -n "$compose_file" && -f "$compose_file" ]] || die '--compose-file must name an existing file'
 [[ -n "$db_container" ]] || die '--db-container is required'
@@ -798,22 +797,6 @@ database_identity() {
     FROM pg_database WHERE datname = current_database();"
 }
 
-image_platform_identities() {
-  local image=$1 target_platform=$2 raw manifest repo config
-  raw=$(docker buildx imagetools inspect "$image" --raw)
-  if jq -e '.manifests' >/dev/null <<< "$raw"; then
-    manifest=$(jq -er --arg platform "$target_platform" '
-      .manifests[] | select((.platform.os + "/" + .platform.architecture) == $platform) | .digest
-    ' <<< "$raw")
-    repo=${image%%@*}
-    config=$(docker buildx imagetools inspect "$repo@$manifest" --raw | jq -er '.config.digest')
-  else
-    manifest=${image##*@}
-    config=$(jq -er '.config.digest' <<< "$raw")
-  fi
-  printf '%s|%s|%s\n' "${image##*@}" "$manifest" "$config"
-}
-
 container_platform() {
   local machine
   machine=$(docker exec "$1" uname -m)
@@ -826,15 +809,18 @@ container_platform() {
 
 assert_image_identity() {
   local container=$1 image=$2 kind=$3 check_cluster=${4:-true}
-  local actual_platform identities index manifest config image_id repo_digests configured
+  local actual_platform image_id repo_digests configured
   actual_platform=$(container_platform "$container")
   [[ -z "$platform" || "$actual_platform" == "$platform" ]] || die "$container platform is $actual_platform, expected $platform"
-  identities=$(image_platform_identities "$image" "$actual_platform")
-  IFS='|' read -r index manifest config <<< "$identities"
   image_id=$(docker inspect "$container" --format '{{.Image}}')
   repo_digests=$(docker image inspect "$image_id" --format '{{json .RepoDigests}}')
   configured=$(docker inspect "$container" --format '{{.Config.Image}}')
-  if [[ "$configured" != "$image" && "$image_id" != "$index" && "$image_id" != "$manifest" && "$image_id" != "$config" ]] &&
+  # Docker resolves this immutable digest when the container is created. Keep
+  # recovery entirely local: the configured reference or the local image's
+  # RepoDigests must name that exact artifact, and the runtime checks below
+  # authenticate its architecture and PostgreSQL/Alpine/pgvector contract.
+  # A privileged Docker administrator remains the explicit trust boundary.
+  if [[ "$configured" != "$image" ]] &&
      ! jq -e --arg image "$image" 'index($image) != null' >/dev/null <<< "$repo_digests"; then
     die "$container does not resolve to the allowed $kind image"
   fi
