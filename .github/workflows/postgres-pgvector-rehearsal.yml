@@ -6,27 +6,41 @@ on:
     paths:
       - ".github/workflows/postgres-pgvector-rehearsal.yml"
       - "docker/migrate-or-baseline.mjs"
+      - "docker-compose.yml"
+      - "docker-compose.noosphere.yml"
       - "docker/postgres-pgvector/rehearsal-*"
       - "docker/postgres-pgvector/rehearsal.env"
+      - "install-openclaw.sh"
       - "package.json"
       - "package-lock.json"
       - "prisma.config.ts"
       - "prisma/migrations/**"
       - "prisma/schema.prisma"
       - "scripts/rehearse-pgvector-volume-upgrade.sh"
+      - "scripts/check-postgres-image-policy.mjs"
+      - "scripts/switch-pgvector-compose.sh"
+      - "scripts/test-pgvector-compose-switch.sh"
+      - "scripts/verify-deploy.sh"
   push:
     branches: [main, master]
     paths:
       - ".github/workflows/postgres-pgvector-rehearsal.yml"
       - "docker/migrate-or-baseline.mjs"
+      - "docker-compose.yml"
+      - "docker-compose.noosphere.yml"
       - "docker/postgres-pgvector/rehearsal-*"
       - "docker/postgres-pgvector/rehearsal.env"
+      - "install-openclaw.sh"
       - "package.json"
       - "package-lock.json"
       - "prisma.config.ts"
       - "prisma/migrations/**"
       - "prisma/schema.prisma"
       - "scripts/rehearse-pgvector-volume-upgrade.sh"
+      - "scripts/check-postgres-image-policy.mjs"
+      - "scripts/switch-pgvector-compose.sh"
+      - "scripts/test-pgvector-compose-switch.sh"
+      - "scripts/verify-deploy.sh"
 
 permissions:
   contents: read
@@ -43,7 +57,7 @@ env:
 jobs:
   rehearse-volume-upgrade:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -68,6 +82,9 @@ jobs:
       - name: Install pinned migration tooling
         run: npm ci
 
+      - name: Verify immutable PostgreSQL distribution policy
+        run: npm run postgres-image:check
+
       - name: Set up QEMU
         if: matrix.platform == 'linux/arm64'
         uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
@@ -86,6 +103,12 @@ jobs:
       - name: Rehearse volume upgrade and rollback
         timeout-minutes: 30
         run: scripts/rehearse-pgvector-volume-upgrade.sh ${{ matrix.platform }}
+
+      - name: Test guarded Compose switch and interrupted-run recovery
+        timeout-minutes: 35
+        env:
+          PGVECTOR_SWITCH_TEST_RUN_ID: gha-switch-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.slug }}
+        run: scripts/test-pgvector-compose-switch.sh ${{ matrix.platform }}
 
       # EXIT/INT/TERM cleanup cannot run after SIGKILL. This separately
       # invoked, exact-run cleanup still executes after a killed script step

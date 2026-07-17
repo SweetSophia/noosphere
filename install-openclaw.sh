@@ -3,17 +3,32 @@ set -euo pipefail
 trap 'echo "Installer failed near line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 
 NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
-NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
-NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-latest}"
-NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION}}"
-REDIS_URL="${REDIS_URL:-redis://redis:6379}"
-NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE="${NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE:-120}"
+NOOSPHERE_PORT="${NOOSPHERE_PORT:-}"
+NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-}"
+NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-}"
+APP_URL="${APP_URL:-}"
+BIND_ADDRESS="${BIND_ADDRESS:-}"
+REDIS_URL="${REDIS_URL:-}"
+PG_POOL_MAX="${PG_POOL_MAX:-}"
+PG_IDLE_TIMEOUT_MS="${PG_IDLE_TIMEOUT_MS:-}"
+PG_CONN_TIMEOUT_MS="${PG_CONN_TIMEOUT_MS:-}"
+NOOSPHERE_ADMIN_PASSWORD_RESET="${NOOSPHERE_ADMIN_PASSWORD_RESET:-}"
+NOOSPHERE_FORCE_ADMIN="${NOOSPHERE_FORCE_ADMIN:-}"
+NOOSPHERE_BOOTSTRAP_SECRETS_FILE="${NOOSPHERE_BOOTSTRAP_SECRETS_FILE:-}"
+NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE="${NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE:-}"
 PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory}"
 SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$HOME/.openclaw/secrets}"
 SECRETS_FILE="${NOOSPHERE_SECRETS_FILE:-$SECRETS_DIR/noosphere-memory.json}"
 SECRET_PROVIDER_ID="${NOOSPHERE_SECRET_PROVIDER_ID:-noosphere-memory}"
-BIND_ADDRESS="${BIND_ADDRESS:-}"
 PLUGIN_ID="noosphere-memory"
+POSTGRES_SWITCH_SCRIPT_SHA256='1794bd2312377bd00613dcf6f52673c45839b6c0595e93538045f87fb1ddf983'
+POSTGRES_SWITCH_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/master/scripts/switch-pgvector-compose.sh'
+POSTGRES_VERIFY_SCRIPT_SHA256='2e11e5f2fb8f549fad209eec59c5d2c57b0a2ca1c8f9998c8c1281d636da314c'
+POSTGRES_VERIFY_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/master/scripts/verify-deploy.sh'
+EXPLICIT_POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
+EXPLICIT_NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-}"
+EXPLICIT_ADMIN_PASSWORD="${NOOSPHERE_ADMIN_PASSWORD:-}"
+EXPLICIT_API_KEY="${NOOSPHERE_BOOTSTRAP_API_KEY:-}"
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -85,10 +100,111 @@ NOOSPHERE_FORCE_ADMIN=${NOOSPHERE_FORCE_ADMIN:-false}
 NOOSPHERE_BOOTSTRAP_API_KEY=${API_KEY}
 NOOSPHERE_BOOTSTRAP_SECRETS_FILE=${NOOSPHERE_BOOTSTRAP_SECRETS_FILE:-/tmp/noosphere-bootstrap-secrets/secrets.json}
 REDIS_URL=${REDIS_URL}
+PG_POOL_MAX=${PG_POOL_MAX}
+PG_IDLE_TIMEOUT_MS=${PG_IDLE_TIMEOUT_MS}
+PG_CONN_TIMEOUT_MS=${PG_CONN_TIMEOUT_MS}
 NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE=${NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE}
 ENV
   chmod 600 "$env_tmp"
   mv "$env_tmp" "$NOOSPHERE_HOME/.env"
+}
+
+resolve_runtime_config() {
+  local runtime_env="$NOOSPHERE_HOME/.env"
+
+  NOOSPHERE_PORT="${NOOSPHERE_PORT:-$(env_get "$runtime_env" NOOSPHERE_PORT)}"
+  NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-$(env_get "$runtime_env" NOOSPHERE_VERSION)}"
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-latest}"
+  APP_URL="${APP_URL:-$(env_get "$runtime_env" APP_URL)}"
+  BIND_ADDRESS="${BIND_ADDRESS:-$(env_get "$runtime_env" BIND_ADDRESS)}"
+  REDIS_URL="${REDIS_URL:-$(env_get "$runtime_env" REDIS_URL)}"
+  REDIS_URL="${REDIS_URL:-redis://redis:6379}"
+  PG_POOL_MAX="${PG_POOL_MAX:-$(env_get "$runtime_env" PG_POOL_MAX)}"
+  PG_POOL_MAX="${PG_POOL_MAX:-20}"
+  PG_IDLE_TIMEOUT_MS="${PG_IDLE_TIMEOUT_MS:-$(env_get "$runtime_env" PG_IDLE_TIMEOUT_MS)}"
+  PG_IDLE_TIMEOUT_MS="${PG_IDLE_TIMEOUT_MS:-30000}"
+  PG_CONN_TIMEOUT_MS="${PG_CONN_TIMEOUT_MS:-$(env_get "$runtime_env" PG_CONN_TIMEOUT_MS)}"
+  PG_CONN_TIMEOUT_MS="${PG_CONN_TIMEOUT_MS:-5000}"
+  NOOSPHERE_ADMIN_PASSWORD_RESET="${NOOSPHERE_ADMIN_PASSWORD_RESET:-$(env_get "$runtime_env" NOOSPHERE_ADMIN_PASSWORD_RESET)}"
+  NOOSPHERE_ADMIN_PASSWORD_RESET="${NOOSPHERE_ADMIN_PASSWORD_RESET:-false}"
+  NOOSPHERE_FORCE_ADMIN="${NOOSPHERE_FORCE_ADMIN:-$(env_get "$runtime_env" NOOSPHERE_FORCE_ADMIN)}"
+  NOOSPHERE_FORCE_ADMIN="${NOOSPHERE_FORCE_ADMIN:-false}"
+  NOOSPHERE_BOOTSTRAP_SECRETS_FILE="${NOOSPHERE_BOOTSTRAP_SECRETS_FILE:-$(env_get "$runtime_env" NOOSPHERE_BOOTSTRAP_SECRETS_FILE)}"
+  NOOSPHERE_BOOTSTRAP_SECRETS_FILE="${NOOSPHERE_BOOTSTRAP_SECRETS_FILE:-/tmp/noosphere-bootstrap-secrets/secrets.json}"
+  NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE="${NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE:-$(env_get "$runtime_env" NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE)}"
+  NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE="${NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE:-120}"
+  NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION}}"
+}
+
+prepare_guard_script() {
+  local relative_source=$1 url=$2 expected_sha=$3 target=$4 source='' temp actual_sha installer_dir
+  installer_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  if [[ -f "$installer_dir/$relative_source" ]]; then
+    source="$installer_dir/$relative_source"
+  fi
+
+  temp=$(mktemp "$NOOSPHERE_HOME/.guard-script.XXXXXX")
+  if [[ -n "$source" ]]; then
+    install -m 600 "$source" "$temp"
+  else
+    curl -fsSL "$url" -o "$temp"
+    chmod 600 "$temp"
+  fi
+  actual_sha=$(sha256sum "$temp" | awk '{print $1}')
+  if [[ "$actual_sha" != "$expected_sha" ]]; then
+    rm -f "$temp"
+    echo "Refusing PostgreSQL guard script with unexpected checksum: $relative_source" >&2
+    exit 1
+  fi
+  install -m 700 "$temp" "$target"
+  rm -f "$temp"
+}
+
+acquire_postgres_operation_lock() {
+  local docker_context docker_host engine_id lock_root lock_key lock_path
+  docker_host=''
+  if [[ -n ${DOCKER_CONTEXT:-} ]]; then
+    docker_context=$DOCKER_CONTEXT
+    docker_host=$(docker context inspect "$docker_context" --format '{{(index .Endpoints "docker").Host}}') || {
+      echo "Could not inspect Docker context $docker_context" >&2
+      exit 1
+    }
+  elif [[ -n ${DOCKER_HOST:-} ]]; then
+    docker_host=$DOCKER_HOST
+  else
+    docker_context=$(docker context show) || {
+      echo 'Could not determine the active Docker context.' >&2
+      exit 1
+    }
+    docker_host=$(docker context inspect "$docker_context" --format '{{(index .Endpoints "docker").Host}}') || {
+      echo "Could not inspect Docker context $docker_context" >&2
+      exit 1
+    }
+  fi
+  [[ "$docker_host" == unix://* ]] || {
+    echo "Refusing non-local Docker endpoint: $docker_host" >&2
+    exit 1
+  }
+  lock_root=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+  [[ "$lock_root" == /* && -d "$lock_root" && ! -L "$lock_root" ]] || {
+    echo "Runtime lock directory is unavailable or unsafe: $lock_root" >&2
+    exit 1
+  }
+  [[ $(stat -c '%u' "$lock_root") == "$(id -u)" ]] || {
+    echo 'Runtime lock directory is not owned by the current user.' >&2
+    exit 1
+  }
+  engine_id=$(docker info --format '{{.ID}}')
+  lock_key=$(printf '%s\0%s\0%s' "$engine_id" "$docker_host" noosphere_postgres_data | sha256sum | awk '{print $1}')
+  lock_path="$lock_root/noosphere-pgvector-switch-$lock_key.lock"
+  exec 8>"$lock_path"
+  flock -w 5 8 || {
+    echo 'Another installer or PostgreSQL image switch is active for noosphere_postgres_data.' >&2
+    exit 1
+  }
+  export NOOSPHERE_A2B_LOCK_FD=8
+  export NOOSPHERE_A2B_LOCK_PATH="$lock_path"
 }
 
 extract_bootstrap_json() {
@@ -323,14 +439,28 @@ need docker
 need node
 need curl
 need openclaw
+need jq
+need sha256sum
+need flock
 
 if ! docker compose version >/dev/null 2>&1; then
   echo "Docker Compose v2 is required: docker compose" >&2
   exit 1
 fi
 
+acquire_postgres_operation_lock
+
 mkdir -p "$NOOSPHERE_HOME" "$SECRETS_DIR"
 chmod 700 "$SECRETS_DIR" || true
+resolve_runtime_config
+
+POSTGRES_SWITCH_SCRIPT="$NOOSPHERE_HOME/switch-pgvector-compose.sh"
+POSTGRES_VERIFY_SCRIPT="$NOOSPHERE_HOME/verify-deploy.sh"
+POSTGRES_BACKUP_DIR="$NOOSPHERE_HOME/backups/postgres-pgvector"
+prepare_guard_script scripts/switch-pgvector-compose.sh "$POSTGRES_SWITCH_SCRIPT_URL" \
+  "$POSTGRES_SWITCH_SCRIPT_SHA256" "$POSTGRES_SWITCH_SCRIPT"
+prepare_guard_script scripts/verify-deploy.sh "$POSTGRES_VERIFY_SCRIPT_URL" \
+  "$POSTGRES_VERIFY_SCRIPT_SHA256" "$POSTGRES_VERIFY_SCRIPT"
 
 # Detect whether prompts can be shown. In `curl | bash`, stdin is the
 # installer pipe, so use /dev/tty when a controlling terminal is available.
@@ -380,19 +510,25 @@ else
   fi
 fi
 
-POSTGRES_PASSWORD="$(json_get "$SECRETS_FILE" postgresPassword)"
-NEXTAUTH_SECRET="$(json_get "$SECRETS_FILE" nextAuthSecret)"
-ADMIN_PASSWORD="$(json_get "$SECRETS_FILE" adminPassword)"
-API_KEY="$(json_get "$SECRETS_FILE" apiKey)"
+POSTGRES_PASSWORD="$EXPLICIT_POSTGRES_PASSWORD"
+NEXTAUTH_SECRET="$EXPLICIT_NEXTAUTH_SECRET"
+ADMIN_PASSWORD="$EXPLICIT_ADMIN_PASSWORD"
+API_KEY="$EXPLICIT_API_KEY"
 
-# If a previous install started PostgreSQL but exited before writing the OpenClaw
-# secret file, recover from the runtime .env so reruns use the original DB
-# password and bootstrap credentials instead of generating incompatible ones.
+# The installer-managed runtime file is the persistent source of truth. A
+# non-empty process value wins for this run; otherwise prefer .env before the
+# derived OpenClaw secret file so a deliberate .env edit is never shadowed by a
+# stale credential copy.
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(env_get_secret "$NOOSPHERE_HOME/.env" POSTGRES_PASSWORD)}"
 NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(env_get_secret "$NOOSPHERE_HOME/.env" NEXTAUTH_SECRET)}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_ADMIN_PASSWORD)}"
 API_KEY="${API_KEY:-$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_API_KEY)}"
 NOOSPHERE_BOOTSTRAP_SECRETS_FILE="${NOOSPHERE_BOOTSTRAP_SECRETS_FILE:-$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_SECRETS_FILE)}"
+
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(json_get "$SECRETS_FILE" postgresPassword)}"
+NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(json_get "$SECRETS_FILE" nextAuthSecret)}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(json_get "$SECRETS_FILE" adminPassword)}"
+API_KEY="${API_KEY:-$(json_get "$SECRETS_FILE" apiKey)}"
 
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(random_secret 32)}"
 NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(random_secret 32)}"
@@ -407,10 +543,87 @@ export NOOSPHERE_VERSION NOOSPHERE_PORT NOOSPHERE_IMAGE APP_URL BIND_ADDRESS POS
 export NOOSPHERE_ADMIN_PASSWORD="$ADMIN_PASSWORD"
 export NOOSPHERE_BOOTSTRAP_API_KEY="$API_KEY"
 
-# Persist runtime secrets before starting persistent containers. If bootstrap or
-# plugin setup fails, a rerun can recover the original PostgreSQL password and
-# finish the install instead of leaving an orphaned DB volume with unknown creds.
-write_runtime_env
+# Preserve an existing operator-managed runtime file byte-for-byte. Process
+# environment values still take precedence for this run; edit .env explicitly
+# when a change should persist across future installer reruns.
+if [[ ! -f "$NOOSPHERE_HOME/.env" ]]; then
+  write_runtime_env
+else
+  chmod 600 "$NOOSPHERE_HOME/.env"
+fi
+
+new_install_required=false
+existing_switch_required=false
+postgres_evidence="$POSTGRES_BACKUP_DIR/noosphere_postgres_data.phase-a2b.json"
+incomplete_new_install=false
+incomplete_switch=false
+resume_recovered_switch=false
+if [[ -f "$postgres_evidence" ]] &&
+   jq -e '.mode == "new-install" and (.phase == "claim-created" or .phase == "provisioning")' \
+     "$postgres_evidence" >/dev/null 2>&1; then
+  incomplete_new_install=true
+fi
+if [[ -f "$postgres_evidence" ]] &&
+   jq -e '.mode == "switch" and .phase != "complete"' "$postgres_evidence" >/dev/null 2>&1; then
+  incomplete_switch=true
+fi
+if [[ -f "$postgres_evidence" ]] &&
+   jq -e '.mode == "switch" and .phase == "recovered"' "$postgres_evidence" >/dev/null 2>&1; then
+  resume_recovered_switch=true
+fi
+
+if docker inspect noosphere-openclaw-db >/dev/null 2>&1; then
+  if [[ "$incomplete_new_install" == true ]]; then
+    new_install_required=true
+    docker stop --time 60 noosphere-openclaw-app >/dev/null 2>&1 || true
+  else
+    [[ -f "$NOOSPHERE_HOME/docker-compose.yml" ]] || {
+      echo 'Existing database container has no installer-managed Compose file; refusing an unguarded upgrade.' >&2
+      exit 1
+    }
+    existing_switch_required=true
+  fi
+elif docker volume inspect noosphere_postgres_data >/dev/null 2>&1; then
+  if [[ "$incomplete_new_install" == true ]]; then
+    new_install_required=true
+    docker stop --time 60 noosphere-openclaw-app >/dev/null 2>&1 || true
+  elif [[ "$incomplete_switch" == true ]]; then
+    existing_switch_required=true
+    docker stop --time 60 noosphere-openclaw-app >/dev/null 2>&1 || true
+  else
+    echo 'Existing PostgreSQL volume has no managed database container or durable new-install claim.' >&2
+    exit 1
+  fi
+else
+  if [[ -f "$postgres_evidence" && "$incomplete_new_install" != true ]]; then
+    echo 'PostgreSQL transition evidence exists but its named volume is missing; refusing a new install.' >&2
+    exit 1
+  fi
+  new_install_required=true
+fi
+
+# A durable recovered journal means the exact-source database, authorization
+# marker, and source-gated Compose file have already crossed the rollback
+# commit boundary. Let the guard verify and archive that state before this
+# installer publishes any candidate desired state. The guard deliberately
+# returns non-zero after recovery, so the operator must rerun from a fresh
+# transaction rather than continuing in the same invocation.
+if [[ "$resume_recovered_switch" == true ]]; then
+  echo 'Finalizing the verified PostgreSQL source recovery before publishing the candidate template...'
+  recovered_exit=0
+  "$POSTGRES_SWITCH_SCRIPT" \
+    --compose-file "$NOOSPHERE_HOME/docker-compose.yml" \
+    --env-file "$NOOSPHERE_HOME/.env" \
+    --db-container noosphere-openclaw-db \
+    --app-container noosphere-openclaw-app \
+    --backup-dir "$POSTGRES_BACKUP_DIR" \
+    --defer-app-restart || recovered_exit=$?
+  if (( recovered_exit == 0 )); then
+    echo 'Recovered PostgreSQL evidence unexpectedly returned success; refusing to continue in the same installer run.' >&2
+    exit 1
+  fi
+  exit "$recovered_exit"
+fi
 
 cat > "$NOOSPHERE_HOME/docker-compose.yml" <<YAML
 name: noosphere
@@ -447,6 +660,19 @@ services:
 
   app:
     image: ${NOOSPHERE_IMAGE}
+    entrypoint:
+      - /bin/sh
+      - -ceu
+      - |
+          marker=/run/noosphere-pgvector/writer-authorized
+          actual="\$\$(cat "\$\$marker" 2>/dev/null || true)"
+          if [ "\$\$actual" != 'ghcr.io/sweetsophia/noosphere-postgres-pgvector@sha256:12bc9b34226803a04811a3ddd06feac14121c2c7ce369aaddbd778d242751292' ]; then
+            echo 'Noosphere writer authorization is incomplete; finish the guarded transition.' >&2
+            exit 78
+          fi
+          exec /app/docker/docker-entrypoint.sh "\$\$@"
+      - --
+    command: ["node", "server.js"]
     container_name: noosphere-openclaw-app
     restart: unless-stopped
     ports:
@@ -464,6 +690,7 @@ services:
       NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE: \${NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE:-120}
     volumes:
       - noosphere_uploads:/app/uploads:rw
+      - noosphere_postgres_authorization:/run/noosphere-pgvector:ro
     depends_on:
       init:
         condition: service_completed_successfully
@@ -477,7 +704,20 @@ services:
       start_period: 45s
 
   db:
-    image: postgres:16-alpine
+    image: ghcr.io/sweetsophia/noosphere-postgres-pgvector@sha256:12bc9b34226803a04811a3ddd06feac14121c2c7ce369aaddbd778d242751292
+    entrypoint:
+      - /bin/sh
+      - -ceu
+      - |
+          marker=/run/noosphere-pgvector/candidate-authorized
+          actual="\$\$(cat "\$\$marker" 2>/dev/null || true)"
+          if [ "\$\$actual" != 'ghcr.io/sweetsophia/noosphere-postgres-pgvector@sha256:12bc9b34226803a04811a3ddd06feac14121c2c7ce369aaddbd778d242751292' ]; then
+            echo 'PostgreSQL candidate authorization is missing; run the guarded installer or switch.' >&2
+            exit 78
+          fi
+          exec /usr/local/bin/docker-entrypoint.sh "\$\$@"
+      - --
+    command: ["postgres"]
     container_name: noosphere-openclaw-db
     restart: unless-stopped
     environment:
@@ -486,8 +726,9 @@ services:
       POSTGRES_DB: noosphere
     volumes:
       - noosphere_postgres_data:/var/lib/postgresql/data
+      - noosphere_postgres_authorization:/run/noosphere-pgvector:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U noosphere -d noosphere"]
+      test: ["CMD-SHELL", "[ \"\$\$(cat /proc/1/comm 2>/dev/null)\" = postgres ] && [ \"\$\$(psql -XAtq -v ON_ERROR_STOP=1 -U noosphere -d noosphere -c 'SELECT 1;' 2>/dev/null)\" = 1 ]"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -511,6 +752,9 @@ volumes:
   noosphere_postgres_data:
     name: noosphere_postgres_data
     driver: local
+  noosphere_postgres_authorization:
+    name: noosphere_postgres_authorization
+    external: true
   noosphere_uploads:
     name: noosphere_uploads
     driver: local
@@ -518,6 +762,28 @@ volumes:
     name: noosphere_redis_data
     driver: local
 YAML
+
+if [[ "$existing_switch_required" == true ]]; then
+  # Publish the fail-closed candidate gate before invoking the transition.
+  # The existing source container keeps running unchanged, while any
+  # accidental Compose recreation is refused until the guard authorizes it.
+  "$POSTGRES_SWITCH_SCRIPT" \
+    --compose-file "$NOOSPHERE_HOME/docker-compose.yml" \
+    --env-file "$NOOSPHERE_HOME/.env" \
+    --db-container noosphere-openclaw-db \
+    --app-container noosphere-openclaw-app \
+    --backup-dir "$POSTGRES_BACKUP_DIR" \
+    --defer-app-restart
+fi
+
+if [[ "$new_install_required" == true ]]; then
+  "$POSTGRES_SWITCH_SCRIPT" --prepare-new-install \
+    --compose-file "$NOOSPHERE_HOME/docker-compose.yml" \
+    --env-file "$NOOSPHERE_HOME/.env" \
+    --db-container noosphere-openclaw-db \
+    --app-container noosphere-openclaw-app \
+    --backup-dir "$POSTGRES_BACKUP_DIR"
+fi
 
 cd "$NOOSPHERE_HOME"
 echo "Starting Noosphere at ${APP_URL}..."
@@ -554,9 +820,6 @@ rm -f "$BOOTSTRAP_TMP"
 
 echo "Bootstrap completed successfully."
 
-docker compose up -d app
-wait_for_container_healthy noosphere-openclaw-app 30
-
 install -m 600 /dev/null "$SECRETS_FILE"
 cat > "$SECRETS_FILE" <<JSON
 {
@@ -569,7 +832,25 @@ cat > "$SECRETS_FILE" <<JSON
 }
 JSON
 
+if [[ "$new_install_required" == true ]]; then
+  "$POSTGRES_SWITCH_SCRIPT" --record-new-install \
+    --compose-file "$NOOSPHERE_HOME/docker-compose.yml" \
+    --env-file "$NOOSPHERE_HOME/.env" \
+    --db-container noosphere-openclaw-db \
+    --app-container noosphere-openclaw-app \
+    --backup-dir "$POSTGRES_BACKUP_DIR"
+fi
+
+docker compose up -d app
+wait_for_container_healthy noosphere-openclaw-app 30
 wait_for_http_health "$APP_URL" 60
+
+NOOSPHERE_APP_URL="$APP_URL" \
+NOOSPHERE_DB_CONTAINER=noosphere-openclaw-db \
+NOOSPHERE_EXPECTED_DB_VOLUME=noosphere_postgres_data \
+NOOSPHERE_EXPECTED_POSTGRES_IMAGE_MODE=candidate \
+NOOSPHERE_POSTGRES_EVIDENCE="$POSTGRES_BACKUP_DIR/noosphere_postgres_data.phase-a2b.json" \
+  "$POSTGRES_VERIFY_SCRIPT"
 
 echo "Installing OpenClaw plugin: ${PLUGIN_SPEC}"
 if openclaw plugins inspect "$PLUGIN_ID" >/dev/null 2>&1; then

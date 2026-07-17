@@ -119,11 +119,10 @@ export function registerNoosphereCli(program: CliCommand, rawConfig: unknown, ro
     .command("upgrade")
     .description("Print the recommended upgrade commands")
     .action(() => {
-      console.log("Recommended Noosphere upgrade flow:");
-      console.log("cd ~/.noosphere");
-      console.log("docker compose pull");
-      console.log("docker compose up -d");
-      console.log("openclaw plugins update noosphere-memory");
+      console.log("Noosphere upgrades must use the guarded installer flow:");
+      console.log("curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/master/install-openclaw.sh | bash");
+      console.log("");
+      console.log("The installer performs the PostgreSQL image transition, backup restore proof, rollback rehearsal, and deployment verification before reporting success.");
       console.log("openclaw noosphere doctor");
     });
 }

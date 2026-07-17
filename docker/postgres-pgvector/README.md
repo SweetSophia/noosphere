@@ -54,6 +54,11 @@ database containers, refuses non-local Docker contexts, and removes only
 resources carrying its exact run label. Its randomly named volumes are created
 new and are never aliases for Compose or bind-mounted database storage.
 
+The locked source is the exact multi-architecture index observed behind the
+legacy bundled `postgres:16-alpine` deployment: PostgreSQL 16.14 on Alpine
+3.23.4. Rehearsals do not substitute a newer synthetic source image for the
+artifact that actually created existing supported volumes.
+
 For each supported architecture it:
 
 1. initializes PostgreSQL with the same defaults as bundled Compose, replays
@@ -117,9 +122,27 @@ snapshot, normalized migration names and file checksums, and an independent
 SQL-generated snapshot of every application table. The wider gate separately
 compares canonical schema and database/locale/collation identities.
 
-## Boundary and next phase
+## Phase A2b Compose switch
 
-This image remains non-production capability only. Phase A2 is rehearsal
-evidence; it does not edit either Compose file, mount the live database, or
-activate hybrid retrieval. A later Phase A2b may propose a bundled Compose
-switch only after the full rehearsal gate is accepted.
+Phase A2b pins the accepted candidate in both public Compose templates and the
+installer, then makes every existing-volume transition pass through
+[`scripts/switch-pgvector-compose.sh`](../../scripts/switch-pgvector-compose.sh).
+The guard stops writers, restore-tests a private logical backup, proves exact
+source rollback, repeats all integrity checks at each image hop, persists a
+crash-recovery journal, and promotes Compose only after the final candidate is
+verified. Fresh installs use a separate absent-volume claim: the guard labels
+and fingerprints the new data volume plus an external candidate-authorization
+volume, permits bootstrap while the app is stopped, and finalizes provenance
+before any application writer starts. Candidate Compose refuses PostgreSQL
+startup unless the read-only database marker is present, and the app separately
+refuses startup until the guard publishes its completion-bound writer marker.
+Failed recovery rebinds both markers and the restored desired state to the exact
+source before writers resume. The disposable
+regression covers SIGKILL recovery, the durable recovered checkpoint, unclaimed
+candidate refusal, and both fresh-install claim crash windows on amd64 and arm64
+in the same workflow as the Phase A2 rehearsal.
+
+See [`POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md`](../../docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md)
+for the operator contract. Phase A2b keeps the `vector` extension uninstalled
+cluster-wide and does not activate hybrid retrieval; optional extension/schema
+activation remains Phase A3.
