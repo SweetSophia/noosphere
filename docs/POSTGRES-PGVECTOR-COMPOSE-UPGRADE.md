@@ -42,7 +42,12 @@ Docker administrator access is an explicit trust boundary. The lock serializes t
 Install and upgrade through the same command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/master/install-openclaw.sh | bash
+# Installer commit: 5a4c120777d9f986e37b488850b4e236102735e7
+# Expected SHA-256: a07d6fd0732d1229a4034190046745b279f01582e99c31628a0abc0bec0a7c43
+installer="$(mktemp)"
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5a4c120777d9f986e37b488850b4e236102735e7/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' 'a07d6fd0732d1229a4034190046745b279f01582e99c31628a0abc0bec0a7c43' "$installer" | sha256sum -c -
+bash "$installer" && rm -f "$installer"
 ```
 
 On an existing supported source install, the installer downloads checksum-pinned guard and deploy-verification scripts, writes the fail-closed candidate Compose gate while leaving the running source container unchanged, performs the full offline transition with writer restart deferred to the installer, then runs bootstrap, application health, exact image/volume/version/extension verification, and minimum data checks. If interrupted after writing Compose but before authorization, an accidental candidate recreation exits before PostgreSQL can touch the source volume.

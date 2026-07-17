@@ -13,6 +13,10 @@ import { NoosphereMemoryClient, type NoosphereStatusResponse } from "./client.js
 const PLUGIN_ID = "noosphere-memory";
 const DEFAULT_COMPOSE_FILE = "~/.noosphere/docker-compose.yml";
 const DEFAULT_LOG_TAIL = 80;
+const VERIFIED_INSTALLER_REF = "5a4c120777d9f986e37b488850b4e236102735e7";
+const VERIFIED_INSTALLER_SHA256 = "a07d6fd0732d1229a4034190046745b279f01582e99c31628a0abc0bec0a7c43";
+const VERIFIED_INSTALLER_URL =
+  `https://raw.githubusercontent.com/SweetSophia/noosphere/${VERIFIED_INSTALLER_REF}/install-openclaw.sh`;
 
 export type NoosphereCliCheckStatus = "pass" | "warn" | "fail";
 
@@ -67,6 +71,15 @@ interface CliCommand {
 type CliOptionParser = (value: string) => unknown;
 type CliActionHandler<TArgs extends readonly unknown[]> = (...args: TArgs) => void | Promise<void>;
 
+export function getVerifiedInstallerCommands(): string[] {
+  return [
+    'installer="$(mktemp)"',
+    `curl -fsSL ${VERIFIED_INSTALLER_URL} -o "$installer"`,
+    `printf '%s  %s\\n' '${VERIFIED_INSTALLER_SHA256}' "$installer" | sha256sum -c -`,
+    'bash "$installer" && rm -f "$installer"',
+  ];
+}
+
 export function registerNoosphereCli(program: CliCommand, rawConfig: unknown, rootConfig: unknown): void {
   const noosphere = program
     .command("noosphere")
@@ -109,8 +122,8 @@ export function registerNoosphereCli(program: CliCommand, rawConfig: unknown, ro
     .command("setup")
     .description("Print the recommended installer command")
     .action(() => {
-      console.log("Noosphere setup is handled by the installer script:");
-      console.log("curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/master/install-openclaw.sh | bash");
+      console.log("Noosphere setup uses an immutable, checksum-verified installer:");
+      for (const command of getVerifiedInstallerCommands()) console.log(command);
       console.log("");
       console.log("After setup, run: openclaw noosphere doctor");
     });
@@ -119,8 +132,8 @@ export function registerNoosphereCli(program: CliCommand, rawConfig: unknown, ro
     .command("upgrade")
     .description("Print the recommended upgrade commands")
     .action(() => {
-      console.log("Noosphere upgrades must use the guarded installer flow:");
-      console.log("curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/master/install-openclaw.sh | bash");
+      console.log("Noosphere upgrades must use the immutable, checksum-verified guarded installer:");
+      for (const command of getVerifiedInstallerCommands()) console.log(command);
       console.log("");
       console.log("The installer performs the PostgreSQL image transition, backup restore proof, rollback rehearsal, and deployment verification before reporting success.");
       console.log("openclaw noosphere doctor");

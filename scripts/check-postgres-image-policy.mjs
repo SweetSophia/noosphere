@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
+const verifiedInstallerRef = "5a4c120777d9f986e37b488850b4e236102735e7";
+const verifiedInstallerSha256 = "a07d6fd0732d1229a4034190046745b279f01582e99c31628a0abc0bec0a7c43";
 
 function read(relativePath) {
   try {
@@ -211,13 +213,42 @@ for (const relativePath of [
 ]) {
   const text = read(relativePath);
   expect(
-    text.includes("install-openclaw.sh | bash"),
-    `${relativePath} must route upgrades through the guarded installer`,
+    text.includes(verifiedInstallerRef) &&
+      text.includes(verifiedInstallerSha256) &&
+      text.includes("sha256sum -c -") &&
+      text.indexOf("curl -fsSL") < text.indexOf("sha256sum -c -") &&
+      text.indexOf("sha256sum -c -") < text.indexOf('bash "$installer"'),
+    `${relativePath} must route setup and upgrades through the immutable checksum-verified installer`,
   );
   expect(
-    !text.includes('console.log("docker compose pull")') &&
+    !text.includes("noosphere/master/install-openclaw.sh") &&
+      !text.includes("install-openclaw.sh | bash") &&
+      !text.includes('console.log("docker compose pull")') &&
       !text.includes('console.log("docker compose up -d")'),
-    `${relativePath} must not advertise an unrestricted Compose upgrade`,
+    `${relativePath} must not advertise a moving-branch installer or unrestricted Compose upgrade`,
+  );
+}
+
+for (const relativePath of [
+  "README.md",
+  "README-legacy.md",
+  "openclaw-noosphere-memory/README.md",
+  "docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md",
+  "docs/OPENCLAW-OFFICIAL-PLUGIN-DEVELOPMENT-PLAN.md",
+  "docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md",
+  "docs/articles/noosphere-medium-article.md",
+]) {
+  const text = read(relativePath);
+  expect(
+    text.includes(verifiedInstallerRef) &&
+      text.includes(verifiedInstallerSha256) &&
+      text.includes("sha256sum -c -"),
+    `${relativePath} must document the immutable checksum-verified installer`,
+  );
+  expect(
+    !text.includes("noosphere/master/install-openclaw.sh") &&
+      !text.includes("install-openclaw.sh | bash"),
+    `${relativePath} must not recommend executing a moving-branch installer`,
   );
 }
 

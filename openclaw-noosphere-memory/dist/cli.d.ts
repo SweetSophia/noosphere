@@ -39,6 +39,7 @@ interface CliCommand {
 }
 type CliOptionParser = (value: string) => unknown;
 type CliActionHandler<TArgs extends readonly unknown[]> = (...args: TArgs) => void | Promise<void>;
+export declare function getVerifiedInstallerCommands(): string[];
 export declare function registerNoosphereCli(program: CliCommand, rawConfig: unknown, rootConfig: unknown): void;
 export declare function buildNoosphereStatusReport(rawConfig: unknown, rootConfig: unknown, options?: NoosphereDoctorOptions): Promise<NoosphereStatusReport>;
 export declare function buildNoosphereDoctorReport(rawConfig: unknown, rootConfig: unknown, options?: NoosphereDoctorOptions): Promise<NoosphereDoctorReport>;
