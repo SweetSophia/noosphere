@@ -1,47 +1,80 @@
 #!/usr/bin/env bash
-set -Eeuo pipefail
+set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 config_path="$repo_root/docker/postgres-pgvector/rehearsal.env"
 fixture_path="$repo_root/docker/postgres-pgvector/rehearsal-fixture.sql"
 integrity_path="$repo_root/docker/postgres-pgvector/rehearsal-integrity.sql"
 schema_path="$repo_root/docker/postgres-pgvector/rehearsal-schema.sql"
-platform=${1:-linux/amd64}
+label_key=io.noosphere.rehearsal
+mode=rehearse
 
-case "$platform" in
-  linux/amd64|linux/arm64) ;;
-  *) printf 'unsupported platform: %s\n' "$platform" >&2; exit 2 ;;
+case "${1:-}" in
+  --cleanup-run)
+    mode=cleanup
+    platform=cleanup
+    run_id=${2:-}
+    [[ $# == 2 ]] || {
+      printf 'usage: %s --cleanup-run RUN_ID\n' "${BASH_SOURCE[0]}" >&2
+      exit 2
+    }
+    ;;
+  --record-baseline)
+    mode=record
+    expected_record_migration_count=${2:-}
+    platform=${3:-linux/amd64}
+    [[ $# -ge 2 && $# -le 3 ]] || {
+      printf 'usage: %s --record-baseline MIGRATION_COUNT [linux/amd64|linux/arm64]\n' "${BASH_SOURCE[0]}" >&2
+      exit 2
+    }
+    ;;
+  *)
+    platform=${1:-linux/amd64}
+    [[ $# -le 1 ]] || {
+      printf 'usage: %s [linux/amd64|linux/arm64]\n' "${BASH_SOURCE[0]}" >&2
+      exit 2
+    }
+    ;;
 esac
-
-# shellcheck disable=SC1090
-source "$config_path"
-
-for image_ref in "$SOURCE_IMAGE" "$CANDIDATE_IMAGE"; do
-  if [[ ! "$image_ref" =~ @sha256:[0-9a-f]{64}$ ]]; then
-    printf 'rehearsal image is not digest-addressed: %s\n' "$image_ref" >&2
-    exit 1
-  fi
-done
-if [[ ! "$EXPECTED_INTEGRITY_SHA256" =~ ^(TO_BE_RECORDED|[0-9a-f]{64})$ ]]; then
-  printf 'invalid EXPECTED_INTEGRITY_SHA256 in %s\n' "$config_path" >&2
-  exit 1
-fi
-if [[ ! "$CANDIDATE_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
-  printf 'invalid CANDIDATE_SOURCE_COMMIT in %s\n' "$config_path" >&2
-  exit 1
-fi
 
 log() { printf '[pgvector-rehearsal:%s] %s\n' "$platform" "$*"; }
 die() { printf '[pgvector-rehearsal:%s] ERROR: %s\n' "$platform" "$*" >&2; exit 1; }
 
-for required_command in docker jq node sha256sum od; do
-  command -v "$required_command" >/dev/null || die "required command is missing: $required_command"
-done
-docker buildx version >/dev/null 2>&1 || die 'Docker Buildx plugin is missing'
+if [[ "$mode" != cleanup ]]; then
+  case "$platform" in
+    linux/amd64|linux/arm64) ;;
+    *) die "unsupported platform: $platform" ;;
+  esac
+  for required_command in od tr; do
+    command -v "$required_command" >/dev/null || die "required command is missing: $required_command"
+  done
+  run_id=${REHEARSAL_RUN_ID:-$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')}
+fi
 
-run_id=$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')
-password=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
-label_key=io.noosphere.rehearsal
+[[ "$run_id" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$ ]] ||
+  die 'run ID must contain 1-64 letters, digits, dots, underscores, or hyphens'
+
+command -v docker >/dev/null || die 'required command is missing: docker'
+docker_context_endpoint=
+if [[ -n "${DOCKER_CONTEXT:-}" ]]; then
+  docker_context=$DOCKER_CONTEXT
+  docker_context_endpoint=$(
+    docker context inspect "$docker_context" --format '{{.Endpoints.docker.Host}}' 2>/dev/null
+  ) || die "could not inspect Docker context $docker_context"
+elif [[ -n "${DOCKER_HOST:-}" ]]; then
+  docker_context_endpoint=$DOCKER_HOST
+else
+  docker_context=$(docker context show 2>/dev/null) || die 'could not determine the active Docker context'
+  docker_context_endpoint=$(
+    docker context inspect "$docker_context" --format '{{.Endpoints.docker.Host}}' 2>/dev/null
+  ) || die "could not inspect Docker context $docker_context"
+fi
+case "$docker_context_endpoint" in
+  unix://*) ;;
+  *) die "refusing non-local Docker endpoint: $docker_context_endpoint" ;;
+esac
+docker info >/dev/null 2>&1 || die 'Docker daemon is unavailable'
+
 prefix="noosphere-pgvector-rehearsal-${run_id}"
 source_volume="${prefix}-source"
 physical_volume="${prefix}-physical"
@@ -66,42 +99,200 @@ containers=(
   "$control_container"
 )
 
+list_contains_exact() {
+  local expected=$1 item
+  while IFS= read -r item; do
+    [[ "$item" == "$expected" ]] && return 0
+  done
+  return 1
+}
+
+container_name_state() {
+  local resource=$1 resources
+  resources=$(docker container ls -a --format '{{.Names}}') || return 2
+  list_contains_exact "$resource" <<<"$resources"
+}
+
+volume_name_state() {
+  local resource=$1 resources
+  resources=$(docker volume ls --format '{{.Name}}') || return 2
+  list_contains_exact "$resource" <<<"$resources"
+}
+
+owned_container() {
+  local resource=$1 state label
+  if container_name_state "$resource"; then
+    :
+  else
+    state=$?
+    return "$state"
+  fi
+  label=$(docker container inspect --format "{{ index .Config.Labels \"$label_key\" }}" "$resource" 2>/dev/null) || return 2
+  [[ "$label" == "$run_id" ]] || return 3
+}
+
+owned_volume() {
+  local resource=$1 state label
+  if volume_name_state "$resource"; then
+    :
+  else
+    state=$?
+    return "$state"
+  fi
+  label=$(docker volume inspect --format "{{ index .Labels \"$label_key\" }}" "$resource" 2>/dev/null) || return 2
+  [[ "$label" == "$run_id" ]] || return 3
+}
+
+cleanup_container_once() {
+  local resource=$1 state
+  if owned_container "$resource"; then
+    docker container rm --force "$resource" >/dev/null 2>&1
+    return
+  else
+    state=$?
+  fi
+  [[ "$state" == 1 ]]
+}
+
+cleanup_volume_once() {
+  local resource=$1 state
+  if owned_volume "$resource"; then
+    docker volume rm "$resource" >/dev/null 2>&1
+    return
+  else
+    state=$?
+  fi
+  [[ "$state" == 1 ]]
+}
+
+cleanup_resources() {
+  local resource attempt state pending_cleanup=0
+
+  for attempt in 1 2; do
+    pending_cleanup=0
+    for resource in "${containers[@]}"; do
+      cleanup_container_once "$resource" || pending_cleanup=1
+    done
+    ((pending_cleanup == 0)) && break
+    sleep 1
+  done
+
+  for attempt in 1 2; do
+    pending_cleanup=0
+    for resource in "${volumes[@]}"; do
+      cleanup_volume_once "$resource" || pending_cleanup=1
+    done
+    ((pending_cleanup == 0)) && break
+    sleep 1
+  done
+
+  if ! docker info >/dev/null 2>&1; then
+    printf '[pgvector-rehearsal:%s] ERROR: Docker daemon became unavailable during cleanup\n' "$platform" >&2
+    return 1
+  fi
+
+  pending_cleanup=0
+  for resource in "${containers[@]}"; do
+    if owned_container "$resource"; then
+      printf '[pgvector-rehearsal:%s] ERROR: cleanup left container %s\n' "$platform" "$resource" >&2
+      pending_cleanup=1
+    else
+      state=$?
+      if [[ "$state" == 2 ]]; then
+        printf '[pgvector-rehearsal:%s] ERROR: could not inspect container %s during cleanup\n' "$platform" "$resource" >&2
+        pending_cleanup=1
+      elif [[ "$state" == 3 ]]; then
+        printf '[pgvector-rehearsal:%s] ERROR: refusing container %s with a different ownership label\n' "$platform" "$resource" >&2
+        pending_cleanup=1
+      fi
+    fi
+  done
+  for resource in "${volumes[@]}"; do
+    if owned_volume "$resource"; then
+      printf '[pgvector-rehearsal:%s] ERROR: cleanup left volume %s\n' "$platform" "$resource" >&2
+      pending_cleanup=1
+    else
+      state=$?
+      if [[ "$state" == 2 ]]; then
+        printf '[pgvector-rehearsal:%s] ERROR: could not inspect volume %s during cleanup\n' "$platform" "$resource" >&2
+        pending_cleanup=1
+      elif [[ "$state" == 3 ]]; then
+        printf '[pgvector-rehearsal:%s] ERROR: refusing volume %s with a different ownership label\n' "$platform" "$resource" >&2
+        pending_cleanup=1
+      fi
+    fi
+  done
+  return "$pending_cleanup"
+}
+
+if [[ "$mode" == cleanup ]]; then
+  cleanup_resources
+  exit
+fi
+
+# shellcheck disable=SC1090
+source "$config_path"
+
+for image_ref in "$SOURCE_IMAGE" "$CANDIDATE_IMAGE"; do
+  if [[ ! "$image_ref" =~ @sha256:[0-9a-f]{64}$ ]]; then
+    printf 'rehearsal image is not digest-addressed: %s\n' "$image_ref" >&2
+    exit 1
+  fi
+done
+if [[ ! "$EXPECTED_INTEGRITY_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+  printf 'invalid EXPECTED_INTEGRITY_SHA256 in %s\n' "$config_path" >&2
+  exit 1
+fi
+if [[ ! "$EXPECTED_MIGRATION_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+  printf 'invalid EXPECTED_MIGRATION_COUNT in %s\n' "$config_path" >&2
+  exit 1
+fi
+if [[ "$mode" == record ]]; then
+  [[ "$expected_record_migration_count" =~ ^[1-9][0-9]*$ ]] ||
+    die 'record-baseline migration count must be a positive integer'
+  EXPECTED_MIGRATION_COUNT=$expected_record_migration_count
+  EXPECTED_INTEGRITY_SHA256=TO_BE_RECORDED
+fi
+if [[ ! "$CANDIDATE_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+  printf 'invalid CANDIDATE_SOURCE_COMMIT in %s\n' "$config_path" >&2
+  exit 1
+fi
+
+for required_command in jq node sha256sum; do
+  command -v "$required_command" >/dev/null || die "required command is missing: $required_command"
+done
+docker buildx version >/dev/null 2>&1 || die 'Docker Buildx plugin is missing'
+
+password=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
+
 [[ -f "$repo_root/node_modules/prisma/build/index.js" ]] ||
   die 'Prisma CLI is missing; run npm ci before the rehearsal'
 [[ -d "$repo_root/node_modules/pg" ]] ||
   die 'PostgreSQL Node driver is missing; run npm ci before the rehearsal'
 
-owned_container() {
-  [[ "$(docker inspect --format "{{ index .Config.Labels \"$label_key\" }}" "$1" 2>/dev/null || true)" == "$run_id" ]]
+on_exit() {
+  local status=$?
+  trap - EXIT INT TERM
+  if ! cleanup_resources && ((status == 0)); then
+    status=1
+  fi
+  exit "$status"
 }
-
-owned_volume() {
-  [[ "$(docker volume inspect --format "{{ index .Labels \"$label_key\" }}" "$1" 2>/dev/null || true)" == "$run_id" ]]
-}
-
-cleanup() {
-  local resource
-  for resource in "${containers[@]}"; do
-    if owned_container "$resource"; then
-      docker rm --force "$resource" >/dev/null 2>&1 || true
-    fi
-  done
-  for resource in "${volumes[@]}"; do
-    if owned_volume "$resource"; then
-      docker volume rm "$resource" >/dev/null 2>&1 || true
-    fi
-  done
-}
-trap cleanup EXIT INT TERM
 
 for resource in "${containers[@]}"; do
-  if docker container inspect "$resource" >/dev/null 2>&1; then
+  if container_name_state "$resource"; then
     die "refusing to reuse pre-existing container $resource"
+  else
+    state=$?
+    [[ "$state" == 1 ]] || die "could not enumerate containers before checking $resource"
   fi
 done
 for resource in "${volumes[@]}"; do
-  if docker volume inspect "$resource" >/dev/null 2>&1; then
+  if volume_name_state "$resource"; then
     die "refusing to reuse pre-existing volume $resource"
+  else
+    state=$?
+    [[ "$state" == 1 ]] || die "could not enumerate volumes before checking $resource"
   fi
 done
 
@@ -150,6 +341,13 @@ fi
   die "candidate provenance source is $provenance_source"
 [[ "$provenance_revision" == "$CANDIDATE_SOURCE_COMMIT" ]] ||
   die "candidate provenance revision is $provenance_revision"
+
+# Preflight and provenance validation create no resources. Install cleanup only
+# after they pass so a same-labelled pre-existing resource is never mistaken
+# for something created by this process.
+trap on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 for resource in "${volumes[@]}"; do
   docker volume create --label "$label_key=$run_id" "$resource" >/dev/null
@@ -219,6 +417,9 @@ assert_no_collation_warning() {
 
 database_identity() {
   local name=$1
+  # The pinned Alpine image initializes libc-provider databases. A null stored
+  # and actual collation version pair is therefore valid; the separate
+  # IS DISTINCT FROM check still rejects a one-sided or changed version.
   sql_value "$name" "
     SELECT datlocprovider::text || '|' || datcollate || '|' || datctype || '|' ||
            pg_encoding_to_char(encoding) || '|' || coalesce(daticulocale, '<null>') || '|' ||
@@ -283,6 +484,9 @@ actual_migration_history() {
     ORDER BY migration_name;"
 }
 
+# `prisma migrate deploy` skips already-applied migrations without comparing
+# their current file contents. This explicit checksum comparison is therefore
+# the rehearsal's repository-to-database migration drift detector.
 assert_migration_history() {
   local name=$1 expected actual total invalid
   expected=$(expected_migration_history)
@@ -299,8 +503,10 @@ assert_migration_history() {
 
 database_url() {
   local name=$1 port
-  port=$(docker inspect --format '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' "$name")
-  [[ "$port" =~ ^[0-9]+$ ]] || die "could not resolve the published PostgreSQL port for $name"
+  port=$(docker inspect --format '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' "$name" 2>/dev/null) ||
+    die "could not inspect the published PostgreSQL port for $name"
+  [[ "$port" =~ ^[0-9]+$ ]] ||
+    die "published PostgreSQL port for $name is invalid: ${port:-<empty>}"
   printf 'postgresql://noosphere:%s@127.0.0.1:%s/noosphere' "$password" "$port"
 }
 
@@ -404,6 +610,7 @@ stop_and_assert_clean "$source_container" "$source_volume" "$initial_checksums"
 log 'copying the clean source volume and starting the candidate image'
 docker run --name "$copy_container" --label "$label_key=$run_id" \
   --platform "$platform" --user root --entrypoint sh \
+  --tmpfs /var/lib/postgresql/data \
   -v "$source_volume:/from:ro" -v "$physical_volume:/to" \
   "$SOURCE_IMAGE" -c 'cp -a /from/. /to/' >/dev/null
 owned_container "$copy_container" || die "copy container ownership label mismatch"

@@ -50,7 +50,9 @@ Phase A2 uses the immutable multi-architecture image recorded in
 [`rehearsal.env`](./rehearsal.env). It creates only cryptographically named,
 ownership-labelled disposable containers and volumes. The rehearsal refuses
 pre-existing resources, protects the mounted volumes of the bundled production
-database containers, and removes only resources carrying its exact run label.
+database containers, refuses non-local Docker contexts, and removes only
+resources carrying its exact run label. Its randomly named volumes are created
+new and are never aliases for Compose or bind-mounted database storage.
 
 For each supported architecture it:
 
@@ -71,9 +73,11 @@ For each supported architecture it:
    source-image volumes, reruns the real migration path, and repeats every
    integrity check.
 
-Run the same commands used by CI:
+Install the pinned Node dependencies first. The rehearsal also requires a local
+Unix-socket Docker context, Docker Buildx, `jq`, `sha256sum`, and `od`:
 
 ```bash
+npm ci
 scripts/rehearse-pgvector-volume-upgrade.sh linux/amd64
 scripts/rehearse-pgvector-volume-upgrade.sh linux/arm64
 ```
@@ -84,6 +88,34 @@ commit `d1eecc96a6a9b6d14ead2e3d352cadf1e69c8f27`, digest
 `sha256:12bc9b34226803a04811a3ddd06feac14121c2c7ce369aaddbd778d242751292`.
 Before touching a disposable volume, the rehearsal verifies that the selected
 platform's BuildKit provenance names that exact repository and source commit.
+
+Normal exits and interrupt/termination signals remove the exact run's labelled
+resources. CI also invokes a separate `if: always()` cleanup step with a stable
+per-job run ID, covering a rehearsal shell killed by SIGKILL while the hosted
+runner remains available. For a local shell that was forcibly killed, copy the
+run ID from the resource-name prefix and run:
+
+```bash
+scripts/rehearse-pgvector-volume-upgrade.sh --cleanup-run RUN_ID
+```
+
+Cleanup retries container and volume removal, reports leftovers, and refuses
+resources without the exact expected name and ownership label.
+
+When a migration or deterministic fixture changes, supply the new migration
+count in explicit baseline mode. This prints the new digest, exits with status
+3, and still performs exact-run cleanup:
+
+```bash
+scripts/rehearse-pgvector-volume-upgrade.sh \
+  --record-baseline 11 linux/amd64
+```
+
+Copy the printed digest and migration count into `rehearsal.env`, rerun amd64
+normally, then rerun arm64. The committed digest combines a dynamic all-table
+snapshot, normalized migration names and file checksums, and an independent
+SQL-generated snapshot of every application table. The wider gate separately
+compares canonical schema and database/locale/collation identities.
 
 ## Boundary and next phase
 

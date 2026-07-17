@@ -43,12 +43,17 @@ env:
 jobs:
   rehearse-volume-upgrade:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: linux/amd64
+            slug: amd64
           - platform: linux/arm64
+            slug: arm64
+    env:
+      REHEARSAL_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.slug }}
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -79,4 +84,15 @@ jobs:
       # The candidate package is public. Do not authenticate before executing
       # a pull-request-controlled rehearsal script.
       - name: Rehearse volume upgrade and rollback
+        timeout-minutes: 30
         run: scripts/rehearse-pgvector-volume-upgrade.sh ${{ matrix.platform }}
+
+      # EXIT/INT/TERM cleanup cannot run after SIGKILL. This separately
+      # invoked, exact-run cleanup still executes after a killed script step
+      # while the hosted runner remains available.
+      - name: Remove exact-run rehearsal resources
+        if: always()
+        run: |
+          if [[ -x scripts/rehearse-pgvector-volume-upgrade.sh ]]; then
+            scripts/rehearse-pgvector-volume-upgrade.sh --cleanup-run "$REHEARSAL_RUN_ID"
+          fi
