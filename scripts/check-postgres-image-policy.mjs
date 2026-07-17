@@ -85,7 +85,16 @@ function expectExactDbImage(relativePath, image, authorizationKey) {
 }
 
 function sha256(relativePath) {
-  return createHash("sha256").update(readFileSync(resolve(root, relativePath))).digest("hex");
+  return createHash("sha256").update(read(relativePath)).digest("hex");
+}
+
+function isExecutable(relativePath) {
+  try {
+    return (statSync(resolve(root, relativePath)).mode & 0o111) !== 0;
+  } catch (error) {
+    failures.push(`Failed to inspect ${relativePath}: ${error.message}`);
+    return false;
+  }
 }
 
 function extractShellConstant(text, name) {
@@ -121,7 +130,7 @@ for (const [constant, relativePath] of [
     `install-openclaw.sh ${constant} must match ${relativePath}`,
   );
   expect(
-    (statSync(resolve(root, relativePath)).mode & 0o111) !== 0,
+    isExecutable(relativePath),
     `${relativePath} must be executable`,
   );
 }
@@ -152,6 +161,11 @@ for (const [runtimeKey, secretKey] of [
 expect(
   installer.includes("--defer-app-restart"),
   "install-openclaw.sh must keep writers stopped until its guarded transaction finishes",
+);
+expect(
+  installer.includes("engine_id=$(docker info --format '{{.ID}}') || {") &&
+    installer.includes("Docker engine ID is empty."),
+  "install-openclaw.sh must fail closed when Docker engine identity is unavailable",
 );
 expect(
   installer.includes("incomplete_switch=false") &&
@@ -213,6 +227,17 @@ expect(
   "switch-pgvector-compose.sh must verify guarded recovery from local immutable image evidence without registry lookups",
 );
 expect(
+  switchScript.includes("engine_id=$(docker info --format '{{.ID}}') || die") &&
+    switchScript.includes("Docker engine ID is empty"),
+  "switch-pgvector-compose.sh must fail closed when Docker engine identity is unavailable",
+);
+expect(
+  countLiteral(switchScript, 'if [[ "$restart_app_after_switch" == true ]]') === 2 &&
+    countLiteral(switchScript, '[[ "$restart_app_after_switch" == false ]] || restart_app') === 3 &&
+    switchScript.includes("deferred source app writer restarted unexpectedly"),
+  "switch-pgvector-compose.sh must honor deferred writer restart during both source-recovery paths",
+);
+expect(
   switchScript.includes("--prepare-new-install") &&
     switchScript.includes("io.noosphere.pgvector-new-install-run") &&
     switchScript.includes("claim-created|provisioning|complete"),
@@ -239,8 +264,12 @@ expect(
 );
 
 const verifyScript = read("scripts/verify-deploy.sh");
+const evidenceFileGuard = verifyScript.indexOf('[[ -f "$POSTGRES_EVIDENCE" ]]');
+const postgresVersionQuery = verifyScript.indexOf('postgres_version="$(docker exec');
 expect(
   verifyScript.includes("candidate verification requires NOOSPHERE_POSTGRES_EVIDENCE") &&
+    evidenceFileGuard >= 0 &&
+    postgresVersionQuery > evidenceFileGuard &&
     verifyScript.includes('evidence_phase" == complete') &&
     verifyScript.includes('probe="$evidence_probe"') &&
     !verifyScript.includes("noosphere_a2b_verify_"),

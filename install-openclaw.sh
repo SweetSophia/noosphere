@@ -21,9 +21,9 @@ SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$HOME/.openclaw/secrets}"
 SECRETS_FILE="${NOOSPHERE_SECRETS_FILE:-$SECRETS_DIR/noosphere-memory.json}"
 SECRET_PROVIDER_ID="${NOOSPHERE_SECRET_PROVIDER_ID:-noosphere-memory}"
 PLUGIN_ID="noosphere-memory"
-POSTGRES_SWITCH_SCRIPT_SHA256='3955e42859291ed1da8878d2c919678d28ce50f80f3c7116c47a59f98baf83a5'
+POSTGRES_SWITCH_SCRIPT_SHA256='707d85233fdbc4896de2109fa5832831147898ce0f1ef2b7e6f9cf49280cc276'
 POSTGRES_SWITCH_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/master/scripts/switch-pgvector-compose.sh'
-POSTGRES_VERIFY_SCRIPT_SHA256='2e11e5f2fb8f549fad209eec59c5d2c57b0a2ca1c8f9998c8c1281d636da314c'
+POSTGRES_VERIFY_SCRIPT_SHA256='e6751d338f84e3c51cb2e5dd8691e372e704dbd20fb8cc9e960420e81d20b2fd'
 POSTGRES_VERIFY_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/master/scripts/verify-deploy.sh'
 EXPLICIT_POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
 EXPLICIT_NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-}"
@@ -197,7 +197,14 @@ acquire_postgres_operation_lock() {
     echo 'Runtime lock directory is not owned by the current user.' >&2
     exit 1
   }
-  engine_id=$(docker info --format '{{.ID}}')
+  engine_id=$(docker info --format '{{.ID}}') || {
+    echo 'Could not determine the Docker engine ID.' >&2
+    exit 1
+  }
+  [[ -n "$engine_id" ]] || {
+    echo 'Docker engine ID is empty.' >&2
+    exit 1
+  }
   lock_key=$(printf '%s\0%s\0%s' "$engine_id" "$docker_host" noosphere_postgres_data | sha256sum | awk '{print $1}')
   lock_path="$lock_root/noosphere-pgvector-switch-$lock_key.lock"
   exec 8>"$lock_path"

@@ -310,25 +310,42 @@ fi
 [[ $(docker inspect "$db_container" --format '{{.Config.Image}}') == "$SOURCE_IMAGE" ]]
 [[ -f "$journal" && $(jq -r '.phase' "$journal") == preparing ]]
 
-if NOOSPHERE_A2B_FAIL_AFTER_PHASE=recovered \
-  "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" >> "$log_file" 2>&1; then
-  echo 'Early recovered-journal checkpoint unexpectedly reported switch success' >&2
+# Model the installer's inherited transaction lock and prove that recovery
+# honors --defer-app-restart. The source state is verified and archived, but
+# the installer retains sole ownership of the next writer start.
+if [[ -n ${DOCKER_CONTEXT:-} ]]; then
+  installer_docker_host=$(docker context inspect "$DOCKER_CONTEXT" --format '{{(index .Endpoints "docker").Host}}')
+elif [[ -n ${DOCKER_HOST:-} ]]; then
+  installer_docker_host=$DOCKER_HOST
+else
+  installer_docker_context=$(docker context show)
+  installer_docker_host=$(docker context inspect "$installer_docker_context" --format '{{(index .Endpoints "docker").Host}}')
+fi
+installer_engine_id=$(docker info --format '{{.ID}}')
+installer_lock_root=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+installer_lock_key=$(printf '%s\0%s\0%s' "$installer_engine_id" "$installer_docker_host" "$volume" |
+  sha256sum | awk '{print $1}')
+installer_lock_path="$installer_lock_root/noosphere-pgvector-switch-$installer_lock_key.lock"
+exec 8>"$installer_lock_path"
+flock -w 5 8
+if NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$installer_lock_path" \
+  "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" --defer-app-restart >> "$log_file" 2>&1; then
+  echo 'Deferred preparing-journal recovery unexpectedly reported switch success' >&2
   exit 1
 fi
-[[ $(jq -r '.phase + "|" + .recoveredFromPhase' "$journal") == 'recovered|preparing' ]]
+exec 8>&-
 [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
-
-if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" >> "$log_file" 2>&1; then
-  echo 'Preparing-journal recovery unexpectedly reported switch success' >&2
-  exit 1
-fi
-[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 [[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]]
 [[ $(docker inspect "$db_container" --format '{{.Config.Image}}') == "$SOURCE_IMAGE" ]]
 [[ $(docker exec "$db_container" psql -XAtq -v ON_ERROR_STOP=1 -U noosphere -d postgres \
   -c "SELECT count(*) FROM pg_database WHERE datname = '$probe';") == 0 ]]
 [[ ! -f "$journal" ]]
 compgen -G "$journal.recovered-*" >/dev/null
+
+# Simulate the installer deliberately choosing the next writer start after the
+# deferred recovery transaction has released its lock.
+docker compose -f "$compose_file" up -d app
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 
 # Republish the already-verified target gate before retrying. The recovered
 # source marker keeps ordinary candidate startup blocked in this interval.

@@ -111,6 +111,7 @@ docker inspect "$DB_CONTAINER" >/dev/null 2>&1 || fail "database container '$DB_
 case "$EXPECTED_IMAGE_MODE" in
   candidate)
     [[ -n "$POSTGRES_EVIDENCE" ]] || fail 'candidate verification requires NOOSPHERE_POSTGRES_EVIDENCE'
+    [[ -f "$POSTGRES_EVIDENCE" ]] || fail "PostgreSQL transition evidence does not exist: $POSTGRES_EVIDENCE"
     expected_image="$CANDIDATE_IMAGE"
     expected_pgvector="$EXPECTED_PGVECTOR_VERSION"
     ;;

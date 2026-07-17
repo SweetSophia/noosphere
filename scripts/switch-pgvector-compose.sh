@@ -174,7 +174,8 @@ lock_root=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 [[ "$lock_root" == /* && -d "$lock_root" && ! -L "$lock_root" ]] ||
   die "runtime lock directory is unavailable or unsafe: $lock_root"
 [[ $(stat -c '%u' "$lock_root") == "$(id -u)" ]] || die 'runtime lock directory is not owned by the current user'
-engine_id=$(docker info --format '{{.ID}}')
+engine_id=$(docker info --format '{{.ID}}') || die 'could not determine the Docker engine ID'
+[[ -n "$engine_id" ]] || die 'Docker engine ID is empty'
 lock_key=$(printf '%s\0%s\0%s' "$engine_id" "$docker_host" "$volume" | sha256sum | awk '{print $1}')
 lock_path="$lock_root/noosphere-pgvector-switch-$lock_key.lock"
 if [[ -n ${NOOSPHERE_A2B_LOCK_FD:-} ]]; then
@@ -930,8 +931,13 @@ attempt_source_recovery() (
     assert_image_identity "$db_container" "$SOURCE_IMAGE" source false
     assert_compose_authorization_gate "$SOURCE_IMAGE"
     assert_stale_authorization_volume
-    restart_app
-    phase_checkpoint recovery-writer-restarted || return $?
+    if [[ "$restart_app_after_switch" == true ]]; then
+      restart_app
+      phase_checkpoint recovery-writer-restarted || return $?
+    elif docker inspect "$app_container" >/dev/null 2>&1; then
+      [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
+        die 'deferred source app writer restarted unexpectedly'
+    fi
     return 0
   fi
 
@@ -988,12 +994,17 @@ attempt_source_recovery() (
   mv -f "$staged" "$compose_file"
   fsync_path "$(dirname "$compose_file")"
   update_journal recovered || return $?
-  restart_app
-  if [[ "$app_was_running" == true ]]; then
-    [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]] ||
-      die 'source app writer did not restart after verified recovery'
+  if [[ "$restart_app_after_switch" == true ]]; then
+    restart_app
+    if [[ "$app_was_running" == true ]]; then
+      [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]] ||
+        die 'source app writer did not restart after verified recovery'
+    fi
+    phase_checkpoint recovery-writer-restarted || return $?
+  elif docker inspect "$app_container" >/dev/null 2>&1; then
+    [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
+      die 'deferred source app writer restarted unexpectedly'
   fi
-  phase_checkpoint recovery-writer-restarted || return $?
 )
 
 recover_source() {
