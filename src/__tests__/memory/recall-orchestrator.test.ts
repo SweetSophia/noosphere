@@ -694,7 +694,10 @@ async function main() {
   test("tracks per-provider duration", async () => {
     const slowProvider = mockProvider("slow", [], {
       search: async () => {
-        await new Promise((r) => setTimeout(r, 10));
+        // Keep the simulated delay comfortably above the assertion threshold.
+        // Node timers may resolve a nominal 10 ms delay just before the rounded
+        // performance measurement reaches 10 ms, which made this test flaky.
+        await new Promise((r) => setTimeout(r, 25));
         return [
           mockResult({ id: "1", provider: "slow", content: "data" }),
         ];
@@ -712,7 +715,7 @@ async function main() {
 
     assert(
       response.providerMeta[0].durationMs >= 10,
-      "duration tracked (>= 10ms)",
+      "duration tracked for a deliberately slow provider (>= 10ms)",
     );
   });
 
