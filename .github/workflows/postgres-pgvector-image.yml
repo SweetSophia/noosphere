@@ -5,15 +5,16 @@ on:
     branches: [main, master]
     paths:
       - ".github/workflows/postgres-pgvector-image.yml"
-      - "docker/postgres-pgvector/**"
+      - "docker/postgres-pgvector/Dockerfile"
+      - "docker/postgres-pgvector/metadata.env"
       - "scripts/test-pgvector-image.sh"
       - "scripts/test-verify-pgvector-image-index.sh"
       - "scripts/verify-pgvector-image-index.sh"
   push:
     branches: [main, master]
     paths:
-      - ".github/workflows/postgres-pgvector-image.yml"
-      - "docker/postgres-pgvector/**"
+      - "docker/postgres-pgvector/Dockerfile"
+      - "docker/postgres-pgvector/metadata.env"
       - "scripts/test-pgvector-image.sh"
       - "scripts/test-verify-pgvector-image-index.sh"
       - "scripts/verify-pgvector-image-index.sh"

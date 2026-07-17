@@ -44,6 +44,82 @@ scripts/test-pgvector-image.sh noosphere-postgres-pgvector:test
 
 The smoke test verifies OCI identity labels, platform architecture, PostgreSQL and Alpine versions, the bundled license, `CREATE EXTENSION vector`, the extension version, dimensions, and exact distance behavior.
 
+## Phase A2 volume-upgrade rehearsal
+
+Phase A2 uses the immutable multi-architecture image recorded in
+[`rehearsal.env`](./rehearsal.env). It creates only cryptographically named,
+ownership-labelled disposable containers and volumes. The rehearsal refuses
+pre-existing resources, protects the mounted volumes of the bundled production
+database containers, refuses non-local Docker contexts, and removes only
+resources carrying its exact run label. Its randomly named volumes are created
+new and are never aliases for Compose or bind-mounted database storage.
+
+For each supported architecture it:
+
+1. initializes PostgreSQL with the same defaults as bundled Compose, replays
+   every committed migration through Noosphere's pinned Prisma startup path,
+   verifies the exact migration history, and loads a deterministic fixture
+   covering application tables, arrays, JSON, enums, nullable relationships,
+   functions, triggers, constraints, indexes, and collation-sensitive text;
+2. records a committed canonical all-table snapshot digest with normalized
+   Prisma migration history, a schema signature, database/locale/collation
+   identity, data-checksum state, and a custom-format logical backup;
+3. cleanly stops PostgreSQL, copies the physical volume, starts the exact
+   pgvector image on that copy, reruns the real migration path idempotently,
+   and verifies the extension in a scratch database;
+4. cleanly stops the candidate and starts the pinned source image on the same
+   copied volume to prove physical rollback and migration compatibility; and
+5. restores the backup independently into clean candidate-image and
+   source-image volumes, reruns the real migration path, and repeats every
+   integrity check.
+
+Install the pinned Node dependencies first. The rehearsal also requires a local
+Unix-socket Docker context, Docker Buildx, `jq`, `sha256sum`, and `od`:
+
+```bash
+npm ci
+scripts/rehearse-pgvector-volume-upgrade.sh linux/amd64
+scripts/rehearse-pgvector-volume-upgrade.sh linux/arm64
+```
+
+The arm64 command requires binfmt/QEMU on an amd64 host. CI runs both
+architectures independently. The candidate is the Phase A1 index built from
+commit `d1eecc96a6a9b6d14ead2e3d352cadf1e69c8f27`, digest
+`sha256:12bc9b34226803a04811a3ddd06feac14121c2c7ce369aaddbd778d242751292`.
+Before touching a disposable volume, the rehearsal verifies that the selected
+platform's BuildKit provenance names that exact repository and source commit.
+
+Normal exits and interrupt/termination signals remove the exact run's labelled
+resources. CI also invokes a separate `if: always()` cleanup step with a stable
+per-job run ID, covering a rehearsal shell killed by SIGKILL while the hosted
+runner remains available. For a local shell that was forcibly killed, copy the
+run ID from the resource-name prefix and run:
+
+```bash
+scripts/rehearse-pgvector-volume-upgrade.sh --cleanup-run RUN_ID
+```
+
+Cleanup retries container and volume removal, reports leftovers, and refuses
+resources without the exact expected name and ownership label.
+
+When a migration or deterministic fixture changes, supply the new migration
+count in explicit baseline mode. This prints the new digest, exits with status
+3, and still performs exact-run cleanup:
+
+```bash
+scripts/rehearse-pgvector-volume-upgrade.sh \
+  --record-baseline 11 linux/amd64
+```
+
+Copy the printed digest and migration count into `rehearsal.env`, rerun amd64
+normally, then rerun arm64. The committed digest combines a dynamic all-table
+snapshot, normalized migration names and file checksums, and an independent
+SQL-generated snapshot of every application table. The wider gate separately
+compares canonical schema and database/locale/collation identities.
+
 ## Boundary and next phase
 
-This image is non-production capability only. Phase A2 must rehearse backup, restore, copied-volume compatibility, collation health, extension availability, data integrity, and rollback before any bundled Compose switch is proposed.
+This image remains non-production capability only. Phase A2 is rehearsal
+evidence; it does not edit either Compose file, mount the live database, or
+activate hybrid retrieval. A later Phase A2b may propose a bundled Compose
+switch only after the full rehearsal gate is accepted.
