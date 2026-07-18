@@ -21,10 +21,10 @@ SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$HOME/.openclaw/secrets}"
 SECRETS_FILE="${NOOSPHERE_SECRETS_FILE:-$SECRETS_DIR/noosphere-memory.json}"
 SECRET_PROVIDER_ID="${NOOSPHERE_SECRET_PROVIDER_ID:-noosphere-memory}"
 PLUGIN_ID="noosphere-memory"
-POSTGRES_SWITCH_SCRIPT_SHA256='707d85233fdbc4896de2109fa5832831147898ce0f1ef2b7e6f9cf49280cc276'
-POSTGRES_SWITCH_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/master/scripts/switch-pgvector-compose.sh'
+POSTGRES_SWITCH_SCRIPT_SHA256='46acd0f91c0db9474414d5c52e454e125a8e57641633b41d164d1e6c0a4df475'
+POSTGRES_SWITCH_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/a2067895023efc638e966ee827fea67385d8aa37/scripts/switch-pgvector-compose.sh'
 POSTGRES_VERIFY_SCRIPT_SHA256='e6751d338f84e3c51cb2e5dd8691e372e704dbd20fb8cc9e960420e81d20b2fd'
-POSTGRES_VERIFY_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/master/scripts/verify-deploy.sh'
+POSTGRES_VERIFY_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/a2067895023efc638e966ee827fea67385d8aa37/scripts/verify-deploy.sh'
 EXPLICIT_POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
 EXPLICIT_NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-}"
 EXPLICIT_ADMIN_PASSWORD="${NOOSPHERE_ADMIN_PASSWORD:-}"
@@ -164,7 +164,7 @@ prepare_guard_script() {
 }
 
 acquire_postgres_operation_lock() {
-  local docker_context docker_host engine_id lock_root lock_key lock_path
+  local docker_context docker_host docker_socket engine_id lock_root lock_key lock_path
   docker_host=''
   if [[ -n ${DOCKER_CONTEXT:-} ]]; then
     docker_context=$DOCKER_CONTEXT
@@ -188,6 +188,12 @@ acquire_postgres_operation_lock() {
     echo "Refusing non-local Docker endpoint: $docker_host" >&2
     exit 1
   }
+  docker_socket=${docker_host#unix://}
+  [[ "$docker_socket" == /* ]] || {
+    echo "Docker Unix endpoint must use an absolute path: $docker_host" >&2
+    exit 1
+  }
+  docker_host="unix://$(realpath -m "$docker_socket")"
   lock_root=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
   [[ "$lock_root" == /* && -d "$lock_root" && ! -L "$lock_root" ]] || {
     echo "Runtime lock directory is unavailable or unsafe: $lock_root" >&2
@@ -205,7 +211,7 @@ acquire_postgres_operation_lock() {
     echo 'Docker engine ID is empty.' >&2
     exit 1
   }
-  lock_key=$(printf '%s\0%s\0%s' "$engine_id" "$docker_host" noosphere_postgres_data | sha256sum | awk '{print $1}')
+  lock_key=$(printf '%s\0%s' "$engine_id" noosphere_postgres_data | sha256sum | awk '{print $1}')
   lock_path="$lock_root/noosphere-pgvector-switch-$lock_key.lock"
   exec 8>"$lock_path"
   flock -w 5 8 || {
@@ -451,6 +457,7 @@ need openclaw
 need jq
 need sha256sum
 need flock
+need realpath
 
 if ! docker compose version >/dev/null 2>&1; then
   echo "Docker Compose v2 is required: docker compose" >&2
@@ -847,9 +854,16 @@ if [[ "$new_install_required" == true ]]; then
     --env-file "$NOOSPHERE_HOME/.env" \
     --db-container noosphere-openclaw-db \
     --app-container noosphere-openclaw-app \
-    --backup-dir "$POSTGRES_BACKUP_DIR"
+    --backup-dir "$POSTGRES_BACKUP_DIR" \
+    --defer-app-restart
 fi
 
+"$POSTGRES_SWITCH_SCRIPT" --authorize-writer \
+  --compose-file "$NOOSPHERE_HOME/docker-compose.yml" \
+  --env-file "$NOOSPHERE_HOME/.env" \
+  --db-container noosphere-openclaw-db \
+  --app-container noosphere-openclaw-app \
+  --backup-dir "$POSTGRES_BACKUP_DIR"
 docker compose up -d app
 wait_for_container_healthy noosphere-openclaw-app 30
 wait_for_http_health "$APP_URL" 60
