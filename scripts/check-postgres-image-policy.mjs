@@ -7,8 +7,11 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
-const verifiedInstallerRef = "5a4c120777d9f986e37b488850b4e236102735e7";
-const verifiedInstallerSha256 = "a07d6fd0732d1229a4034190046745b279f01582e99c31628a0abc0bec0a7c43";
+const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
+const immutableHelperRef = "a2067895023efc638e966ee827fea67385d8aa37";
+const verifiedInstallerRef = "4a0061a017947825e96b5cc5899914e7d0ed1898";
+const verifiedInstallerSha256 = "c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2";
+const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
   try {
@@ -103,6 +106,42 @@ function extractShellConstant(text, name) {
   return text.match(new RegExp(`^${name}='([a-f0-9]{64})'$`, "m"))?.[1] ?? "";
 }
 
+function extractShellStringConstant(text, name) {
+  return text.match(new RegExp(`^${name}='([^']+)'$`, "m"))?.[1] ?? "";
+}
+
+async function verifyRemoteArtifact(label, url, expectedSha256) {
+  try {
+    const response = await fetch(url, {
+      redirect: "error",
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) {
+      failures.push(`${label} returned HTTP ${response.status}: ${url}`);
+      return;
+    }
+
+    const declaredLength = Number(response.headers.get("content-length") ?? 0);
+    if (declaredLength > 2_000_000) {
+      failures.push(`${label} exceeded the 2 MB policy limit before download`);
+      return;
+    }
+
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.byteLength > 2_000_000) {
+      failures.push(`${label} exceeded the 2 MB policy limit`);
+      return;
+    }
+    const actualSha256 = createHash("sha256").update(bytes).digest("hex");
+    expect(
+      actualSha256 === expectedSha256,
+      `${label} at its immutable ref must match ${expectedSha256}, got ${actualSha256}`,
+    );
+  } catch (error) {
+    failures.push(`${label} could not be verified at its immutable ref: ${error.message}`);
+  }
+}
+
 const lock = parseEnv("docker/postgres-pgvector/rehearsal.env");
 const sourceImage = lock.get("SOURCE_IMAGE") ?? "";
 const candidateImage = lock.get("CANDIDATE_IMAGE") ?? "";
@@ -123,13 +162,29 @@ expectExactDbImage("docker-compose.noosphere.yml", candidateImage, "noosphere_po
 expectExactDbImage("install-openclaw.sh", candidateImage, "noosphere_postgres_authorization");
 
 const installer = read("install-openclaw.sh");
-for (const [constant, relativePath] of [
-  ["POSTGRES_SWITCH_SCRIPT_SHA256", "scripts/switch-pgvector-compose.sh"],
-  ["POSTGRES_VERIFY_SCRIPT_SHA256", "scripts/verify-deploy.sh"],
-]) {
+const helperArtifacts = [
+  {
+    label: "PostgreSQL switch guard",
+    shaConstant: "POSTGRES_SWITCH_SCRIPT_SHA256",
+    urlConstant: "POSTGRES_SWITCH_SCRIPT_URL",
+    relativePath: "scripts/switch-pgvector-compose.sh",
+  },
+  {
+    label: "deployment verifier",
+    shaConstant: "POSTGRES_VERIFY_SCRIPT_SHA256",
+    urlConstant: "POSTGRES_VERIFY_SCRIPT_URL",
+    relativePath: "scripts/verify-deploy.sh",
+  },
+];
+for (const { shaConstant, urlConstant, relativePath } of helperArtifacts) {
+  const expectedUrl = `${rawRepositoryUrl}/${immutableHelperRef}/${relativePath}`;
   expect(
-    extractShellConstant(installer, constant) === sha256(relativePath),
-    `install-openclaw.sh ${constant} must match ${relativePath}`,
+    extractShellConstant(installer, shaConstant) === sha256(relativePath),
+    `install-openclaw.sh ${shaConstant} must match ${relativePath}`,
+  );
+  expect(
+    extractShellStringConstant(installer, urlConstant) === expectedUrl,
+    `install-openclaw.sh ${urlConstant} must use immutable helper ref ${immutableHelperRef}`,
   );
   expect(
     isExecutable(relativePath),
@@ -178,13 +233,19 @@ expect(
 );
 const prepareNewInstall = installer.indexOf('"$POSTGRES_SWITCH_SCRIPT" --prepare-new-install');
 const finalizeNewInstall = installer.indexOf('"$POSTGRES_SWITCH_SCRIPT" --record-new-install');
+const authorizeWriter = installer.indexOf('"$POSTGRES_SWITCH_SCRIPT" --authorize-writer');
 const startApp = installer.indexOf("docker compose up -d app");
 const candidateGateTemplate = installer.indexOf("marker=/run/noosphere-pgvector/candidate-authorized");
-const existingSwitch = installer.lastIndexOf("--defer-app-restart");
+const existingSwitchBlock = installer.indexOf('if [[ "$existing_switch_required" == true ]]');
+const existingSwitchDefer = installer.indexOf("--defer-app-restart", existingSwitchBlock);
+const newInstallBlock = installer.indexOf('if [[ "$new_install_required" == true ]]', existingSwitchBlock);
 const recoveredSwitchResume = installer.indexOf('if [[ "$resume_recovered_switch" == true ]]');
 const composeTemplatePublish = installer.indexOf('cat > "$NOOSPHERE_HOME/docker-compose.yml"');
 expect(
-  candidateGateTemplate >= 0 && existingSwitch > candidateGateTemplate,
+  candidateGateTemplate >= 0 &&
+    existingSwitchBlock > candidateGateTemplate &&
+    existingSwitchDefer > existingSwitchBlock &&
+    newInstallBlock > existingSwitchDefer,
   "install-openclaw.sh must publish the fail-closed candidate gate before switching an existing volume",
 );
 expect(
@@ -199,8 +260,13 @@ expect(
   "install-openclaw.sh must prepare a durable new-volume claim before finalizing it",
 );
 expect(
-  startApp > finalizeNewInstall,
-  "install-openclaw.sh must finalize new-install evidence before starting the app writer",
+  authorizeWriter > finalizeNewInstall && startApp > authorizeWriter,
+  "install-openclaw.sh must authorize the writer under its inherited lock immediately before starting the app",
+);
+expect(
+  installer.includes('docker_host="unix://$(realpath -m "$docker_socket")"') &&
+    installer.includes("printf '%s\\0%s' \"$engine_id\" noosphere_postgres_data"),
+  "install-openclaw.sh must canonicalize the local endpoint and lock by Docker engine identity plus volume",
 );
 expect(
   countLiteral(installer, '"$POSTGRES_VERIFY_SCRIPT"') >= 2,
@@ -263,10 +329,21 @@ expect(
   "switch-pgvector-compose.sh must fail closed when Docker engine identity is unavailable",
 );
 expect(
-  countLiteral(switchScript, 'if [[ "$restart_app_after_switch" == true ]]') === 2 &&
-    countLiteral(switchScript, '[[ "$restart_app_after_switch" == false ]] || restart_app') === 3 &&
+  switchScript.includes("--authorize-writer") &&
+    switchScript.includes("writer authorization requires the app container to remain stopped") &&
+    switchScript.includes('[[ "$restart_app_after_switch" == false ]] || authorize_writer_marker') &&
+    switchScript.includes("deferred source recovery unexpectedly published writer authorization") &&
     switchScript.includes("deferred source app writer restarted unexpectedly"),
-  "switch-pgvector-compose.sh must honor deferred writer restart during both source-recovery paths",
+  "switch-pgvector-compose.sh must keep writer authorization absent until the inherited installer publishes it",
+);
+expect(
+  switchScript.includes('docker_host="unix://$(realpath -m "$docker_socket")"') &&
+    switchScript.includes("printf '%s\\0%s' \"$engine_id\" \"$volume\"") &&
+    switchScript.includes("dockerEngineId") &&
+    switchScript.includes("dockerEndpoint") &&
+    switchScript.includes("transition journal names another Docker engine") &&
+    switchScript.includes("transition journal names another Docker endpoint"),
+  "switch-pgvector-compose.sh must bind locking and durable evidence to the canonical Docker engine",
 );
 expect(
   switchScript.includes("--prepare-new-install") &&
@@ -324,6 +401,26 @@ for (const relativePath of [
     !text.includes("postgres:16-alpine"),
     `${relativePath} must not fall back to a mutable PostgreSQL tag`,
   );
+}
+
+expect(
+  sha256("install-openclaw.sh") === verifiedInstallerSha256,
+  "the checked-in installer bytes must match the checksum advertised by public immutable-install guidance",
+);
+
+if (verifyRemoteArtifacts) {
+  await verifyRemoteArtifact(
+    "public installer",
+    `${rawRepositoryUrl}/${verifiedInstallerRef}/install-openclaw.sh`,
+    verifiedInstallerSha256,
+  );
+  for (const { label, shaConstant, urlConstant } of helperArtifacts) {
+    await verifyRemoteArtifact(
+      label,
+      extractShellStringConstant(installer, urlConstant),
+      extractShellConstant(installer, shaConstant),
+    );
+  }
 }
 
 if (failures.length > 0) {
