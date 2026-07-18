@@ -8,6 +8,19 @@ services:
       args:
         DATABASE_URL: postgresql://noosphere:buildtime@db:5432/noosphere
         NOOSPHERE_VERSION: ${NOOSPHERE_VERSION:-1.11.0}
+    entrypoint:
+      - /bin/sh
+      - -ceu
+      - |
+          marker=/run/noosphere-pgvector/writer-authorized
+          actual="$$(cat "$$marker" 2>/dev/null || true)"
+          if [ "$$actual" != 'ghcr.io/sweetsophia/noosphere-postgres-pgvector@sha256:12bc9b34226803a04811a3ddd06feac14121c2c7ce369aaddbd778d242751292' ]; then
+            echo 'Noosphere writer authorization is incomplete; finish the guarded transition.' >&2
+            exit 78
+          fi
+          exec /app/docker/docker-entrypoint.sh "$$@"
+      - --
+    command: ["node", "server.js"]
     container_name: noosphere-app
     restart: unless-stopped
     labels:
@@ -31,6 +44,7 @@ services:
       - ./uploads:/app/uploads:rw
       - ./uploads/images:/app/uploads/images:rw
       - /home/niya/obsidian-vault/noosphere:/app/obsidian-vault:rw
+      - postgres_authorization:/run/noosphere-pgvector:ro
     depends_on:
       db:
         condition: service_healthy
@@ -50,7 +64,20 @@ services:
       start_period: 45s
 
   db:
-    image: postgres:16-alpine
+    image: ghcr.io/sweetsophia/noosphere-postgres-pgvector@sha256:12bc9b34226803a04811a3ddd06feac14121c2c7ce369aaddbd778d242751292
+    entrypoint:
+      - /bin/sh
+      - -ceu
+      - |
+          marker=/run/noosphere-pgvector/candidate-authorized
+          actual="$$(cat "$$marker" 2>/dev/null || true)"
+          if [ "$$actual" != 'ghcr.io/sweetsophia/noosphere-postgres-pgvector@sha256:12bc9b34226803a04811a3ddd06feac14121c2c7ce369aaddbd778d242751292' ]; then
+            echo 'PostgreSQL candidate authorization is missing; run the guarded installer or switch.' >&2
+            exit 78
+          fi
+          exec /usr/local/bin/docker-entrypoint.sh "$$@"
+      - --
+    command: ["postgres"]
     container_name: noosphere-db
     restart: unless-stopped
     environment:
@@ -59,10 +86,11 @@ services:
       POSTGRES_DB: noosphere
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - postgres_authorization:/run/noosphere-pgvector:ro
     ports:
       - "127.0.0.1:5433:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U noosphere -d noosphere"]
+      test: ["CMD-SHELL", "[ \"$$(cat /proc/1/comm 2>/dev/null)\" = postgres ] && [ \"$$(psql -XAtq -v ON_ERROR_STOP=1 -U noosphere -d noosphere -c 'SELECT 1;' 2>/dev/null)\" = 1 ]"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -88,6 +116,9 @@ volumes:
   postgres_data:
     name: noosphere_postgres_data
     driver: local
+  postgres_authorization:
+    name: noosphere_postgres_authorization
+    external: true
   redis_data:
     name: noosphere_redis_data
     driver: local

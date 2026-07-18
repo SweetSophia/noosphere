@@ -197,7 +197,7 @@ The deferred security and operations details are merge gates for their implement
 1. **Phase 0 — this ADR:** settle contracts without runtime changes.
 2. **Phase A1 — non-production capability:** build and test the pinned Alpine-based pgvector database image in CI. Its supply-chain lock, smoke tests, publication boundary, and local verification commands live in [`docker/postgres-pgvector/README.md`](../docker/postgres-pgvector/README.md).
 3. **Phase A2 — bundled upgrade rehearsal:** prove backup, rollback, volume compatibility, collation health, extension availability, and data integrity without changing production Compose.
-4. **Phase A2b — bundled Compose switch:** adopt the rehearsed database image in bundled and installer Compose only after every A2 gate passes; verify the live volume and rollback procedure again.
+4. **Phase A2b — guarded bundled Compose switch:** pin the accepted image in bundled and installer Compose, require the offline restore-tested source → candidate → source → candidate transaction for existing volumes, and persist fail-closed crash-recovery evidence. The operator contract lives in [`POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md`](./POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md); `vector` remains uninstalled.
 5. **Phase A3 — optional feature storage:** add preflighted feature activation, immutable profiles, vector storage, jobs, triggers, and raw-SQL integration tests.
 6. **Phase B — provider and worker:** add the OpenAI-compatible client, separate worker, conditional publication, backfill, privacy controls, and cache invalidation.
 7. **Phase C — exact hybrid recall:** add the shared authorized candidate relation, query embeddings, deterministic RRF, final authorization, and classified fallback behind the disabled flag.

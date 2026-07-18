@@ -42,8 +42,24 @@ cp noosphere.env.example .env
 # an existing bootstrap admin password.
 # Set NOOSPHERE_FORCE_ADMIN=true to re-assert the ADMIN role on the existing
 # bootstrap admin account (does not rotate the password).
-docker compose -f docker-compose.noosphere.yml up -d
+mkdir -p .noosphere/postgres-pgvector-backups
+chmod 700 .noosphere/postgres-pgvector-backups
+guard=(./scripts/switch-pgvector-compose.sh --compose-file "$PWD/docker-compose.noosphere.yml" \
+  --env-file "$PWD/.env" --db-container noosphere-openclaw-db \
+  --app-container noosphere-openclaw-app --backup-dir "$PWD/.noosphere/postgres-pgvector-backups")
+"${guard[@]}" --prepare-new-install
+docker compose -f docker-compose.noosphere.yml --env-file .env up -d db redis
+docker compose -f docker-compose.noosphere.yml --env-file .env run --rm -T init
+"${guard[@]}" --record-new-install
+docker compose -f docker-compose.noosphere.yml --env-file .env up -d app
 ```
+
+That guarded sequence is for an absent PostgreSQL volume only. The candidate
+Compose service requires an external authorization volume and refuses an
+ordinary start without guard-created evidence. If `noosphere_postgres_data`
+already exists, complete the existing-volume transition in
+[PostgreSQL pgvector Compose upgrade](docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md)
+first.
 
 Then open `http://localhost:6578/wiki`.
 
@@ -67,7 +83,16 @@ To run from source instead:
 cp .env.example .env
 # Edit DATABASE_URL, NEXTAUTH_SECRET, NEXTAUTH_URL, APP_URL, and POSTGRES_PASSWORD.
 docker network create noosphere-net 2>/dev/null || true
-docker compose up -d
+mkdir -p .noosphere/postgres-pgvector-backups
+chmod 700 .noosphere/postgres-pgvector-backups
+guard=(./scripts/switch-pgvector-compose.sh --compose-file "$PWD/docker-compose.yml" \
+  --env-file "$PWD/.env" --db-container noosphere-db --app-container noosphere-app \
+  --backup-dir "$PWD/.noosphere/postgres-pgvector-backups")
+"${guard[@]}" --prepare-new-install
+docker compose up -d db redis
+npm run db:migrate
+"${guard[@]}" --record-new-install
+docker compose up -d app
 docker compose exec app node scripts/create-admin.js
 ```
 
@@ -77,13 +102,20 @@ OpenClaw users can install Noosphere and the OpenClaw plugin with the repository
 installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/master/install-openclaw.sh | bash
+# Installer commit: 4a0061a017947825e96b5cc5899914e7d0ed1898
+# Expected SHA-256: c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2
+installer="$(mktemp)"
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/4a0061a017947825e96b5cc5899914e7d0ed1898/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' 'c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2' "$installer" | sha256sum -c -
+bash "$installer" && rm -f "$installer"
 openclaw noosphere doctor
 openclaw noosphere status
 ```
 
 The installer provisions Docker, Redis, Noosphere secrets, and the OpenClaw plugin
-configuration. For the full setup, upgrade, operations, and uninstall guide, see
+configuration. Existing installations are upgraded only through its offline,
+restore-tested PostgreSQL image guard; unrestricted Compose upgrades are not a
+supported database transition. For the full setup, upgrade, operations, and uninstall guide, see
 [docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md](docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md).
 
 ## Choose an Integration
@@ -243,10 +275,24 @@ npm install
 cp .env.example .env
 # Edit DATABASE_URL, NEXTAUTH_SECRET, NEXTAUTH_URL, APP_URL, and POSTGRES_PASSWORD.
 docker network create noosphere-net 2>/dev/null || true
+mkdir -p .noosphere/postgres-pgvector-backups
+chmod 700 .noosphere/postgres-pgvector-backups
+guard=(./scripts/switch-pgvector-compose.sh --compose-file "$PWD/docker-compose.yml" \
+  --env-file "$PWD/.env" --db-container noosphere-db --app-container noosphere-app \
+  --backup-dir "$PWD/.noosphere/postgres-pgvector-backups")
+"${guard[@]}" --prepare-new-install
 docker compose up -d db redis
 npm run db:migrate
+"${guard[@]}" --record-new-install
 PORT=6578 npm run dev
 ```
+
+The external `noosphere_postgres_authorization` volume is created only by the
+guard, so an ordinary candidate Compose start fails closed. When the
+development Compose project reuses an existing
+`noosphere_postgres_data` volume created by the former source image, run the
+guarded PostgreSQL image transition before the first `docker compose up` from
+this revision.
 
 Useful checks:
 
@@ -265,7 +311,8 @@ Health and deployment checks:
 
 ```bash
 curl http://127.0.0.1:6578/api/health
-npm run deploy:verify
+NOOSPHERE_POSTGRES_EVIDENCE=/absolute/private/path/postgres-pgvector/noosphere_postgres_data.phase-a2b.json \
+  npm run deploy:verify
 docker compose logs -f app
 ```
 
@@ -275,10 +322,14 @@ Production deploys should preserve the pinned Compose project and named volumes:
 - PostgreSQL volume: `noosphere_postgres_data`
 - Redis volume: `noosphere_redis_data`
 
-`npm run deploy:verify` fails if the database container is mounted to the wrong
-PostgreSQL volume or if the live database has no topics, articles, or API keys.
-That catches the empty-volume failure mode where `/api/health` can pass while
-authenticated tools return `Unauthorized`.
+Candidate verification requires the active completed Phase A2b journal through
+`NOOSPHERE_POSTGRES_EVIDENCE`. `npm run deploy:verify` fails if that evidence
+does not bind the running database image, data volume, authorization volume, and
+template probe; if PostgreSQL exposes the wrong pgvector capability or has
+activated `vector` in any database/template; or if there are no topics,
+articles, or API keys. The guarded Phase A2b transition and recovery contract is
+documented in
+[docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md](docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md).
 
 Keep detailed recovery work in deployment/runbook docs rather than this README.
 
@@ -288,6 +339,7 @@ Keep detailed recovery work in deployment/runbook docs rather than this README.
 | --- | --- |
 | [README-legacy.md](README-legacy.md) | Previous full README content kept for reference during the docs split |
 | [docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md](docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md) | OpenClaw install, operations, upgrade, troubleshooting, and uninstall |
+| [docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md](docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md) | Guarded PostgreSQL image transition, proof, rollback, and recovery |
 | [docs/NOOSPHERE-MEMORY-ARCHITECTURE.md](docs/NOOSPHERE-MEMORY-ARCHITECTURE.md) | Provider abstraction, recall orchestration, ranking, budgeting, and scheduler |
 | [docs/NOOSPHERE_MEMORY_COMPARISON.md](docs/NOOSPHERE_MEMORY_COMPARISON.md) | Comparison with Hindsight, QMD, memU, mem0, and LanceDB Pro |
 | [docs/NOOSPHERE-SKILL.md](docs/NOOSPHERE-SKILL.md) | Agent-facing wiki skill reference |

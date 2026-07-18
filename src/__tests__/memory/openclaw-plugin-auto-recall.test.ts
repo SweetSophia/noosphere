@@ -9,6 +9,7 @@ import {
 import {
   buildNoosphereDoctorReport,
   buildNoosphereStatusReport,
+  getVerifiedInstallerCommands,
 } from "../../../openclaw-noosphere-memory/src/cli.js";
 import { createNoosphereCorpusSupplement } from "../../../openclaw-noosphere-memory/src/corpus-supplement.js";
 import {
@@ -2060,6 +2061,20 @@ describe("OpenClaw Noosphere CLI helpers", () => {
     });
     throw new Error("unreachable");
   };
+
+  it("prints an immutable checksum-verified installer flow", () => {
+    const commands = getVerifiedInstallerCommands();
+    const combined = commands.join("\n");
+
+    assert.equal(commands.length, 4);
+    assert.match(combined, /4a0061a017947825e96b5cc5899914e7d0ed1898/);
+    assert.match(combined, /c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2/);
+    assert.match(commands[0], /mktemp/);
+    assert.match(commands[1], /curl .* -o \"\$installer\"/);
+    assert.match(commands[2], /sha256sum -c -/);
+    assert.match(commands[3], /^bash /);
+    assert.doesNotMatch(combined, /\/master\/install-openclaw\.sh|install-openclaw\.sh \| bash/);
+  });
 
   it("builds a passing doctor report when runtime prerequisites are satisfied", async () => {
     const report = await buildNoosphereDoctorReport(rawConfig, rootConfig, {

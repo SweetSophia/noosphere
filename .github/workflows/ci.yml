@@ -25,6 +25,9 @@ jobs:
       - name: Check package publishing policy
         run: npm run package-policy:check
 
+      - name: Check PostgreSQL image distribution policy
+        run: npm run postgres-image:check -- --verify-remote
+
       - name: Install dependencies
         run: npm ci
 

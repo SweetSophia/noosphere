@@ -20,6 +20,7 @@ Install these on the machine running OpenClaw Gateway:
 - Node.js 22+
 - OpenClaw CLI
 - `curl`
+- `jq`, `sha256sum`, and `flock`
 
 Verify:
 
@@ -29,6 +30,9 @@ docker compose version
 node --version
 openclaw --version
 curl --version
+jq --version
+sha256sum --version
+flock --version
 ```
 
 ## Quick install
@@ -36,7 +40,12 @@ curl --version
 Use the installer from the repository:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/master/install-openclaw.sh | bash
+# Installer commit: 4a0061a017947825e96b5cc5899914e7d0ed1898
+# Expected SHA-256: c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2
+installer="$(mktemp)"
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/4a0061a017947825e96b5cc5899914e7d0ed1898/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' 'c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2' "$installer" | sha256sum -c -
+bash "$installer" && rm -f "$installer"
 ```
 
 The installer:
@@ -44,14 +53,16 @@ The installer:
 1. **Prompts for IP address selection** — detects available network interfaces (localhost, Tailscale, local network IPs) and lets you choose which address Noosphere will bind to. You can also select `0.0.0.0` (all interfaces) or enter a custom IP.
 2. Creates `~/.noosphere/`.
 3. Generates local secrets.
-4. Writes a production `docker-compose.yml` using `ghcr.io/sweetsophia/noosphere`.
-5. Starts PostgreSQL, Redis, and Noosphere.
-6. Runs Prisma migrations through `docker/migrate-or-baseline.mjs`.
-7. Runs repeatable bootstrap through `docker/bootstrap.mjs` using the same generated admin/API credentials that are later written to `.env` and OpenClaw secrets.
-8. Writes `~/.openclaw/secrets/noosphere-memory.json`.
-9. Installs or updates `noosphere-memory` in OpenClaw.
-10. Patches OpenClaw config with the Noosphere base URL, API key secret reference, and `hooks.allowPromptInjection: true`.
-11. Restarts OpenClaw Gateway when available.
+4. For an existing install, takes an exclusive operation lock and writes a fail-closed candidate Compose gate while the source container keeps running unchanged.
+5. Runs the offline, restore-tested PostgreSQL image switch; candidate recreation remains blocked until the guard creates exact authorization.
+6. For a new database, durably claims the still-absent named volume, creates it with provenance labels, then starts PostgreSQL and Redis on the rehearsed candidate.
+7. Runs Prisma migrations through `docker/migrate-or-baseline.mjs`.
+8. Runs repeatable bootstrap through `docker/bootstrap.mjs` using the same generated admin/API credentials that are later written to `.env` and OpenClaw secrets.
+9. Finalizes new-install provenance before starting Noosphere (or validates completed switch evidence), then runs full deployment verification.
+10. Writes `~/.openclaw/secrets/noosphere-memory.json`.
+11. Installs or updates `noosphere-memory` in OpenClaw.
+12. Patches OpenClaw config with the Noosphere base URL, API key secret reference, and `hooks.allowPromptInjection: true`.
+13. Restarts OpenClaw Gateway when available.
 
 > **Note:** The installer can still prompt when run through `curl | bash` by reading from `/dev/tty` if a controlling terminal is available. The interactive IP prompt is skipped when `APP_URL` is set, or when no interactive terminal is available (for example CI/cron/background automation). In non-interactive mode, the script auto-detects the best available IP (Tailscale > localhost). Set `APP_URL` beforehand to force a specific address in any mode.
 
@@ -85,6 +96,10 @@ Set these environment variables before running the installer when you need non-d
 | `NOOSPHERE_VERSION` | `latest` | GHCR image tag. |
 | `NOOSPHERE_IMAGE` | `ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION}` | Full image reference override. |
 | `REDIS_URL` | `redis://redis:6379` | Redis connection string used inside Compose. Leave default for the bundled Redis service. |
+| `PG_POOL_MAX` | `20` | Maximum application PostgreSQL pool size. |
+| `PG_IDLE_TIMEOUT_MS` | `30000` | Idle PostgreSQL connection timeout. |
+| `PG_CONN_TIMEOUT_MS` | `5000` | PostgreSQL connection timeout. |
+| `NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE` | `120` | Per-process automatic-recall request limit. |
 | `APP_URL` | `http://127.0.0.1:${NOOSPHERE_PORT}` | URL stored in Noosphere/OpenClaw config. When set, skips the interactive IP selection prompt. |
 | `BIND_ADDRESS` | derived from `APP_URL` host (if a valid IP) or `127.0.0.1` | Docker port binding address. Set explicitly to override the derived value (e.g., `0.0.0.0` to bind all interfaces, or `127.0.0.1` to force localhost regardless of `APP_URL`). |
 | `NOOSPHERE_ADMIN_PASSWORD_RESET` | `false` | Forwarded into the generated `.env`; set to `true` only when intentionally rotating an existing bootstrap admin password. |
@@ -137,20 +152,16 @@ Use this when you want to run Noosphere yourself instead of using the installer.
 ```bash
 git clone https://github.com/SweetSophia/noosphere.git
 cd noosphere
+repo="$PWD"
 mkdir -p ~/.noosphere
 cp docker-compose.noosphere.yml ~/.noosphere/docker-compose.yml
 cp noosphere.env.example ~/.noosphere/.env
 chmod 600 ~/.noosphere/.env
 ```
 
-If you do not want a checkout, download the two files directly:
-
-```bash
-mkdir -p ~/.noosphere
-curl -fsSLo ~/.noosphere/docker-compose.yml https://raw.githubusercontent.com/SweetSophia/noosphere/master/docker-compose.noosphere.yml
-curl -fsSLo ~/.noosphere/.env https://raw.githubusercontent.com/SweetSophia/noosphere/master/noosphere.env.example
-chmod 600 ~/.noosphere/.env
-```
+The candidate Compose file intentionally cannot start without guard-created
+authorization evidence. If you do not want a repository checkout, use the
+checksum-pinned installer instead of downloading and starting Compose directly.
 
 Edit `~/.noosphere/.env` and set strong values for:
 
@@ -164,17 +175,32 @@ Start and wait for health:
 
 ```bash
 cd ~/.noosphere
+mkdir -p backups/postgres-pgvector
+chmod 700 backups/postgres-pgvector
+guard=("$repo/scripts/switch-pgvector-compose.sh" --compose-file "$PWD/docker-compose.yml" \
+  --env-file "$PWD/.env" --db-container noosphere-openclaw-db \
+  --app-container noosphere-openclaw-app --backup-dir "$PWD/backups/postgres-pgvector")
+"${guard[@]}" --prepare-new-install
 docker compose pull
-docker compose up -d
+docker compose up -d db redis
+docker compose run --rm -T init
+"${guard[@]}" --record-new-install
+docker compose up -d app
 for i in {1..60}; do
   curl -fsS http://127.0.0.1:6578/api/health && break
   sleep 2
 done
 ```
 
-The production Compose template includes a one-shot `init` service. It waits for PostgreSQL, applies migrations, runs bootstrap, then allows the app service to start.
+The guard creates an external `noosphere_postgres_authorization` volume and
+binds its marker to the candidate and PostgreSQL data volume. The production
+Compose template refuses PostgreSQL startup without that evidence. Its one-shot
+`init` service waits for PostgreSQL, applies migrations, and runs bootstrap;
+new-install evidence is finalized before the app service starts.
 It also starts a Redis service for recall/search caching; if Redis is unavailable, Noosphere fails open and continues serving search from PostgreSQL.
 The template pins the Compose project and persistent volume names (`noosphere_postgres_data`, `noosphere_uploads`, and `noosphere_redis_data`) so moving the Compose file between directories does not silently create a second empty database.
+
+These manual start commands are for a new database volume. Before upgrading an existing PostgreSQL volume, use the guarded flow in [PostgreSQL pgvector Compose upgrade](POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md).
 
 ## Manual OpenClaw plugin install
 
@@ -386,17 +412,21 @@ curl -s https://<host>/api/memory/status \
 
 ## Upgrade
 
-Recommended flow:
+Use the guarded installer for upgrades as well as first-time setup:
 
 ```bash
-cd ~/.noosphere
-docker compose pull
-docker compose up -d
-openclaw plugins update noosphere-memory
+# Installer commit: 4a0061a017947825e96b5cc5899914e7d0ed1898
+# Expected SHA-256: c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2
+installer="$(mktemp)"
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/4a0061a017947825e96b5cc5899914e7d0ed1898/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' 'c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2' "$installer" | sha256sum -c -
+bash "$installer" && rm -f "$installer"
 openclaw noosphere doctor
 ```
 
-The Compose `init` service runs migration/bootstrap logic before app startup, and `docker compose up -d` is preferred over app-only recreation when upgrading to versions that add services such as Redis. Bootstrap is repeatable and preserves article/topic content. Existing bootstrap admin accounts keep their current password unless `NOOSPHERE_ADMIN_PASSWORD_RESET=true`; `NOOSPHERE_FORCE_ADMIN=true` re-asserts the ADMIN role on the existing account and does **not** rotate the password (combine with `NOOSPHERE_ADMIN_PASSWORD_RESET=true` for a full role + password rotation). After upgrading, verify admin login once; set `NOOSPHERE_ADMIN_PASSWORD_RESET=true` for a single bootstrap run if you intentionally want `.env` to rotate the existing admin password.
+Do not replace this with an unrestricted `docker compose pull && docker compose up`. The installer preserves the existing `.env`, proves backup restoration and exact source rollback with writers stopped, promotes the candidate database image only after invariants pass, then runs migration/bootstrap and deployment verification. Existing bootstrap admin accounts keep their current password unless `NOOSPHERE_ADMIN_PASSWORD_RESET=true`; `NOOSPHERE_FORCE_ADMIN=true` re-asserts the ADMIN role without rotating the password.
+
+The complete source/candidate contract, repository-checkout procedure, evidence paths, and interrupted-run recovery are documented in [PostgreSQL pgvector Compose upgrade](POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md).
 After an upgrade, verify the database volume identity before treating API key errors as key rotation:
 
 ```bash
@@ -515,10 +545,15 @@ Applying database schema and bootstrap data...
 
 then the install did not complete. A healthy run must continue with `Bootstrap completed successfully.` and `Installing OpenClaw plugin: ...`.
 
-First make sure you are using the latest installer from `master`:
+First use the reviewed installer revision and verify its checksum before execution:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/master/install-openclaw.sh | bash
+# Installer commit: 4a0061a017947825e96b5cc5899914e7d0ed1898
+# Expected SHA-256: c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2
+installer="$(mktemp)"
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/4a0061a017947825e96b5cc5899914e7d0ed1898/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' 'c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2' "$installer" | sha256sum -c -
+bash "$installer" && rm -f "$installer"
 ```
 
 The current installer protects `curl | bash` runs by redirecting the bootstrap container's stdin from `/dev/null`, so Docker Compose cannot consume the remaining installer script before app/plugin setup. If the issue persists, inspect the partial state before retrying:
