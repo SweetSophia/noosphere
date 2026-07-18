@@ -31,6 +31,23 @@ backup_dir="$tmp_dir/backups"
 log_file="$tmp_dir/switch.log"
 mkdir -m 700 "$backup_dir"
 
+docker_engine_id=$(docker info --format '{{.ID}}')
+if [[ -n ${DOCKER_CONTEXT:-} ]]; then
+  docker_endpoint=$(docker context inspect "$DOCKER_CONTEXT" --format '{{(index .Endpoints "docker").Host}}')
+elif [[ -n ${DOCKER_HOST:-} ]]; then
+  docker_endpoint=$DOCKER_HOST
+else
+  docker_context=$(docker context show)
+  docker_endpoint=$(docker context inspect "$docker_context" --format '{{(index .Endpoints "docker").Host}}')
+fi
+docker_endpoint="unix://$(realpath -m "${docker_endpoint#unix://}")"
+lock_path_for_volume() {
+  local target_volume=$1 lock_root lock_key
+  lock_root=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+  lock_key=$(printf '%s\0%s' "$docker_engine_id" "$target_volume" | sha256sum | awk '{print $1}')
+  printf '%s/noosphere-pgvector-switch-%s.lock\n' "$lock_root" "$lock_key"
+}
+
 cleanup() {
   local status=$? id
   for id in $(docker ps -aq --filter "label=io.noosphere.pgvector-switch-run" --filter "name=noosphere-a2b"); do
@@ -281,6 +298,8 @@ grep -F 'test pause injected after journal phase preparing' "$log_file" >/dev/nu
 kill -KILL "$switch_pid"
 wait "$switch_pid" 2>/dev/null || true
 [[ -f "$journal" && $(jq -r '.phase' "$journal") == preparing ]]
+[[ $(jq -r '.dockerEngineId' "$journal") == "$docker_engine_id" ]]
+[[ $(jq -r '.dockerEndpoint' "$journal") == "$docker_endpoint" ]]
 probe=$(jq -r '.probeDatabase' "$journal")
 
 # Model a power loss after the claimed CREATE DATABASE but before DROP. The
@@ -313,19 +332,7 @@ fi
 # Model the installer's inherited transaction lock and prove that recovery
 # honors --defer-app-restart. The source state is verified and archived, but
 # the installer retains sole ownership of the next writer start.
-if [[ -n ${DOCKER_CONTEXT:-} ]]; then
-  installer_docker_host=$(docker context inspect "$DOCKER_CONTEXT" --format '{{(index .Endpoints "docker").Host}}')
-elif [[ -n ${DOCKER_HOST:-} ]]; then
-  installer_docker_host=$DOCKER_HOST
-else
-  installer_docker_context=$(docker context show)
-  installer_docker_host=$(docker context inspect "$installer_docker_context" --format '{{(index .Endpoints "docker").Host}}')
-fi
-installer_engine_id=$(docker info --format '{{.ID}}')
-installer_lock_root=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
-installer_lock_key=$(printf '%s\0%s\0%s' "$installer_engine_id" "$installer_docker_host" "$volume" |
-  sha256sum | awk '{print $1}')
-installer_lock_path="$installer_lock_root/noosphere-pgvector-switch-$installer_lock_key.lock"
+installer_lock_path=$(lock_path_for_volume "$volume")
 exec 8>"$installer_lock_path"
 flock -w 5 8
 if NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$installer_lock_path" \
@@ -341,11 +348,20 @@ exec 8>&-
   -c "SELECT count(*) FROM pg_database WHERE datname = '$probe';") == 0 ]]
 [[ ! -f "$journal" ]]
 compgen -G "$journal.recovered-*" >/dev/null
+[[ $(docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'cat /authorization/writer-authorized 2>/dev/null || true') == '' ]]
 
-# Simulate the installer deliberately choosing the next writer start after the
-# deferred recovery transaction has released its lock.
-docker compose -f "$compose_file" up -d app
-[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+# Ordinary Compose must remain unable to publish a writer after the installer
+# requested deferred ownership and released its failed transaction.
+docker compose -f "$compose_file" up -d --force-recreate app >> "$log_file" 2>&1 || true
+for _ in $(seq 1 30); do
+  [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]] && break
+  sleep 1
+done
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
+[[ $(docker inspect "$app_container" --format '{{.State.ExitCode}}') == 78 ]]
 
 # Republish the already-verified target gate before retrying. The recovered
 # source marker keeps ordinary candidate startup blocked in this interval.
@@ -406,6 +422,24 @@ if docker inspect "$app_container" >/dev/null 2>&1; then
 fi
 install -m 600 "$saved_journal" "$journal"
 
+jq '.dockerEngineId = "different-engine"' "$journal" > "$tampered_journal"
+install -m 600 "$tampered_journal" "$journal"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" >> "$log_file" 2>&1; then
+  echo 'Guarded switch accepted recovery evidence from another Docker engine' >&2
+  exit 1
+fi
+[[ -f "$journal" ]]
+install -m 600 "$saved_journal" "$journal"
+
+jq '.dockerEndpoint = "unix:///different/docker.sock"' "$journal" > "$tampered_journal"
+install -m 600 "$tampered_journal" "$journal"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" >> "$log_file" 2>&1; then
+  echo 'Guarded switch accepted recovery evidence from another Docker endpoint' >&2
+  exit 1
+fi
+[[ -f "$journal" ]]
+install -m 600 "$saved_journal" "$journal"
+
 if NOOSPHERE_A2B_FAIL_AFTER_PHASE=recovered \
   "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" >> "$log_file" 2>&1; then
   echo 'Recovery checkpoint fault unexpectedly reported switch success' >&2
@@ -446,8 +480,12 @@ if NOOSPHERE_A2B_FAIL_AFTER_PHASE=recovery-writer-restarted \
   exit 1
 fi
 [[ $(jq -r '.phase' "$journal") == recovered ]]
-[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+if docker inspect "$app_container" >/dev/null 2>&1; then
+  [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
+fi
 [[ $(docker inspect "$db_container" --format '{{.Config.Image}}') == "$SOURCE_IMAGE" ]]
+docker compose -f "$compose_file" up -d app
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 docker exec "$db_container" psql -X -v ON_ERROR_STOP=1 -U noosphere -d noosphere -c \
   "INSERT INTO \"Topic\" VALUES ('topic-recovery-write', 'Write after recovered handoff');" >/dev/null
 
@@ -456,13 +494,15 @@ if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" >> "$log_f
   exit 1
 fi
 [[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]]
-[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
 [[ $(docker inspect "$db_container" --format '{{.Config.Image}}') == "$SOURCE_IMAGE" ]]
 [[ $(docker exec "$db_container" psql -XAtq -U noosphere -d noosphere -c \
   "SELECT count(*) FROM \"Topic\" WHERE id = 'topic-recovery-write';") == 1 ]]
 docker inspect "$app_container" | jq -e --arg source "$SOURCE_IMAGE" '
   .[0].Config.Entrypoint | any(type == "string" and contains("writer-authorized") and contains($source))
 ' >/dev/null
+docker compose -f "$compose_file" up -d app
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 [[ ! -f "$journal" ]]
 compgen -G "$journal.recovered-*" >/dev/null
 
@@ -482,7 +522,26 @@ docker inspect "$app_container" | jq -e --arg candidate "$CANDIDATE_IMAGE" '
 # application row counts: legitimate writes after commit must not be rolled back.
 docker exec "$db_container" psql -X -v ON_ERROR_STOP=1 -U noosphere -d noosphere -c \
   "INSERT INTO \"Topic\" VALUES ('topic-2', 'Post-commit write');" >/dev/null
-"$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" >> "$log_file" 2>&1
+exec 8>"$installer_lock_path"
+flock -w 5 8
+NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$installer_lock_path" \
+  "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" --defer-app-restart >> "$log_file" 2>&1
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
+if docker exec "$db_container" test -e /run/noosphere-pgvector/writer-authorized; then
+  echo 'Deferred completed-evidence verification published writer authorization' >&2
+  exit 1
+fi
+docker compose -f "$compose_file" up -d --force-recreate app >> "$log_file" 2>&1 || true
+for _ in $(seq 1 30); do
+  [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]] && break
+  sleep 1
+done
+[[ $(docker inspect "$app_container" --format '{{.State.ExitCode}}') == 78 ]]
+NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$installer_lock_path" \
+  "$ROOT_DIR/scripts/switch-pgvector-compose.sh" --authorize-writer "${switch_args[@]}" >> "$log_file" 2>&1
+exec 8>&-
+docker compose -f "$compose_file" up -d --force-recreate app
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 [[ $(docker exec "$db_container" psql -XAtq -U noosphere -d noosphere -c 'SELECT count(*) FROM "Topic";') == 3 ]]
 
 # A candidate that already contains an upgraded source volume cannot be blessed
@@ -595,6 +654,8 @@ if NOOSPHERE_A2B_FAIL_AFTER_PHASE=claim-created \
   exit 1
 fi
 [[ $(jq -r '.phase + "|" + .mode' "$new_install_journal") == 'claim-created|new-install' ]]
+[[ $(jq -r '.dockerEngineId' "$new_install_journal") == "$docker_engine_id" ]]
+[[ $(jq -r '.dockerEndpoint' "$new_install_journal") == "$docker_endpoint" ]]
 if docker volume inspect "$new_volume" >/dev/null 2>&1; then
   echo 'New-install volume was created before its durable claim checkpoint' >&2
   exit 1
@@ -683,9 +744,22 @@ if docker exec "$new_db_container" test -e /run/noosphere-pgvector/writer-author
   exit 1
 fi
 
-"$ROOT_DIR/scripts/switch-pgvector-compose.sh" --record-new-install "${new_install_args[@]}" >> "$log_file" 2>&1
+new_installer_lock_path=$(lock_path_for_volume "$new_volume")
+exec 8>"$new_installer_lock_path"
+flock -w 5 8
+NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$new_installer_lock_path" \
+  "$ROOT_DIR/scripts/switch-pgvector-compose.sh" --record-new-install --defer-app-restart \
+  "${new_install_args[@]}" >> "$log_file" 2>&1
+if docker exec "$new_db_container" test -e /run/noosphere-pgvector/writer-authorized; then
+  echo 'Deferred new-install completion published writer authorization' >&2
+  exit 1
+fi
+NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$new_installer_lock_path" \
+  "$ROOT_DIR/scripts/switch-pgvector-compose.sh" --authorize-writer \
+  "${new_install_args[@]}" >> "$log_file" 2>&1
+exec 8>&-
 [[ $(docker exec "$new_db_container" cat /run/noosphere-pgvector/writer-authorized) == "$CANDIDATE_IMAGE" ]]
-docker compose -f "$new_compose_file" up -d app
+docker compose -f "$new_compose_file" up -d --force-recreate app
 for _ in $(seq 1 30); do
   [[ $(docker inspect "$new_app_container" --format '{{.State.Running}}') == true ]] && break
   sleep 1

@@ -55,6 +55,8 @@ Usage:
     --db-container NAME --app-container NAME --backup-dir DIR [options]
   switch-pgvector-compose.sh --prepare-new-install --compose-file FILE \
     --db-container NAME --app-container NAME --backup-dir DIR [options]
+  switch-pgvector-compose.sh --authorize-writer --compose-file FILE \
+    --db-container NAME --app-container NAME --backup-dir DIR [options]
 
 Options:
   --env-file FILE          Compose environment file
@@ -64,6 +66,7 @@ Options:
   --platform OS/ARCH       Explicit platform (default: running image platform)
   --prepare-new-install    Durably claim and create an absent candidate volume
   --record-new-install     Finalize a prepared new-volume claim before app start
+  --authorize-writer       Publish writer authorization inside an inherited installer lock
   --defer-app-restart      Keep the app stopped for an inherited installer transaction
   --help                   Show this help
 
@@ -104,6 +107,7 @@ while (($# > 0)); do
     --platform) platform=${2:?missing value}; shift 2 ;;
     --prepare-new-install) mode='prepare-new-install'; shift ;;
     --record-new-install) mode='record-new-install'; shift ;;
+    --authorize-writer) mode='authorize-writer'; shift ;;
     --defer-app-restart) restart_app_after_switch=false; shift ;;
     --help|-h) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
@@ -149,6 +153,9 @@ else
     die "could not inspect Docker context $docker_context"
 fi
 [[ "$docker_host" == unix://* ]] || die "refusing non-local Docker endpoint: $docker_host"
+docker_socket=${docker_host#unix://}
+[[ "$docker_socket" == /* ]] || die "Docker Unix endpoint must use an absolute path: $docker_host"
+docker_host="unix://$(realpath -m "$docker_socket")"
 
 reject_symlink_components() {
   local target=$1 current='/' component
@@ -176,7 +183,7 @@ lock_root=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 [[ $(stat -c '%u' "$lock_root") == "$(id -u)" ]] || die 'runtime lock directory is not owned by the current user'
 engine_id=$(docker info --format '{{.ID}}') || die 'could not determine the Docker engine ID'
 [[ -n "$engine_id" ]] || die 'Docker engine ID is empty'
-lock_key=$(printf '%s\0%s\0%s' "$engine_id" "$docker_host" "$volume" | sha256sum | awk '{print $1}')
+lock_key=$(printf '%s\0%s' "$engine_id" "$volume" | sha256sum | awk '{print $1}')
 lock_path="$lock_root/noosphere-pgvector-switch-$lock_key.lock"
 if [[ -n ${NOOSPHERE_A2B_LOCK_FD:-} ]]; then
   [[ "$NOOSPHERE_A2B_LOCK_FD" =~ ^[0-9]+$ ]] || die 'invalid inherited operation-lock descriptor'
@@ -193,6 +200,8 @@ else
 fi
 [[ "$restart_app_after_switch" == true || -n ${NOOSPHERE_A2B_LOCK_FD:-} ]] ||
   die '--defer-app-restart is allowed only inside an inherited installer transaction'
+[[ "$mode" != authorize-writer || -n ${NOOSPHERE_A2B_LOCK_FD:-} ]] ||
+  die '--authorize-writer is allowed only inside an inherited installer transaction'
 
 journal="$backup_dir/${volume}.phase-a2b.json"
 
@@ -309,6 +318,7 @@ assert_owned_regular_file() {
 
 validate_journal() {
   local stored_volume stored_source stored_candidate stored_platform stored_authorization expected_run_dir
+  local stored_engine_id stored_docker_endpoint
   local stored_original stored_candidate_compose stored_source_override stored_backup
   local stored_original_sha stored_candidate_sha stored_override_sha stored_backup_sha
   local evidence_file signature evidence_phase
@@ -323,12 +333,16 @@ validate_journal() {
   stored_candidate=$(jq -er '.candidateImage' "$journal")
   stored_platform=$(jq -er '.platform' "$journal")
   stored_authorization=$(jq -er '.authorizationVolume' "$journal")
+  stored_engine_id=$(jq -er '.dockerEngineId' "$journal")
+  stored_docker_endpoint=$(jq -er '.dockerEndpoint' "$journal")
   run_id=$(jq -er '.runId' "$journal")
   probe_database=$(jq -er '.probeDatabase' "$journal")
 
   [[ "$stored_volume" == "$volume" ]] || die 'transition journal names another PostgreSQL volume'
   [[ "$stored_candidate" == "$CANDIDATE_IMAGE" ]] || die 'transition journal names another candidate image'
   [[ "$stored_authorization" == "$authorization_volume" ]] || die 'transition journal names another authorization volume'
+  [[ "$stored_engine_id" == "$engine_id" ]] || die 'transition journal names another Docker engine'
+  [[ "$stored_docker_endpoint" == "$docker_host" ]] || die 'transition journal names another Docker endpoint'
   [[ "$stored_platform" =~ ^linux/(amd64|arm64)$ ]] || die 'transition journal contains an invalid platform'
   [[ -z "$platform" || "$stored_platform" == "$platform" ]] || die 'transition journal names another platform'
   [[ "$run_id" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$ ]] || die 'transition journal contains an invalid run ID'
@@ -395,7 +409,7 @@ validate_journal() {
       [[ $(jq -r '.dbService' "$journal") == "$db_service" ]] || die 'transition journal names another database service'
       [[ $(jq -r '.dbContainer' "$journal") == "$db_container" ]] || die 'transition journal names another database container'
       [[ $(jq -r '.appContainer' "$journal") == "$app_container" ]] || die 'transition journal names another app container'
-      jq -e '.appWasRunning == true' "$journal" >/dev/null || die 'transition journal has invalid app state'
+      jq -e '.appWasRunning | type == "boolean"' "$journal" >/dev/null || die 'transition journal has invalid app state'
 
       expected_run_dir="$backup_dir/phase-a2b-$run_id"
       stored_original=$(jq -er '.originalCompose' "$journal")
@@ -592,7 +606,7 @@ revoke_writer_marker() {
 }
 
 assert_stale_authorization_volume() {
-  local labels marker writer_marker target_platform=${platform:-$(engine_platform)}
+  local expect_writer=${1:-true} labels marker writer_marker target_platform=${platform:-$(engine_platform)}
   [[ $(docker volume inspect "$authorization_volume" --format '{{.Driver}}') == local ]] ||
     die "$authorization_volume must use the local volume driver"
   labels=$(docker volume inspect "$authorization_volume" --format '{{json .Labels}}')
@@ -611,8 +625,12 @@ assert_stale_authorization_volume() {
     --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
     --mount type=tmpfs,destination=/var/lib/postgresql/data \
     --entrypoint sh "$CANDIDATE_IMAGE" -ceu "cat /authorization/$WRITER_MARKER 2>/dev/null || true")
-  [[ "$writer_marker" == "$SOURCE_IMAGE" ]] ||
-    die 'writer authorization is not safely rebound to the exact source image'
+  if [[ "$expect_writer" == true ]]; then
+    [[ "$writer_marker" == "$SOURCE_IMAGE" ]] ||
+      die 'writer authorization is not safely rebound to the exact source image'
+  else
+    [[ -z "$writer_marker" ]] || die 'deferred source recovery unexpectedly published writer authorization'
+  fi
   assert_authorization_consumers_managed
 }
 
@@ -627,17 +645,26 @@ authorize_source_marker() {
   fi
   labels=$(docker volume inspect "$authorization_volume" --format '{{json .Labels}}')
   if ! jq -e --arg run "$run_id" --arg runKey "$AUTH_RUN_LABEL_KEY" '.[$runKey] == $run' >/dev/null <<< "$labels"; then
-    assert_stale_authorization_volume
+    assert_stale_authorization_volume "$restart_app_after_switch"
     return 0
   fi
   assert_authorization_volume '' false "${platform:-$(engine_platform)}" >/dev/null
   assert_authorization_consumers_managed
-  docker run --rm --network none --platform "${platform:-$(engine_platform)}" \
-    --label "$LABEL_KEY=$run_id" \
-    --mount "type=volume,source=$authorization_volume,target=/authorization" \
-    --mount type=tmpfs,destination=/var/lib/postgresql/data \
-    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-    "umask 077; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$AUTH_MARKER.source-$run_id.tmp; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$WRITER_MARKER.source-$run_id.tmp; sync; mv -f /authorization/$AUTH_MARKER.source-$run_id.tmp /authorization/$AUTH_MARKER; mv -f /authorization/$WRITER_MARKER.source-$run_id.tmp /authorization/$WRITER_MARKER; sync"
+  if [[ "$restart_app_after_switch" == true ]]; then
+    docker run --rm --network none --platform "${platform:-$(engine_platform)}" \
+      --label "$LABEL_KEY=$run_id" \
+      --mount "type=volume,source=$authorization_volume,target=/authorization" \
+      --mount type=tmpfs,destination=/var/lib/postgresql/data \
+      --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+      "umask 077; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$AUTH_MARKER.source-$run_id.tmp; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$WRITER_MARKER.source-$run_id.tmp; sync; mv -f /authorization/$AUTH_MARKER.source-$run_id.tmp /authorization/$AUTH_MARKER; mv -f /authorization/$WRITER_MARKER.source-$run_id.tmp /authorization/$WRITER_MARKER; sync"
+  else
+    docker run --rm --network none --platform "${platform:-$(engine_platform)}" \
+      --label "$LABEL_KEY=$run_id" \
+      --mount "type=volume,source=$authorization_volume,target=/authorization" \
+      --mount type=tmpfs,destination=/var/lib/postgresql/data \
+      --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+      "umask 077; rm -f /authorization/$WRITER_MARKER; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$AUTH_MARKER.source-$run_id.tmp; sync; mv -f /authorization/$AUTH_MARKER.source-$run_id.tmp /authorization/$AUTH_MARKER; sync"
+  fi
 }
 
 engine_platform() {
@@ -930,7 +957,7 @@ attempt_source_recovery() (
     assert_container_volume_mount "$db_container"
     assert_image_identity "$db_container" "$SOURCE_IMAGE" source false
     assert_compose_authorization_gate "$SOURCE_IMAGE"
-    assert_stale_authorization_volume
+    assert_stale_authorization_volume "$restart_app_after_switch"
     if [[ "$restart_app_after_switch" == true ]]; then
       restart_app
       phase_checkpoint recovery-writer-restarted || return $?
@@ -1056,11 +1083,19 @@ fail_closed_on_die=true
 if [[ -f "$journal" ]]; then
   validate_journal
   if [[ "$journal_mode" == switch ]]; then
-    [[ "$mode" == switch ]] || die 'switch evidence cannot be used by a new-install operation'
+    [[ "$mode" == switch || "$mode" == authorize-writer ]] ||
+      die 'switch evidence cannot be used by a new-install operation'
     if [[ "$journal_phase" != complete ]]; then
+      [[ "$mode" == switch ]] || die 'writer authorization requires complete switch evidence'
       recover_source "incomplete prior journal phase $journal_phase"
     fi
     assert_candidate_authorization_gate
+    current_app_was_running=false
+    if docker inspect "$app_container" >/dev/null 2>&1; then
+      current_app_was_running=$(docker inspect "$app_container" --format '{{.State.Running}}')
+    fi
+    [[ "$mode" != authorize-writer || "$current_app_was_running" == false ]] ||
+      die 'writer authorization requires the app container to remain stopped'
     docker stop --time 60 "$app_container" >/dev/null 2>&1 || true
     if docker inspect "$app_container" >/dev/null 2>&1; then
       [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
@@ -1073,20 +1108,28 @@ if [[ -f "$journal" ]]; then
     assert_image_identity "$db_container" "$CANDIDATE_IMAGE" candidate false
     assert_volume_consumers "$db_container"
     assert_container_volume_mount "$db_container"
-    authorize_writer_marker
+    if [[ "$mode" == authorize-writer || "$restart_app_after_switch" == true ]]; then
+      authorize_writer_marker
+    fi
     operation_complete=true
     trap - ERR
-    [[ "$restart_app_after_switch" == false ]] || restart_app
+    [[ "$mode" == authorize-writer ]] || app_was_running=$current_app_was_running
+    [[ "$mode" == authorize-writer || "$restart_app_after_switch" == false ]] || restart_app
     log "existing candidate matches completed evidence: $journal"
     exit 0
   fi
 
   if [[ "$journal_phase" == complete ]]; then
+    [[ "$mode" == switch || "$mode" == record-new-install || "$mode" == authorize-writer ]] ||
+      die 'completed new-install evidence cannot be used by this operation'
     assert_candidate_authorization_gate
-    if [[ "$mode" == switch ]] && docker inspect "$app_container" >/dev/null 2>&1 &&
-       [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]; then
-      app_was_running=true
+    current_app_was_running=false
+    if docker inspect "$app_container" >/dev/null 2>&1; then
+      current_app_was_running=$(docker inspect "$app_container" --format '{{.State.Running}}')
     fi
+    [[ "$mode" != authorize-writer || "$current_app_was_running" == false ]] ||
+      die 'writer authorization requires the app container to remain stopped'
+    [[ "$mode" != switch ]] || app_was_running=$current_app_was_running
     docker stop --time 60 "$app_container" >/dev/null 2>&1 || true
     if docker inspect "$app_container" >/dev/null 2>&1; then
       [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
@@ -1097,7 +1140,9 @@ if [[ -f "$journal" ]]; then
     assert_image_identity "$db_container" "$CANDIDATE_IMAGE" candidate false
     assert_volume_consumers "$db_container"
     assert_container_volume_mount "$db_container"
-    authorize_writer_marker
+    if [[ "$mode" == authorize-writer || "$restart_app_after_switch" == true ]]; then
+      authorize_writer_marker
+    fi
     operation_complete=true
     trap - ERR
     if [[ "$mode" == switch ]]; then
@@ -1125,11 +1170,13 @@ if [[ "$mode" == prepare-new-install ]]; then
     jq -n --arg phase claim-created --arg mode new-install --arg runId "$run_id" \
       --arg volume "$volume" --arg candidateImage "$CANDIDATE_IMAGE" --arg platform "$platform" \
       --arg authorizationVolume "$authorization_volume" \
+      --arg dockerEngineId "$engine_id" --arg dockerEndpoint "$docker_host" \
       --arg probeDatabase "$probe_database" \
       --arg composeFile "$compose_file" --arg dbService "$db_service" \
       --arg dbContainer "$db_container" --arg appContainer "$app_container" \
       '{phase:$phase,mode:$mode,runId:$runId,volume:$volume,authorizationVolume:$authorizationVolume,candidateImage:$candidateImage,
-        platform:$platform,probeDatabase:$probeDatabase,composeFile:$composeFile,dbService:$dbService,
+        platform:$platform,dockerEngineId:$dockerEngineId,dockerEndpoint:$dockerEndpoint,
+        probeDatabase:$probeDatabase,composeFile:$composeFile,dbService:$dbService,
         dbContainer:$dbContainer,appContainer:$appContainer}' > "$temp"
     write_json_atomic "$journal" "$temp"
     rm -f "$temp"
@@ -1211,7 +1258,7 @@ if [[ "$mode" == record-new-install ]]; then
   rm -f "$temp"
   validate_journal
   phase_checkpoint complete
-  authorize_writer_marker
+  [[ "$restart_app_after_switch" == false ]] || authorize_writer_marker
   operation_complete=true
   trap - ERR
   log "new-install evidence recorded: $journal"
@@ -1222,7 +1269,9 @@ fi
 
 [[ ! -f "$journal" ]] || die 'completed evidence exists; current state should have returned earlier'
 [[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]] || die 'source database must be running'
-[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]] || die 'app must be running before the switch'
+docker inspect "$app_container" >/dev/null 2>&1 || die 'managed app container must exist before the switch'
+app_was_running=$(docker inspect "$app_container" --format '{{.State.Running}}')
+[[ "$app_was_running" == true || "$app_was_running" == false ]] || die 'app container has an invalid running state'
 platform=${platform:-$(container_platform "$db_container")}
 [[ "$platform" =~ ^linux/(amd64|arm64)$ ]] || die "unsupported platform: $platform"
 assert_container_volume_mount "$db_container"
@@ -1232,7 +1281,11 @@ assert_volume_consumers "$db_container"
 assert_candidate_authorization_gate
 stale_authorization_volume=false
 if docker volume inspect "$authorization_volume" >/dev/null 2>&1; then
-  assert_stale_authorization_volume
+  # A stopped managed writer may legitimately be resuming an installer-owned
+  # deferred recovery, where the source gate is present but writer permission
+  # intentionally is not. Bind the stale-marker expectation to observed app
+  # state instead of accidentally re-authorizing it here.
+  assert_stale_authorization_volume "$app_was_running"
   stale_authorization_volume=true
 fi
 
@@ -1265,20 +1318,23 @@ jq -n --arg phase preparing --arg mode switch --arg runId "$run_id" --arg volume
   --arg sourceOverrideSha256 "$source_override_sha" --arg composeFile "$compose_file" --arg dbService "$db_service" \
   --arg dbContainer "$db_container" --arg appContainer "$app_container" --arg platform "$platform" \
   --arg authorizationVolume "$authorization_volume" --arg probeDatabase "$probe_database" \
-  --argjson appWasRunning true \
+  --arg dockerEngineId "$engine_id" --arg dockerEndpoint "$docker_host" \
+  --argjson appWasRunning "$app_was_running" \
   '{phase:$phase,mode:$mode,runId:$runId,volume:$volume,appWasRunning:$appWasRunning,volumeFingerprint:$volumeFingerprint,
     sourceImage:$sourceImage,candidateImage:$candidateImage,originalCompose:$originalCompose,
     candidateCompose:$candidateCompose,sourceOverride:$sourceOverride,originalComposeSha256:$originalComposeSha256,
     candidateComposeSha256:$candidateComposeSha256,sourceOverrideSha256:$sourceOverrideSha256,composeFile:$composeFile,
-    dbService:$dbService,dbContainer:$dbContainer,appContainer:$appContainer,platform:$platform,probeDatabase:$probeDatabase,
+    dbService:$dbService,dbContainer:$dbContainer,appContainer:$appContainer,platform:$platform,
+    dockerEngineId:$dockerEngineId,dockerEndpoint:$dockerEndpoint,probeDatabase:$probeDatabase,
     authorizationVolume:$authorizationVolume}' > "$temp"
 write_json_atomic "$journal" "$temp"
 rm -f "$temp"
 validate_journal
 phase_checkpoint preparing
 
-app_was_running=true
-docker stop --time 60 "$app_container" >/dev/null
+if [[ "$app_was_running" == true ]]; then
+  docker stop --time 60 "$app_container" >/dev/null
+fi
 [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
   die 'app writer remained running before offline database verification'
 assert_image_identity "$db_container" "$SOURCE_IMAGE" source
@@ -1388,7 +1444,7 @@ log "promoted candidate Compose: $compose_file"
 # baseline digests, so reruns trust this durable proof plus the bound volume and
 # exact candidate image rather than comparing stale application data.
 update_journal complete
-authorize_writer_marker
+[[ "$restart_app_after_switch" == false ]] || authorize_writer_marker
 
 operation_complete=true
 trap - ERR
