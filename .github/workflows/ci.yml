@@ -104,8 +104,7 @@ jobs:
       - name: Create .env.test for test scripts
         run: |
           printf '%s\n' \
-            'DATABASE_URL=postgresql://noosphere_app:test-application@localhost:5432/test' \
-            'REDIS_URL=redis://localhost:6379' > .env.test
+            'DATABASE_URL=postgresql://noosphere_app:test-application@localhost:5432/test' > .env.test
 
       - name: Build against the extension-less application identity
         run: npm run build
