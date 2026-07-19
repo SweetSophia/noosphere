@@ -223,14 +223,21 @@ expect(
     installer.includes("PostgreSQL bootstrap, migration, and application passwords must be distinct."),
   "install-openclaw.sh must append missing role-separation secrets without reusing credentials",
 );
+const installerProvisionIndexes = Array.from(
+  installer.matchAll(/node docker\/provision-database-roles\.mjs/g),
+  (match) => match.index,
+);
+const installerMigrateIndex = installer.indexOf("node docker/migrate-or-baseline.mjs");
+const installerBootstrapIndex = installer.indexOf("node docker/bootstrap.mjs");
 expect(
-  installer.includes("node docker/provision-database-roles.mjs") &&
-    installer.indexOf("node docker/provision-database-roles.mjs") <
-      installer.indexOf("node docker/migrate-or-baseline.mjs") &&
+  installerProvisionIndexes.length === 2 &&
+    installerProvisionIndexes[0] < installerMigrateIndex &&
+    installerMigrateIndex < installerProvisionIndexes[1] &&
+    installerProvisionIndexes[1] < installerBootstrapIndex &&
     installer.includes("postgresql://noosphere_migrator:\\${POSTGRES_MIGRATION_PASSWORD}@db:5432/noosphere") &&
     installer.includes("postgresql://noosphere_app:\\${POSTGRES_APP_PASSWORD}@db:5432/noosphere") &&
     installer.includes('SKIP_MIGRATION: "1"'),
-  "install-openclaw.sh must provision roles before migration and run the app with the limited identity",
+  "install-openclaw.sh must provision roles before and after migration, then run the app with the limited identity",
 );
 expect(
   installer.includes("--defer-app-restart"),

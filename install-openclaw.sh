@@ -709,6 +709,7 @@ services:
       - |
           node docker/provision-database-roles.mjs
           node docker/migrate-or-baseline.mjs
+          node docker/provision-database-roles.mjs
           node docker/bootstrap.mjs
     volumes:
       - noosphere_uploads:/app/uploads:rw
