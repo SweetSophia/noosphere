@@ -6,6 +6,9 @@ const MIGRATOR_ROLE = "noosphere_migrator";
 const APP_ROLE = "noosphere_app";
 const HYBRID_ADMIN_LOGIN = "noosphere_hybrid_admin_login";
 const HYBRID_WORKER_LOGIN = "noosphere_hybrid_worker_login";
+// This exact regprocedure list is the migration path for application-callable
+// public routines. A migration that adds or changes such a routine must update
+// this list; the post-migration provision pass revokes every other EXECUTE.
 const APPLICATION_FUNCTION_ALLOWLIST = [
   "public.prevent_api_key_agent_principal_rebind()",
   "public.prevent_memory_principal_scope_rebind()",
@@ -419,21 +422,119 @@ async function main() {
         FROM pg_catalog.pg_auth_members AS membership
         JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
         JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
-        WHERE member.rolname IN (
-          'noosphere_migrator',
-          'noosphere_app',
-          'noosphere_hybrid_admin_login',
-          'noosphere_hybrid_worker_login'
+        WHERE (
+          member.rolname IN (
+            'noosphere_migrator',
+            'noosphere_app',
+            'noosphere_hybrid_admin_login',
+            'noosphere_hybrid_worker_login'
+          )
+          OR pg_catalog.starts_with(member.rolname, 'noosphere_hybrid_')
+          OR pg_catalog.starts_with(granted.rolname, 'noosphere_hybrid_')
         )
           AND NOT (
-            (member.rolname = 'noosphere_hybrid_admin_login' AND granted.rolname = 'noosphere_hybrid_admin')
+            (
+              member.rolname = 'noosphere_hybrid_admin_login'
+              AND granted.rolname = 'noosphere_hybrid_admin'
+              AND NOT membership.admin_option
+              AND membership.inherit_option
+              AND membership.set_option
+            )
             OR
-            (member.rolname = 'noosphere_hybrid_worker_login' AND granted.rolname = 'noosphere_hybrid_worker')
+            (
+              member.rolname = 'noosphere_hybrid_worker_login'
+              AND granted.rolname = 'noosphere_hybrid_worker'
+              AND NOT membership.admin_option
+              AND membership.inherit_option
+              AND membership.set_option
+            )
           )
       `);
       if (unexpectedMembership.rowCount !== 0) {
         throw new Error(
           `database runtime login has unexpected membership: ${unexpectedMembership.rows[0].member_name}->${unexpectedMembership.rows[0].granted_name}`,
+        );
+      }
+
+      // Before optional activation neither capability role exists. After
+      // activation both must exist and both login memberships must be present.
+      // Reject a partial/pre-created phase instead of treating the first
+      // provision pass as a vacuous membership success.
+      const hybridPhaseAudit = await client.query(`
+        SELECT
+          (
+            SELECT pg_catalog.count(*)::integer
+            FROM pg_catalog.pg_namespace
+            WHERE nspname = 'noosphere_hybrid'
+          ) AS feature_schema_count,
+          (
+            SELECT pg_catalog.count(*)::integer
+            FROM pg_catalog.pg_roles
+            WHERE rolname IN (
+              'noosphere_hybrid_extension_owner',
+              'noosphere_hybrid_owner',
+              'noosphere_hybrid_activator',
+              'noosphere_hybrid_admin',
+              'noosphere_hybrid_worker'
+            )
+          ) AS named_capability_role_count,
+          (
+            SELECT pg_catalog.count(*)::integer
+            FROM pg_catalog.pg_roles
+            WHERE pg_catalog.starts_with(rolname, 'noosphere_hybrid_')
+              AND NOT rolcanlogin
+          ) AS hybrid_nonlogin_role_count,
+          (
+            SELECT pg_catalog.count(*)::integer
+            FROM pg_catalog.pg_roles
+            WHERE rolname IN (
+                'noosphere_hybrid_extension_owner',
+                'noosphere_hybrid_owner',
+                'noosphere_hybrid_activator',
+                'noosphere_hybrid_admin',
+                'noosphere_hybrid_worker'
+              )
+              AND (
+                rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole OR
+                rolinherit OR rolreplication OR rolbypassrls
+              )
+          ) AS unsafe_capability_role_count,
+          (
+            SELECT pg_catalog.count(*)::integer
+            FROM pg_catalog.pg_auth_members AS membership
+            JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+            JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
+            WHERE (member.rolname, granted.rolname) IN (
+              ('noosphere_hybrid_admin_login', 'noosphere_hybrid_admin'),
+              ('noosphere_hybrid_worker_login', 'noosphere_hybrid_worker')
+            )
+          ) AS expected_membership_count
+      `);
+      const featureSchemaCount = hybridPhaseAudit.rows[0]?.feature_schema_count;
+      const namedCapabilityRoleCount = hybridPhaseAudit.rows[0]?.named_capability_role_count;
+      const hybridNonloginRoleCount = hybridPhaseAudit.rows[0]?.hybrid_nonlogin_role_count;
+      const unsafeCapabilityRoleCount = hybridPhaseAudit.rows[0]?.unsafe_capability_role_count;
+      const expectedMembershipCount = hybridPhaseAudit.rows[0]?.expected_membership_count;
+      if (
+        !(
+          (
+            featureSchemaCount === 0 &&
+            namedCapabilityRoleCount === 0 &&
+            hybridNonloginRoleCount === 0 &&
+            unsafeCapabilityRoleCount === 0 &&
+            expectedMembershipCount === 0
+          ) ||
+          (
+            featureSchemaCount === 1 &&
+            namedCapabilityRoleCount === 5 &&
+            hybridNonloginRoleCount === 5 &&
+            unsafeCapabilityRoleCount === 0 &&
+            expectedMembershipCount === 2
+          )
+        )
+      ) {
+        throw new Error(
+          `hybrid capability phase is partial or unsafe: schemas=${featureSchemaCount}, namedRoles=${namedCapabilityRoleCount}, nonloginRoles=${hybridNonloginRoleCount}, unsafeRoles=${unsafeCapabilityRoleCount}, memberships=${expectedMembershipCount}`,
         );
       }
     }

@@ -113,8 +113,10 @@ SELECT
   ALTER ROLE noosphere_hybrid_extension_owner NOSUPERUSER;
 
   GRANT USAGE ON SCHEMA noosphere_vector, noosphere_crypto TO noosphere_hybrid_owner;
-  GRANT SELECT (id, title, excerpt, content, "deletedAt", "restrictedTags"),
-        REFERENCES (id)
+  -- Feature-table foreign keys and the initial revision-state backfill need
+  -- only the Article identifier before feature DDL. The exact steady-state
+  -- table SELECT grant is installed after the schema is complete.
+  GRANT SELECT (id), REFERENCES (id)
     ON public."Article" TO noosphere_hybrid_owner;
 
   -- The feature activator is a separate, unloginable capability. Its database
@@ -165,6 +167,8 @@ SELECT
 
   WITH semantics AS (
     SELECT
+      -- This is an exact textual drift fingerprint from PostgreSQL's stable
+      -- non-pretty deparser, not a substitute for the behavioral matrix.
       pg_catalog.pg_get_viewdef(
         'noosphere_hybrid.worker_eligibility'::pg_catalog.regclass,
         false
@@ -191,6 +195,8 @@ SELECT
           )
       ) AS trigger_manifest,
       (
+        -- Routine DDL is fingerprinted for the pinned PostgreSQL runtime.
+        -- A future database-image transition must establish fresh evidence.
         SELECT pg_catalog.string_agg(
           pg_catalog.pg_get_functiondef(procedure.oid),
           E'\n'
@@ -247,9 +253,12 @@ SELECT
   REVOKE ALL ON ALL FUNCTIONS IN SCHEMA noosphere_hybrid FROM PUBLIC;
 
   -- The locked feature owner is the definer for eligibility/trigger routines
-  -- and needs only read access to the canonical Article source. Runtime
-  -- capability roles never receive this public-table grant.
+  -- and needs read access to the canonical Article source. PostgreSQL requires
+  -- one UPDATE-capable column for SELECT ... FOR SHARE; the inert id-only grant
+  -- exists solely for claim_jobs row locking. Runtime capability roles never
+  -- receive either public-table grant.
   GRANT SELECT ON public."Article" TO noosphere_hybrid_owner;
+  GRANT UPDATE (id) ON public."Article" TO noosphere_hybrid_owner;
   GRANT USAGE ON SCHEMA noosphere_hybrid TO noosphere_hybrid_admin, noosphere_hybrid_worker;
   GRANT USAGE ON SCHEMA noosphere_vector TO noosphere_hybrid_worker;
   GRANT noosphere_hybrid_admin TO noosphere_hybrid_admin_login;
@@ -270,11 +279,8 @@ SELECT
     uuid,
     noosphere_hybrid.profile_state
   ) TO noosphere_hybrid_admin;
-  GRANT SELECT ON noosphere_hybrid.worker_eligibility TO noosphere_hybrid_worker;
-  GRANT EXECUTE ON FUNCTION noosphere_hybrid.canonical_document(text, text, text, integer)
-    TO noosphere_hybrid_worker;
-  GRANT EXECUTE ON FUNCTION noosphere_hybrid.canonical_hash(text, text, text, integer)
-    TO noosphere_hybrid_worker;
+  -- Canonical bytes are exposed only through claim_jobs, whose Article row
+  -- lock is the restriction/quarantine revocation linearization point.
   GRANT EXECUTE ON FUNCTION noosphere_hybrid.claim_jobs(integer, integer)
     TO noosphere_hybrid_worker;
   GRANT EXECUTE ON FUNCTION noosphere_hybrid.publish_embedding(

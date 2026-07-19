@@ -3,6 +3,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -162,6 +163,27 @@ expectExactDbImage("docker-compose.noosphere.yml", candidateImage, "noosphere_po
 expectExactDbImage("install-openclaw.sh", candidateImage, "noosphere_postgres_authorization");
 
 const installer = read("install-openclaw.sh");
+const installerValidationEnv = {
+  ...process.env,
+  NOOSPHERE_INSTALLER_TEST_MODE: "runtime-env-validation",
+};
+const safeInstallerValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: { ...installerValidationEnv, NOOSPHERE_INSTALLER_TEST_VALUE: "redis://redis:6379" },
+});
+const multilineInstallerValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: {
+    ...installerValidationEnv,
+    NOOSPHERE_INSTALLER_TEST_VALUE: "redis://redis:6379\nINJECTED_ASSIGNMENT=true",
+  },
+});
+expect(
+  safeInstallerValidation.status === 0 &&
+    multilineInstallerValidation.status !== 0 &&
+    multilineInstallerValidation.stderr.includes("must not contain CR or LF characters"),
+  "install-openclaw.sh must executable-test rejection of multiline runtime env values",
+);
 const helperArtifacts = [
   {
     label: "PostgreSQL switch guard",
@@ -222,9 +244,46 @@ expect(
     installer.includes('ensure_runtime_env_secret POSTGRES_APP_PASSWORD "$POSTGRES_APP_PASSWORD"') &&
     installer.includes('ENV_REWRITE_FILE="$NOOSPHERE_HOME/.env"') &&
     installer.includes('.split(/\\r?\\n/)') &&
+    installer.includes('if (/[\\r\\n]/.test(value))') &&
+    installer.includes('reject_multiline_env_value POSTGRES_MIGRATION_PASSWORD "$POSTGRES_MIGRATION_PASSWORD"') &&
+    installer.includes('reject_multiline_env_value POSTGRES_APP_PASSWORD "$POSTGRES_APP_PASSWORD"') &&
     installer.includes('process.stdout.write(`${retained.join("\\n")}\\n`)') &&
     installer.includes("PostgreSQL bootstrap, migration, and application passwords must be distinct."),
   "install-openclaw.sh must atomically rewrite role-separation secrets with a final newline and without reusing credentials",
+);
+const persistedRuntimeAssignments = [
+  ["NOOSPHERE_VERSION", "NOOSPHERE_VERSION"],
+  ["NOOSPHERE_IMAGE", "NOOSPHERE_IMAGE"],
+  ["NOOSPHERE_PORT", "NOOSPHERE_PORT"],
+  ["APP_URL", "APP_URL"],
+  ["BIND_ADDRESS", "BIND_ADDRESS"],
+  ["POSTGRES_PASSWORD", "POSTGRES_PASSWORD"],
+  ["POSTGRES_MIGRATION_PASSWORD", "POSTGRES_MIGRATION_PASSWORD"],
+  ["POSTGRES_APP_PASSWORD", "POSTGRES_APP_PASSWORD"],
+  ["NEXTAUTH_SECRET", "NEXTAUTH_SECRET"],
+  ["NOOSPHERE_ADMIN_PASSWORD", "ADMIN_PASSWORD"],
+  ["NOOSPHERE_ADMIN_PASSWORD_RESET", "NOOSPHERE_ADMIN_PASSWORD_RESET"],
+  ["NOOSPHERE_FORCE_ADMIN", "NOOSPHERE_FORCE_ADMIN"],
+  ["NOOSPHERE_BOOTSTRAP_API_KEY", "API_KEY"],
+  ["NOOSPHERE_BOOTSTRAP_SECRETS_FILE", "NOOSPHERE_BOOTSTRAP_SECRETS_FILE"],
+  ["REDIS_URL", "REDIS_URL"],
+  ["PG_POOL_MAX", "PG_POOL_MAX"],
+  ["PG_IDLE_TIMEOUT_MS", "PG_IDLE_TIMEOUT_MS"],
+  ["PG_CONN_TIMEOUT_MS", "PG_CONN_TIMEOUT_MS"],
+  ["NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE", "NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE"],
+];
+expect(
+  persistedRuntimeAssignments.every(([name, variable]) =>
+    installer.includes(`reject_multiline_env_value ${name} "$${variable}"`),
+  ),
+  "install-openclaw.sh must reject CR/LF in every persisted runtime assignment",
+);
+const activationScript = read("scripts/activate-hybrid-storage.sh");
+expect(
+  activationScript.includes("validate_provenance_value source_url") &&
+    activationScript.includes("validate_provenance_value built_image_digest") &&
+    activationScript.includes("^[[:graph:]]+$"),
+  "hybrid activation must bound and validate provenance values before psql substitution",
 );
 const installerProvisionIndexes = Array.from(
   installer.matchAll(/node docker\/provision-database-roles\.mjs/g),

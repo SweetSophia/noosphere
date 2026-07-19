@@ -177,6 +177,21 @@ NOOSPHERE_HYBRID_ADMIN_DATABASE_URL="$candidate_admin" \
 NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$candidate_worker" \
   node "$repo_root/docker/provision-database-roles.mjs"
 
+# Provisioning must distinguish the valid pre-activation phase (zero capability
+# roles) from a partial attacker/pre-created capability phase.
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'CREATE ROLE noosphere_hybrid_admin NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS'
+if NOOSPHERE_BOOTSTRAP_DATABASE_URL="$candidate_bootstrap" \
+  DATABASE_URL="$candidate_migrator" \
+  NOOSPHERE_APP_DATABASE_URL="$candidate_app" \
+  NOOSPHERE_HYBRID_ADMIN_DATABASE_URL="$candidate_admin" \
+  NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$candidate_worker" \
+  node "$repo_root/docker/provision-database-roles.mjs" >/dev/null 2>&1; then
+  die 'partial hybrid capability phase unexpectedly passed provisioning'
+fi
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'DROP ROLE noosphere_hybrid_admin'
+
 DATABASE_URL="$source_migrator" npx prisma migrate deploy
 DATABASE_URL="$candidate_migrator" npx prisma migrate deploy
 NOOSPHERE_BOOTSTRAP_DATABASE_URL="$source_bootstrap" \
@@ -214,6 +229,22 @@ expect_sql_failure 'application migration-ledger mutation' "$source_app" "DELETE
 
 # Activate the candidate fixture, then prove Prisma preserves every optional object.
 activate_candidate
+
+# Deployment provisioning must reject any extra member of a hybrid capability,
+# not only drift attached to the four expected runtime logins.
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "CREATE ROLE hybrid_membership_attacker LOGIN PASSWORD 'disposable-attacker-password';
+   GRANT noosphere_hybrid_worker TO hybrid_membership_attacker" >/dev/null
+if NOOSPHERE_BOOTSTRAP_DATABASE_URL="$candidate_bootstrap" \
+  DATABASE_URL="$candidate_migrator" \
+  NOOSPHERE_APP_DATABASE_URL="$candidate_app" \
+  NOOSPHERE_HYBRID_ADMIN_DATABASE_URL="$candidate_admin" \
+  NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$candidate_worker" \
+  node "$repo_root/docker/provision-database-roles.mjs" >/dev/null 2>&1; then
+  die 'unexpected hybrid capability member passed deployment provisioning'
+fi
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'REVOKE noosphere_hybrid_worker FROM hybrid_membership_attacker; DROP ROLE hybrid_membership_attacker' >/dev/null
 
 before_signature=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
   "SELECT (SELECT oid FROM pg_catalog.pg_extension WHERE extname='vector') || ':' ||
@@ -351,9 +382,47 @@ psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
 psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
   "UPDATE public.\"Article\" SET content='revision one', \"updatedAt\"=clock_timestamp() WHERE id='hybrid-article'" >/dev/null
 
-assert_equals 1 "$(psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 -c \
-  "SELECT count(*) FROM noosphere_hybrid.worker_eligibility WHERE article_id='hybrid-article'")" \
-  'worker eligibility view execution'
+expect_sql_failure 'worker direct eligibility-view read' "$candidate_worker" \
+  "SELECT count(*) FROM noosphere_hybrid.worker_eligibility WHERE article_id='hybrid-article'"
+
+# Until Phase B installs worker scopes and consent, restricted articles must
+# expose neither canonical bytes nor identifiers and must not be claimable.
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "UPDATE public.\"Article\" SET \"restrictedTags\"=ARRAY['financial'], \"updatedAt\"=clock_timestamp() WHERE id='hybrid-article'" >/dev/null
+assert_equals 0 "$(psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT count(*) FROM noosphere_hybrid.claim_jobs(1,60)')" \
+  'restricted article claim count'
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "UPDATE public.\"Article\" SET \"restrictedTags\"=ARRAY[]::text[], \"updatedAt\"=clock_timestamp() WHERE id='hybrid-article'" >/dev/null
+assert_equals 0 "$(psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT count(*) FROM noosphere_hybrid.claim_jobs(0,60)')" \
+  'unrestricted article zero-limit claim probe'
+
+# A worker cannot pin an old MVCC snapshot while an article is unrestricted,
+# wait for a restriction commit, then read the old identifier/bytes. The
+# Article FOR SHARE lock in claim_jobs converts that stale snapshot into a
+# serialization failure.
+coproc SNAPSHOT_WORKER { psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 2>&1; }
+snapshot_worker_out=${SNAPSHOT_WORKER[0]}
+snapshot_worker_in=${SNAPSHOT_WORKER[1]}
+snapshot_worker_pid=$SNAPSHOT_WORKER_PID
+printf '%s\n' \
+  'BEGIN ISOLATION LEVEL REPEATABLE READ;' \
+  'SELECT pg_catalog.pg_current_snapshot();' >&"$snapshot_worker_in"
+IFS= read -r snapshot_marker <&"$snapshot_worker_out"
+[[ -n "$snapshot_marker" ]] || die 'worker repeatable-read snapshot was not established'
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "UPDATE public.\"Article\" SET \"restrictedTags\"=ARRAY['financial'], \"updatedAt\"=clock_timestamp() WHERE id='hybrid-article'" >/dev/null
+printf '%s\n' 'SELECT count(*) FROM noosphere_hybrid.claim_jobs(1,60);' >&"$snapshot_worker_in"
+exec {snapshot_worker_in}>&-
+snapshot_failure=$(cat <&"$snapshot_worker_out")
+if wait "$snapshot_worker_pid"; then
+  die 'repeatable-read worker snapshot returned bytes after restriction commit'
+fi
+[[ "$snapshot_failure" == *'could not serialize access due to concurrent update'* ]] ||
+  die "repeatable-read restriction gate failed for an unexpected reason: $snapshot_failure"
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "UPDATE public.\"Article\" SET \"restrictedTags\"=ARRAY[]::text[], \"updatedAt\"=clock_timestamp() WHERE id='hybrid-article'" >/dev/null
 
 claim=$(psql "$candidate_worker" -XAtq -F '|' -v ON_ERROR_STOP=1 <<'SQL'
 CREATE TEMP TABLE embedding_job(id integer);

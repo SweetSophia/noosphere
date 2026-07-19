@@ -244,6 +244,9 @@ export function buildFallbackSearchTsQuery(query: string): Prisma.Sql | null {
 }
 
 export function extractFallbackSearchTerms(query: string): string[] {
+  // The strict websearch_to_tsquery path retains Unicode. This secondary,
+  // zero-result fallback intentionally folds Latin diacritics (café -> cafe)
+  // and emits only bounded ASCII lexemes that cannot carry tsquery operators.
   const seeds = query
     .toLowerCase()
     .normalize("NFKD")

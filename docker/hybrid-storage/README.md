@@ -32,12 +32,33 @@ step from feature DDL:
 4. steady-state login roles are limited to one administration or worker
    capability. The application login has no hybrid-schema access.
 
-The worker reads only `worker_eligibility`, a security-barrier,
-security-definer view. Feature tables do not use RLS in Phase A3: their locked
+The elevation and demotion are statements in the same activation transaction.
+A disconnect before commit rolls the elevation back; a committed transaction
+already contains the final `NOSUPERUSER` state. The extension owner is also
+`NOLOGIN`, and repeat activation validates that no privileged role attribute
+survived. The unavoidable transient authority exists only inside the connected
+bootstrap transaction while `CREATE EXTENSION` runs.
+
+The worker receives identifiers and canonical bytes only from `claim_jobs`; it
+has no direct grant on the internal `worker_eligibility` security-barrier,
+definer-semantics view. Feature tables do not use RLS in Phase A3: their locked
 non-login owner has `NOBYPASSRLS`, base tables have no worker grants, and the
-view exposes canonical bytes and eligible identifiers without raw
-`restrictedTags`. Every definer routine fully qualifies object references and
-pins `search_path` to `pg_catalog, pg_temp`.
+claim path exposes only unrestricted article identifiers and canonical bytes.
+It takes an `Article` row lock as the revocation linearization point, so a stale
+`REPEATABLE READ` snapshot fails serialization after a restriction commit
+instead of returning old bytes. Phase B must install and test explicit
+local/remote restricted-content policy before this fail-closed rule can be
+broadened. Every definer routine fully qualifies object references and pins
+`search_path` to `pg_catalog, pg_temp`.
+
+Deployment initialization deliberately runs
+`provision -> migrate -> provision -> bootstrap`. The second provision is
+load-bearing: migrations can add public
+tables or routines, so runtime grants are revoked and rebuilt from the exact
+application function allowlist after every migration. Migration authors adding
+an application-callable public routine must add its exact `regprocedure`
+signature to `APPLICATION_FUNCTION_ALLOWLIST` in
+`docker/provision-database-roles.mjs`.
 
 ## Activate a bundled database
 
@@ -78,8 +99,9 @@ The test owns only uniquely named containers and volumes labeled with its exact
 run ID. It verifies the Prisma `migrate deploy`, shadow database, `migrate
 diff`, and `db push` no-create/no-drop contract; effective privileges; malicious
 temporary-object shadowing; canonical bytes; profile bounds and immutability;
-lease expiry and stale completion; terminal-failure supersession; soft delete,
-restore, and hard delete; and cache-epoch coverage.
+restricted-content worker denial; lease expiry and stale completion;
+terminal-failure supersession; soft delete, restore, and hard delete; and
+cache-epoch coverage.
 
 ## Rollback boundary
 

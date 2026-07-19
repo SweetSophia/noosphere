@@ -162,6 +162,8 @@ BEGIN
   IF pg_catalog.encode(
       noosphere_crypto.digest(
         pg_catalog.convert_to(
+          -- Exact non-pretty deparse drift detection; behavioral eligibility
+          -- is proven separately by the live PostgreSQL contract matrix.
           pg_catalog.pg_get_viewdef(
             'noosphere_hybrid.worker_eligibility'::pg_catalog.regclass,
             false
@@ -195,6 +197,8 @@ BEGIN
     SELECT pg_catalog.encode(
       noosphere_crypto.digest(
         pg_catalog.convert_to(
+          -- This manifest is deliberately tied to the pinned PostgreSQL
+          -- runtime; database-image upgrades must create new evidence.
           pg_catalog.string_agg(
             pg_catalog.pg_get_functiondef(procedure.oid),
             E'\n'
@@ -323,11 +327,6 @@ BEGIN
       'noosphere_hybrid.set_profile_state(uuid,noosphere_hybrid.profile_state)',
       'EXECUTE'
     )
-    OR NOT pg_catalog.has_table_privilege(
-      'noosphere_hybrid_worker',
-      'noosphere_hybrid.worker_eligibility',
-      'SELECT'
-    )
     OR NOT pg_catalog.has_function_privilege(
       'noosphere_hybrid_worker',
       'noosphere_hybrid.claim_jobs(integer,integer)',
@@ -341,16 +340,6 @@ BEGIN
     OR NOT pg_catalog.has_function_privilege(
       'noosphere_hybrid_worker',
       'noosphere_hybrid.publish_embedding(uuid,uuid,bigint,bigint,bytea,noosphere_vector.vector)',
-      'EXECUTE'
-    )
-    OR NOT pg_catalog.has_function_privilege(
-      'noosphere_hybrid_worker',
-      'noosphere_hybrid.canonical_document(text,text,text,integer)',
-      'EXECUTE'
-    )
-    OR NOT pg_catalog.has_function_privilege(
-      'noosphere_hybrid_worker',
-      'noosphere_hybrid.canonical_hash(text,text,text,integer)',
       'EXECUTE'
     )
     OR pg_catalog.has_function_privilege(
@@ -388,11 +377,8 @@ BEGIN
           'noosphere_hybrid_worker', relation.oid,
           'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
         )
-        OR (
-          relation.relname <> 'worker_eligibility'
-          AND pg_catalog.has_table_privilege(
-            'noosphere_hybrid_worker', relation.oid, 'SELECT'
-          )
+        OR pg_catalog.has_table_privilege(
+          'noosphere_hybrid_worker', relation.oid, 'SELECT'
         )
       )
   ) OR EXISTS (
@@ -414,8 +400,6 @@ BEGIN
         ) <> (
           procedure.oid IN (
             'noosphere_hybrid.claim_jobs(integer,integer)'::pg_catalog.regprocedure,
-            'noosphere_hybrid.canonical_document(text,text,text,integer)'::pg_catalog.regprocedure,
-            'noosphere_hybrid.canonical_hash(text,text,text,integer)'::pg_catalog.regprocedure,
             'noosphere_hybrid.fail_job(uuid,uuid,bigint,text,timestamptz,boolean)'::pg_catalog.regprocedure,
             'noosphere_hybrid.publish_embedding(uuid,uuid,bigint,bigint,bytea,noosphere_vector.vector)'::pg_catalog.regprocedure
           )
@@ -463,7 +447,21 @@ BEGIN
     )
     OR pg_catalog.has_table_privilege(
       'noosphere_hybrid_owner', 'public."Article"',
-      'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+      'INSERT,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+    )
+    OR NOT pg_catalog.has_column_privilege(
+      'noosphere_hybrid_owner', 'public."Article"', 'id', 'UPDATE'
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_attribute AS attribute
+      WHERE attribute.attrelid = 'public."Article"'::pg_catalog.regclass
+        AND attribute.attnum > 0
+        AND NOT attribute.attisdropped
+        AND attribute.attname <> 'id'
+        AND pg_catalog.has_column_privilege(
+          'noosphere_hybrid_owner', 'public."Article"', attribute.attname, 'UPDATE'
+        )
     )
     OR EXISTS (
       SELECT 1

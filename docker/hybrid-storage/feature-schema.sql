@@ -336,6 +336,9 @@ AS $function$
   WHERE article.id = target_article_id
     AND article."deletedAt" IS NULL
     AND article."recallQuarantinedAt" IS NULL
+    -- Phase A3 has no worker-side scope/consent policy. Do not create new
+    -- worker work for restricted content until Phase B installs that gate.
+    AND pg_catalog.cardinality(article."restrictedTags") = 0
   ON CONFLICT (article_id, profile_id) DO UPDATE
   SET
     desired_revision = EXCLUDED.desired_revision,
@@ -433,7 +436,9 @@ BEGIN
   END IF;
 
   -- A scope transition invalidates every remote artifact in Phase A3. Remote
-  -- dispatch remains unreachable until Phase B adds dynamic consent.
+  -- dispatch remains unreachable until Phase B adds dynamic consent. The A3
+  -- worker has no caller scope, so restricted content also loses every queued
+  -- or leased job before the worker boundary can expose an identifier or byte.
   IF NEW."restrictedTags" IS DISTINCT FROM OLD."restrictedTags" THEN
     DELETE FROM noosphere_hybrid.article_embedding AS embedding
     USING noosphere_hybrid.embedding_profile AS profile
@@ -445,6 +450,9 @@ BEGIN
     WHERE job.article_id = NEW.id
       AND job.profile_id = profile.id
       AND profile.locality = 'remote';
+    IF pg_catalog.cardinality(NEW."restrictedTags") > 0 THEN
+      DELETE FROM noosphere_hybrid.embedding_job WHERE article_id = NEW.id;
+    END IF;
   END IF;
 
   PERFORM noosphere_hybrid.enqueue_article(NEW.id, next_revision);
@@ -567,6 +575,10 @@ WHERE profile.state IN ('preparing', 'serving')
   AND profile.locality = 'local'
   AND article."deletedAt" IS NULL
   AND article."recallQuarantinedAt" IS NULL
+  -- A3 deliberately exposes no restricted article identifiers or canonical
+  -- bytes. Phase B must replace this fail-closed rule with its explicit
+  -- local/remote restricted-content policy before enabling workers.
+  AND pg_catalog.cardinality(article."restrictedTags") = 0
   AND noosphere_hybrid.canonical_hash(
     article.title,
     article.excerpt,
@@ -600,6 +612,7 @@ AS $function$
     SELECT job.id
     FROM noosphere_hybrid.embedding_job AS job
     JOIN noosphere_hybrid.worker_eligibility AS eligible ON eligible.job_id = job.id
+    JOIN public."Article" AS article ON article.id = job.article_id
     WHERE (
         job.state = 'queued'
         OR (job.state = 'leased' AND job.lease_expires_at <= pg_catalog.clock_timestamp())
@@ -607,6 +620,10 @@ AS $function$
       AND job.available_at <= pg_catalog.clock_timestamp()
     ORDER BY job.available_at, job.created_at, job.id
     FOR UPDATE OF job SKIP LOCKED
+    -- This lock is the revocation linearization point. Under REPEATABLE READ,
+    -- an Article changed after the worker's snapshot raises a serialization
+    -- failure instead of returning now-restricted bytes from that snapshot.
+    FOR SHARE OF article
     LIMIT CASE WHEN claim_limit BETWEEN 1 AND 100 THEN claim_limit ELSE 0 END
   ),
   claimed AS (

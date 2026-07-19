@@ -197,10 +197,18 @@ The deferred security and operations details are merge gates for their implement
 Phase A3 selects a security-barrier, security-definer view named
 `noosphere_hybrid.worker_eligibility` instead of RLS on the private feature
 tables. The locked non-login owner holds the narrow public-article column grants;
-the worker has no base-table privileges and can read only eligible identifiers,
-profile identity, dimensions, hashes, and canonical document bytes through the
-view. The view uses owner semantics (`security_invoker=false`), every definer
-routine pins `search_path` to `pg_catalog, pg_temp`, and every object reference
+the worker has no base-table or internal-view privileges and receives eligible
+identifiers, profile identity, dimensions, hashes, and canonical document bytes
+only through `claim_jobs`. Phase A3 is deliberately stricter than the eventual
+local-profile policy:
+the internal view and enqueue path exclude every article with non-empty
+`restrictedTags`, and the worker can execute only the `claim_jobs` byte-returning
+API. That API locks the canonical `Article` row so restriction commits are
+linearized against claims, including stale `REPEATABLE READ` snapshots. The
+worker therefore cannot enumerate restricted identifiers or canonical bytes
+before Phase B installs explicit local/remote restricted-content policy and
+consent checks. The view uses owner semantics (`security_invoker=false`), every
+definer routine pins `search_path` to `pg_catalog, pg_temp`, and every object reference
 inside those routines is schema-qualified. PostgreSQL 16 integration tests run
 the worker with malicious same-named temporary objects and assert that raw
 `restrictedTags` and private feature tables remain unreadable.

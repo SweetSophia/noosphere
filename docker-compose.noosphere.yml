@@ -31,6 +31,8 @@ services:
       - |
           node docker/provision-database-roles.mjs
           node docker/migrate-or-baseline.mjs
+          # Migrations may create tables or routines. Re-provision so the
+          # limited app role receives only the current exact runtime grants.
           node docker/provision-database-roles.mjs
           node docker/bootstrap.mjs
     volumes:

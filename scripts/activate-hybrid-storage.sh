@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export LC_ALL=C
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 metadata="$repo_root/docker/hybrid-storage/metadata.env"
@@ -14,6 +15,12 @@ die() {
 
 need() {
   command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+validate_provenance_value() {
+  local label=$1 value=$2 max_length=$3
+  [[ -n "$value" && ${#value} -le max_length && "$value" =~ ^[[:graph:]]+$ ]] ||
+    die "$label must be non-empty printable ASCII without whitespace and at most $max_length bytes"
 }
 
 need psql
@@ -40,6 +47,13 @@ provenance_kind=${NOOSPHERE_HYBRID_PROVENANCE_KIND:-bundled}
 [[ -n "$worker_url" ]] || die 'NOOSPHERE_HYBRID_WORKER_DATABASE_URL is required'
 [[ "$provenance_kind" == bundled || "$provenance_kind" == external ]] ||
   die 'NOOSPHERE_HYBRID_PROVENANCE_KIND must be bundled or external'
+validate_provenance_value provenance_kind "$provenance_kind" 16
+validate_provenance_value source_url "$PGVECTOR_SOURCE_URL" 2048
+validate_provenance_value source_sha256 "$PGVECTOR_SOURCE_SHA256" 64
+validate_provenance_value pgvector_version "$PGVECTOR_VERSION" 32
+validate_provenance_value spdx_identifier "$PGVECTOR_LICENSE_SPDX" 128
+[[ "$PGVECTOR_SOURCE_SHA256" =~ ^[a-f0-9]{64}$ ]] ||
+  die 'PGVECTOR_SOURCE_SHA256 must be lowercase SHA-256'
 
 NOOSPHERE_BOOTSTRAP_DATABASE_URL="$bootstrap_url" \
 DATABASE_URL="$migration_url" \
@@ -194,6 +208,9 @@ activation_sql_sha256=$(
     sha256sum "$validation_sql" | awk '{print $1}'
   } | sha256sum | awk '{print $1}'
 )
+validate_provenance_value built_image_digest "$built_image_digest" 512
+validate_provenance_value activation_sql_sha256 "$activation_sql_sha256" 64
+validate_provenance_value public_schema_fingerprint "$public_schema_fingerprint" 64
 
 psql "$bootstrap_url" -X \
   -v ON_ERROR_STOP=1 \
