@@ -116,6 +116,16 @@ test("provider request authenticates, bounds content, and returns one validated 
     (error) => error instanceof HybridProviderError && error.code === "provider_protocol_unsupported",
   );
 
+  const aborted = new AbortController();
+  aborted.abort(new Error("worker shutdown"));
+  await assert.rejects(
+    requestEmbedding(job, provider, {
+      signal: aborted.signal,
+      fetchImpl: async () => assert.fail("transport must not run for an already-aborted request"),
+    }),
+    (error) => error instanceof HybridProviderError && error.code === "provider_timeout",
+  );
+
   await assert.rejects(
     requestEmbedding(job, provider, {
       maxResponseBytes: 10,

@@ -152,7 +152,9 @@ Restricted articles are eligible for local profiles by default. Remote profiles
 require general egress consent; restricted remote articles additionally require
 `--restricted-remote true`. Revoking either consent deletes affected remote
 vectors and jobs and demotes every remote profile to `inactive`. Re-consent does
-not restore its prior state.
+not restore its prior state. Expanding restricted consent while a remote profile
+is already active moves it to `preparing` and records a fresh complete backfill
+generation before the newly eligible restricted set may serve.
 
 ### Configure and run the worker
 

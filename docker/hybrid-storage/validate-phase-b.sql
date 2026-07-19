@@ -191,11 +191,14 @@ BEGIN
     RAISE EXCEPTION 'Phase B capability roles have direct table privileges';
   END IF;
 
-  IF NOT pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b.set_embedding_consent(boolean,boolean)', 'EXECUTE')
+  IF NOT pg_catalog.has_schema_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b', 'USAGE')
+    OR NOT pg_catalog.has_schema_privilege('noosphere_hybrid_worker', 'noosphere_hybrid_b', 'USAGE')
+    OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b.set_embedding_consent(boolean,boolean)', 'EXECUTE')
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b.profile_coverage(uuid)', 'EXECUTE')
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b.profile_status(uuid)', 'EXECUTE')
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b.set_profile_state(uuid,noosphere_hybrid.profile_state)', 'EXECUTE')
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b.enqueue_profile_backfill(uuid,integer)', 'EXECUTE')
+    OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b.queue_health()', 'EXECUTE')
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_worker', 'noosphere_hybrid_b.claim_jobs(integer,integer,integer,uuid[])', 'EXECUTE')
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_worker', 'noosphere_hybrid_b.authorize_dispatch(uuid,uuid,bigint)', 'EXECUTE')
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_worker', 'noosphere_hybrid_b.release_stale_job(uuid,uuid,bigint,integer)', 'EXECUTE')

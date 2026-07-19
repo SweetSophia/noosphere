@@ -157,9 +157,16 @@ export async function requestEmbedding(job, provider, options = {}) {
   const outerSignal = options.signal;
   const controller = new AbortController();
   const abortFromOuter = () => controller.abort(outerSignal?.reason);
-  outerSignal?.addEventListener("abort", abortFromOuter, { once: true });
+  if (outerSignal?.aborted) {
+    controller.abort(outerSignal.reason);
+  } else {
+    outerSignal?.addEventListener("abort", abortFromOuter, { once: true });
+  }
   const timeout = setTimeout(() => controller.abort(new Error("provider timeout")), timeoutMs);
   try {
+    if (controller.signal.aborted) {
+      throw controller.signal.reason ?? new Error("provider request cancelled");
+    }
     const headers = { "content-type": "application/json", accept: "application/json" };
     if (provider.apiKey) headers.authorization = `Bearer ${provider.apiKey}`;
     const response = await fetchImpl(provider.endpoint, {

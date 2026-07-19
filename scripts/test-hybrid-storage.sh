@@ -856,6 +856,23 @@ psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
    REVOKE ALL ON SCHEMA noosphere_hybrid_b FROM hybrid_phase_b_acl_attacker;
    DROP ROLE hybrid_phase_b_acl_attacker" >/dev/null
 activate_phase_b >/dev/null
+
+# Repeat activation must reject missing positive capability grants as well as
+# unexpected grants. These are the entry points the admin/worker CLIs require.
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'REVOKE USAGE ON SCHEMA noosphere_hybrid_b FROM noosphere_hybrid_worker' >/dev/null
+if activate_phase_b >/dev/null 2>&1; then
+  die 'Phase B activation accepted missing worker schema usage'
+fi
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'GRANT USAGE ON SCHEMA noosphere_hybrid_b TO noosphere_hybrid_worker;
+   REVOKE EXECUTE ON FUNCTION noosphere_hybrid_b.queue_health() FROM noosphere_hybrid_admin' >/dev/null
+if activate_phase_b >/dev/null 2>&1; then
+  die 'Phase B activation accepted missing administrator queue health execution'
+fi
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'GRANT EXECUTE ON FUNCTION noosphere_hybrid_b.queue_health() TO noosphere_hybrid_admin' >/dev/null
+activate_phase_b >/dev/null
 expect_sql_failure 'application Phase B schema read' "$candidate_app" \
   'SELECT * FROM noosphere_hybrid_b.feature_state'
 expect_sql_failure 'worker Phase B consent read' "$candidate_worker" \
@@ -1221,9 +1238,19 @@ expect_sql_failure 'Phase B remote prepare without consent' "$candidate_admin" \
 phase_b_epoch_before_consent=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
   'SELECT epoch FROM noosphere_hybrid.search_cache_epoch WHERE singleton')
 psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
-  "SELECT noosphere_hybrid_b.set_embedding_consent(true,true);
+  "SELECT noosphere_hybrid_b.set_embedding_consent(true,false);
    SELECT noosphere_hybrid_b.set_profile_state('$remote_profile','preparing');
-   SELECT * FROM noosphere_hybrid_b.enqueue_profile_backfill('$remote_profile',1000)" >/dev/null
+   SELECT * FROM noosphere_hybrid_b.enqueue_profile_backfill('$remote_profile',1000);
+   SELECT noosphere_hybrid_b.set_profile_state('$remote_profile','serving');
+   SELECT noosphere_hybrid_b.set_embedding_consent(true,true)" >/dev/null
+assert_equals 'preparing:2:f' "$(psql "$candidate_bootstrap" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  "SELECT profile.state,backfill.generation,backfill.completed
+   FROM noosphere_hybrid.embedding_profile AS profile
+   JOIN noosphere_hybrid_b.profile_backfill_state AS backfill ON backfill.profile_id=profile.id
+   WHERE profile.id='$remote_profile'")" \
+  'Phase B restricted consent expansion starts a fresh complete backfill'
+psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT * FROM noosphere_hybrid_b.enqueue_profile_backfill('$remote_profile',1000)" >/dev/null
 phase_b_epoch_after_consent=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
   'SELECT epoch FROM noosphere_hybrid.search_cache_epoch WHERE singleton')
 [[ $phase_b_epoch_after_consent -gt $phase_b_epoch_before_consent ]] ||
@@ -1281,7 +1308,7 @@ psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
   "SELECT noosphere_hybrid_b.set_embedding_consent(true,true);
    SELECT noosphere_hybrid_b.set_profile_state('$remote_profile','preparing');
    SELECT * FROM noosphere_hybrid_b.enqueue_profile_backfill('$remote_profile',1000)" >/dev/null
-assert_equals '2:t' "$(psql "$candidate_bootstrap" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+assert_equals '3:t' "$(psql "$candidate_bootstrap" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
   "SELECT generation,completed FROM noosphere_hybrid_b.profile_backfill_state WHERE profile_id='$remote_profile'")" \
   'Phase B re-prepare creates and completes a fresh backfill generation'
 remote_claim=$(psql "$candidate_worker" -XAtq -F '|' -v ON_ERROR_STOP=1 -c \

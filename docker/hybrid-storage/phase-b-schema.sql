@@ -384,6 +384,31 @@ BEGIN
     UPDATE noosphere_hybrid.embedding_profile
     SET state = 'inactive'
     WHERE locality = 'remote' AND state <> 'inactive';
+  ELSIF previous.remote_egress
+    AND NOT previous.restricted_remote_egress
+    AND allow_restricted_remote_egress THEN
+    -- Restricted consent expands the eligible set for every active remote
+    -- profile. Serving profiles must leave candidate generation until a fresh
+    -- complete backfill proves coverage for that larger set.
+    UPDATE noosphere_hybrid.embedding_profile
+    SET state = 'preparing'
+    WHERE locality = 'remote' AND state IN ('preparing', 'serving');
+
+    INSERT INTO noosphere_hybrid_b.profile_backfill_state (
+      profile_id, generation, cursor, completed, started_at, updated_at, completed_at
+    )
+    SELECT
+      profile.id, 1, NULL, false,
+      pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp(), NULL
+    FROM noosphere_hybrid.embedding_profile AS profile
+    WHERE profile.locality = 'remote' AND profile.state = 'preparing'
+    ON CONFLICT (profile_id) DO UPDATE
+    SET generation = noosphere_hybrid_b.profile_backfill_state.generation + 1,
+        cursor = NULL,
+        completed = false,
+        started_at = pg_catalog.clock_timestamp(),
+        updated_at = pg_catalog.clock_timestamp(),
+        completed_at = NULL;
   END IF;
   PERFORM noosphere_hybrid.bump_search_cache_epoch();
 END;
