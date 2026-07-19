@@ -220,8 +220,11 @@ for (const [runtimeKey, secretKey] of [
 expect(
   installer.includes('ensure_runtime_env_secret POSTGRES_MIGRATION_PASSWORD "$POSTGRES_MIGRATION_PASSWORD"') &&
     installer.includes('ensure_runtime_env_secret POSTGRES_APP_PASSWORD "$POSTGRES_APP_PASSWORD"') &&
+    installer.includes('ENV_REWRITE_FILE="$NOOSPHERE_HOME/.env"') &&
+    installer.includes('.split(/\\r?\\n/)') &&
+    installer.includes('process.stdout.write(`${retained.join("\\n")}\\n`)') &&
     installer.includes("PostgreSQL bootstrap, migration, and application passwords must be distinct."),
-  "install-openclaw.sh must append missing role-separation secrets without reusing credentials",
+  "install-openclaw.sh must atomically rewrite role-separation secrets with a final newline and without reusing credentials",
 );
 const installerProvisionIndexes = Array.from(
   installer.matchAll(/node docker\/provision-database-roles\.mjs/g),

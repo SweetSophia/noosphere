@@ -292,8 +292,10 @@ guard=(./scripts/switch-pgvector-compose.sh --compose-file "$PWD/docker-compose.
 docker compose up -d db redis
 docker compose run --rm -T init
 "${guard[@]}" --record-new-install
-DATABASE_URL='postgresql://noosphere_app:CHANGE_ME_APP@localhost:5433/noosphere' \
-  PORT=6578 npm run dev
+set -a
+. ./.env
+set +a
+DATABASE_URL="$NOOSPHERE_APP_DATABASE_URL" PORT=6578 npm run dev
 ```
 
 The external `noosphere_postgres_authorization` volume is created only by the

@@ -119,10 +119,28 @@ ensure_runtime_env_secret() {
   current="$(env_get_secret "$NOOSPHERE_HOME/.env" "$key")"
   [[ "$current" != "$value" ]] || return 0
   temp="$(mktemp "$NOOSPHERE_HOME/.env.XXXXXX")"
-  {
-    sed "/^${key}=/d" "$NOOSPHERE_HOME/.env"
-    printf '%s=%s\n' "$key" "$value"
-  } > "$temp"
+  # Rewrite through Node so an existing final line without LF cannot merge
+  # with the appended credential. Passing the value through the environment
+  # also avoids embedding operator-supplied secrets in generated source text.
+  ENV_REWRITE_FILE="$NOOSPHERE_HOME/.env" \
+    ENV_REWRITE_KEY="$key" \
+    ENV_REWRITE_VALUE="$value" \
+    node -e '
+      const fs = require("node:fs");
+      const file = process.env.ENV_REWRITE_FILE;
+      const key = process.env.ENV_REWRITE_KEY;
+      const value = process.env.ENV_REWRITE_VALUE;
+      if (!file || !key || value === undefined) process.exit(1);
+      const retained = fs.readFileSync(file, "utf8")
+        .split(/\r?\n/)
+        .filter((line) => {
+          const separator = line.indexOf("=");
+          return !(separator > 0 && line.slice(0, separator) === key);
+        });
+      while (retained.at(-1) === "") retained.pop();
+      retained.push(`${key}=${value}`);
+      process.stdout.write(`${retained.join("\n")}\n`);
+    ' > "$temp"
   chmod 600 "$temp"
   mv "$temp" "$NOOSPHERE_HOME/.env"
 }
