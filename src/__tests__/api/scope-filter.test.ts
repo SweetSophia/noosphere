@@ -3,6 +3,7 @@ import test, { describe } from "node:test";
 import {
   buildScopeFilter,
   canAccessScopes,
+  resolveScopeAccess,
 } from "@/lib/api/scope-filter";
 
 describe("buildScopeFilter", () => {
@@ -131,5 +132,44 @@ describe("canAccessScopes", () => {
       canAccessScopes(["scope-a", "scope-b"], ["scope-c", "scope-d"]),
       false,
     );
+  });
+});
+
+describe("canonical authorization matrix", () => {
+  const cases = [
+    { name: "undefined", allowed: undefined, article: ["financial"], access: false, kind: "unrestricted" },
+    { name: "empty", allowed: [], article: ["financial"], access: false, kind: "unrestricted" },
+    { name: "unrestricted", allowed: [], article: [], access: true, kind: "unrestricted" },
+    { name: "disjoint", allowed: ["hr"], article: ["financial"], access: false, kind: "scoped" },
+    { name: "overlap", allowed: ["hr"], article: ["financial", "hr"], access: true, kind: "scoped" },
+    { name: "union", allowed: ["financial", "hr"], article: ["hr"], access: true, kind: "scoped" },
+    { name: "wildcard", allowed: ["*"], article: ["financial"], access: true, kind: "all" },
+  ] as const;
+
+  for (const matrixCase of cases) {
+    test(matrixCase.name, () => {
+      assert.equal(
+        canAccessScopes([...matrixCase.article], matrixCase.allowed ? [...matrixCase.allowed] : undefined),
+        matrixCase.access,
+      );
+      assert.equal(
+        resolveScopeAccess(matrixCase.allowed ? [...matrixCase.allowed] : undefined).kind,
+        matrixCase.kind,
+      );
+    });
+  }
+
+  test("wildcard bypass preserves unrelated Prisma predicates", () => {
+    assert.deepEqual(buildScopeFilter(["*"], {
+      deletedAt: null,
+      status: "published",
+      hybridLifecycle: "serving",
+      consentReady: true,
+    }), {
+      deletedAt: null,
+      status: "published",
+      hybridLifecycle: "serving",
+      consentReady: true,
+    });
   });
 });

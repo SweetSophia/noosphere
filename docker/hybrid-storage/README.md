@@ -1,0 +1,160 @@
+# Optional hybrid-storage activation
+
+Phase A3 installs the storage boundary for future hybrid retrieval. It does not
+start an embedding provider, make a profile serve queries, or change the current
+keyword-only application path.
+
+## What activation installs
+
+- `vector` 0.8.1 in the locked `noosphere_vector` schema;
+- `pgcrypto` in the locked `noosphere_crypto` schema;
+- versioned profiles, vector rows, embedding revisions, durable coalescing jobs,
+  and the search-cache epoch in `noosphere_hybrid`;
+- article and metadata triggers for revision, deletion, restore, and cache-epoch
+  transitions; and
+- separate non-superuser administration and worker credentials.
+
+Profiles start `inactive`. Phase A3 rejects `preparing` and `serving`
+transitions because Phase B has not installed the provider, consent, readiness,
+and backfill gates yet. Keyword-only deployments require no activation.
+
+## Privilege model
+
+PostgreSQL does not mark pgvector 0.8.1 as a trusted extension, so its initial
+installation requires superuser authority. Activation splits that unavoidable
+step from feature DDL:
+
+1. the bootstrap superuser gives temporary superuser authority to an
+   unloginable extension owner only while creating the two extension schemas;
+2. a separate unloginable activator receives transaction-scoped database
+   `CREATE` and feature-owner membership for feature DDL;
+3. both temporary grants are revoked before commit; and
+4. steady-state login roles are limited to one administration or worker
+   capability. The application login has no hybrid-schema access.
+
+The elevation and demotion are statements in the same activation transaction.
+A disconnect before commit rolls the elevation back; a committed transaction
+already contains the final `NOSUPERUSER` state. The extension owner is also
+`NOLOGIN`, and repeat activation validates that no privileged role attribute
+survived. The unavoidable transient authority exists only inside the connected
+bootstrap transaction while `CREATE EXTENSION` runs.
+
+The worker receives identifiers and canonical bytes only from `claim_jobs`; it
+has no direct grant on the internal `worker_eligibility` security-barrier,
+definer-semantics view. Feature tables do not use RLS in Phase A3: their locked
+non-login owner has `NOBYPASSRLS`, base tables have no worker grants, and the
+claim path exposes only unrestricted article identifiers and canonical bytes.
+It takes an `Article` row lock as the revocation linearization point. At the
+default `READ COMMITTED` isolation, a concurrent update is followed and its
+eligibility predicates are rechecked; a stale `REPEATABLE READ` snapshot fails
+serialization after a restriction commit instead of returning old bytes. Phase
+B must install and test explicit
+local/remote restricted-content policy before this fail-closed rule can be
+broadened. Every definer routine fully qualifies object references and pins
+`search_path` to `pg_catalog, pg_temp`.
+
+Deployment initialization deliberately runs
+`provision -> migrate -> provision -> bootstrap`. The second provision is
+load-bearing: migrations can add public
+tables or routines, so runtime grants are revoked and rebuilt from the exact
+application function allowlist after every migration. Migration authors adding
+an application-callable public routine must add its exact `regprocedure`
+signature to `APPLICATION_FUNCTION_ALLOWLIST` in
+`docker/provision-database-roles.mjs` together with the migration that owns it.
+Before that migration is applied the routine must be absent; afterward it must
+resolve and the application role's effective public-function `EXECUTE` set must
+match the active allowlist exactly. Repeat activation also rejects any hybrid
+schema, relation, routine, or default-ACL grantee outside the locked owner and
+capability-role allowlist; direct grants cannot substitute for audited role
+membership.
+
+## Activate a bundled database
+
+First complete the guarded pgvector Compose transition and the standard Prisma
+migrations. Then provide five distinct database credentials:
+
+```bash
+export NOOSPHERE_BOOTSTRAP_DATABASE_URL='postgresql://noosphere:<bootstrap>@127.0.0.1:5433/noosphere'
+export DATABASE_URL='postgresql://noosphere_migrator:<migration>@127.0.0.1:5433/noosphere'
+export NOOSPHERE_APP_DATABASE_URL='postgresql://noosphere_app:<application>@127.0.0.1:5433/noosphere'
+export NOOSPHERE_HYBRID_ADMIN_DATABASE_URL='postgresql://noosphere_hybrid_admin_login:<admin>@127.0.0.1:5433/noosphere'
+export NOOSPHERE_HYBRID_WORKER_DATABASE_URL='postgresql://noosphere_hybrid_worker_login:<worker>@127.0.0.1:5433/noosphere'
+export NOOSPHERE_DB_CONTAINER='noosphere-db'
+npm run hybrid-storage:activate
+```
+
+The activator verifies that the running container uses the immutable bundled
+image digest before recording its provenance. A repeat invocation succeeds only
+when provenance, versions, object owners, role attributes and memberships,
+ACLs, default ACLs, triggers, view semantics, and the public-schema fingerprint
+match exactly. It never repairs a mismatched activated state.
+
+For an external PostgreSQL 16.14 server (`server_version_num=160014`), set
+`NOOSPHERE_HYBRID_PROVENANCE_KIND=external` and provide
+`NOOSPHERE_HYBRID_EXTERNAL_IMAGE_DIGEST=external:<sha256>`. The server must
+already expose pgvector 0.8.1 and pgcrypto as available extensions. External
+provenance is intentionally distinct from the verified bundled-image record,
+but activation records and revalidates the same exact PostgreSQL runtime because
+the routine manifest is runtime-deparser evidence.
+
+## Partial-state recovery
+
+`hybrid capability phase is partial or unsafe` is a fail-closed recovery stop,
+not a prompt to rerun provisioning. Stop the application, init job, and any
+future worker; preserve the complete error output; take and verify a database
+backup before changing catalog state. Inventory the named schemas, capability
+roles, and memberships read-only:
+
+```sql
+SELECT nspname FROM pg_catalog.pg_namespace
+WHERE nspname IN ('noosphere_vector', 'noosphere_crypto', 'noosphere_hybrid')
+ORDER BY nspname;
+
+SELECT rolname, rolcanlogin, rolsuper, rolcreatedb, rolcreaterole,
+       rolinherit, rolreplication, rolbypassrls
+FROM pg_catalog.pg_roles
+WHERE pg_catalog.starts_with(rolname, 'noosphere_hybrid_')
+ORDER BY rolname;
+
+SELECT member.rolname AS member_name, granted.rolname AS granted_name,
+       membership.admin_option, membership.inherit_option, membership.set_option
+FROM pg_catalog.pg_auth_members AS membership
+JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
+WHERE pg_catalog.starts_with(member.rolname, 'noosphere_hybrid_')
+   OR pg_catalog.starts_with(granted.rolname, 'noosphere_hybrid_')
+ORDER BY member_name, granted_name;
+```
+
+Activation is one transaction, so an interrupted supported activation cannot
+commit a partial phase. Treat partial state as manual/catalog drift or an
+unsupported earlier artifact. The default recovery is restoration of a verified
+pre-activation backup. Do not drop schemas, extensions, roles, memberships, or
+feature rows merely to make provisioning pass. Any manual reconciliation is an
+explicit DBA operation outside this phase: bind it to the preserved backup,
+prove object ownership and dependencies, and remove only independently verified
+A3 objects before starting again from the clean pre-activation state.
+
+## Verify
+
+Run the disposable source-image and activated-candidate matrix:
+
+```bash
+npm run test:hybrid-storage
+```
+
+The test owns only uniquely named containers and volumes labeled with its exact
+run ID. It verifies the Prisma `migrate deploy`, shadow database, `migrate
+diff`, and `db push` no-create/no-drop contract; effective privileges; malicious
+temporary-object shadowing; canonical bytes; profile bounds and immutability;
+restricted-content worker denial; lease expiry and stale completion;
+terminal-failure supersession; soft delete, restore, and hard delete; and
+cache-epoch coverage.
+
+## Rollback boundary
+
+Phase A3 is opt-in and is not activated by Docker Compose or the application at
+startup. Before Phase B writes production vectors, rollback is to leave all
+profiles inactive and continue keyword-only operation. Do not drop the feature
+schemas as an application migration. Removing activated storage is a separate,
+explicit operator action that requires a backup and is outside this phase.

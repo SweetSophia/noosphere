@@ -23,6 +23,8 @@
     "db:studio": "prisma studio",
     "package-policy:check": "node scripts/check-package-policies.mjs",
     "postgres-image:check": "node scripts/check-postgres-image-policy.mjs",
+    "hybrid-storage:activate": "bash scripts/activate-hybrid-storage.sh",
+    "test:hybrid-storage": "bash scripts/test-hybrid-storage.sh",
     "version:sync": "node scripts/sync-version.mjs",
     "version:check": "node scripts/sync-version.mjs --check",
     "test:persistence-layer": "node --env-file=.env.test --import tsx --test 'src/__tests__/persistence-layer/**/*.test.ts'"

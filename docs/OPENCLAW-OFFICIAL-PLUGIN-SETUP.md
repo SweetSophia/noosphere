@@ -40,11 +40,11 @@ flock --version
 Use the installer from the repository:
 
 ```bash
-# Installer commit: 4a0061a017947825e96b5cc5899914e7d0ed1898
-# Expected SHA-256: c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2
+# Installer commit: 26639cc2dfd6a831336387c6a66b9d3abdcc96fc
+# Expected SHA-256: 3e882c1471e46e0fd8d944a0a2801b632fd34ec676e5703306e75eea8d9a649f
 installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/4a0061a017947825e96b5cc5899914e7d0ed1898/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' 'c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2' "$installer" | sha256sum -c -
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/26639cc2dfd6a831336387c6a66b9d3abdcc96fc/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' '3e882c1471e46e0fd8d944a0a2801b632fd34ec676e5703306e75eea8d9a649f' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 ```
 
@@ -166,6 +166,8 @@ checksum-pinned installer instead of downloading and starting Compose directly.
 Edit `~/.noosphere/.env` and set strong values for:
 
 - `POSTGRES_PASSWORD`
+- `POSTGRES_MIGRATION_PASSWORD`
+- `POSTGRES_APP_PASSWORD`
 - `NEXTAUTH_SECRET`
 - `NOOSPHERE_ADMIN_PASSWORD`
 - `NOOSPHERE_ADMIN_PASSWORD_RESET=true` only when intentionally rotating an existing admin password
@@ -415,11 +417,11 @@ curl -s https://<host>/api/memory/status \
 Use the guarded installer for upgrades as well as first-time setup:
 
 ```bash
-# Installer commit: 4a0061a017947825e96b5cc5899914e7d0ed1898
-# Expected SHA-256: c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2
+# Installer commit: 26639cc2dfd6a831336387c6a66b9d3abdcc96fc
+# Expected SHA-256: 3e882c1471e46e0fd8d944a0a2801b632fd34ec676e5703306e75eea8d9a649f
 installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/4a0061a017947825e96b5cc5899914e7d0ed1898/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' 'c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2' "$installer" | sha256sum -c -
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/26639cc2dfd6a831336387c6a66b9d3abdcc96fc/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' '3e882c1471e46e0fd8d944a0a2801b632fd34ec676e5703306e75eea8d9a649f' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 openclaw noosphere doctor
 ```
@@ -548,11 +550,11 @@ then the install did not complete. A healthy run must continue with `Bootstrap c
 First use the reviewed installer revision and verify its checksum before execution:
 
 ```bash
-# Installer commit: 4a0061a017947825e96b5cc5899914e7d0ed1898
-# Expected SHA-256: c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2
+# Installer commit: 26639cc2dfd6a831336387c6a66b9d3abdcc96fc
+# Expected SHA-256: 3e882c1471e46e0fd8d944a0a2801b632fd34ec676e5703306e75eea8d9a649f
 installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/4a0061a017947825e96b5cc5899914e7d0ed1898/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' 'c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2' "$installer" | sha256sum -c -
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/26639cc2dfd6a831336387c6a66b9d3abdcc96fc/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' '3e882c1471e46e0fd8d944a0a2801b632fd34ec676e5703306e75eea8d9a649f' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 ```
 

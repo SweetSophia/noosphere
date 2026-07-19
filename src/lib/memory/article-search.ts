@@ -11,6 +11,7 @@
  */
 
 import { Prisma } from "@prisma/client";
+import { resolveScopeAccess } from "@/lib/api/scope-filter";
 
 const FALLBACK_SEARCH_MAX_SEED_TERMS = 8;
 const FALLBACK_SEARCH_MAX_TERMS = 16;
@@ -153,19 +154,27 @@ export function buildArticleSearchFilters(
   // undefined and [] both mean "unrestricted only" — only unrestricted articles.
   // Non-empty non-admin scopes: unrestricted OR hasSome.
   // "*": no filter (admin bypass).
-  const scopes = options.allowedScopes;
-  if (!scopes?.includes("*")) {
-    if (!scopes || scopes.length === 0) {
-      clauses.push(Prisma.sql`coalesce(a."restrictedTags", '{}') = '{}'`);
-    } else {
-      clauses.push(
-        Prisma.sql`(coalesce(a."restrictedTags", '{}') = '{}' OR a."restrictedTags" && ${scopes})`,
-      );
-    }
-  }
-  // If "*" is in scopes, skip scope filter entirely.
+  clauses.push(...buildRestrictedScopeSql(options.allowedScopes));
 
   return clauses;
+}
+
+/**
+ * Parameterized raw-SQL realization of the canonical restricted-scope
+ * interpretation. An empty array means unrestricted-only; "*" omits only this
+ * predicate and never any other eligibility check.
+ */
+export function buildRestrictedScopeSql(
+  allowedScopes: string[] | undefined,
+): Prisma.Sql[] {
+  const access = resolveScopeAccess(allowedScopes);
+  if (access.kind === "all") return [];
+  if (access.kind === "unrestricted") {
+    return [Prisma.sql`coalesce(a."restrictedTags", '{}') = '{}'`];
+  }
+  return [
+    Prisma.sql`(coalesce(a."restrictedTags", '{}') = '{}' OR a."restrictedTags" && ${access.scopes})`,
+  ];
 }
 
 // ─── CTE builder ─────────────────────────────────────────────────────────────
@@ -235,6 +244,9 @@ export function buildFallbackSearchTsQuery(query: string): Prisma.Sql | null {
 }
 
 export function extractFallbackSearchTerms(query: string): string[] {
+  // The strict websearch_to_tsquery path retains Unicode. This secondary,
+  // zero-result fallback intentionally folds Latin diacritics (café -> cafe)
+  // and emits only bounded ASCII lexemes that cannot carry tsquery operators.
   const seeds = query
     .toLowerCase()
     .normalize("NFKD")

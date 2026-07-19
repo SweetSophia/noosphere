@@ -43,7 +43,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      DATABASE_URL: postgresql://test:test@localhost:5432/test
+      NOOSPHERE_BOOTSTRAP_DATABASE_URL: postgresql://test:test@localhost:5432/test
+      DATABASE_URL: postgresql://noosphere_app:test-application@localhost:5432/test
+      NOOSPHERE_APP_DATABASE_URL: postgresql://noosphere_app:test-application@localhost:5432/test
     services:
       postgres:
         image: postgres:16-alpine
@@ -84,11 +86,30 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
+      - name: Provision separate database identities
+        run: node docker/provision-database-roles.mjs
+        env:
+          DATABASE_URL: postgresql://noosphere_migrator:test-migrator@localhost:5432/test
+
       - name: Apply database migrations
         run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://noosphere_migrator:test-migrator@localhost:5432/test
+
+      - name: Grant runtime access after migrations
+        run: node docker/provision-database-roles.mjs
+        env:
+          DATABASE_URL: postgresql://noosphere_migrator:test-migrator@localhost:5432/test
 
       - name: Create .env.test for test scripts
-        run: echo "DATABASE_URL=postgresql://test:test@localhost:5432/test" > .env.test
+        run: |
+          printf '%s\n' \
+            'DATABASE_URL=postgresql://noosphere_app:test-application@localhost:5432/test' > .env.test
+
+      - name: Build against the extension-less application identity
+        run: npm run build
+        env:
+          DATABASE_URL: postgresql://noosphere_app:test-application@localhost:5432/test
 
       - name: Run memory tests
         run: npm run test:memory
@@ -99,6 +120,9 @@ jobs:
       - name: Run API tests
         run: npm run test:api
 
+      - name: Run wiki and keyword-search tests
+        run: npm run test:wiki
+
       - name: Run rate-limit tests
         run: npm run test:rate-limit
         env:
@@ -106,3 +130,8 @@ jobs:
 
       - name: Run security tests
         run: npm run test:security
+
+      - name: Verify keyword-only runtime made no feature DDL
+        run: node scripts/verify-keyword-only-database.mjs
+        env:
+          DATABASE_URL: postgresql://noosphere_migrator:test-migrator@localhost:5432/test

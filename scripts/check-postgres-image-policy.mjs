@@ -3,14 +3,15 @@
 import { readFileSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
 const immutableHelperRef = "a2067895023efc638e966ee827fea67385d8aa37";
-const verifiedInstallerRef = "4a0061a017947825e96b5cc5899914e7d0ed1898";
-const verifiedInstallerSha256 = "c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2";
+const verifiedInstallerRef = "26639cc2dfd6a831336387c6a66b9d3abdcc96fc";
+const verifiedInstallerSha256 = "3e882c1471e46e0fd8d944a0a2801b632fd34ec676e5703306e75eea8d9a649f";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
@@ -143,8 +144,12 @@ async function verifyRemoteArtifact(label, url, expectedSha256) {
 }
 
 const lock = parseEnv("docker/postgres-pgvector/rehearsal.env");
+const hybridMetadata = parseEnv("docker/hybrid-storage/metadata.env");
 const sourceImage = lock.get("SOURCE_IMAGE") ?? "";
 const candidateImage = lock.get("CANDIDATE_IMAGE") ?? "";
+const expectedPostgresVersion = lock.get("EXPECTED_POSTGRES_VERSION") ?? "";
+const hybridPostgresVersion = hybridMetadata.get("POSTGRES_VERSION") ?? "";
+const hybridPostgresVersionNum = hybridMetadata.get("POSTGRES_SERVER_VERSION_NUM") ?? "";
 
 for (const [name, value] of [
   ["SOURCE_IMAGE", sourceImage],
@@ -157,11 +162,37 @@ for (const [name, value] of [
 }
 
 expect(sourceImage !== candidateImage, "SOURCE_IMAGE and CANDIDATE_IMAGE must differ");
+expect(
+  hybridPostgresVersion === expectedPostgresVersion &&
+    hybridPostgresVersionNum === "160014",
+  "hybrid activation metadata must bind the rehearsed PostgreSQL 16.14 runtime and server_version_num=160014",
+);
 expectExactDbImage("docker-compose.yml", candidateImage, "postgres_authorization");
 expectExactDbImage("docker-compose.noosphere.yml", candidateImage, "noosphere_postgres_authorization");
 expectExactDbImage("install-openclaw.sh", candidateImage, "noosphere_postgres_authorization");
 
 const installer = read("install-openclaw.sh");
+const installerValidationEnv = {
+  ...process.env,
+  NOOSPHERE_INSTALLER_TEST_MODE: "runtime-env-validation",
+};
+const safeInstallerValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: { ...installerValidationEnv, NOOSPHERE_INSTALLER_TEST_VALUE: "redis://redis:6379" },
+});
+const multilineInstallerValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: {
+    ...installerValidationEnv,
+    NOOSPHERE_INSTALLER_TEST_VALUE: "redis://redis:6379\nINJECTED_ASSIGNMENT=true",
+  },
+});
+expect(
+  safeInstallerValidation.status === 0 &&
+    multilineInstallerValidation.status !== 0 &&
+    multilineInstallerValidation.stderr.includes("must not contain CR or LF characters"),
+  "install-openclaw.sh must executable-test rejection of multiline runtime env values",
+);
 const helperArtifacts = [
   {
     label: "PostgreSQL switch guard",
@@ -204,6 +235,8 @@ expect(
 );
 for (const [runtimeKey, secretKey] of [
   ["POSTGRES_PASSWORD", "postgresPassword"],
+  ["POSTGRES_MIGRATION_PASSWORD", "postgresMigrationPassword"],
+  ["POSTGRES_APP_PASSWORD", "postgresAppPassword"],
   ["NEXTAUTH_SECRET", "nextAuthSecret"],
   ["NOOSPHERE_ADMIN_PASSWORD", "adminPassword"],
   ["NOOSPHERE_BOOTSTRAP_API_KEY", "apiKey"],
@@ -215,6 +248,69 @@ for (const [runtimeKey, secretKey] of [
     `install-openclaw.sh must prefer runtime .env ${runtimeKey} over the derived secret-file copy`,
   );
 }
+expect(
+  installer.includes('ensure_runtime_env_secret POSTGRES_MIGRATION_PASSWORD "$POSTGRES_MIGRATION_PASSWORD"') &&
+    installer.includes('ensure_runtime_env_secret POSTGRES_APP_PASSWORD "$POSTGRES_APP_PASSWORD"') &&
+    installer.includes('ENV_REWRITE_FILE="$NOOSPHERE_HOME/.env"') &&
+    installer.includes('.split(/\\r?\\n/)') &&
+    installer.includes('if (/[\\r\\n]/.test(value))') &&
+    installer.includes('reject_multiline_env_value POSTGRES_MIGRATION_PASSWORD "$POSTGRES_MIGRATION_PASSWORD"') &&
+    installer.includes('reject_multiline_env_value POSTGRES_APP_PASSWORD "$POSTGRES_APP_PASSWORD"') &&
+    installer.includes('process.stdout.write(`${retained.join("\\n")}\\n`)') &&
+    installer.includes("PostgreSQL bootstrap, migration, and application passwords must be distinct."),
+  "install-openclaw.sh must atomically rewrite role-separation secrets with a final newline and without reusing credentials",
+);
+const writeRuntimeEnvBlock =
+  installer.match(/write_runtime_env\(\) \{([\s\S]*?)\n}\n\nensure_runtime_env_secret\(\)/)?.[1] ?? "";
+const persistedRuntimeAssignments = Array.from(
+  writeRuntimeEnvBlock.matchAll(
+    /^([A-Z][A-Z0-9_]*)=\$\{([A-Z][A-Z0-9_]*)(?::-[^}]*)?}$/gm,
+  ),
+  (match) => [match[1], match[2]],
+);
+expect(
+  persistedRuntimeAssignments.length === 19 &&
+    new Set(persistedRuntimeAssignments.map(([name]) => name)).size === 19 &&
+    persistedRuntimeAssignments.every(([name, variable]) =>
+      installer.includes(`reject_multiline_env_value ${name} "$${variable}"`),
+    ),
+  "install-openclaw.sh must reject CR/LF in every assignment parsed from its runtime .env writer",
+);
+const activationScript = read("scripts/activate-hybrid-storage.sh");
+const hybridFeatureSchema = read("docker/hybrid-storage/feature-schema.sql");
+const hybridActivationSql = read("docker/hybrid-storage/activate.sql");
+const hybridValidationSql = read("docker/hybrid-storage/validate.sql");
+expect(
+  activationScript.includes("validate_provenance_value source_url") &&
+    activationScript.includes("validate_provenance_value built_image_digest") &&
+    activationScript.includes('server_version_num" == "$POSTGRES_SERVER_VERSION_NUM') &&
+    activationScript.includes('label_postgres_version" == "$POSTGRES_VERSION') &&
+    activationScript.includes("^[[:graph:]]+$"),
+  "hybrid activation must bind the exact PostgreSQL runtime and bound provenance values before psql substitution",
+);
+expect(
+  hybridFeatureSchema.includes("postgresql_server_version_num integer NOT NULL") &&
+    hybridActivationSql.includes(":'postgresql_server_version_num'::integer") &&
+    hybridValidationSql.includes("state.postgresql_server_version_num") &&
+    hybridValidationSql.includes("'server_version_num'"),
+  "hybrid feature evidence must persist and revalidate the exact PostgreSQL runtime",
+);
+const installerProvisionIndexes = Array.from(
+  installer.matchAll(/node docker\/provision-database-roles\.mjs/g),
+  (match) => match.index,
+);
+const installerMigrateIndex = installer.indexOf("node docker/migrate-or-baseline.mjs");
+const installerBootstrapIndex = installer.indexOf("node docker/bootstrap.mjs");
+expect(
+  installerProvisionIndexes.length === 2 &&
+    installerProvisionIndexes[0] < installerMigrateIndex &&
+    installerMigrateIndex < installerProvisionIndexes[1] &&
+    installerProvisionIndexes[1] < installerBootstrapIndex &&
+    installer.includes("postgresql://noosphere_migrator:\\${POSTGRES_MIGRATION_PASSWORD}@db:5432/noosphere") &&
+    installer.includes("postgresql://noosphere_app:\\${POSTGRES_APP_PASSWORD}@db:5432/noosphere") &&
+    installer.includes('SKIP_MIGRATION: "1"'),
+  "install-openclaw.sh must provision roles before and after migration, then run the app with the limited identity",
+);
 expect(
   installer.includes("--defer-app-restart"),
   "install-openclaw.sh must keep writers stopped until its guarded transaction finishes",

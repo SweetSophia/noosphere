@@ -1,13 +1,47 @@
 name: noosphere
 
+x-noosphere-image: &noosphere-image
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      # Prisma only needs a syntactically valid URL while generating/building;
+      # the image build never authenticates or performs database work.
+      DATABASE_URL: postgresql://localhost/noosphere
+      NOOSPHERE_VERSION: ${NOOSPHERE_VERSION:-1.11.0}
+  image: noosphere-local:${NOOSPHERE_VERSION:-1.11.0}
+
 services:
+  init:
+    <<: *noosphere-image
+    container_name: noosphere-init
+    restart: "no"
+    entrypoint: ["/bin/sh", "-ceu", "--"]
+    command:
+      - |
+          node docker/provision-database-roles.mjs
+          node docker/migrate-or-baseline.mjs
+          # Migrations may create tables or routines. Re-provision so the
+          # limited app role receives only the current exact runtime grants.
+          node docker/provision-database-roles.mjs
+          node docker/bootstrap.mjs
+    environment:
+      NOOSPHERE_BOOTSTRAP_DATABASE_URL: postgresql://noosphere:${POSTGRES_PASSWORD}@db:5432/noosphere
+      DATABASE_URL: postgresql://noosphere_migrator:${POSTGRES_MIGRATION_PASSWORD}@db:5432/noosphere
+      NOOSPHERE_APP_DATABASE_URL: postgresql://noosphere_app:${POSTGRES_APP_PASSWORD}@db:5432/noosphere
+      NOOSPHERE_ADMIN_PASSWORD: ${NOOSPHERE_ADMIN_PASSWORD:-}
+      NOOSPHERE_ADMIN_PASSWORD_RESET: ${NOOSPHERE_ADMIN_PASSWORD_RESET:-false}
+      NOOSPHERE_FORCE_ADMIN: ${NOOSPHERE_FORCE_ADMIN:-false}
+      NOOSPHERE_BOOTSTRAP_API_KEY: ${NOOSPHERE_BOOTSTRAP_API_KEY:-}
+      NOOSPHERE_BOOTSTRAP_SECRETS_FILE: ${NOOSPHERE_BOOTSTRAP_SECRETS_FILE:-/tmp/noosphere-bootstrap-secrets/secrets.json}
+    volumes:
+      - ./uploads:/app/uploads:rw
+    depends_on:
+      db:
+        condition: service_healthy
+
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        DATABASE_URL: postgresql://noosphere:buildtime@db:5432/noosphere
-        NOOSPHERE_VERSION: ${NOOSPHERE_VERSION:-1.11.0}
+    <<: *noosphere-image
     entrypoint:
       - /bin/sh
       - -ceu
@@ -28,7 +62,8 @@ services:
     ports:
       - "6578:3000"
     environment:
-      DATABASE_URL: postgresql://noosphere:${POSTGRES_PASSWORD}@db:5432/noosphere
+      DATABASE_URL: postgresql://noosphere_app:${POSTGRES_APP_PASSWORD}@db:5432/noosphere
+      SKIP_MIGRATION: "1"
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
       NEXTAUTH_URL: ${APP_URL:-http://100.111.85.48:6578}
       APP_URL: ${APP_URL:-http://100.111.85.48:6578}
@@ -46,8 +81,8 @@ services:
       - /home/niya/obsidian-vault/noosphere:/app/obsidian-vault:rw
       - postgres_authorization:/run/noosphere-pgvector:ro
     depends_on:
-      db:
-        condition: service_healthy
+      init:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     healthcheck:

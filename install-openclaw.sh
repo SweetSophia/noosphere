@@ -26,6 +26,8 @@ POSTGRES_SWITCH_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosph
 POSTGRES_VERIFY_SCRIPT_SHA256='e6751d338f84e3c51cb2e5dd8691e372e704dbd20fb8cc9e960420e81d20b2fd'
 POSTGRES_VERIFY_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/a2067895023efc638e966ee827fea67385d8aa37/scripts/verify-deploy.sh'
 EXPLICIT_POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
+EXPLICIT_POSTGRES_MIGRATION_PASSWORD="${POSTGRES_MIGRATION_PASSWORD:-}"
+EXPLICIT_POSTGRES_APP_PASSWORD="${POSTGRES_APP_PASSWORD:-}"
 EXPLICIT_NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-}"
 EXPLICIT_ADMIN_PASSWORD="${NOOSPHERE_ADMIN_PASSWORD:-}"
 EXPLICIT_API_KEY="${NOOSPHERE_BOOTSTRAP_API_KEY:-}"
@@ -81,6 +83,21 @@ env_get_secret() {
   printf '%s' "$value"
 }
 
+reject_multiline_env_value() {
+  local label=$1 value=$2
+  if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+    echo "$label must not contain CR or LF characters." >&2
+    exit 1
+  fi
+}
+
+# This mode exercises the real installer guard without performing installation
+# side effects. It is used by the repository policy gate.
+if [[ "${NOOSPHERE_INSTALLER_TEST_MODE:-}" == runtime-env-validation ]]; then
+  reject_multiline_env_value TEST_VALUE "${NOOSPHERE_INSTALLER_TEST_VALUE:-}"
+  exit 0
+fi
+
 write_runtime_env() {
   local env_tmp
   env_tmp="$(mktemp "$NOOSPHERE_HOME/.env.XXXXXX")" || {
@@ -94,6 +111,8 @@ NOOSPHERE_PORT=${NOOSPHERE_PORT}
 APP_URL=${APP_URL}
 BIND_ADDRESS=${BIND_ADDRESS}
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+POSTGRES_MIGRATION_PASSWORD=${POSTGRES_MIGRATION_PASSWORD}
+POSTGRES_APP_PASSWORD=${POSTGRES_APP_PASSWORD}
 NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
 NOOSPHERE_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 NOOSPHERE_ADMIN_PASSWORD_RESET=${NOOSPHERE_ADMIN_PASSWORD_RESET:-false}
@@ -108,6 +127,41 @@ NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE=${NOOSPHERE_MEMORY_RECALL_RATE_LIM
 ENV
   chmod 600 "$env_tmp"
   mv "$env_tmp" "$NOOSPHERE_HOME/.env"
+}
+
+ensure_runtime_env_secret() {
+  local key=$1 value=$2 current temp
+  current="$(env_get_secret "$NOOSPHERE_HOME/.env" "$key")"
+  [[ "$current" != "$value" ]] || return 0
+  temp="$(mktemp "$NOOSPHERE_HOME/.env.XXXXXX")"
+  # Rewrite through Node so an existing final line without LF cannot merge
+  # with the appended credential. Passing the value through the environment
+  # also avoids embedding operator-supplied secrets in generated source text.
+  ENV_REWRITE_FILE="$NOOSPHERE_HOME/.env" \
+    ENV_REWRITE_KEY="$key" \
+    ENV_REWRITE_VALUE="$value" \
+    node -e '
+      const fs = require("node:fs");
+      const file = process.env.ENV_REWRITE_FILE;
+      const key = process.env.ENV_REWRITE_KEY;
+      const value = process.env.ENV_REWRITE_VALUE;
+      if (!file || !key || value === undefined) process.exit(1);
+      if (/[\r\n]/.test(value)) {
+        console.error(`${key} must not contain CR or LF characters.`);
+        process.exit(1);
+      }
+      const retained = fs.readFileSync(file, "utf8")
+        .split(/\r?\n/)
+        .filter((line) => {
+          const separator = line.indexOf("=");
+          return !(separator > 0 && line.slice(0, separator) === key);
+        });
+      while (retained.at(-1) === "") retained.pop();
+      retained.push(`${key}=${value}`);
+      process.stdout.write(`${retained.join("\n")}\n`);
+    ' > "$temp"
+  chmod 600 "$temp"
+  mv "$temp" "$NOOSPHERE_HOME/.env"
 }
 
 resolve_runtime_config() {
@@ -527,6 +581,8 @@ else
 fi
 
 POSTGRES_PASSWORD="$EXPLICIT_POSTGRES_PASSWORD"
+POSTGRES_MIGRATION_PASSWORD="$EXPLICIT_POSTGRES_MIGRATION_PASSWORD"
+POSTGRES_APP_PASSWORD="$EXPLICIT_POSTGRES_APP_PASSWORD"
 NEXTAUTH_SECRET="$EXPLICIT_NEXTAUTH_SECRET"
 ADMIN_PASSWORD="$EXPLICIT_ADMIN_PASSWORD"
 API_KEY="$EXPLICIT_API_KEY"
@@ -536,36 +592,75 @@ API_KEY="$EXPLICIT_API_KEY"
 # derived OpenClaw secret file so a deliberate .env edit is never shadowed by a
 # stale credential copy.
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(env_get_secret "$NOOSPHERE_HOME/.env" POSTGRES_PASSWORD)}"
+POSTGRES_MIGRATION_PASSWORD="${POSTGRES_MIGRATION_PASSWORD:-$(env_get_secret "$NOOSPHERE_HOME/.env" POSTGRES_MIGRATION_PASSWORD)}"
+POSTGRES_APP_PASSWORD="${POSTGRES_APP_PASSWORD:-$(env_get_secret "$NOOSPHERE_HOME/.env" POSTGRES_APP_PASSWORD)}"
 NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(env_get_secret "$NOOSPHERE_HOME/.env" NEXTAUTH_SECRET)}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_ADMIN_PASSWORD)}"
 API_KEY="${API_KEY:-$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_API_KEY)}"
 NOOSPHERE_BOOTSTRAP_SECRETS_FILE="${NOOSPHERE_BOOTSTRAP_SECRETS_FILE:-$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_SECRETS_FILE)}"
 
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(json_get "$SECRETS_FILE" postgresPassword)}"
+POSTGRES_MIGRATION_PASSWORD="${POSTGRES_MIGRATION_PASSWORD:-$(json_get "$SECRETS_FILE" postgresMigrationPassword)}"
+POSTGRES_APP_PASSWORD="${POSTGRES_APP_PASSWORD:-$(json_get "$SECRETS_FILE" postgresAppPassword)}"
 NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(json_get "$SECRETS_FILE" nextAuthSecret)}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(json_get "$SECRETS_FILE" adminPassword)}"
 API_KEY="${API_KEY:-$(json_get "$SECRETS_FILE" apiKey)}"
 
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(random_secret 32)}"
+POSTGRES_MIGRATION_PASSWORD="${POSTGRES_MIGRATION_PASSWORD:-$(random_secret 32)}"
+POSTGRES_APP_PASSWORD="${POSTGRES_APP_PASSWORD:-$(random_secret 32)}"
 NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(random_secret 32)}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(random_secret 24)}"
 API_KEY="${API_KEY:-noo_$(random_secret 32)}"
+NOOSPHERE_ADMIN_PASSWORD_RESET="${NOOSPHERE_ADMIN_PASSWORD_RESET:-false}"
+NOOSPHERE_FORCE_ADMIN="${NOOSPHERE_FORCE_ADMIN:-false}"
+NOOSPHERE_BOOTSTRAP_SECRETS_FILE="${NOOSPHERE_BOOTSTRAP_SECRETS_FILE:-/tmp/noosphere-bootstrap-secrets/secrets.json}"
+
+reject_multiline_env_value NOOSPHERE_VERSION "$NOOSPHERE_VERSION"
+reject_multiline_env_value NOOSPHERE_IMAGE "$NOOSPHERE_IMAGE"
+reject_multiline_env_value NOOSPHERE_PORT "$NOOSPHERE_PORT"
+reject_multiline_env_value APP_URL "$APP_URL"
+reject_multiline_env_value BIND_ADDRESS "$BIND_ADDRESS"
+reject_multiline_env_value POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
+reject_multiline_env_value POSTGRES_MIGRATION_PASSWORD "$POSTGRES_MIGRATION_PASSWORD"
+reject_multiline_env_value POSTGRES_APP_PASSWORD "$POSTGRES_APP_PASSWORD"
+reject_multiline_env_value NEXTAUTH_SECRET "$NEXTAUTH_SECRET"
+reject_multiline_env_value NOOSPHERE_ADMIN_PASSWORD "$ADMIN_PASSWORD"
+reject_multiline_env_value NOOSPHERE_ADMIN_PASSWORD_RESET "$NOOSPHERE_ADMIN_PASSWORD_RESET"
+reject_multiline_env_value NOOSPHERE_FORCE_ADMIN "$NOOSPHERE_FORCE_ADMIN"
+reject_multiline_env_value NOOSPHERE_BOOTSTRAP_API_KEY "$API_KEY"
+reject_multiline_env_value NOOSPHERE_BOOTSTRAP_SECRETS_FILE "$NOOSPHERE_BOOTSTRAP_SECRETS_FILE"
+reject_multiline_env_value REDIS_URL "$REDIS_URL"
+reject_multiline_env_value PG_POOL_MAX "$PG_POOL_MAX"
+reject_multiline_env_value PG_IDLE_TIMEOUT_MS "$PG_IDLE_TIMEOUT_MS"
+reject_multiline_env_value PG_CONN_TIMEOUT_MS "$PG_CONN_TIMEOUT_MS"
+reject_multiline_env_value NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE "$NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE"
 
 # Export Compose variables. Bootstrap credentials are exported too because
 # docker compose up may run the init service again through app.depends_on; the
 # second run must see the same admin/API credentials as the explicit bootstrap
 # run below.
-export NOOSPHERE_VERSION NOOSPHERE_PORT NOOSPHERE_IMAGE APP_URL BIND_ADDRESS POSTGRES_PASSWORD NEXTAUTH_SECRET REDIS_URL NOOSPHERE_BOOTSTRAP_SECRETS_FILE NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE
+[[ "$POSTGRES_PASSWORD" != "$POSTGRES_MIGRATION_PASSWORD" &&
+   "$POSTGRES_PASSWORD" != "$POSTGRES_APP_PASSWORD" &&
+   "$POSTGRES_MIGRATION_PASSWORD" != "$POSTGRES_APP_PASSWORD" ]] || {
+  echo 'PostgreSQL bootstrap, migration, and application passwords must be distinct.' >&2
+  exit 1
+}
+
+export NOOSPHERE_VERSION NOOSPHERE_PORT NOOSPHERE_IMAGE APP_URL BIND_ADDRESS POSTGRES_PASSWORD POSTGRES_MIGRATION_PASSWORD POSTGRES_APP_PASSWORD NEXTAUTH_SECRET REDIS_URL NOOSPHERE_BOOTSTRAP_SECRETS_FILE NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE
 export NOOSPHERE_ADMIN_PASSWORD="$ADMIN_PASSWORD"
 export NOOSPHERE_BOOTSTRAP_API_KEY="$API_KEY"
 
-# Preserve an existing operator-managed runtime file byte-for-byte. Process
-# environment values still take precedence for this run; edit .env explicitly
-# when a change should persist across future installer reruns.
+# Persist the effective role credentials atomically. This is append-only for
+# an older file without the A3 keys, while an explicit password rotation must
+# replace the corresponding assignment so the next restart cannot fall back
+# to a stale credential.
 if [[ ! -f "$NOOSPHERE_HOME/.env" ]]; then
   write_runtime_env
 else
   chmod 600 "$NOOSPHERE_HOME/.env"
+  ensure_runtime_env_secret POSTGRES_MIGRATION_PASSWORD "$POSTGRES_MIGRATION_PASSWORD"
+  ensure_runtime_env_secret POSTGRES_APP_PASSWORD "$POSTGRES_APP_PASSWORD"
 fi
 
 new_install_required=false
@@ -650,7 +745,9 @@ services:
     container_name: noosphere-openclaw-init
     restart: "no"
     environment:
-      DATABASE_URL: postgresql://noosphere:\${POSTGRES_PASSWORD}@db:5432/noosphere
+      NOOSPHERE_BOOTSTRAP_DATABASE_URL: postgresql://noosphere:\${POSTGRES_PASSWORD}@db:5432/noosphere
+      DATABASE_URL: postgresql://noosphere_migrator:\${POSTGRES_MIGRATION_PASSWORD}@db:5432/noosphere
+      NOOSPHERE_APP_DATABASE_URL: postgresql://noosphere_app:\${POSTGRES_APP_PASSWORD}@db:5432/noosphere
       NOOSPHERE_ADMIN_PASSWORD: \${NOOSPHERE_ADMIN_PASSWORD}
       NOOSPHERE_ADMIN_PASSWORD_RESET: \${NOOSPHERE_ADMIN_PASSWORD_RESET:-false}
       NOOSPHERE_FORCE_ADMIN: \${NOOSPHERE_FORCE_ADMIN:-false}
@@ -667,7 +764,15 @@ services:
       PG_CONN_TIMEOUT_MS: \${PG_CONN_TIMEOUT_MS:-5000}
       REDIS_URL: \${REDIS_URL:-redis://redis:6379}
       NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE: \${NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE:-120}
-    command: ["sh", "-c", "node docker/migrate-or-baseline.mjs && node docker/bootstrap.mjs"]
+    entrypoint: ["/bin/sh", "-ceu", "--"]
+    command:
+      - |
+          node docker/provision-database-roles.mjs
+          node docker/migrate-or-baseline.mjs
+          # Migrations may create tables or routines. Re-provision so the
+          # limited app role receives only the current exact runtime grants.
+          node docker/provision-database-roles.mjs
+          node docker/bootstrap.mjs
     volumes:
       - noosphere_uploads:/app/uploads:rw
     depends_on:
@@ -694,7 +799,8 @@ services:
     ports:
       - "\${BIND_ADDRESS:-127.0.0.1}:\${NOOSPHERE_PORT:-6578}:3000"
     environment:
-      DATABASE_URL: postgresql://noosphere:\${POSTGRES_PASSWORD}@db:5432/noosphere
+      DATABASE_URL: postgresql://noosphere_app:\${POSTGRES_APP_PASSWORD}@db:5432/noosphere
+      SKIP_MIGRATION: "1"
       NEXTAUTH_SECRET: \${NEXTAUTH_SECRET}
       NEXTAUTH_URL: \${APP_URL:-http://127.0.0.1:6578}
       APP_URL: \${APP_URL:-http://127.0.0.1:6578}
@@ -844,6 +950,8 @@ cat > "$SECRETS_FILE" <<JSON
   "adminEmail": "admin@noosphere.local",
   "adminPassword": "${ADMIN_PASSWORD}",
   "postgresPassword": "${POSTGRES_PASSWORD}",
+  "postgresMigrationPassword": "${POSTGRES_MIGRATION_PASSWORD}",
+  "postgresAppPassword": "${POSTGRES_APP_PASSWORD}",
   "nextAuthSecret": "${NEXTAUTH_SECRET}"
 }
 JSON

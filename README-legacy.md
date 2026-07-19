@@ -153,6 +153,8 @@ cp .env.example .env
 # Generate secrets for .env
 openssl rand -hex 32  # NEXTAUTH_SECRET
 openssl rand -hex 32  # POSTGRES_PASSWORD
+openssl rand -hex 32  # POSTGRES_MIGRATION_PASSWORD (must differ)
+openssl rand -hex 32  # POSTGRES_APP_PASSWORD (must differ)
 # Optional for non-Compose deployments; Compose includes Redis automatically
 # REDIS_URL=redis://localhost:6379
 
@@ -181,7 +183,8 @@ Then copy `noosphere.env.example` next to the production Compose template and se
 
 ```bash
 cp noosphere.env.example .env
-# edit .env: POSTGRES_PASSWORD, NEXTAUTH_SECRET, NOOSPHERE_ADMIN_PASSWORD, NOOSPHERE_BOOTSTRAP_API_KEY
+# edit .env: all three distinct PostgreSQL passwords, NEXTAUTH_SECRET,
+# NOOSPHERE_ADMIN_PASSWORD, and NOOSPHERE_BOOTSTRAP_API_KEY
 docker compose -f docker-compose.noosphere.yml up -d
 ```
 
@@ -200,16 +203,16 @@ Database ports differ by caller:
 npm install
 cp .env.example .env
 # Update your local .env before starting:
-# - DATABASE_URL should use the Postgres host port exposed by Docker Compose:
-#   DATABASE_URL="postgresql://noosphere:YOUR_POSTGRES_PASSWORD@localhost:5433/noosphere"
+# - DATABASE_URL uses noosphere_migrator and the host port exposed by Compose.
+# - NOOSPHERE_APP_DATABASE_URL uses the distinct noosphere_app credential.
 # - Set NEXTAUTH_SECRET.
 # - Set NEXTAUTH_URL="http://localhost:6578".
 # - Set APP_URL="http://localhost:6578".
-# - Set POSTGRES_PASSWORD.
+# - Set all three distinct PostgreSQL passwords.
 
-docker compose up db -d
-npx prisma migrate dev
-PORT=6578 npm run dev
+docker compose up -d db redis
+docker compose run --rm -T init
+DATABASE_URL='postgresql://noosphere_app:YOUR_APP_PASSWORD@localhost:5433/noosphere' PORT=6578 npm run dev
 ```
 
 ## Agent API Reference
@@ -409,11 +412,11 @@ For the full setup, operations, troubleshooting, upgrade, and uninstall guide, s
 On the machine running OpenClaw Gateway:
 
 ```bash
-# Installer commit: 4a0061a017947825e96b5cc5899914e7d0ed1898
-# Expected SHA-256: c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2
+# Installer commit: 26639cc2dfd6a831336387c6a66b9d3abdcc96fc
+# Expected SHA-256: 3e882c1471e46e0fd8d944a0a2801b632fd34ec676e5703306e75eea8d9a649f
 installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/4a0061a017947825e96b5cc5899914e7d0ed1898/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' 'c0bfacd392c25231144000024f3f880ade5b1304292ec6732ef4efe0389a77a2' "$installer" | sha256sum -c -
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/26639cc2dfd6a831336387c6a66b9d3abdcc96fc/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' '3e882c1471e46e0fd8d944a0a2801b632fd34ec676e5703306e75eea8d9a649f' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 openclaw noosphere doctor
 openclaw noosphere status
@@ -788,11 +791,15 @@ Live verification from the Noosphere deployment on 2026-05-21:
 
 | Variable | Description |
 | --- | --- |
-| `DATABASE_URL` | PostgreSQL connection string |
+| `DATABASE_URL` | Migration-owner PostgreSQL connection string |
+| `NOOSPHERE_APP_DATABASE_URL` | Limited application PostgreSQL connection string |
+| `NOOSPHERE_BOOTSTRAP_DATABASE_URL` | One-time bootstrap-superuser connection string |
 | `NEXTAUTH_SECRET` | Secret for session encryption |
 | `NEXTAUTH_URL` | Base URL, for example `http://localhost:6578` |
 | `APP_URL` | Public URL of the app |
 | `POSTGRES_PASSWORD` | PostgreSQL password for Docker Compose |
+| `POSTGRES_MIGRATION_PASSWORD` | Distinct migration-owner password |
+| `POSTGRES_APP_PASSWORD` | Distinct application-runtime password |
 | `REDIS_URL` | Redis connection string; use `redis://redis:6379` inside Docker Compose |
 
 ## Deployment
@@ -813,8 +820,10 @@ docker compose --env-file ~/.noosphere/.env up -d redis app
 curl http://127.0.0.1:6578/api/health
 npm run deploy:verify
 
-# Run production migrations after first deploy or schema changes
-docker compose --env-file ~/.noosphere/.env exec app node node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma
+# Run production migrations after first deploy or schema changes. The init
+# service uses the dedicated migration owner, refreshes runtime grants, and
+# then performs the idempotent bootstrap.
+docker compose --env-file ~/.noosphere/.env run --rm init
 
 # View logs
 docker compose logs -f app

@@ -1,0 +1,53 @@
+name: Hybrid storage
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - "docker/hybrid-storage/**"
+      - "docker/provision-database-roles.mjs"
+      - "prisma/**"
+      - "scripts/activate-hybrid-storage.sh"
+      - "scripts/test-hybrid-storage.sh"
+      - "package.json"
+      - ".github/workflows/hybrid-storage.yml"
+  pull_request:
+    branches: [master, main]
+    paths:
+      - "docker/hybrid-storage/**"
+      - "docker/provision-database-roles.mjs"
+      - "prisma/**"
+      - "scripts/activate-hybrid-storage.sh"
+      - "scripts/test-hybrid-storage.sh"
+      - "package.json"
+      - ".github/workflows/hybrid-storage.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hybrid-storage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  storage-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run optional hybrid-storage contract matrix
+        run: npm run test:hybrid-storage
