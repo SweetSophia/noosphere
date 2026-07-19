@@ -213,6 +213,12 @@ inside those routines is schema-qualified. PostgreSQL 16 integration tests run
 the worker with malicious same-named temporary objects and assert that raw
 `restrictedTags` and private feature tables remain unreadable.
 
+The claim lock is isolation-aware without changing the worker login's global
+transaction default. Under `READ COMMITTED`, EvalPlanQual follows a concurrently
+updated Article tuple and rechecks eligibility; under `REPEATABLE READ`, a
+restriction committed after the worker's transaction snapshot raises `40001`.
+The live PostgreSQL contract matrix proves both interleavings.
+
 Because pgvector 0.8.1 is not a trusted extension, extension provisioning and
 feature activation are distinct privilege stages in one advisory-locked
 transaction. A bootstrap superuser temporarily elevates an unloginable extension

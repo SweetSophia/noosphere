@@ -6,6 +6,8 @@ const MIGRATOR_ROLE = "noosphere_migrator";
 const APP_ROLE = "noosphere_app";
 const HYBRID_ADMIN_LOGIN = "noosphere_hybrid_admin_login";
 const HYBRID_WORKER_LOGIN = "noosphere_hybrid_worker_login";
+const AUTOMATIC_MEMORY_PHASE_A_MIGRATION =
+  "20260715132950_automatic_memory_phase_a";
 // This exact regprocedure list is the migration path for application-callable
 // public routines. A migration that adds or changes such a routine must update
 // this list; the post-migration provision pass revokes every other EXECUTE.
@@ -22,7 +24,66 @@ const APPLICATION_FUNCTION_ALLOWLIST = [
   "public.validate_memory_candidate_source()",
   "public.assert_memory_capture_group_candidates_have_source(text,text,text,integer)",
   "public.validate_memory_candidate_source_edge()",
-];
+].map((signature) => ({
+  signature,
+  introducedByMigration: AUTOMATIC_MEMORY_PHASE_A_MIGRATION,
+}));
+
+async function appliedMigrationNames(client) {
+  const ledger = await client.query(
+    "SELECT pg_catalog.to_regclass('public._prisma_migrations') AS relation",
+  );
+  if (!ledger.rows[0]?.relation) return new Set();
+
+  const migrations = await client.query(`
+    SELECT migration_name
+    FROM public._prisma_migrations
+    WHERE finished_at IS NOT NULL
+      AND rolled_back_at IS NULL
+  `);
+  return new Set(migrations.rows.map(({ migration_name: name }) => name));
+}
+
+async function grantApplicationFunctionAllowlist(client) {
+  const appliedMigrations = await appliedMigrationNames(client);
+  const grantedSignatures = [];
+
+  for (
+    const { signature, introducedByMigration } of APPLICATION_FUNCTION_ALLOWLIST
+  ) {
+    const migrationApplied = appliedMigrations.has(introducedByMigration);
+    const result = await client.query(
+      `
+        SELECT
+          pg_catalog.to_regprocedure($1::text) AS oid,
+          pg_catalog.format(
+            'GRANT EXECUTE ON FUNCTION %s TO noosphere_app',
+            pg_catalog.to_regprocedure($1::text)
+          ) AS sql
+      `,
+      [signature],
+    );
+    const oid = result.rows[0]?.oid;
+
+    // The pre-migration provision pass must tolerate routines whose owning
+    // migration has not run yet. Every other state is drift: a matching
+    // routine before its migration could be attacker-created, while a missing
+    // routine after the migration would leave runtime operations broken.
+    if (Boolean(oid) !== migrationApplied) {
+      const routinePresent = Boolean(oid);
+      throw new Error([
+        `application function allowlist drift for ${signature}:`,
+        `migration ${introducedByMigration} applied=${migrationApplied},`,
+        `routine present=${routinePresent}`,
+      ].join(" "));
+    }
+    if (oid) {
+      await client.query(result.rows[0].sql);
+      grantedSignatures.push(signature);
+    }
+  }
+  return grantedSignatures;
+}
 
 function requireDatabaseUrl(name) {
   const raw = process.env[name];
@@ -114,25 +175,6 @@ async function ensureRole(client, roleName, password) {
   }
   await client.query(await formattedRoleAttributeSql(client, "ALTER", roleName));
   await client.query(await formattedRolePasswordSql(client, roleName, password));
-}
-
-async function grantApplicationFunctionAllowlist(client) {
-  for (const signature of APPLICATION_FUNCTION_ALLOWLIST) {
-    const result = await client.query(
-      `
-        SELECT
-          pg_catalog.to_regprocedure($1::text) AS oid,
-          pg_catalog.format(
-            'GRANT EXECUTE ON FUNCTION %s TO noosphere_app',
-            pg_catalog.to_regprocedure($1::text)
-          ) AS sql
-      `,
-      [signature],
-    );
-    if (result.rows[0]?.oid) {
-      await client.query(result.rows[0].sql);
-    }
-  }
 }
 
 async function transferApplicationOwnership(client, bootstrapUser) {
@@ -365,7 +407,8 @@ async function main() {
       ALTER DEFAULT PRIVILEGES FOR ROLE noosphere_migrator
         REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
     `);
-    await grantApplicationFunctionAllowlist(client);
+    const activeApplicationFunctionAllowlist =
+      await grantApplicationFunctionAllowlist(client);
 
     const runtimePrivilegeAudit = await client.query(`
       SELECT
@@ -393,12 +436,24 @@ async function main() {
               )
             )
         ) AS unexpected_public_function_execute
-    `, [APPLICATION_FUNCTION_ALLOWLIST]);
+        , EXISTS (
+          SELECT 1
+          FROM pg_catalog.unnest($1::text[]) AS allowed(signature)
+          WHERE NOT pg_catalog.has_function_privilege(
+            'noosphere_app',
+            pg_catalog.to_regprocedure(allowed.signature),
+            'EXECUTE'
+          )
+        ) AS missing_public_function_execute
+    `, [activeApplicationFunctionAllowlist]);
     if (
       runtimePrivilegeAudit.rows[0]?.migration_ledger_access ||
-      runtimePrivilegeAudit.rows[0]?.unexpected_public_function_execute
+      runtimePrivilegeAudit.rows[0]?.unexpected_public_function_execute ||
+      runtimePrivilegeAudit.rows[0]?.missing_public_function_execute
     ) {
-      throw new Error("application runtime retained deployment-ledger or public-function authority");
+      throw new Error(
+        "application runtime public-function or deployment-ledger authority does not match the exact phase allowlist",
+      );
     }
 
     const roleAudit = await client.query(`

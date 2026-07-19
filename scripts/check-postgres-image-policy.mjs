@@ -144,8 +144,12 @@ async function verifyRemoteArtifact(label, url, expectedSha256) {
 }
 
 const lock = parseEnv("docker/postgres-pgvector/rehearsal.env");
+const hybridMetadata = parseEnv("docker/hybrid-storage/metadata.env");
 const sourceImage = lock.get("SOURCE_IMAGE") ?? "";
 const candidateImage = lock.get("CANDIDATE_IMAGE") ?? "";
+const expectedPostgresVersion = lock.get("EXPECTED_POSTGRES_VERSION") ?? "";
+const hybridPostgresVersion = hybridMetadata.get("POSTGRES_VERSION") ?? "";
+const hybridPostgresVersionNum = hybridMetadata.get("POSTGRES_SERVER_VERSION_NUM") ?? "";
 
 for (const [name, value] of [
   ["SOURCE_IMAGE", sourceImage],
@@ -158,6 +162,11 @@ for (const [name, value] of [
 }
 
 expect(sourceImage !== candidateImage, "SOURCE_IMAGE and CANDIDATE_IMAGE must differ");
+expect(
+  hybridPostgresVersion === expectedPostgresVersion &&
+    hybridPostgresVersionNum === "160014",
+  "hybrid activation metadata must bind the rehearsed PostgreSQL 16.14 runtime and server_version_num=160014",
+);
 expectExactDbImage("docker-compose.yml", candidateImage, "postgres_authorization");
 expectExactDbImage("docker-compose.noosphere.yml", candidateImage, "noosphere_postgres_authorization");
 expectExactDbImage("install-openclaw.sh", candidateImage, "noosphere_postgres_authorization");
@@ -268,11 +277,23 @@ expect(
   "install-openclaw.sh must reject CR/LF in every assignment parsed from its runtime .env writer",
 );
 const activationScript = read("scripts/activate-hybrid-storage.sh");
+const hybridFeatureSchema = read("docker/hybrid-storage/feature-schema.sql");
+const hybridActivationSql = read("docker/hybrid-storage/activate.sql");
+const hybridValidationSql = read("docker/hybrid-storage/validate.sql");
 expect(
   activationScript.includes("validate_provenance_value source_url") &&
     activationScript.includes("validate_provenance_value built_image_digest") &&
+    activationScript.includes('server_version_num" == "$POSTGRES_SERVER_VERSION_NUM') &&
+    activationScript.includes('label_postgres_version" == "$POSTGRES_VERSION') &&
     activationScript.includes("^[[:graph:]]+$"),
-  "hybrid activation must bound and validate provenance values before psql substitution",
+  "hybrid activation must bind the exact PostgreSQL runtime and bound provenance values before psql substitution",
+);
+expect(
+  hybridFeatureSchema.includes("postgresql_server_version_num integer NOT NULL") &&
+    hybridActivationSql.includes(":'postgresql_server_version_num'::integer") &&
+    hybridValidationSql.includes("state.postgresql_server_version_num") &&
+    hybridValidationSql.includes("'server_version_num'"),
+  "hybrid feature evidence must persist and revalidate the exact PostgreSQL runtime",
 );
 const installerProvisionIndexes = Array.from(
   installer.matchAll(/node docker\/provision-database-roles\.mjs/g),

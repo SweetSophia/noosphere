@@ -5,6 +5,7 @@ SELECT pg_catalog.pg_advisory_xact_lock(
   pg_catalog.hashtextextended('noosphere-hybrid-storage-activation-v1', 0)
 );
 SELECT pg_catalog.set_config('noosphere.activation.provenance_kind', :'provenance_kind', true);
+SELECT pg_catalog.set_config('noosphere.activation.postgresql_server_version_num', :'postgresql_server_version_num', true);
 SELECT pg_catalog.set_config('noosphere.activation.source_url', :'source_url', true);
 SELECT pg_catalog.set_config('noosphere.activation.source_sha256', :'source_sha256', true);
 SELECT pg_catalog.set_config('noosphere.activation.pgvector_version', :'pgvector_version', true);
@@ -211,6 +212,7 @@ SELECT
     singleton,
     feature_version,
     provenance_kind,
+    postgresql_server_version_num,
     source_url,
     source_sha256,
     pgvector_version,
@@ -226,6 +228,7 @@ SELECT
     true,
     1,
     :'provenance_kind',
+    :'postgresql_server_version_num'::integer,
     :'source_url',
     :'source_sha256',
     :'pgvector_version',

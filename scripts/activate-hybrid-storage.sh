@@ -99,8 +99,12 @@ SQL
 [[ "$role_audit" == 'app:noosphere_app:false:false:false:false,hybrid-admin:noosphere_hybrid_admin_login:false:false:false:false,hybrid-worker:noosphere_hybrid_worker_login:false:false:false:false,migration:noosphere_migrator:false:false:false:false' ]] ||
   die "runtime role separation preflight failed: $role_audit"
 
-server_major=$(psql "$bootstrap_url" -XAtq -v ON_ERROR_STOP=1 -c "SHOW server_version_num")
-[[ "$server_major" == 16* ]] || die "PostgreSQL 16 is required, got server_version_num=$server_major"
+server_version_num=$(psql "$bootstrap_url" -XAtq -v ON_ERROR_STOP=1 -c "SHOW server_version_num")
+server_version=$(psql "$bootstrap_url" -XAtq -v ON_ERROR_STOP=1 -c "SHOW server_version")
+[[ "$server_version_num" =~ ^[0-9]+$ ]] ||
+  die "PostgreSQL returned an invalid server_version_num: $server_version_num"
+[[ "$server_version_num" == "$POSTGRES_SERVER_VERSION_NUM" ]] ||
+  die "PostgreSQL $POSTGRES_VERSION (server_version_num=$POSTGRES_SERVER_VERSION_NUM) is required, got server_version=$server_version server_version_num=$server_version_num"
 
 available_vector=$(
   psql "$bootstrap_url" -XAtq -v ON_ERROR_STOP=1 \
@@ -126,10 +130,12 @@ if [[ "$provenance_kind" == bundled ]]; then
     die 'database container does not run the locked bundled image'
 
   label_pgvector_version=$(docker image inspect "$actual_image" --format '{{ index .Config.Labels "io.noosphere.pgvector.version" }}')
+  label_postgres_version=$(docker image inspect "$actual_image" --format '{{ index .Config.Labels "io.noosphere.postgresql.version" }}')
   label_source_url=$(docker image inspect "$actual_image" --format '{{ index .Config.Labels "io.noosphere.pgvector.source.url" }}')
   label_source_sha256=$(docker image inspect "$actual_image" --format '{{ index .Config.Labels "io.noosphere.pgvector.source.sha256" }}')
   label_license=$(docker image inspect "$actual_image" --format '{{ index .Config.Labels "io.noosphere.pgvector.license" }}')
-  [[ "$label_pgvector_version" == "$PGVECTOR_VERSION" &&
+  [[ "$label_postgres_version" == "$POSTGRES_VERSION" &&
+     "$label_pgvector_version" == "$PGVECTOR_VERSION" &&
      "$label_source_url" == "$PGVECTOR_SOURCE_URL" &&
      "$label_source_sha256" == "$PGVECTOR_SOURCE_SHA256" &&
      "$label_license" == "$PGVECTOR_LICENSE_SPDX" ]] ||
@@ -215,6 +221,7 @@ validate_provenance_value public_schema_fingerprint "$public_schema_fingerprint"
 psql "$bootstrap_url" -X \
   -v ON_ERROR_STOP=1 \
   -v provenance_kind="$provenance_kind" \
+  -v postgresql_server_version_num="$server_version_num" \
   -v source_url="$PGVECTOR_SOURCE_URL" \
   -v source_sha256="$PGVECTOR_SOURCE_SHA256" \
   -v pgvector_version="$PGVECTOR_VERSION" \

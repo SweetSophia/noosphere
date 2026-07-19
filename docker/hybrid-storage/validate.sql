@@ -9,6 +9,12 @@ BEGIN
 
   IF state.feature_version <> 1
     OR state.provenance_kind <> pg_catalog.current_setting('noosphere.activation.provenance_kind')
+    OR state.postgresql_server_version_num <> pg_catalog.current_setting(
+      'noosphere.activation.postgresql_server_version_num'
+    )::integer
+    OR state.postgresql_server_version_num <> pg_catalog.current_setting(
+      'server_version_num'
+    )::integer
     OR state.source_url <> pg_catalog.current_setting('noosphere.activation.source_url')
     OR state.source_sha256 <> pg_catalog.current_setting('noosphere.activation.source_sha256')
     OR state.pgvector_version <> pg_catalog.current_setting('noosphere.activation.pgvector_version')
@@ -252,11 +258,30 @@ BEGIN
     ) AS acl
     JOIN pg_catalog.pg_roles AS grantee ON grantee.oid = acl.grantee
     WHERE namespace.nspname IN ('noosphere_vector', 'noosphere_crypto', 'noosphere_hybrid')
-      AND grantee.rolname IN (
-        'noosphere_hybrid_admin_login',
-        'noosphere_hybrid_worker_login',
-        'noosphere_app',
-        'noosphere_migrator'
+      AND NOT (
+        (
+          namespace.nspname = 'noosphere_vector'
+          AND grantee.rolname IN (
+            'noosphere_hybrid_extension_owner',
+            'noosphere_hybrid_owner',
+            'noosphere_hybrid_worker'
+          )
+        )
+        OR (
+          namespace.nspname = 'noosphere_crypto'
+          AND grantee.rolname IN (
+            'noosphere_hybrid_extension_owner',
+            'noosphere_hybrid_owner'
+          )
+        )
+        OR (
+          namespace.nspname = 'noosphere_hybrid'
+          AND grantee.rolname IN (
+            'noosphere_hybrid_owner',
+            'noosphere_hybrid_admin',
+            'noosphere_hybrid_worker'
+          )
+        )
       )
   ) OR EXISTS (
     SELECT 1
@@ -270,12 +295,7 @@ BEGIN
     ) AS acl
     JOIN pg_catalog.pg_roles AS grantee ON grantee.oid = acl.grantee
     WHERE namespace.nspname = 'noosphere_hybrid'
-      AND grantee.rolname IN (
-        'noosphere_hybrid_admin_login',
-        'noosphere_hybrid_worker_login',
-        'noosphere_app',
-        'noosphere_migrator'
-      )
+      AND grantee.rolname <> 'noosphere_hybrid_owner'
   ) OR EXISTS (
     SELECT 1
     FROM pg_catalog.pg_proc AS procedure
@@ -285,14 +305,13 @@ BEGIN
     ) AS acl
     JOIN pg_catalog.pg_roles AS grantee ON grantee.oid = acl.grantee
     WHERE namespace.nspname = 'noosphere_hybrid'
-      AND grantee.rolname IN (
-        'noosphere_hybrid_admin_login',
-        'noosphere_hybrid_worker_login',
-        'noosphere_app',
-        'noosphere_migrator'
+      AND grantee.rolname NOT IN (
+        'noosphere_hybrid_owner',
+        'noosphere_hybrid_admin',
+        'noosphere_hybrid_worker'
       )
   ) THEN
-    RAISE EXCEPTION 'runtime logins retain direct hybrid privileges instead of capability-only membership';
+    RAISE EXCEPTION 'hybrid ACLs contain a grantee outside the exact owner and capability allowlist';
   END IF;
 
   IF EXISTS (
@@ -304,6 +323,17 @@ BEGIN
       AND acl.grantee = 0
   ) THEN
     RAISE EXCEPTION 'PUBLIC retains hybrid default privileges';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_default_acl AS defaults
+    JOIN pg_catalog.pg_roles AS owner ON owner.oid = defaults.defaclrole
+    CROSS JOIN LATERAL pg_catalog.aclexplode(defaults.defaclacl) AS acl
+    WHERE owner.rolname = 'noosphere_hybrid_owner'
+      AND acl.grantee <> owner.oid
+  ) THEN
+    RAISE EXCEPTION 'hybrid default ACLs contain an unexpected grantee';
   END IF;
 
   IF NOT EXISTS (

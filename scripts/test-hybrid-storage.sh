@@ -50,8 +50,37 @@ cleanup_volume() {
   docker volume rm "$name" >/dev/null
 }
 
+close_write_fd() {
+  local descriptor=${1:-}
+  [[ "$descriptor" =~ ^[0-9]+$ ]] || return 0
+  exec {descriptor}>&- 2>/dev/null || true
+}
+
+close_read_fd() {
+  local descriptor=${1:-}
+  [[ "$descriptor" =~ ^[0-9]+$ ]] || return 0
+  exec {descriptor}<&- 2>/dev/null || true
+}
+
+cleanup_process() {
+  local pid=${1:-}
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 0
+  if kill -0 "$pid" >/dev/null 2>&1; then
+    kill "$pid" >/dev/null 2>&1 || true
+  fi
+  wait "$pid" >/dev/null 2>&1 || true
+}
+
 cleanup() {
   local status=$?
+  trap - EXIT INT TERM
+  close_write_fd "${read_committed_writer_in:-}"
+  cleanup_process "${read_committed_claim_pid:-}"
+  cleanup_process "${read_committed_writer_pid:-}"
+  close_read_fd "${read_committed_writer_out:-}"
+  if [[ -n "${read_committed_claim_output:-}" && -f "$read_committed_claim_output" ]]; then
+    rm -f -- "$read_committed_claim_output"
+  fi
   cleanup_container "$source_container"
   cleanup_container "$candidate_container"
   cleanup_volume "$source_volume"
@@ -177,6 +206,27 @@ NOOSPHERE_HYBRID_ADMIN_DATABASE_URL="$candidate_admin" \
 NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$candidate_worker" \
   node "$repo_root/docker/provision-database-roles.mjs"
 
+# A pre-migration pass may omit routines whose owning migration has not run.
+# Once that migration is recorded as complete, every callable signature must
+# resolve; otherwise the post-migration pass would silently ship a broken app.
+psql "$source_bootstrap" -XAtq -v ON_ERROR_STOP=1 <<'SQL'
+CREATE TABLE public._prisma_migrations (
+  migration_name text PRIMARY KEY,
+  finished_at timestamptz,
+  rolled_back_at timestamptz
+);
+INSERT INTO public._prisma_migrations (migration_name, finished_at, rolled_back_at)
+VALUES ('20260715132950_automatic_memory_phase_a', pg_catalog.clock_timestamp(), NULL);
+SQL
+if NOOSPHERE_BOOTSTRAP_DATABASE_URL="$source_bootstrap" \
+  DATABASE_URL="$source_migrator" \
+  NOOSPHERE_APP_DATABASE_URL="$source_app" \
+  node "$repo_root/docker/provision-database-roles.mjs" >/dev/null 2>&1; then
+  die 'applied migration with missing application-callable routines unexpectedly passed provisioning'
+fi
+psql "$source_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'DROP TABLE public._prisma_migrations'
+
 # Provisioning must distinguish the valid pre-activation phase (zero capability
 # roles) from a partial attacker/pre-created capability phase.
 psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
@@ -204,6 +254,47 @@ NOOSPHERE_APP_DATABASE_URL="$candidate_app" \
 NOOSPHERE_HYBRID_ADMIN_DATABASE_URL="$candidate_admin" \
 NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$candidate_worker" \
   node "$repo_root/docker/provision-database-roles.mjs"
+
+application_function_audit=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 <<'SQL'
+WITH expected(signature) AS (
+  VALUES
+    ('public.prevent_api_key_agent_principal_rebind()'),
+    ('public.prevent_memory_principal_scope_rebind()'),
+    ('public.validate_memory_capture_identity_scope()'),
+    ('public.validate_memory_candidate_identity_scope()'),
+    ('public.prevent_active_memory_capture_delete()'),
+    ('public.assert_memory_capture_has_source(text)'),
+    ('public.validate_memory_capture_source()'),
+    ('public.memory_candidate_source_is_valid(text)'),
+    ('public.assert_memory_candidate_has_source(text)'),
+    ('public.validate_memory_candidate_source()'),
+    ('public.assert_memory_capture_group_candidates_have_source(text,text,text,integer)'),
+    ('public.validate_memory_candidate_source_edge()')
+), resolved AS (
+  SELECT signature, pg_catalog.to_regprocedure(signature) AS oid
+  FROM expected
+), unexpected AS (
+  SELECT procedure.oid
+  FROM pg_catalog.pg_proc AS procedure
+  JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
+  WHERE namespace.nspname = 'public'
+    AND pg_catalog.has_function_privilege('noosphere_app', procedure.oid, 'EXECUTE')
+    AND procedure.oid <> ALL (
+      ARRAY(SELECT oid FROM resolved WHERE oid IS NOT NULL)
+    )
+)
+SELECT
+  pg_catalog.count(*) FILTER (WHERE oid IS NULL) || ':' ||
+  pg_catalog.count(*) FILTER (
+    WHERE oid IS NOT NULL
+      AND NOT pg_catalog.has_function_privilege('noosphere_app', oid, 'EXECUTE')
+  ) || ':' ||
+  (SELECT pg_catalog.count(*) FROM unexpected)
+FROM resolved;
+SQL
+)
+assert_equals '0:0:0' "$application_function_audit" \
+  'application public-function EXECUTE allowlist'
 psql "$source_bootstrap" -XAtq -v ON_ERROR_STOP=1 \
   -c 'CREATE DATABASE noosphere_shadow OWNER noosphere_migrator'
 psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 \
@@ -229,6 +320,9 @@ expect_sql_failure 'application migration-ledger mutation' "$source_app" "DELETE
 
 # Activate the candidate fixture, then prove Prisma preserves every optional object.
 activate_candidate
+assert_equals '160014:160014' "$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT postgresql_server_version_num || ':' || pg_catalog.current_setting('server_version_num') FROM noosphere_hybrid.feature_state WHERE singleton")" \
+  'activation PostgreSQL runtime provenance'
 
 # Deployment provisioning must reject any extra member of a hybrid capability,
 # not only drift attached to the four expected runtime logins.
@@ -268,8 +362,36 @@ after_signature=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
           (SELECT activation_sql_sha256 FROM noosphere_hybrid.feature_state WHERE singleton)")
 assert_equals "$before_signature" "$after_signature" 'activated Prisma matrix changed optional object identity'
 
-# Repeat activation is validation-only. It must reject direct-login privilege
-# drift and trigger semantic drift instead of silently repairing either.
+# Repeat activation is validation-only. It must reject unexpected direct and
+# default ACL grantees, direct-login privilege drift, and trigger semantic drift
+# instead of silently repairing any of them.
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 <<'SQL'
+CREATE ROLE hybrid_direct_grant_attacker LOGIN;
+GRANT USAGE ON SCHEMA noosphere_hybrid TO hybrid_direct_grant_attacker;
+GRANT EXECUTE ON FUNCTION noosphere_hybrid.claim_jobs(integer, integer)
+  TO hybrid_direct_grant_attacker;
+SQL
+assert_equals 'true:true' "$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT pg_catalog.has_schema_privilege('hybrid_direct_grant_attacker', 'noosphere_hybrid', 'USAGE') || ':' || pg_catalog.has_function_privilege('hybrid_direct_grant_attacker', 'noosphere_hybrid.claim_jobs(integer,integer)', 'EXECUTE')")" \
+  'arbitrary login direct hybrid ACL fixture'
+expect_activation_failure 'arbitrary direct hybrid ACL grantee drift'
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 <<'SQL'
+REVOKE EXECUTE ON FUNCTION noosphere_hybrid.claim_jobs(integer, integer)
+  FROM hybrid_direct_grant_attacker;
+REVOKE USAGE ON SCHEMA noosphere_hybrid FROM hybrid_direct_grant_attacker;
+SQL
+activate_candidate >/dev/null
+
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'ALTER DEFAULT PRIVILEGES FOR ROLE noosphere_hybrid_owner GRANT EXECUTE ON FUNCTIONS TO hybrid_direct_grant_attacker'
+expect_activation_failure 'arbitrary hybrid default ACL grantee drift'
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 <<'SQL'
+ALTER DEFAULT PRIVILEGES FOR ROLE noosphere_hybrid_owner
+  REVOKE EXECUTE ON FUNCTIONS FROM hybrid_direct_grant_attacker;
+DROP ROLE hybrid_direct_grant_attacker;
+SQL
+activate_candidate >/dev/null
+
 psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
   'GRANT UPDATE, DELETE ON noosphere_hybrid.embedding_job TO noosphere_hybrid_admin_login'
 expect_activation_failure 'direct hybrid login grant drift'
@@ -397,6 +519,82 @@ psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
 assert_equals 0 "$(psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 -c \
   'SELECT count(*) FROM noosphere_hybrid.claim_jobs(0,60)')" \
   'unrestricted article zero-limit claim probe'
+
+# At PostgreSQL's default READ COMMITTED isolation, a restriction that commits
+# after claim_jobs takes its statement snapshot must be followed through the
+# Article row lock and rechecked by EvalPlanQual. Disable triggers only inside
+# this disposable writer transaction so a zero result proves the row-lock
+# eligibility recheck rather than job cleanup.
+coproc READ_COMMITTED_RESTRICTION_WRITER {
+  psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 2>&1
+}
+read_committed_writer_out=${READ_COMMITTED_RESTRICTION_WRITER[0]}
+read_committed_writer_in=${READ_COMMITTED_RESTRICTION_WRITER[1]}
+read_committed_writer_pid=$READ_COMMITTED_RESTRICTION_WRITER_PID
+printf '%s\n' \
+  'BEGIN;' \
+  'SET LOCAL session_replication_role = replica;' \
+  'UPDATE public."Article" SET "restrictedTags"=ARRAY['\''financial'\''], "updatedAt"=clock_timestamp() WHERE id='\''hybrid-article'\'';' \
+  'SELECT '\''restriction-ready'\'';' >&"$read_committed_writer_in"
+IFS= read -r read_committed_writer_marker <&"$read_committed_writer_out"
+assert_equals restriction-ready "$read_committed_writer_marker" \
+  'read-committed restriction writer readiness'
+
+read_committed_claim_output=$(mktemp)
+PGAPPNAME=noosphere-hybrid-read-committed-race \
+  psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 \
+    -c 'SELECT count(*) FROM noosphere_hybrid.claim_jobs(1,60)' \
+    >"$read_committed_claim_output" 2>&1 &
+read_committed_claim_pid=$!
+read_committed_claim_blocked=false
+for attempt in $(seq 1 100); do
+  claim_wait=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+    "SELECT coalesce(wait_event_type, '') || ':' || coalesce(wait_event, '') FROM pg_catalog.pg_stat_activity WHERE application_name='noosphere-hybrid-read-committed-race'")
+  if [[ "$claim_wait" == Lock:* ]]; then
+    read_committed_claim_blocked=true
+    break
+  fi
+  kill -0 "$read_committed_claim_pid" >/dev/null 2>&1 || break
+  sleep 0.1
+done
+[[ "$read_committed_claim_blocked" == true ]] ||
+  die "read-committed claim did not block on the concurrent restriction: ${claim_wait:-absent}"
+
+printf '%s\n' 'COMMIT;' >&"$read_committed_writer_in"
+exec {read_committed_writer_in}>&-
+read_committed_writer_in=
+read_committed_writer_tail=$(cat <&"$read_committed_writer_out")
+exec {read_committed_writer_out}<&-
+read_committed_writer_out=
+read_committed_writer_failed=false
+if ! wait "$read_committed_writer_pid"; then
+  read_committed_writer_failed=true
+fi
+read_committed_writer_pid=
+if [[ "$read_committed_writer_failed" == true ]]; then
+  die "read-committed restriction writer failed: $read_committed_writer_tail"
+fi
+read_committed_claim_failed=false
+if ! wait "$read_committed_claim_pid"; then
+  read_committed_claim_failed=true
+fi
+read_committed_claim_pid=
+if [[ "$read_committed_claim_failed" == true ]]; then
+  read_committed_claim_failure=$(cat "$read_committed_claim_output")
+  rm -f -- "$read_committed_claim_output"
+  read_committed_claim_output=
+  die "read-committed claim failed instead of rechecking eligibility: $read_committed_claim_failure"
+fi
+read_committed_claim_count=$(cat "$read_committed_claim_output")
+rm -f -- "$read_committed_claim_output"
+read_committed_claim_output=
+assert_equals 0 "$read_committed_claim_count" \
+  'read-committed concurrent restriction claim count'
+assert_equals 1 "$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT count(*) FROM noosphere_hybrid.embedding_job WHERE article_id='hybrid-article' AND state='queued'")" \
+  'read-committed denial preserved the queued job fixture'
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "UPDATE public.\"Article\" SET \"restrictedTags\"=ARRAY[]::text[], \"updatedAt\"=clock_timestamp() WHERE id='hybrid-article'" >/dev/null
 
 # A worker cannot pin an old MVCC snapshot while an article is unrestricted,
 # wait for a restriction commit, then read the old identifier/bytes. The

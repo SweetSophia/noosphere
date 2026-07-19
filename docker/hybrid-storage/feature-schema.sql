@@ -15,6 +15,7 @@ CREATE TABLE noosphere_hybrid.feature_state (
   singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
   feature_version integer NOT NULL CHECK (feature_version = 1),
   provenance_kind text NOT NULL CHECK (provenance_kind IN ('bundled', 'external')),
+  postgresql_server_version_num integer NOT NULL CHECK (postgresql_server_version_num = 160014),
   source_url text NOT NULL,
   source_sha256 text NOT NULL CHECK (source_sha256 ~ '^[a-f0-9]{64}$'),
   pgvector_version text NOT NULL,
@@ -618,11 +619,20 @@ AS $function$
         OR (job.state = 'leased' AND job.lease_expires_at <= pg_catalog.clock_timestamp())
       )
       AND job.available_at <= pg_catalog.clock_timestamp()
+      -- These predicates deliberately repeat the internal view's privacy
+      -- boundary on the exact Article alias locked below. Under READ
+      -- COMMITTED, EvalPlanQual rechecks qualifications attached to this
+      -- locked alias; predicates hidden behind the view's separate Article
+      -- scan would otherwise remain satisfied by the statement snapshot.
+      AND article."deletedAt" IS NULL
+      AND article."recallQuarantinedAt" IS NULL
+      AND pg_catalog.cardinality(article."restrictedTags") = 0
     ORDER BY job.available_at, job.created_at, job.id
     FOR UPDATE OF job SKIP LOCKED
-    -- This lock is the revocation linearization point. Under REPEATABLE READ,
-    -- an Article changed after the worker's snapshot raises a serialization
-    -- failure instead of returning now-restricted bytes from that snapshot.
+    -- This lock is the revocation linearization point. READ COMMITTED follows
+    -- a concurrently updated tuple and rechecks eligibility through
+    -- EvalPlanQual; REPEATABLE READ instead raises a serialization failure
+    -- when the Article changed after the worker's transaction snapshot.
     FOR SHARE OF article
     LIMIT CASE WHEN claim_limit BETWEEN 1 AND 100 THEN claim_limit ELSE 0 END
   ),
