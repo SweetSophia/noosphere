@@ -23,8 +23,8 @@ test("raw SQL restricted-scope adapter executes the canonical authorization matr
   });
 
   try {
-    await prisma.article.createMany({
-      data: [
+    await prisma.$transaction(
+      [
         {
           id: articleIds.unrestricted,
           topicId,
@@ -49,8 +49,8 @@ test("raw SQL restricted-scope adapter executes the canonical authorization matr
           content: "HR article",
           restrictedTags: ["hr"],
         },
-      ],
-    });
+      ].map((data) => prisma.article.create({ data })),
+    );
 
     const matrix: Array<{
       name: string;
