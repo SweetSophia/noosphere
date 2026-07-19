@@ -233,7 +233,7 @@ activate_candidate
 # Deployment provisioning must reject any extra member of a hybrid capability,
 # not only drift attached to the four expected runtime logins.
 psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
-  "CREATE ROLE hybrid_membership_attacker LOGIN PASSWORD 'disposable-attacker-password';
+  "CREATE ROLE hybrid_membership_attacker NOLOGIN;
    GRANT noosphere_hybrid_worker TO hybrid_membership_attacker" >/dev/null
 if NOOSPHERE_BOOTSTRAP_DATABASE_URL="$candidate_bootstrap" \
   DATABASE_URL="$candidate_migrator" \

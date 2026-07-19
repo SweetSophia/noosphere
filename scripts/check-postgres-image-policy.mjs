@@ -251,32 +251,21 @@ expect(
     installer.includes("PostgreSQL bootstrap, migration, and application passwords must be distinct."),
   "install-openclaw.sh must atomically rewrite role-separation secrets with a final newline and without reusing credentials",
 );
-const persistedRuntimeAssignments = [
-  ["NOOSPHERE_VERSION", "NOOSPHERE_VERSION"],
-  ["NOOSPHERE_IMAGE", "NOOSPHERE_IMAGE"],
-  ["NOOSPHERE_PORT", "NOOSPHERE_PORT"],
-  ["APP_URL", "APP_URL"],
-  ["BIND_ADDRESS", "BIND_ADDRESS"],
-  ["POSTGRES_PASSWORD", "POSTGRES_PASSWORD"],
-  ["POSTGRES_MIGRATION_PASSWORD", "POSTGRES_MIGRATION_PASSWORD"],
-  ["POSTGRES_APP_PASSWORD", "POSTGRES_APP_PASSWORD"],
-  ["NEXTAUTH_SECRET", "NEXTAUTH_SECRET"],
-  ["NOOSPHERE_ADMIN_PASSWORD", "ADMIN_PASSWORD"],
-  ["NOOSPHERE_ADMIN_PASSWORD_RESET", "NOOSPHERE_ADMIN_PASSWORD_RESET"],
-  ["NOOSPHERE_FORCE_ADMIN", "NOOSPHERE_FORCE_ADMIN"],
-  ["NOOSPHERE_BOOTSTRAP_API_KEY", "API_KEY"],
-  ["NOOSPHERE_BOOTSTRAP_SECRETS_FILE", "NOOSPHERE_BOOTSTRAP_SECRETS_FILE"],
-  ["REDIS_URL", "REDIS_URL"],
-  ["PG_POOL_MAX", "PG_POOL_MAX"],
-  ["PG_IDLE_TIMEOUT_MS", "PG_IDLE_TIMEOUT_MS"],
-  ["PG_CONN_TIMEOUT_MS", "PG_CONN_TIMEOUT_MS"],
-  ["NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE", "NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE"],
-];
-expect(
-  persistedRuntimeAssignments.every(([name, variable]) =>
-    installer.includes(`reject_multiline_env_value ${name} "$${variable}"`),
+const writeRuntimeEnvBlock =
+  installer.match(/write_runtime_env\(\) \{([\s\S]*?)\n}\n\nensure_runtime_env_secret\(\)/)?.[1] ?? "";
+const persistedRuntimeAssignments = Array.from(
+  writeRuntimeEnvBlock.matchAll(
+    /^([A-Z][A-Z0-9_]*)=\$\{([A-Z][A-Z0-9_]*)(?::-[^}]*)?}$/gm,
   ),
-  "install-openclaw.sh must reject CR/LF in every persisted runtime assignment",
+  (match) => [match[1], match[2]],
+);
+expect(
+  persistedRuntimeAssignments.length === 19 &&
+    new Set(persistedRuntimeAssignments.map(([name]) => name)).size === 19 &&
+    persistedRuntimeAssignments.every(([name, variable]) =>
+      installer.includes(`reject_multiline_env_value ${name} "$${variable}"`),
+    ),
+  "install-openclaw.sh must reject CR/LF in every assignment parsed from its runtime .env writer",
 );
 const activationScript = read("scripts/activate-hybrid-storage.sh");
 expect(
