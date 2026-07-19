@@ -60,6 +60,27 @@ async function formattedRolePasswordSql(client, roleName, password) {
   return sql;
 }
 
+async function formattedRoleAttributeSql(client, action, roleName) {
+  const templates = {
+    CREATE:
+      "CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS",
+    ALTER:
+      "ALTER ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS",
+  };
+  const template = templates[action];
+  if (!template) throw new Error(`unsupported role attribute action ${action}`);
+
+  const result = await client.query(
+    "SELECT pg_catalog.format($1::text, $2::text) AS sql",
+    [template, roleName],
+  );
+  const sql = result.rows[0]?.sql;
+  if (typeof sql !== "string" || !sql.startsWith(`${action} ROLE `)) {
+    throw new Error("PostgreSQL did not produce a safe role-attribute statement");
+  }
+  return sql;
+}
+
 async function ensureRole(client, roleName, password) {
   const existing = await client.query(
     `
@@ -85,24 +106,10 @@ async function ensureRole(client, roleName, password) {
     throw new Error(`refusing to repair unsafe pre-existing database role ${roleName}`);
   }
 
-  await client.query(`
-    DO $block$
-    BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = '${roleName}'
-      ) THEN
-        CREATE ROLE ${roleName}
-          LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
-          INHERIT NOREPLICATION NOBYPASSRLS;
-      END IF;
-    END;
-    $block$;
-  `);
-  await client.query(`
-    ALTER ROLE ${roleName}
-      LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
-      INHERIT NOREPLICATION NOBYPASSRLS
-  `);
+  if (existing.rowCount === 0) {
+    await client.query(await formattedRoleAttributeSql(client, "CREATE", roleName));
+  }
+  await client.query(await formattedRoleAttributeSql(client, "ALTER", roleName));
   await client.query(await formattedRolePasswordSql(client, roleName, password));
 }
 
