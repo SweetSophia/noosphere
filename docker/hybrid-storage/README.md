@@ -159,7 +159,9 @@ not restore its prior state.
 Pass the provider mapping to the installer as JSON. The installer validates it,
 base64-encodes the bytes to avoid Compose interpolation, and persists only
 `NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64` in the mode-0600 runtime `.env`. A remote
-mapping must include an API key; loopback-local providers may omit it.
+mapping must include an API key. Local mappings may omit it, but both HTTP and
+HTTPS local endpoints must use loopback or the pinned
+`host.docker.internal:host-gateway` mapping.
 
 ```dotenv
 POSTGRES_HYBRID_WORKER_PASSWORD=<worker-role-password>

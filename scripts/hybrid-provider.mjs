@@ -57,13 +57,14 @@ export function canonicalEndpointIdentity(endpoint, locality) {
   if (locality === "remote" && parsed.protocol !== "https:") {
     throw new Error("Remote hybrid providers require HTTPS");
   }
-  if (locality === "local" && parsed.protocol === "http:") {
-    const host = parsed.hostname.toLowerCase();
+  if (locality === "local") {
+    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
     if (!["localhost", "127.0.0.1", "::1", "host.docker.internal"].includes(host)) {
-      throw new Error("Plain HTTP is allowed only for loopback or the pinned container host gateway");
+      throw new Error("Local hybrid providers require loopback or the pinned container host gateway");
     }
-  } else if (parsed.protocol !== "https:") {
-    throw new Error("Hybrid provider endpoints require HTTPS or loopback HTTP");
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      throw new Error("Local hybrid provider endpoints require HTTP or HTTPS");
+    }
   }
   const pathname = parsed.pathname.replace(/\/+$/, "") || "/";
   return `${parsed.protocol}//${parsed.host.toLowerCase()}${pathname}`;

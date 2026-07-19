@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import test from "node:test";
 import {
   HybridProviderError,
@@ -14,6 +15,7 @@ import {
 } from "./hybrid-provider.mjs";
 
 const profileId = "11111111-1111-4111-8111-111111111111";
+const testApiKey = randomBytes(24).toString("hex");
 const job = {
   profile_id: profileId,
   provider_protocol: "openai-compatible",
@@ -29,9 +31,12 @@ const job = {
 test("endpoint identity excludes no mutable or credential-bearing URL components", () => {
   assert.equal(canonicalEndpointIdentity("https://EXAMPLE.com/v1/embeddings/", "remote"), "https://example.com/v1/embeddings");
   assert.equal(canonicalEndpointIdentity("http://host.docker.internal:11434/v1/embeddings", "local"), "http://host.docker.internal:11434/v1/embeddings");
+  assert.equal(canonicalEndpointIdentity("https://localhost/v1/embeddings", "local"), "https://localhost/v1/embeddings");
+  assert.equal(canonicalEndpointIdentity("http://[::1]:8080/v1/embeddings", "local"), "http://[::1]:8080/v1/embeddings");
   assert.throws(() => canonicalEndpointIdentity("https://example.com/v1/embeddings?key=secret", "remote"), /query parameters/);
   assert.throws(() => canonicalEndpointIdentity("http://example.com/v1/embeddings", "remote"), /HTTPS/);
   assert.throws(() => canonicalEndpointIdentity("http://192.168.1.10/v1/embeddings", "local"), /loopback/);
+  assert.throws(() => canonicalEndpointIdentity("https://example.com/v1/embeddings", "local"), /Local hybrid providers/);
 });
 
 test("provider configs are unique, locality-bound, and require remote authentication", () => {
@@ -91,7 +96,7 @@ test("provider request authenticates, bounds content, and returns one validated 
     locality: "local",
     endpoint: "http://127.0.0.1:8080/v1/embeddings",
     endpointIdentitySha256: job.endpoint_identity_sha256,
-    apiKey: "test-only-key",
+    apiKey: testApiKey,
   };
   const embedding = await requestEmbedding(job, provider, {
     fetchImpl: async (url, init) => {
@@ -103,7 +108,7 @@ test("provider request authenticates, bounds content, and returns one validated 
     },
   });
   assert.deepEqual(embedding, [1, 2, 3]);
-  assert.equal(observed.init.headers.authorization, "Bearer test-only-key");
+  assert.equal(observed.init.headers.authorization, `Bearer ${testApiKey}`);
   assert.equal(JSON.parse(observed.init.body).input, "fixture");
 
   await assert.rejects(

@@ -235,13 +235,38 @@ BEGIN
         WHEN noosphere_hybrid.embedding_job.state = 'leased'
           AND noosphere_hybrid.embedding_job.lease_expires_at > pg_catalog.clock_timestamp()
         THEN noosphere_hybrid.embedding_job.lease_expires_at ELSE NULL END,
-      attempt_count = 0,
-      available_at = pg_catalog.clock_timestamp(),
+      lease_generation = CASE
+        WHEN noosphere_hybrid.embedding_job.state = 'leased'
+          AND noosphere_hybrid.embedding_job.lease_expires_at > pg_catalog.clock_timestamp()
+        THEN noosphere_hybrid.embedding_job.lease_generation ELSE 0 END,
+      attempt_count = CASE
+        WHEN noosphere_hybrid.embedding_job.state = 'leased'
+          AND noosphere_hybrid.embedding_job.lease_expires_at > pg_catalog.clock_timestamp()
+        -- A3's earlier AFTER trigger preserves the live lease generation but
+        -- predates Phase B's durable cap and resets attempt_count. Reconstitute
+        -- the invariant here without modifying the exact A3 base. Phase B
+        -- increments both counters together on every claim.
+        THEN GREATEST(
+          noosphere_hybrid.embedding_job.attempt_count::bigint,
+          noosphere_hybrid.embedding_job.lease_generation
+        )::integer
+        ELSE 0 END,
+      available_at = CASE
+        WHEN noosphere_hybrid.embedding_job.state = 'leased'
+          AND noosphere_hybrid.embedding_job.lease_expires_at > pg_catalog.clock_timestamp()
+        THEN noosphere_hybrid.embedding_job.available_at
+        ELSE pg_catalog.clock_timestamp() END,
       last_error_code = NULL,
       updated_at = pg_catalog.clock_timestamp()
   WHERE noosphere_hybrid.embedding_job.desired_revision IS DISTINCT FROM EXCLUDED.desired_revision
      OR noosphere_hybrid.embedding_job.desired_content_hash IS DISTINCT FROM EXCLUDED.desired_content_hash
-     OR noosphere_hybrid.embedding_job.state IN ('failed', 'cancelled');
+     OR noosphere_hybrid.embedding_job.state IN ('failed', 'cancelled')
+     OR (
+       noosphere_hybrid.embedding_job.state = 'leased'
+       AND noosphere_hybrid.embedding_job.lease_expires_at > pg_catalog.clock_timestamp()
+       AND noosphere_hybrid.embedding_job.attempt_count
+         < noosphere_hybrid.embedding_job.lease_generation
+     );
 
   GET DIAGNOSTICS affected = ROW_COUNT;
   RETURN affected > 0;

@@ -259,10 +259,14 @@ function errorCode(error) {
 function abortableDelay(milliseconds, signal) {
   if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, milliseconds);
-    signal.addEventListener("abort", () => {
+    const onAbort = () => {
       clearTimeout(timer);
       resolve();
-    }, { once: true });
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", onAbort, { once: true });
   });
 }

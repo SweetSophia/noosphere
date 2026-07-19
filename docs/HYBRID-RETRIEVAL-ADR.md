@@ -281,8 +281,8 @@ worker dispatches no more than 16 concurrent requests and validates
 the provider protocol, immutable endpoint fingerprint, model/revision,
 single-vector response shape, dimensions, finite components, normalization,
 content type, response size, and timeout before conditional publication. Remote
-providers require HTTPS and bearer authentication. Plain HTTP local providers
-are limited to loopback or Compose's statically mapped
+providers require HTTPS and bearer authentication. Every `local` provider,
+whether HTTP or HTTPS, is limited to loopback or Compose's statically mapped
 `host.docker.internal:host-gateway`; credentials and endpoints remain
 operator-owned configuration and never enter the database, cache, logs, or
 durable error state.

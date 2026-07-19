@@ -298,8 +298,10 @@ NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$candidate_worker" \
 
 # Installer-managed rotation must update the live login roles before a worker is
 # recreated with the newly persisted secrets.
-rotated_candidate_admin="postgresql://noosphere_hybrid_admin_login:candidate-admin-password-rotated@127.0.0.1:$candidate_port/noosphere"
-rotated_candidate_worker="postgresql://noosphere_hybrid_worker_login:candidate-worker-password-rotated@127.0.0.1:$candidate_port/noosphere"
+printf -v rotated_candidate_admin_password '%04x%04x%04x%04x' "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM"
+printf -v rotated_candidate_worker_password '%04x%04x%04x%04x' "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM"
+rotated_candidate_admin="postgresql://noosphere_hybrid_admin_login:$rotated_candidate_admin_password@127.0.0.1:$candidate_port/noosphere"
+rotated_candidate_worker="postgresql://noosphere_hybrid_worker_login:$rotated_candidate_worker_password@127.0.0.1:$candidate_port/noosphere"
 NOOSPHERE_BOOTSTRAP_DATABASE_URL="$candidate_bootstrap" \
 DATABASE_URL="$candidate_migrator" \
 NOOSPHERE_APP_DATABASE_URL="$candidate_app" \
@@ -967,15 +969,22 @@ psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
      'published','high','hybrid-topic',ARRAY[]::text[],clock_timestamp(),clock_timestamp()
    )" >/dev/null
 crash_claim=$(psql "$candidate_worker" -XAtq -F '|' -v ON_ERROR_STOP=1 -c \
-  "SELECT job_id,lease_generation FROM noosphere_hybrid_b.claim_jobs(1,30,2,ARRAY['$local_profile']::uuid[])")
-IFS='|' read -r crash_job crash_generation <<<"$crash_claim"
+  "SELECT job_id,lease_token,lease_generation,attempt_count FROM noosphere_hybrid_b.claim_jobs(1,30,2,ARRAY['$local_profile']::uuid[])")
+IFS='|' read -r crash_job crash_token crash_generation crash_attempt <<<"$crash_claim"
 [[ "$crash_job" =~ ^[a-f0-9-]{36}$ ]] || die 'Phase B crash-cap first claim missing'
+assert_equals 1 "$crash_attempt" 'Phase B crash-cap first durable attempt'
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "UPDATE public.\"Article\" SET content='crash cap bytes revised', \"updatedAt\"=clock_timestamp() WHERE id='phase-b-crash-cap'" >/dev/null
+assert_equals "leased:1:$crash_token:$crash_generation" "$(psql "$candidate_bootstrap" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  "SELECT state,attempt_count,lease_token,lease_generation FROM noosphere_hybrid.embedding_job WHERE id='$crash_job'")" \
+  'Phase B active lease preserves monotonic attempts across revision coalescing'
 psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
   "UPDATE noosphere_hybrid.embedding_job SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id='$crash_job'" >/dev/null
 crash_claim=$(psql "$candidate_worker" -XAtq -F '|' -v ON_ERROR_STOP=1 -c \
-  "SELECT job_id,lease_generation FROM noosphere_hybrid_b.claim_jobs(1,30,2,ARRAY['$local_profile']::uuid[])")
-IFS='|' read -r crash_job crash_generation <<<"$crash_claim"
+  "SELECT job_id,lease_generation,attempt_count FROM noosphere_hybrid_b.claim_jobs(1,30,2,ARRAY['$local_profile']::uuid[])")
+IFS='|' read -r crash_job crash_generation crash_attempt <<<"$crash_claim"
 assert_equals 2 "$crash_generation" 'Phase B crash-cap second lease generation'
+assert_equals 2 "$crash_attempt" 'Phase B crash-cap second durable attempt'
 psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
   "UPDATE noosphere_hybrid.embedding_job SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id='$crash_job'" >/dev/null
 assert_equals 0 "$(psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 -c \
@@ -1243,8 +1252,9 @@ phase_b_epoch_after_revocation=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_S
 assert_equals f "$(psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 -c \
   "BEGIN; SELECT noosphere_hybrid_b.authorize_dispatch('$remote_job','$remote_token',$remote_generation); ROLLBACK")" \
   'Phase B dispatch authorization after committed consent revocation'
-remote_provider_config=$(printf '[{"profileId":"%s","locality":"remote","endpoint":"%s","apiKey":"test-only-remote-key"}]' \
-  "$remote_profile" "$remote_fixture_endpoint")
+printf -v remote_provider_api_key '%04x%04x%04x%04x' "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM"
+remote_provider_config=$(printf '[{"profileId":"%s","locality":"remote","endpoint":"%s","apiKey":"%s"}]' \
+  "$remote_profile" "$remote_fixture_endpoint" "$remote_provider_api_key")
 fixture_requests_before_revoked_worker=$(grep -c '^request$' "$fixture_log")
 worker_log=$(mktemp)
 if ! NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$candidate_worker" \
