@@ -218,13 +218,7 @@ PARALLEL SAFE
 SET search_path = pg_catalog, pg_temp
 RETURN NOT EXISTS (
   SELECT 1
-  FROM pg_catalog.unnest(
-    noosphere_vector.vector_to_float4(
-      input_vector,
-      noosphere_vector.vector_dims(input_vector),
-      false
-    )
-  ) AS component(value)
+  FROM pg_catalog.unnest(input_vector::real[]) AS component(value)
   WHERE value::text IN ('NaN', 'Infinity', '-Infinity')
 );
 
