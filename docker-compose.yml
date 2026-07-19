@@ -5,7 +5,9 @@ x-noosphere-image: &noosphere-image
     context: .
     dockerfile: Dockerfile
     args:
-      DATABASE_URL: postgresql://noosphere_migrator:buildtime@db:5432/noosphere
+      # Prisma only needs a syntactically valid URL while generating/building;
+      # the image build never authenticates or performs database work.
+      DATABASE_URL: postgresql://localhost/noosphere
       NOOSPHERE_VERSION: ${NOOSPHERE_VERSION:-1.11.0}
   image: noosphere-local:${NOOSPHERE_VERSION:-1.11.0}
 
