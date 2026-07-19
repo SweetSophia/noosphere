@@ -75,11 +75,43 @@ cleanup() {
   local status=$?
   trap - EXIT INT TERM
   close_write_fd "${read_committed_writer_in:-}"
+  close_write_fd "${phase_b_consent_writer_in:-}"
+  close_write_fd "${phase_b_authorize_worker_in:-}"
   cleanup_process "${read_committed_claim_pid:-}"
   cleanup_process "${read_committed_writer_pid:-}"
+  cleanup_process "${phase_b_publish_pid:-}"
+  cleanup_process "${phase_b_consent_writer_pid:-}"
+  cleanup_process "${phase_b_authorize_worker_pid:-}"
+  cleanup_process "${phase_b_content_update_pid:-}"
+  cleanup_process "${fixture_pid:-}"
   close_read_fd "${read_committed_writer_out:-}"
+  close_read_fd "${phase_b_consent_writer_out:-}"
+  close_read_fd "${phase_b_authorize_worker_out:-}"
   if [[ -n "${read_committed_claim_output:-}" && -f "$read_committed_claim_output" ]]; then
     rm -f -- "$read_committed_claim_output"
+  fi
+  if [[ -n "${phase_b_publish_output:-}" && -f "$phase_b_publish_output" ]]; then
+    rm -f -- "$phase_b_publish_output"
+  fi
+  if [[ -n "${fixture_log:-}" && -f "$fixture_log" ]]; then
+    rm -f -- "$fixture_log"
+  fi
+  if [[ -n "${worker_health_file:-}" && -f "$worker_health_file" ]]; then
+    rm -f -- "$worker_health_file"
+  fi
+  if [[ -n "${worker_log:-}" && -f "$worker_log" ]]; then
+    rm -f -- "$worker_log"
+  fi
+  for temporary_file in \
+    "${invalid_lease_log:-}" \
+    "${terminal_health_file:-}" \
+    "${terminal_worker_log:-}"; do
+    if [[ -n "$temporary_file" && -f "$temporary_file" ]]; then
+      rm -f -- "$temporary_file"
+    fi
+  done
+  if [[ -n "${phase_b_content_update_output:-}" && -f "$phase_b_content_update_output" ]]; then
+    rm -f -- "$phase_b_content_update_output"
   fi
   cleanup_container "$source_container"
   cleanup_container "$candidate_container"
@@ -158,6 +190,15 @@ activate_candidate() {
   NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$candidate_worker" \
   NOOSPHERE_DB_CONTAINER="$candidate_container" \
     "$repo_root/scripts/activate-hybrid-storage.sh"
+}
+
+activate_phase_b() {
+  NOOSPHERE_BOOTSTRAP_DATABASE_URL="$candidate_bootstrap" \
+  DATABASE_URL="$candidate_migrator" \
+  NOOSPHERE_APP_DATABASE_URL="$candidate_app" \
+  NOOSPHERE_HYBRID_ADMIN_DATABASE_URL="$candidate_admin" \
+  NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$candidate_worker" \
+    "$repo_root/scripts/activate-hybrid-worker.sh"
 }
 
 expect_activation_failure() {
@@ -254,6 +295,29 @@ NOOSPHERE_APP_DATABASE_URL="$candidate_app" \
 NOOSPHERE_HYBRID_ADMIN_DATABASE_URL="$candidate_admin" \
 NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$candidate_worker" \
   node "$repo_root/docker/provision-database-roles.mjs"
+
+# Installer-managed rotation must update the live login roles before a worker is
+# recreated with the newly persisted secrets.
+rotated_candidate_admin="postgresql://noosphere_hybrid_admin_login:candidate-admin-password-rotated@127.0.0.1:$candidate_port/noosphere"
+rotated_candidate_worker="postgresql://noosphere_hybrid_worker_login:candidate-worker-password-rotated@127.0.0.1:$candidate_port/noosphere"
+NOOSPHERE_BOOTSTRAP_DATABASE_URL="$candidate_bootstrap" \
+DATABASE_URL="$candidate_migrator" \
+NOOSPHERE_APP_DATABASE_URL="$candidate_app" \
+NOOSPHERE_HYBRID_ADMIN_DATABASE_URL="$rotated_candidate_admin" \
+NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$rotated_candidate_worker" \
+  node "$repo_root/docker/provision-database-roles.mjs"
+if psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c 'SELECT 1' >/dev/null 2>&1; then
+  die 'old Phase B administrator password survived rotation'
+fi
+if psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 -c 'SELECT 1' >/dev/null 2>&1; then
+  die 'old Phase B worker password survived rotation'
+fi
+assert_equals noosphere_hybrid_admin_login "$(psql "$rotated_candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c 'SELECT current_user')" \
+  'rotated Phase B administrator login'
+assert_equals noosphere_hybrid_worker_login "$(psql "$rotated_candidate_worker" -XAtq -v ON_ERROR_STOP=1 -c 'SELECT current_user')" \
+  'rotated Phase B worker login'
+candidate_admin=$rotated_candidate_admin
+candidate_worker=$rotated_candidate_worker
 
 application_function_audit=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 <<'SQL'
 WITH expected(signature) AS (
@@ -726,5 +790,576 @@ epoch_after=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c 'SELECT ep
 psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
   "DELETE FROM public.\"Article\" WHERE id='hybrid-article'" >/dev/null
 assert_equals '0:0:0' "$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c "SELECT (SELECT count(*) FROM noosphere_hybrid.article_embedding_state WHERE article_id='hybrid-article') || ':' || (SELECT count(*) FROM noosphere_hybrid.embedding_job WHERE article_id='hybrid-article') || ':' || (SELECT count(*) FROM noosphere_hybrid.article_embedding WHERE article_id='hybrid-article')")" 'physical-delete cascade'
+psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid.set_profile_state('$profile_id','inactive')" >/dev/null
 
-printf '[hybrid-storage-test] PASS: extension-less and activated drift, privilege, lifecycle, race, deletion, and epoch matrices.\n'
+# Phase B is a separately evidenced layer. It must activate and repeat exactly
+# without weakening the immutable A3 validator underneath it.
+activate_phase_b >/dev/null
+assert_equals 'f:f:f:f' "$(psql "$candidate_bootstrap" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  "SELECT pg_catalog.has_function_privilege('noosphere_hybrid_admin','noosphere_hybrid.set_profile_state(uuid,noosphere_hybrid.profile_state)','EXECUTE'),
+          pg_catalog.has_function_privilege('noosphere_hybrid_worker','noosphere_hybrid.claim_jobs(integer,integer)','EXECUTE'),
+          pg_catalog.has_function_privilege('noosphere_hybrid_worker','noosphere_hybrid.publish_embedding(uuid,uuid,bigint,bigint,bytea,noosphere_vector.vector)','EXECUTE'),
+          pg_catalog.has_function_privilege('noosphere_hybrid_worker','noosphere_hybrid.fail_job(uuid,uuid,bigint,text,timestamptz,boolean)','EXECUTE')")" \
+  'Phase B legacy A3 execution surface withdrawal'
+
+phase_b_database_source=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT source_sha256 FROM noosphere_hybrid_b.feature_state WHERE singleton')
+if psql "$candidate_bootstrap" -X -v ON_ERROR_STOP=1 \
+  -v a3_source_sha256="$(printf '0%.0s' {1..64})" \
+  -v phase_b_source_sha256="$phase_b_database_source" \
+  -f "$repo_root/docker/hybrid-storage/activate-phase-b.sql" >/dev/null 2>&1; then
+  die 'Phase B activation accepted A3 source bytes that do not match persisted provenance'
+fi
+
+# B activation re-runs A3's exact validator inside the same transaction before
+# restoring the B-only ACL. Drift in an unrelated A3 routine grant must block B.
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "GRANT EXECUTE ON FUNCTION noosphere_hybrid.canonical_document(text,text,text,integer) TO noosphere_hybrid_admin" >/dev/null
+if activate_phase_b >/dev/null 2>&1; then
+  die 'Phase B activation accepted drift in its A3 base'
+fi
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "REVOKE EXECUTE ON FUNCTION noosphere_hybrid.canonical_document(text,text,text,integer) FROM noosphere_hybrid_admin" >/dev/null
+activate_phase_b >/dev/null
+
+# The B structural fingerprint covers table columns/defaults/constraints,
+# indexes, and every B-owned Article trigger, not only routine text.
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'ALTER TABLE noosphere_hybrid_b.embedding_consent DROP CONSTRAINT embedding_consent_restricted_requires_remote' >/dev/null
+if activate_phase_b >/dev/null 2>&1; then
+  die 'Phase B activation accepted a dropped consent invariant'
+fi
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'ALTER TABLE noosphere_hybrid_b.embedding_consent ADD CONSTRAINT embedding_consent_restricted_requires_remote CHECK (NOT restricted_remote_egress OR remote_egress)' >/dev/null
+activate_phase_b >/dev/null
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'CREATE TRIGGER noosphere_hybrid_b_unexpected_guard BEFORE UPDATE ON public."Article" FOR EACH ROW EXECUTE FUNCTION noosphere_hybrid_b.article_write_guard()' >/dev/null
+if activate_phase_b >/dev/null 2>&1; then
+  die 'Phase B activation accepted an unexpected B-owned Article trigger'
+fi
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'DROP TRIGGER noosphere_hybrid_b_unexpected_guard ON public."Article"' >/dev/null
+activate_phase_b >/dev/null
+
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "CREATE ROLE hybrid_phase_b_acl_attacker NOLOGIN;
+   GRANT USAGE ON SCHEMA noosphere_hybrid_b TO hybrid_phase_b_acl_attacker;
+   GRANT EXECUTE ON FUNCTION noosphere_hybrid_b.profile_status(uuid) TO hybrid_phase_b_acl_attacker" >/dev/null
+if activate_phase_b >/dev/null 2>&1; then
+  die 'Phase B activation accepted an ACL grantee outside the exact capability allowlist'
+fi
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "REVOKE ALL ON FUNCTION noosphere_hybrid_b.profile_status(uuid) FROM hybrid_phase_b_acl_attacker;
+   REVOKE ALL ON SCHEMA noosphere_hybrid_b FROM hybrid_phase_b_acl_attacker;
+   DROP ROLE hybrid_phase_b_acl_attacker" >/dev/null
+activate_phase_b >/dev/null
+expect_sql_failure 'application Phase B schema read' "$candidate_app" \
+  'SELECT * FROM noosphere_hybrid_b.feature_state'
+expect_sql_failure 'worker Phase B consent read' "$candidate_worker" \
+  'SELECT * FROM noosphere_hybrid_b.embedding_consent'
+expect_sql_failure 'administrator Phase B consent mutation' "$candidate_admin" \
+  'UPDATE noosphere_hybrid_b.embedding_consent SET remote_egress=true'
+
+fixture_endpoint='http://127.0.0.1:19876/v1/embeddings'
+fixture_endpoint_sha=$(printf '%s' "$fixture_endpoint" | sha256sum | awk '{print $1}')
+local_profile=$(psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid.create_profile(
+     'openai-compatible','local','fixture-model','fixture-r1',3,
+     'cosine','none',32768,decode('$fixture_endpoint_sha','hex'))")
+psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_b.set_profile_state('$local_profile','preparing')" >/dev/null
+assert_equals '1:f' "$(psql "$candidate_bootstrap" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  "SELECT generation,completed FROM noosphere_hybrid_b.profile_backfill_state WHERE profile_id='$local_profile'")" \
+  'Phase B prepare creates a durable incomplete backfill generation'
+expect_sql_failure 'Phase B serving before durable backfill completion' "$candidate_admin" \
+  "SELECT noosphere_hybrid_b.set_profile_state('$local_profile','serving')"
+psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT * FROM noosphere_hybrid_b.enqueue_profile_backfill('$local_profile',1000)" >/dev/null
+assert_equals '1:t' "$(psql "$candidate_bootstrap" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  "SELECT generation,completed FROM noosphere_hybrid_b.profile_backfill_state WHERE profile_id='$local_profile'")" \
+  'Phase B durable backfill completion'
+
+# Local embeddings accept restricted content by default. A3's fail-closed
+# trigger runs first; the Phase B trigger then re-enqueues only the newly
+# authorized local profile from the same monotonic revision.
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO public."Article" (
+  id, title, slug, content, excerpt, status, confidence, "topicId",
+  "restrictedTags", "createdAt", "updatedAt"
+) VALUES (
+  'phase-b-restricted', 'Phase B restricted', 'phase-b-restricted',
+  'restricted local bytes', '', 'published', 'high', 'hybrid-topic',
+  ARRAY['financial'], clock_timestamp(), clock_timestamp()
+);
+SQL
+assert_equals queued "$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT state FROM noosphere_hybrid.embedding_job WHERE article_id='phase-b-restricted' AND profile_id='$local_profile'")" \
+  'Phase B local restricted enqueue'
+
+# The standalone worker must use the worker login, call the authenticated
+# provider boundary, validate the response, and publish through the CAS routine.
+fixture_log=$(mktemp)
+HYBRID_FIXTURE_PORT=19876 node "$repo_root/scripts/hybrid-embedding-fixture-server.mjs" >"$fixture_log" 2>&1 &
+fixture_pid=$!
+for _ in $(seq 1 50); do
+  grep -q '^ready$' "$fixture_log" && break
+  kill -0 "$fixture_pid" 2>/dev/null || die 'hybrid embedding fixture server exited early'
+  sleep 0.1
+done
+grep -q '^ready$' "$fixture_log" || die 'hybrid embedding fixture server did not become ready'
+provider_config=$(printf '[{"profileId":"%s","locality":"local","endpoint":"%s","apiKey":""}]' \
+  "$local_profile" "$fixture_endpoint")
+invalid_lease_log=$(mktemp)
+if NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$candidate_worker" \
+  NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64="$(printf '%s' "$provider_config" | base64 -w0)" \
+  NOOSPHERE_HYBRID_LEASE_SECONDS=30 \
+  NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS=120000 \
+    node "$repo_root/scripts/hybrid-worker.mjs" --once >"$invalid_lease_log" 2>&1; then
+  die 'Phase B worker accepted a provider timeout longer than its lease'
+fi
+grep -q 'must outlive' "$invalid_lease_log" || {
+  cat "$invalid_lease_log" >&2
+  die 'Phase B invalid lease-window diagnostic missing'
+}
+rm -f -- "$invalid_lease_log"
+invalid_lease_log=
+worker_health_file=$(mktemp)
+worker_log=$(mktemp)
+phase_b_epoch_before_publish=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT epoch FROM noosphere_hybrid.search_cache_epoch WHERE singleton')
+if ! NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$candidate_worker" \
+  NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64="$(printf '%s' "$provider_config" | base64 -w0)" \
+  NOOSPHERE_HYBRID_WORKER_CONCURRENCY=1 \
+  NOOSPHERE_HYBRID_WORKER_HEALTH_FILE="$worker_health_file" \
+    node "$repo_root/scripts/hybrid-worker.mjs" --once >"$worker_log" 2>&1; then
+  cat "$worker_log" >&2
+  die 'Phase B standalone worker failed'
+fi
+phase_b_epoch_after_publish=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT epoch FROM noosphere_hybrid.search_cache_epoch WHERE singleton')
+[[ $phase_b_epoch_after_publish -gt $phase_b_epoch_before_publish ]] ||
+  die 'Phase B vector publication did not advance the cache epoch'
+rm -f -- "$worker_log"
+worker_log=
+assert_equals 1 "$(grep -c '^request$' "$fixture_log")" \
+  'Phase B provider fixture request count after local publication'
+assert_equals 1 "$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT count(*) FROM noosphere_hybrid.article_embedding WHERE article_id='phase-b-restricted' AND profile_id='$local_profile'")" \
+  'Phase B worker publication'
+assert_equals 0 "$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT count(*) FROM noosphere_hybrid.embedding_job WHERE profile_id='$local_profile'")" \
+  'Phase B local queue after publication'
+assert_equals '1:1:1.00000000000000000000' "$(psql "$candidate_admin" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  "SELECT eligible_count,ready_count,coverage FROM noosphere_hybrid_b.profile_coverage('$local_profile')")" \
+  'Phase B local coverage'
+psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_b.set_profile_state('$local_profile','serving')" >/dev/null
+
+# A worker crash after dispatch must not bypass the durable attempt cap. Expire
+# two simulated crash leases, then prove recovery terminalizes instead of
+# issuing a third claim.
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "INSERT INTO public.\"Article\" (
+     id,title,slug,content,excerpt,status,confidence,\"topicId\",\"restrictedTags\",\"createdAt\",\"updatedAt\"
+   ) VALUES (
+     'phase-b-crash-cap','Crash cap','phase-b-crash-cap','crash cap bytes','',
+     'published','high','hybrid-topic',ARRAY[]::text[],clock_timestamp(),clock_timestamp()
+   )" >/dev/null
+crash_claim=$(psql "$candidate_worker" -XAtq -F '|' -v ON_ERROR_STOP=1 -c \
+  "SELECT job_id,lease_generation FROM noosphere_hybrid_b.claim_jobs(1,30,2,ARRAY['$local_profile']::uuid[])")
+IFS='|' read -r crash_job crash_generation <<<"$crash_claim"
+[[ "$crash_job" =~ ^[a-f0-9-]{36}$ ]] || die 'Phase B crash-cap first claim missing'
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "UPDATE noosphere_hybrid.embedding_job SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id='$crash_job'" >/dev/null
+crash_claim=$(psql "$candidate_worker" -XAtq -F '|' -v ON_ERROR_STOP=1 -c \
+  "SELECT job_id,lease_generation FROM noosphere_hybrid_b.claim_jobs(1,30,2,ARRAY['$local_profile']::uuid[])")
+IFS='|' read -r crash_job crash_generation <<<"$crash_claim"
+assert_equals 2 "$crash_generation" 'Phase B crash-cap second lease generation'
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "UPDATE noosphere_hybrid.embedding_job SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE id='$crash_job'" >/dev/null
+assert_equals 0 "$(psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT count(*) FROM noosphere_hybrid_b.claim_jobs(1,30,2,ARRAY['$local_profile']::uuid[])")" \
+  'Phase B crash-cap third claim denial'
+assert_equals 'failed:2:lease_expired_max_attempts' "$(psql "$candidate_bootstrap" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  "SELECT state,attempt_count,last_error_code FROM noosphere_hybrid.embedding_job WHERE id='$crash_job'")" \
+  'Phase B crash-cap durable terminal state'
+terminal_health_file=$(mktemp)
+terminal_worker_log=$(mktemp)
+if ! NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$candidate_worker" \
+  NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64="$(printf '%s' "$provider_config" | base64 -w0)" \
+  NOOSPHERE_HYBRID_WORKER_CONCURRENCY=1 \
+  NOOSPHERE_HYBRID_WORKER_HEALTH_FILE="$terminal_health_file" \
+    node "$repo_root/scripts/hybrid-worker.mjs" --once >"$terminal_worker_log" 2>&1; then
+  cat "$terminal_worker_log" >&2
+  die 'Phase B terminal-failure health worker run failed'
+fi
+assert_equals critical "$(node -e \
+  "const fs=require('node:fs'); const h=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); process.stdout.write(h.status)" "$terminal_health_file")" \
+  'Phase B terminal failure queue severity'
+if NOOSPHERE_HYBRID_WORKER_HEALTH_FILE="$terminal_health_file" \
+  node "$repo_root/scripts/check-hybrid-worker-health.mjs"; then
+  die 'Phase B health checker accepted terminal job failure'
+fi
+rm -f -- "$terminal_health_file" "$terminal_worker_log"
+terminal_health_file=
+terminal_worker_log=
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "DELETE FROM public.\"Article\" WHERE id='phase-b-crash-cap'" >/dev/null
+
+# Publication must preserve newer coalesced work and reject leases invalidated
+# by soft deletion or profile deactivation.
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "UPDATE public.\"Article\" SET \"restrictedTags\"=ARRAY['hr'], \"updatedAt\"=clock_timestamp() WHERE id='phase-b-restricted'" >/dev/null
+local_claim=$(psql "$candidate_worker" -XAtq -F '|' -v ON_ERROR_STOP=1 -c \
+  "SELECT job_id,lease_token,lease_generation,claimed_revision,encode(claimed_content_hash,'hex')
+   FROM noosphere_hybrid_b.claim_jobs(1,120,8,ARRAY['$local_profile']::uuid[])")
+IFS='|' read -r local_job local_token local_generation local_revision local_hash <<<"$local_claim"
+# Authorization-first and mutation-first are both linearized by the same short
+# advisory lock. Hold the authorization transaction open, prove the Article
+# update blocks, then commit and let the newer revision coalesce.
+coproc PHASE_B_AUTHORIZE_WORKER { psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 2>&1; }
+phase_b_authorize_worker_out=${PHASE_B_AUTHORIZE_WORKER[0]}
+phase_b_authorize_worker_in=${PHASE_B_AUTHORIZE_WORKER[1]}
+phase_b_authorize_worker_pid=$PHASE_B_AUTHORIZE_WORKER_PID
+printf '%s\n' \
+  'BEGIN;' \
+  "SELECT noosphere_hybrid_b.authorize_dispatch('$local_job','$local_token',$local_generation);" \
+  >&"$phase_b_authorize_worker_in"
+IFS= read -r phase_b_authorized <&"$phase_b_authorize_worker_out"
+assert_equals t "$phase_b_authorized" 'Phase B authorization-first readiness'
+phase_b_content_update_output=$(mktemp)
+PGAPPNAME=noosphere-hybrid-phase-b-content-race \
+  psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+    "UPDATE public.\"Article\" SET content='newer restricted local bytes', \"updatedAt\"=clock_timestamp() WHERE id='phase-b-restricted'" \
+    >"$phase_b_content_update_output" 2>&1 &
+phase_b_content_update_pid=$!
+phase_b_content_update_blocked=false
+for attempt in $(seq 1 100); do
+  phase_b_content_update_wait=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+    "SELECT coalesce(wait_event_type, '') || ':' || coalesce(wait_event, '')
+     FROM pg_catalog.pg_stat_activity
+     WHERE application_name='noosphere-hybrid-phase-b-content-race'")
+  if [[ "$phase_b_content_update_wait" == Lock:* ]]; then
+    phase_b_content_update_blocked=true
+    break
+  fi
+  kill -0 "$phase_b_content_update_pid" >/dev/null 2>&1 || break
+  sleep 0.1
+done
+[[ "$phase_b_content_update_blocked" == true ]] ||
+  die "Phase B Article update did not block behind dispatch authorization: ${phase_b_content_update_wait:-absent}"
+printf '%s\n' 'COMMIT;' >&"$phase_b_authorize_worker_in"
+exec {phase_b_authorize_worker_in}>&-
+phase_b_authorize_worker_in=
+phase_b_authorize_tail=$(cat <&"$phase_b_authorize_worker_out")
+exec {phase_b_authorize_worker_out}<&-
+phase_b_authorize_worker_out=
+if ! wait "$phase_b_authorize_worker_pid"; then
+  die "Phase B authorization transaction failed: $phase_b_authorize_tail"
+fi
+phase_b_authorize_worker_pid=
+if ! wait "$phase_b_content_update_pid"; then
+  phase_b_content_update_failure=$(cat "$phase_b_content_update_output")
+  rm -f -- "$phase_b_content_update_output"
+  phase_b_content_update_output=
+  die "Phase B blocked Article update failed: $phase_b_content_update_failure"
+fi
+phase_b_content_update_pid=
+rm -f -- "$phase_b_content_update_output"
+phase_b_content_update_output=
+assert_equals f "$(psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_b.authorize_dispatch('$local_job','$local_token',$local_generation)")" \
+  'Phase B dispatch authorization rejects a coalesced newer revision'
+assert_equals t "$(psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_b.release_stale_job('$local_job','$local_token',$local_generation,8)")" \
+  'Phase B stale dispatch releases its exact lease'
+assert_equals 'queued:t' "$(psql "$candidate_bootstrap" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  "SELECT state,lease_token IS NULL FROM noosphere_hybrid.embedding_job WHERE id='$local_job'")" \
+  'Phase B stale dispatch lease release state'
+local_stale_publish=$(psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_b.publish_embedding(
+     '$local_job','$local_token',$local_generation,$local_revision,
+     decode('$local_hash','hex'),'[1,2,3]'::noosphere_vector.vector)")
+assert_equals f "$local_stale_publish" 'Phase B stale publication after content change'
+assert_equals queued "$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT state FROM noosphere_hybrid.embedding_job
+   WHERE article_id='phase-b-restricted' AND profile_id='$local_profile'
+     AND desired_revision > $local_revision")" \
+  'Phase B newer desired revision survives stale publication'
+
+local_claim=$(psql "$candidate_worker" -XAtq -F '|' -v ON_ERROR_STOP=1 -c \
+  "SELECT job_id,lease_token,lease_generation,claimed_revision,encode(claimed_content_hash,'hex')
+   FROM noosphere_hybrid_b.claim_jobs(1,120,8,ARRAY['$local_profile']::uuid[])")
+IFS='|' read -r local_job local_token local_generation local_revision local_hash <<<"$local_claim"
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "UPDATE public.\"Article\" SET \"deletedAt\"=clock_timestamp(), \"updatedAt\"=clock_timestamp() WHERE id='phase-b-restricted'" >/dev/null
+assert_equals f "$(psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_b.publish_embedding(
+     '$local_job','$local_token',$local_generation,$local_revision,
+     decode('$local_hash','hex'),'[1,2,3]'::noosphere_vector.vector)")" \
+  'Phase B late publication after soft delete'
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "UPDATE public.\"Article\" SET \"deletedAt\"=NULL, \"updatedAt\"=clock_timestamp() WHERE id='phase-b-restricted'" >/dev/null
+
+local_claim=$(psql "$candidate_worker" -XAtq -F '|' -v ON_ERROR_STOP=1 -c \
+  "SELECT job_id,lease_token,lease_generation,claimed_revision,encode(claimed_content_hash,'hex')
+   FROM noosphere_hybrid_b.claim_jobs(1,120,8,ARRAY['$local_profile']::uuid[])")
+IFS='|' read -r local_job local_token local_generation local_revision local_hash <<<"$local_claim"
+psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_b.set_profile_state('$local_profile','inactive')" >/dev/null
+assert_equals f "$(psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_b.publish_embedding(
+     '$local_job','$local_token',$local_generation,$local_revision,
+     decode('$local_hash','hex'),'[1,2,3]'::noosphere_vector.vector)")" \
+  'Phase B late publication after profile deactivation'
+
+# Prove the serving boundary exactly: 94/100 is rejected atomically, while
+# 95/100 is accepted. Vector readiness and the successful lifecycle transition
+# must each advance the durable cache epoch.
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO public."Article" (
+  id, title, slug, content, excerpt, status, confidence, "topicId",
+  "restrictedTags", "createdAt", "updatedAt"
+)
+SELECT
+  'phase-b-threshold-' || pg_catalog.lpad(series::text, 3, '0'),
+  'Phase B threshold ' || series,
+  'phase-b-threshold-' || pg_catalog.lpad(series::text, 3, '0'),
+  'threshold content ' || series,
+  '', 'published', 'high', 'hybrid-topic', ARRAY[]::text[],
+  pg_catalog.clock_timestamp(), pg_catalog.clock_timestamp()
+FROM pg_catalog.generate_series(1, 99) AS series;
+SQL
+threshold_profile=$(psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid.create_profile(
+     'openai-compatible','local','threshold-model','threshold-r1',3,
+     'cosine','none',32768,decode(repeat('55',32),'hex'))")
+psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_b.set_profile_state('$threshold_profile','preparing');
+   SELECT * FROM noosphere_hybrid_b.enqueue_profile_backfill('$threshold_profile',1000)" >/dev/null
+phase_b_epoch_before_vectors=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT epoch FROM noosphere_hybrid.search_cache_epoch WHERE singleton')
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "INSERT INTO noosphere_hybrid.article_embedding (
+     article_id, profile_id, revision, content_hash, dimensions, embedding
+   )
+   SELECT article.id, '$threshold_profile', state.revision,
+          noosphere_hybrid.canonical_hash(article.title,article.excerpt,article.content,32768),
+          3, '[1,2,3]'::noosphere_vector.vector
+   FROM public.\"Article\" AS article
+   JOIN noosphere_hybrid.article_embedding_state AS state ON state.article_id=article.id
+   ORDER BY article.id
+   LIMIT 94" >/dev/null
+assert_equals '100:94:0.94' "$(psql "$candidate_admin" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  "SELECT eligible_count,ready_count,round(coverage,2) FROM noosphere_hybrid_b.profile_coverage('$threshold_profile')")" \
+  'Phase B 94 percent serving boundary fixture'
+phase_b_epoch_after_vectors=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT epoch FROM noosphere_hybrid.search_cache_epoch WHERE singleton')
+[[ $phase_b_epoch_after_vectors -gt $phase_b_epoch_before_vectors ]] ||
+  die 'Phase B vector readiness did not advance the cache epoch'
+expect_sql_failure 'Phase B serving below 95 percent' "$candidate_admin" \
+  "SELECT noosphere_hybrid_b.set_profile_state('$threshold_profile','serving')"
+assert_equals "preparing:$phase_b_epoch_after_vectors" "$(psql "$candidate_bootstrap" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  "SELECT profile.state,epoch.epoch FROM noosphere_hybrid.embedding_profile AS profile
+   CROSS JOIN noosphere_hybrid.search_cache_epoch AS epoch
+   WHERE profile.id='$threshold_profile' AND epoch.singleton")" \
+  'Phase B failed serving transition atomicity'
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "INSERT INTO noosphere_hybrid.article_embedding (
+     article_id, profile_id, revision, content_hash, dimensions, embedding
+   )
+   SELECT article.id, '$threshold_profile', state.revision,
+          noosphere_hybrid.canonical_hash(article.title,article.excerpt,article.content,32768),
+          3, '[1,2,3]'::noosphere_vector.vector
+   FROM public.\"Article\" AS article
+   JOIN noosphere_hybrid.article_embedding_state AS state ON state.article_id=article.id
+   WHERE NOT EXISTS (
+     SELECT 1 FROM noosphere_hybrid.article_embedding AS embedding
+     WHERE embedding.article_id=article.id AND embedding.profile_id='$threshold_profile'
+   )
+   ORDER BY article.id
+   LIMIT 1" >/dev/null
+assert_equals '100:95:0.95' "$(psql "$candidate_admin" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  "SELECT eligible_count,ready_count,round(coverage,2) FROM noosphere_hybrid_b.profile_coverage('$threshold_profile')")" \
+  'Phase B 95 percent serving boundary fixture'
+phase_b_epoch_before_serve=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT epoch FROM noosphere_hybrid.search_cache_epoch WHERE singleton')
+psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_b.set_profile_state('$threshold_profile','serving')" >/dev/null
+phase_b_epoch_after_serve=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT epoch FROM noosphere_hybrid.search_cache_epoch WHERE singleton')
+[[ $phase_b_epoch_after_serve -gt $phase_b_epoch_before_serve ]] ||
+  die 'Phase B serving transition did not advance the cache epoch'
+psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_b.set_profile_state('$threshold_profile','inactive')" >/dev/null
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "DELETE FROM noosphere_hybrid.article_embedding WHERE profile_id='$threshold_profile'" >/dev/null
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "DELETE FROM public.\"Article\" WHERE id LIKE 'phase-b-threshold-%'" >/dev/null
+
+# Remote profiles require explicit general consent; restricted remote content
+# requires the second consent. Revocation hard-deletes the remote artifact,
+# cancels work, demotes the profile, and defeats a late publication attempt.
+remote_fixture_endpoint='https://127.0.0.1:19876/v1/embeddings'
+remote_fixture_endpoint_sha=$(printf '%s' "$remote_fixture_endpoint" | sha256sum | awk '{print $1}')
+remote_profile=$(psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid.create_profile(
+     'openai-compatible','remote','fixture-model','fixture-r1',3,
+     'cosine','none',32768,decode('$remote_fixture_endpoint_sha','hex'))")
+expect_sql_failure 'Phase B remote prepare without consent' "$candidate_admin" \
+  "SELECT noosphere_hybrid_b.set_profile_state('$remote_profile','preparing')"
+phase_b_epoch_before_consent=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT epoch FROM noosphere_hybrid.search_cache_epoch WHERE singleton')
+psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_b.set_embedding_consent(true,true);
+   SELECT noosphere_hybrid_b.set_profile_state('$remote_profile','preparing');
+   SELECT * FROM noosphere_hybrid_b.enqueue_profile_backfill('$remote_profile',1000)" >/dev/null
+phase_b_epoch_after_consent=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT epoch FROM noosphere_hybrid.search_cache_epoch WHERE singleton')
+[[ $phase_b_epoch_after_consent -gt $phase_b_epoch_before_consent ]] ||
+  die 'Phase B consent/profile activation did not advance the cache epoch'
+assert_equals "0:1" "$(psql "$candidate_bootstrap" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  "SELECT (SELECT count(*) FROM noosphere_hybrid.embedding_job WHERE profile_id='$local_profile'),
+          (SELECT count(*) FROM noosphere_hybrid.embedding_job WHERE profile_id='$remote_profile')")" \
+  'Phase B backfill queue isolation'
+remote_claim=$(psql "$candidate_worker" -XAtq -F '|' -v ON_ERROR_STOP=1 -c \
+  "SELECT job_id,profile_id,lease_token,lease_generation,claimed_revision,encode(claimed_content_hash,'hex')
+   FROM noosphere_hybrid_b.claim_jobs(1,120,8,ARRAY['$remote_profile']::uuid[])")
+IFS='|' read -r remote_job claimed_profile remote_token remote_generation remote_revision remote_hash <<<"$remote_claim"
+[[ "$remote_job" =~ ^[a-f0-9-]{36}$ ]] || die 'Phase B remote worker did not claim restricted work'
+assert_equals "$remote_profile" "$claimed_profile" 'Phase B remote claim profile identity'
+
+# If revocation commits before dispatch authorization, the worker must make no
+# provider request. This is distinct from merely rejecting a late publication.
+phase_b_epoch_before_revocation=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT epoch FROM noosphere_hybrid.search_cache_epoch WHERE singleton')
+psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT noosphere_hybrid_b.set_embedding_consent(true,false)' >/dev/null
+phase_b_epoch_after_revocation=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT epoch FROM noosphere_hybrid.search_cache_epoch WHERE singleton')
+[[ $phase_b_epoch_after_revocation -gt $phase_b_epoch_before_revocation ]] ||
+  die 'Phase B consent revocation did not advance the cache epoch'
+assert_equals f "$(psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 -c \
+  "BEGIN; SELECT noosphere_hybrid_b.authorize_dispatch('$remote_job','$remote_token',$remote_generation); ROLLBACK")" \
+  'Phase B dispatch authorization after committed consent revocation'
+remote_provider_config=$(printf '[{"profileId":"%s","locality":"remote","endpoint":"%s","apiKey":"test-only-remote-key"}]' \
+  "$remote_profile" "$remote_fixture_endpoint")
+fixture_requests_before_revoked_worker=$(grep -c '^request$' "$fixture_log")
+worker_log=$(mktemp)
+if ! NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$candidate_worker" \
+  NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64="$(printf '%s' "$remote_provider_config" | base64 -w0)" \
+  NOOSPHERE_HYBRID_WORKER_CONCURRENCY=1 \
+  NOOSPHERE_HYBRID_WORKER_HEALTH_FILE="$worker_health_file" \
+    node "$repo_root/scripts/hybrid-worker.mjs" --once >"$worker_log" 2>&1; then
+  cat "$worker_log" >&2
+  die 'Phase B revoked-consent worker check failed'
+fi
+rm -f -- "$worker_log"
+worker_log=
+assert_equals "$fixture_requests_before_revoked_worker" "$(grep -c '^request$' "$fixture_log")" \
+  'Phase B provider requests after consent revoked first'
+kill "$fixture_pid" 2>/dev/null || true
+wait "$fixture_pid" 2>/dev/null || true
+fixture_pid=
+rm -f -- "$fixture_log"
+fixture_log=
+
+# Re-consent does not reactivate the profile. Prepare/backfill explicitly so a
+# second claim can prove publication also serializes behind a live revocation.
+psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_b.set_embedding_consent(true,true);
+   SELECT noosphere_hybrid_b.set_profile_state('$remote_profile','preparing');
+   SELECT * FROM noosphere_hybrid_b.enqueue_profile_backfill('$remote_profile',1000)" >/dev/null
+assert_equals '2:t' "$(psql "$candidate_bootstrap" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  "SELECT generation,completed FROM noosphere_hybrid_b.profile_backfill_state WHERE profile_id='$remote_profile'")" \
+  'Phase B re-prepare creates and completes a fresh backfill generation'
+remote_claim=$(psql "$candidate_worker" -XAtq -F '|' -v ON_ERROR_STOP=1 -c \
+  "SELECT job_id,profile_id,lease_token,lease_generation,claimed_revision,encode(claimed_content_hash,'hex')
+   FROM noosphere_hybrid_b.claim_jobs(1,120,8,ARRAY['$remote_profile']::uuid[])")
+IFS='|' read -r remote_job claimed_profile remote_token remote_generation remote_revision remote_hash <<<"$remote_claim"
+[[ "$remote_job" =~ ^[a-f0-9-]{36}$ ]] || die 'Phase B remote worker did not reclaim restricted work'
+
+coproc PHASE_B_CONSENT_WRITER { psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 2>&1; }
+phase_b_consent_writer_out=${PHASE_B_CONSENT_WRITER[0]}
+phase_b_consent_writer_in=${PHASE_B_CONSENT_WRITER[1]}
+phase_b_consent_writer_pid=$PHASE_B_CONSENT_WRITER_PID
+printf '%s\n' \
+  'BEGIN;' \
+  "SELECT 'consent-ready' FROM (SELECT noosphere_hybrid_b.set_embedding_consent(true,false)) AS applied;" \
+  >&"$phase_b_consent_writer_in"
+IFS= read -r phase_b_consent_marker <&"$phase_b_consent_writer_out"
+assert_equals consent-ready "$phase_b_consent_marker" 'Phase B consent writer readiness'
+
+phase_b_publish_output=$(mktemp)
+PGAPPNAME=noosphere-hybrid-phase-b-consent-race \
+  psql "$candidate_worker" -XAtq -v ON_ERROR_STOP=1 -c \
+    "SELECT noosphere_hybrid_b.publish_embedding(
+       '$remote_job','$remote_token',$remote_generation,$remote_revision,
+       decode('$remote_hash','hex'),'[1,2,3]'::noosphere_vector.vector)" \
+    >"$phase_b_publish_output" 2>&1 &
+phase_b_publish_pid=$!
+phase_b_publish_blocked=false
+for attempt in $(seq 1 100); do
+  phase_b_publish_wait=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+    "SELECT coalesce(wait_event_type, '') || ':' || coalesce(wait_event, '')
+     FROM pg_catalog.pg_stat_activity
+     WHERE application_name='noosphere-hybrid-phase-b-consent-race'")
+  if [[ "$phase_b_publish_wait" == Lock:* ]]; then
+    phase_b_publish_blocked=true
+    break
+  fi
+  kill -0 "$phase_b_publish_pid" >/dev/null 2>&1 || break
+  sleep 0.1
+done
+[[ "$phase_b_publish_blocked" == true ]] ||
+  die "Phase B publication did not block behind consent revocation: ${phase_b_publish_wait:-absent}"
+
+printf '%s\n' 'COMMIT;' >&"$phase_b_consent_writer_in"
+exec {phase_b_consent_writer_in}>&-
+phase_b_consent_writer_in=
+phase_b_consent_writer_tail=$(cat <&"$phase_b_consent_writer_out")
+exec {phase_b_consent_writer_out}<&-
+phase_b_consent_writer_out=
+if ! wait "$phase_b_consent_writer_pid"; then
+  die "Phase B consent writer failed: $phase_b_consent_writer_tail"
+fi
+phase_b_consent_writer_pid=
+if ! wait "$phase_b_publish_pid"; then
+  phase_b_publish_failure=$(cat "$phase_b_publish_output")
+  rm -f -- "$phase_b_publish_output"
+  phase_b_publish_output=
+  die "Phase B publication failed instead of rejecting revoked consent: $phase_b_publish_failure"
+fi
+phase_b_publish_pid=
+remote_late_publish=$(cat "$phase_b_publish_output")
+rm -f -- "$phase_b_publish_output"
+phase_b_publish_output=
+assert_equals f "$remote_late_publish" 'Phase B late publication after consent revocation'
+assert_equals 'inactive:0:0' "$(psql "$candidate_bootstrap" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  "SELECT profile.state,
+          (SELECT count(*) FROM noosphere_hybrid.embedding_job WHERE profile_id=profile.id),
+          (SELECT count(*) FROM noosphere_hybrid.article_embedding WHERE profile_id=profile.id)
+   FROM noosphere_hybrid.embedding_profile AS profile WHERE profile.id='$remote_profile'")" \
+  'Phase B restricted consent revocation cleanup'
+
+# Re-consent never restores serving. Inactive profiles receive no incremental
+# work until an administrator explicitly transitions and backfills them.
+psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_b.set_embedding_consent(true,true)" >/dev/null
+assert_equals inactive "$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT state FROM noosphere_hybrid.embedding_profile WHERE id='$remote_profile'")" \
+  'Phase B re-consent profile state'
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "UPDATE public.\"Article\" SET content='restricted changed while remote inactive', \"updatedAt\"=clock_timestamp() WHERE id='phase-b-restricted'" >/dev/null
+assert_equals 0 "$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT count(*) FROM noosphere_hybrid.embedding_job WHERE article_id='phase-b-restricted' AND profile_id='$remote_profile'")" \
+  'Phase B inactive profile incremental work'
+assert_equals '0:0:0:0' "$(psql "$candidate_worker" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  'SELECT pending_depth,oldest_pending_age_seconds,leased_count,failed_count FROM noosphere_hybrid_b.queue_health()')" \
+  'Phase B queue health after completion'
+
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "DELETE FROM public.\"Article\" WHERE id='phase-b-restricted'" >/dev/null
+
+printf '[hybrid-storage-test] PASS: A3 storage plus Phase B provider, consent, backfill, lifecycle, queue, and worker matrices.\n'

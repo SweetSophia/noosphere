@@ -245,6 +245,61 @@ dynamic consent, complete-backfill, coverage, and readiness gates. The Phase A3
 operator and verification contract is
 [`docker/hybrid-storage/README.md`](../docker/hybrid-storage/README.md).
 
+### Phase B implementation decision
+
+Phase B is an independently evidenced `noosphere_hybrid_b` layer rather than a
+rewrite of A3. Its activation hashes the feature, activation, and validation SQL
+as one source identity. In the same uncommitted transaction it reconstructs the
+original A3 capability ACL, runs the complete A3 validator, and then withdraws
+the legacy A3 state/claim/publish/fail entry points before any B state commits.
+Repeat B activation therefore proves the exact A3 base as well as B ownership,
+security-definer configuration, ACLs, table columns/defaults/constraints/indexes,
+routine/trigger manifests, and the exact Article-trigger inventory. After Phase
+B is active, its activator is the supported repeat-validation entry point.
+
+Eligibility-changing Article writes, consent changes, profile transitions,
+backfill enqueue, claims, failures, and publication take the exclusive form of
+one transaction-scoped advisory lock. A BEFORE Article trigger acquires it
+before A3's AFTER trigger can touch a job; publication takes it before
+profile/job locks. This total order avoids an Article-to-job/job-to-Article
+cycle while making soft deletion, quarantine, restricted-scope change, consent
+revocation, and profile deactivation linearize against publication. Publication
+still requires the exact lease token, generation, desired revision/hash,
+current canonical hash, active profile, current consent, exact dimensions, and
+finite vector in the locked transaction.
+
+The separate Node.js worker authenticates only as
+`noosphere_hybrid_worker_login`. It receives canonical bytes solely from the B
+claim function. Immediately before provider dispatch it takes the same advisory
+lock in a short authorization transaction and rechecks the exact
+lease/generation, profile, article revision/hash, and current consent. The
+authorization commit is the dispatch linearization point: revocation that
+commits first suppresses dispatch, while provider latency holds no database lock
+and cannot block Article writes. Failed authorization CAS-releases the stale
+lease; publication independently repeats the complete eligibility check. The
+worker dispatches no more than 16 concurrent requests and validates
+the provider protocol, immutable endpoint fingerprint, model/revision,
+single-vector response shape, dimensions, finite components, normalization,
+content type, response size, and timeout before conditional publication. Remote
+providers require HTTPS and bearer authentication. Plain HTTP local providers
+are limited to loopback or Compose's statically mapped
+`host.docker.internal:host-gateway`; credentials and endpoints remain
+operator-owned configuration and never enter the database, cache, logs, or
+durable error state.
+
+Profiles transition `inactive` → `preparing` → `serving`; the final transition
+requires a completed database-owned backfill generation created atomically by
+`prepare` plus at least 95% current-hash coverage. Backfill is cursor-based,
+resumable without a caller-supplied cursor, and capped at 1000 articles per
+transaction, while the trigger path continues to coalesce the latest desired
+revision without rejecting writes. The durable claim routine enforces maximum
+attempts across worker crashes, and the lease must outlive the provider timeout
+by at least five seconds. General or restricted
+remote-consent revocation deletes the affected remote vectors and jobs and
+demotes remote profiles to `inactive`. Re-consent requires an explicit prepare,
+backfill, and coverage-gated serve cycle. Phase B remains opt-in behind the
+disabled Compose `hybrid` profile and does not change keyword retrieval.
+
 ## Delivery sequence
 
 1. **Phase 0 — this ADR:** settle contracts without runtime changes.
