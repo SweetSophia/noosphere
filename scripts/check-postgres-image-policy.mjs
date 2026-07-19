@@ -204,6 +204,8 @@ expect(
 );
 for (const [runtimeKey, secretKey] of [
   ["POSTGRES_PASSWORD", "postgresPassword"],
+  ["POSTGRES_MIGRATION_PASSWORD", "postgresMigrationPassword"],
+  ["POSTGRES_APP_PASSWORD", "postgresAppPassword"],
   ["NEXTAUTH_SECRET", "nextAuthSecret"],
   ["NOOSPHERE_ADMIN_PASSWORD", "adminPassword"],
   ["NOOSPHERE_BOOTSTRAP_API_KEY", "apiKey"],
@@ -215,6 +217,21 @@ for (const [runtimeKey, secretKey] of [
     `install-openclaw.sh must prefer runtime .env ${runtimeKey} over the derived secret-file copy`,
   );
 }
+expect(
+  installer.includes('ensure_runtime_env_secret POSTGRES_MIGRATION_PASSWORD "$POSTGRES_MIGRATION_PASSWORD"') &&
+    installer.includes('ensure_runtime_env_secret POSTGRES_APP_PASSWORD "$POSTGRES_APP_PASSWORD"') &&
+    installer.includes("PostgreSQL bootstrap, migration, and application passwords must be distinct."),
+  "install-openclaw.sh must append missing role-separation secrets without reusing credentials",
+);
+expect(
+  installer.includes("node docker/provision-database-roles.mjs") &&
+    installer.indexOf("node docker/provision-database-roles.mjs") <
+      installer.indexOf("node docker/migrate-or-baseline.mjs") &&
+    installer.includes("postgresql://noosphere_migrator:\\${POSTGRES_MIGRATION_PASSWORD}@db:5432/noosphere") &&
+    installer.includes("postgresql://noosphere_app:\\${POSTGRES_APP_PASSWORD}@db:5432/noosphere") &&
+    installer.includes('SKIP_MIGRATION: "1"'),
+  "install-openclaw.sh must provision roles before migration and run the app with the limited identity",
+);
 expect(
   installer.includes("--defer-app-restart"),
   "install-openclaw.sh must keep writers stopped until its guarded transaction finishes",

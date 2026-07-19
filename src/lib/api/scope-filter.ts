@@ -20,13 +20,16 @@ export function buildScopeFilter(
   allowedScopes: string[] | undefined,
   extraWhere: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  // If scopes include "*", grant admin access — no scope restriction at all
-  if (allowedScopes?.includes("*")) {
+  const access = resolveScopeAccess(allowedScopes);
+
+  // "*" bypasses only restricted-tag filtering. Callers still own deletion,
+  // lifecycle, readiness, consent, and every other eligibility predicate.
+  if (access.kind === "all") {
     return extraWhere;
   }
 
   // No scopes at all (undefined or empty): can only access unrestricted articles
-  if (!allowedScopes || allowedScopes.length === 0) {
+  if (access.kind === "unrestricted") {
     if ("restrictedTags" in extraWhere) {
       return {
         AND: [extraWhere, { restrictedTags: { isEmpty: true } }],
@@ -43,7 +46,7 @@ export function buildScopeFilter(
   const scopeWhere = {
     OR: [
       { restrictedTags: { isEmpty: true } },
-      { restrictedTags: { hasSome: allowedScopes } },
+      { restrictedTags: { hasSome: access.scopes } },
     ],
   };
 
@@ -71,7 +74,27 @@ export function canAccessScopes(
   allowedScopes: string[] | undefined,
 ): boolean {
   if (articleScopes.length === 0) return true; // unrestricted
-  if (allowedScopes?.includes("*")) return true; // admin bypass
-  if (!allowedScopes || allowedScopes.length === 0) return false; // no scope access
-  return articleScopes.some((s) => allowedScopes.includes(s));
+  const access = resolveScopeAccess(allowedScopes);
+  if (access.kind === "all") return true;
+  if (access.kind === "unrestricted") return false;
+  return articleScopes.some((scope) => access.scopes.includes(scope));
+}
+
+export type ResolvedScopeAccess =
+  | { kind: "all" }
+  | { kind: "unrestricted" }
+  | { kind: "scoped"; scopes: string[] };
+
+/**
+ * Canonical scope interpretation shared by the in-memory predicate, Prisma
+ * filter, and parameterized raw-SQL adapter.
+ */
+export function resolveScopeAccess(
+  allowedScopes: string[] | undefined,
+): ResolvedScopeAccess {
+  if (allowedScopes?.includes("*")) return { kind: "all" };
+  if (!allowedScopes || allowedScopes.length === 0) {
+    return { kind: "unrestricted" };
+  }
+  return { kind: "scoped", scopes: [...new Set(allowedScopes)] };
 }

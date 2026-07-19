@@ -34,8 +34,10 @@ git clone https://github.com/SweetSophia/noosphere.git
 cd noosphere
 
 cp noosphere.env.example .env
-# Edit .env: POSTGRES_PASSWORD, NEXTAUTH_SECRET, NOOSPHERE_ADMIN_PASSWORD,
-# and NOOSPHERE_BOOTSTRAP_API_KEY. Generate strong values, for example:
+# Edit .env: POSTGRES_PASSWORD, POSTGRES_MIGRATION_PASSWORD,
+# POSTGRES_APP_PASSWORD, NEXTAUTH_SECRET, NOOSPHERE_ADMIN_PASSWORD, and
+# NOOSPHERE_BOOTSTRAP_API_KEY. Every PostgreSQL password must be distinct.
+# Generate strong values, for example:
 # openssl rand -hex 32
 # printf 'noo_%s\n' "$(openssl rand -hex 32)"
 # Set NOOSPHERE_ADMIN_PASSWORD_RESET=true only when intentionally rotating
@@ -81,7 +83,8 @@ To run from source instead:
 
 ```bash
 cp .env.example .env
-# Edit DATABASE_URL, NEXTAUTH_SECRET, NEXTAUTH_URL, APP_URL, and POSTGRES_PASSWORD.
+# Edit the bootstrap, migration, and application database credentials plus
+# NEXTAUTH_SECRET, NEXTAUTH_URL, and APP_URL.
 docker network create noosphere-net 2>/dev/null || true
 mkdir -p .noosphere/postgres-pgvector-backups
 chmod 700 .noosphere/postgres-pgvector-backups
@@ -90,7 +93,7 @@ guard=(./scripts/switch-pgvector-compose.sh --compose-file "$PWD/docker-compose.
   --backup-dir "$PWD/.noosphere/postgres-pgvector-backups")
 "${guard[@]}" --prepare-new-install
 docker compose up -d db redis
-npm run db:migrate
+docker compose run --rm -T init
 "${guard[@]}" --record-new-install
 docker compose up -d app
 docker compose exec app node scripts/create-admin.js
@@ -117,6 +120,10 @@ configuration. Existing installations are upgraded only through its offline,
 restore-tested PostgreSQL image guard; unrestricted Compose upgrades are not a
 supported database transition. For the full setup, upgrade, operations, and uninstall guide, see
 [docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md](docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md).
+
+Optional pgvector storage remains inactive after installation. See
+[docker/hybrid-storage/README.md](docker/hybrid-storage/README.md) for the
+separate Phase A3 activation and verification contract.
 
 ## Choose an Integration
 
@@ -273,7 +280,8 @@ Setup:
 ```bash
 npm install
 cp .env.example .env
-# Edit DATABASE_URL, NEXTAUTH_SECRET, NEXTAUTH_URL, APP_URL, and POSTGRES_PASSWORD.
+# Edit the bootstrap, migration, and application database credentials plus
+# NEXTAUTH_SECRET, NEXTAUTH_URL, and APP_URL.
 docker network create noosphere-net 2>/dev/null || true
 mkdir -p .noosphere/postgres-pgvector-backups
 chmod 700 .noosphere/postgres-pgvector-backups
@@ -282,9 +290,10 @@ guard=(./scripts/switch-pgvector-compose.sh --compose-file "$PWD/docker-compose.
   --backup-dir "$PWD/.noosphere/postgres-pgvector-backups")
 "${guard[@]}" --prepare-new-install
 docker compose up -d db redis
-npm run db:migrate
+docker compose run --rm -T init
 "${guard[@]}" --record-new-install
-PORT=6578 npm run dev
+DATABASE_URL='postgresql://noosphere_app:CHANGE_ME_APP@localhost:5433/noosphere' \
+  PORT=6578 npm run dev
 ```
 
 The external `noosphere_postgres_authorization` volume is created only by the

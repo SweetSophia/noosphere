@@ -166,6 +166,8 @@ checksum-pinned installer instead of downloading and starting Compose directly.
 Edit `~/.noosphere/.env` and set strong values for:
 
 - `POSTGRES_PASSWORD`
+- `POSTGRES_MIGRATION_PASSWORD`
+- `POSTGRES_APP_PASSWORD`
 - `NEXTAUTH_SECRET`
 - `NOOSPHERE_ADMIN_PASSWORD`
 - `NOOSPHERE_ADMIN_PASSWORD_RESET=true` only when intentionally rotating an existing admin password

@@ -192,6 +192,45 @@ The deferred security and operations details are merge gates for their implement
 - **Phase C:** store the complete bounded fused set as only IDs and rank metadata in authenticated cache entries and require one-statement current-filter hydration, post-hydration renormalization, and pagination on every hit. Run the complete authorization-conformance matrix against hybrid candidate generation and final hydration; derive cache identity from a cryptographic hash of normalized query text rather than raw text; HMAC the canonical scope set with a server-held secret rather than exposing plaintext scopes in cache keys; define cache-MAC key rotation and compromise recovery; and test invalid/missing MACs, false or missing completeness metadata, cache tampering, authoritative short/empty sets, epoch changes from every covered entity, scope/filter changes, deletion, vector staleness, profile-state changes, and consent revocation.
 - **Phase D:** suppress aggregate coverage, overlap, and shadow-quality metrics below a documented numeric anonymity floor; audit consent revocations, all profile lifecycle transitions, and other eligibility revocations without content-bearing fields; alert on a documented numeric eligible-denominator or coverage delta so a write-capable actor cannot silently hold activation below the 95% gate; and version the benchmark corpus, ranking metric, lexical baseline, and numeric hybrid acceptance threshold before hybrid results can be returned.
 
+### Phase A3 implementation decision
+
+Phase A3 selects a security-barrier, security-definer view named
+`noosphere_hybrid.worker_eligibility` instead of RLS on the private feature
+tables. The locked non-login owner holds the narrow public-article column grants;
+the worker has no base-table privileges and can read only eligible identifiers,
+profile identity, dimensions, hashes, and canonical document bytes through the
+view. The view uses owner semantics (`security_invoker=false`), every definer
+routine pins `search_path` to `pg_catalog, pg_temp`, and every object reference
+inside those routines is schema-qualified. PostgreSQL 16 integration tests run
+the worker with malicious same-named temporary objects and assert that raw
+`restrictedTags` and private feature tables remain unreadable.
+
+Because pgvector 0.8.1 is not a trusted extension, extension provisioning and
+feature activation are distinct privilege stages in one advisory-locked
+transaction. A bootstrap superuser temporarily elevates an unloginable extension
+owner only for `CREATE EXTENSION`; a separate unloginable activator receives
+transaction-scoped database `CREATE` and feature-owner membership only for the
+application feature DDL. Both authorities are removed before commit. Standard
+runtime deployment now uses separate bootstrap, migration, and application
+credentials, while optional feature administration and worker execution use two
+additional limited credentials.
+
+The durable job primitive is one unique `(article_id, profile_id)` row with
+separate desired and claimed revisions/hashes, a random lease token, and a
+monotonic lease generation. Publication is compare-and-swap: a completion for an
+older desired revision releases its lease but cannot publish, erase, or replace
+newer work. Soft delete hard-deletes vectors and jobs, restore advances revision
+and enqueues current work, writes while deleted never enqueue, and physical
+delete cascades all feature rows. A separate statement-level epoch path covers
+every Article mutation plus Topic, Tag, ArticleTag, profile, and vector changes,
+independent of embedding enqueue rules.
+
+Profiles default to `inactive`. Administrative transitions to `preparing` and
+`serving` are deliberately unreachable until Phase B installs the provider,
+dynamic consent, complete-backfill, coverage, and readiness gates. The Phase A3
+operator and verification contract is
+[`docker/hybrid-storage/README.md`](../docker/hybrid-storage/README.md).
+
 ## Delivery sequence
 
 1. **Phase 0 — this ADR:** settle contracts without runtime changes.
