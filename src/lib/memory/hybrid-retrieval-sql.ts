@@ -10,6 +10,7 @@ import {
 import type { HybridCachedCandidate } from "@/lib/cache/hybrid-search-cache";
 import {
   HYBRID_CANDIDATE_DEPTH,
+  HYBRID_MAX_AUTHORIZED_CANDIDATES,
   HYBRID_VECTOR_AUTH_BATCH_SIZE,
 } from "@/lib/memory/hybrid-ranking";
 
@@ -39,6 +40,14 @@ export function buildHybridMissSql(input: HybridMissSqlInput): Prisma.Sql {
       SELECT cache_epoch
       FROM noosphere_hybrid_c.query_profile_snapshot(${input.profileId}::uuid)
     ),
+    authorized_budget AS MATERIALIZED (
+      SELECT pg_catalog.count(*)::integer AS authorized_count
+      FROM (
+        SELECT id
+        FROM authorized_base
+        LIMIT ${HYBRID_MAX_AUTHORIZED_CANDIDATES + 1}
+      ) AS bounded_authorized
+    ),
     authorized_batches AS MATERIALIZED (
       SELECT
         id,
@@ -47,6 +56,8 @@ export function buildHybridMissSql(input: HybridMissSqlInput): Prisma.Sql {
           / ${HYBRID_VECTOR_AUTH_BATCH_SIZE}
         )::bigint AS batch_number
       FROM authorized_base
+      CROSS JOIN authorized_budget
+      WHERE authorized_budget.authorized_count <= ${HYBRID_MAX_AUTHORIZED_CANDIDATES}
     ),
     authorized_id_batches AS MATERIALIZED (
       SELECT
@@ -155,7 +166,13 @@ export function buildHybridMissSql(input: HybridMissSqlInput): Prisma.Sql {
         pg_catalog.count(*)::integer AS fused_set_size
       FROM eligible_fused
     )
-    ${buildFinalSelect(Prisma.sql`TRUE`)}
+    ${buildFinalSelect(
+      Prisma.sql`TRUE`,
+      Prisma.sql`(
+        SELECT authorized_count <= ${HYBRID_MAX_AUTHORIZED_CANDIDATES}
+        FROM authorized_budget
+      )`,
+    )}
   `;
 }
 
@@ -281,7 +298,10 @@ export function buildHybridCacheHitSql(input: HybridCacheHitSqlInput): Prisma.Sq
         ${encodedCandidates}::jsonb AS candidates,
         (SELECT cached_count FROM validation_counts) AS fused_set_size
     )
-    ${buildFinalSelect(Prisma.sql`(SELECT cache_valid FROM cache_status)`)}
+    ${buildFinalSelect(
+      Prisma.sql`(SELECT cache_valid FROM cache_status)`,
+      Prisma.sql`TRUE`,
+    )}
   `;
 }
 
@@ -448,10 +468,14 @@ function buildHydratedCte(): Prisma.Sql {
   `;
 }
 
-function buildFinalSelect(cacheValid: Prisma.Sql): Prisma.Sql {
+function buildFinalSelect(
+  cacheValid: Prisma.Sql,
+  authorizationBudgetValid: Prisma.Sql,
+): Prisma.Sql {
   return Prisma.sql`
     SELECT
       ${cacheValid} AS cache_valid,
+      ${authorizationBudgetValid} AS authorization_budget_valid,
       profile_epoch.cache_epoch::text AS epoch,
       cache_set.candidates,
       pg_catalog.encode(

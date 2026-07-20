@@ -56,6 +56,7 @@ type HybridProfileRow = {
 
 type HybridRawQueryRow = {
   cache_valid: boolean;
+  authorization_budget_valid: boolean;
   epoch: bigint | number | string;
   candidates: unknown;
   candidates_fingerprint: string;
@@ -355,6 +356,18 @@ export function parseHybridQueryRows(rawRows: HybridRawQueryRow[]): {
     throw new HybridCorrectnessError("hybrid_query_returned_no_sentinel");
   }
   const first = rawRows[0];
+  const authorizationBudgetValid = requireBoolean(
+    first.authorization_budget_valid,
+    "authorization_budget_valid",
+  );
+  for (const row of rawRows) {
+    if (
+      requireBoolean(row.authorization_budget_valid, "authorization_budget_valid") !==
+      authorizationBudgetValid
+    ) {
+      throw new HybridCorrectnessError("hybrid_query_metadata_inconsistent");
+    }
+  }
   const cacheValid = requireBoolean(first.cache_valid, "cache_valid");
   const epoch = requireEpoch(first.epoch);
   const candidatesFingerprint = requireSha256(
@@ -385,6 +398,9 @@ export function parseHybridQueryRows(rawRows: HybridRawQueryRow[]): {
     ) {
       throw new HybridCorrectnessError("hybrid_query_metadata_inconsistent");
     }
+  }
+  if (!authorizationBudgetValid) {
+    throw new HybridLexicalFallbackError("authorized_candidate_limit_exceeded");
   }
 
   return {

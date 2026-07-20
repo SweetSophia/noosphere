@@ -13,6 +13,10 @@ import {
   searchHybridArticles,
 } from "@/lib/memory/hybrid-retrieval-runtime";
 import { readHybridRetrievalConfig } from "@/lib/memory/hybrid-retrieval";
+import {
+  HYBRID_MAX_AUTHORIZED_CANDIDATES,
+  HYBRID_VECTOR_AUTH_BATCH_SIZE,
+} from "@/lib/memory/hybrid-ranking";
 
 const databaseUrl = requireEnvironment("DATABASE_URL");
 const profileId = requireEnvironment("NOOSPHERE_PHASE_C_TEST_PROFILE_ID");
@@ -128,6 +132,59 @@ async function exerciseAuthorizationBatchBoundary(): Promise<void> {
       DELETE FROM "Article" WHERE id LIKE 'phase-c-batch-%'
     `);
   }
+}
+
+async function exerciseAuthorizationBudgetBoundary(): Promise<void> {
+  const executeBudgetCanary = (authorizedCount: number) =>
+    prisma.$queryRaw<Array<{ candidate_count: bigint }>>(Prisma.sql`
+      WITH
+      authorized_base AS MATERIALIZED (
+        SELECT series.value::text AS id
+        FROM pg_catalog.generate_series(1, ${authorizedCount}) AS series(value)
+      ),
+      authorized_budget AS MATERIALIZED (
+        SELECT pg_catalog.count(*)::integer AS authorized_count
+        FROM (
+          SELECT id
+          FROM authorized_base
+          LIMIT ${HYBRID_MAX_AUTHORIZED_CANDIDATES + 1}
+        ) AS bounded_authorized
+      ),
+      authorized_batches AS MATERIALIZED (
+        SELECT
+          id,
+          (
+            (pg_catalog.row_number() OVER (ORDER BY id) - 1)
+            / ${HYBRID_VECTOR_AUTH_BATCH_SIZE}
+          )::bigint AS batch_number
+        FROM authorized_base
+        CROSS JOIN authorized_budget
+        WHERE authorized_budget.authorized_count <= ${HYBRID_MAX_AUTHORIZED_CANDIDATES}
+      ),
+      authorized_id_batches AS MATERIALIZED (
+        SELECT batch_number, pg_catalog.array_agg(id ORDER BY id) AS ids
+        FROM authorized_batches
+        GROUP BY batch_number
+      )
+      SELECT pg_catalog.count(*) AS candidate_count
+      FROM authorized_id_batches AS batch
+      CROSS JOIN LATERAL noosphere_hybrid_c.vector_candidates(
+        ${profileId}::uuid,
+        '[1,0]',
+        batch.ids
+      ) AS candidate
+    `);
+
+  await assert.rejects(
+    executeBudgetCanary(HYBRID_MAX_AUTHORIZED_CANDIDATES),
+    /dimension does not match profile/,
+    "the exact authorization limit must still invoke the vector function",
+  );
+  assert.deepEqual(
+    await executeBudgetCanary(HYBRID_MAX_AUTHORIZED_CANDIDATES + 1),
+    [{ candidate_count: 0n }],
+    "an over-budget request must make zero lateral vector calls",
+  );
 }
 
 async function main(): Promise<void> {
@@ -265,6 +322,7 @@ try {
   assert.ok(relaxed.rows.length > 0, "zero-result strict search must use bounded lexical fallback");
 
   await exerciseAuthorizationBatchBoundary();
+  await exerciseAuthorizationBudgetBoundary();
 
   if (process.env.NOOSPHERE_HYBRID_RETRIEVAL_ENABLED === "true") {
     const runtimeRows = await searchHybridArticles(

@@ -268,15 +268,18 @@ worker.
 
 Hybrid recall uses one authorization-filtered candidate relation for lexical
 and vector legs. The vector leg processes deterministic batches of at most
-1,000 authorized IDs, globally reorders their batch-local top-200 sets, and
-keeps the exact first 200. RRF is deterministic (`k=60`, depth 200 per leg), final
+1,000 authorized IDs up to a request-wide maximum of 100,000 authorized
+articles, globally reorders their batch-local top-200 sets, and keeps the exact
+first 200. Larger authorized sets use classified lexical fallback before any
+lateral vector calls. RRF is deterministic (`k=60`, depth 200 per leg), final
 authorization/current-content hydration, whole-set score normalization, and
 then pagination. Requests whose `offset + limit` exceeds 200 use lexical recall.
 The status filter is optional; Phase C never adds an implicit `published`
 predicate.
 
-Only bounded request-shape classifications (`window_exceeded` and
-`limit_unbounded`), insufficient vector coverage, and transient provider
+Only bounded request-shape classifications (`window_exceeded`,
+`limit_unbounded`, and `authorized_candidate_limit_exceeded`), insufficient
+vector coverage, and transient provider
 connection, timeout, HTTP 408/429, or HTTP 5xx failures use classified lexical fallback. Returned
 lexical results include a bounded fallback reason in provider metadata. Invalid
 configuration, schema/ACL drift, dimension or finite-vector errors, malformed

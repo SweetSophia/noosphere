@@ -5,7 +5,10 @@ import {
   buildHybridCacheHitSql,
   buildHybridMissSql,
 } from "@/lib/memory/hybrid-retrieval-sql";
-import { HYBRID_CANDIDATE_DEPTH } from "@/lib/memory/hybrid-ranking";
+import {
+  HYBRID_CANDIDATE_DEPTH,
+  HYBRID_MAX_AUTHORIZED_CANDIDATES,
+} from "@/lib/memory/hybrid-ranking";
 
 function sqlText(query: { strings: readonly string[] }): string {
   return query.strings.join("?").replace(/\s+/g, " ");
@@ -34,6 +37,17 @@ test("miss query uses one shared authorized base for lexical and vector candidat
   assert.match(text, /lexical_source AS MATERIALIZED .* FROM authorized_base/s);
   assert.match(text, /authorized_batches AS MATERIALIZED/);
   assert.match(text, /authorized_id_batches AS MATERIALIZED/);
+  assert.match(text, /authorized_budget AS MATERIALIZED/);
+  assert.match(text, /authorized_budget\.authorized_count <= \?/);
+  assert.equal(
+    query.values.filter((value) => value === HYBRID_MAX_AUTHORIZED_CANDIDATES).length,
+    2,
+  );
+  assert.equal(
+    query.values.filter((value) => value === HYBRID_MAX_AUTHORIZED_CANDIDATES + 1).length,
+    1,
+  );
+  assert.match(text, /AS authorization_budget_valid/);
   assert.match(text, /vector_batch_source AS MATERIALIZED .* JOIN authorized_base/s);
   assert.match(text, /vector_candidates/);
   assert.match(text, /pg_catalog\.array_agg\(id ORDER BY id\)/);
