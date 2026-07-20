@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 import {
+  buildAuthorizedArticleIdCTE,
   buildArticleSearchFilters,
   buildFallbackSearchTsQuery,
   buildSearchableCTE,
@@ -31,40 +32,24 @@ export interface HybridCacheHitSqlInput extends HybridSqlBaseInput {
   candidates: HybridCachedCandidate[];
 }
 
-export function buildHybridMissSql(input: HybridMissSqlInput): Prisma.Sql {
-  const search = buildSearchCtes(input.query, input.filters);
+export function buildHybridMissSql(
+  input: HybridMissSqlInput,
+  authorizationCandidateLimit = HYBRID_MAX_AUTHORIZED_CANDIDATES,
+): Prisma.Sql {
+  const candidateLimit = validateAuthorizationCandidateLimit(
+    authorizationCandidateLimit,
+  );
+  const search = buildSearchCtes(
+    input.query,
+    input.filters,
+    candidateLimit,
+  );
   return Prisma.sql`
     WITH
     ${search},
     profile_epoch AS MATERIALIZED (
       SELECT cache_epoch
       FROM noosphere_hybrid_c.query_profile_snapshot(${input.profileId}::uuid)
-    ),
-    authorized_budget AS MATERIALIZED (
-      SELECT pg_catalog.count(*)::integer AS authorized_count
-      FROM (
-        SELECT id
-        FROM authorized_base
-        LIMIT ${HYBRID_MAX_AUTHORIZED_CANDIDATES + 1}
-      ) AS bounded_authorized
-    ),
-    authorized_batches AS MATERIALIZED (
-      SELECT
-        id,
-        (
-          (pg_catalog.row_number() OVER (ORDER BY id) - 1)
-          / ${HYBRID_VECTOR_AUTH_BATCH_SIZE}
-        )::bigint AS batch_number
-      FROM authorized_base
-      CROSS JOIN authorized_budget
-      WHERE authorized_budget.authorized_count <= ${HYBRID_MAX_AUTHORIZED_CANDIDATES}
-    ),
-    authorized_id_batches AS MATERIALIZED (
-      SELECT
-        batch_number,
-        pg_catalog.array_agg(id ORDER BY id) AS ids
-      FROM authorized_batches
-      GROUP BY batch_number
     ),
     lexical_source AS MATERIALIZED (
       SELECT
@@ -169,7 +154,7 @@ export function buildHybridMissSql(input: HybridMissSqlInput): Prisma.Sql {
     ${buildFinalSelect(
       Prisma.sql`TRUE`,
       Prisma.sql`(
-        SELECT authorized_count <= ${HYBRID_MAX_AUTHORIZED_CANDIDATES}
+        SELECT authorized_count <= ${candidateLimit}
         FROM authorized_budget
       )`,
     )}
@@ -305,8 +290,36 @@ export function buildHybridCacheHitSql(input: HybridCacheHitSqlInput): Prisma.Sq
   `;
 }
 
-function buildSearchCtes(query: string, filters: ArticleSearchFilters): Prisma.Sql {
-  const authorizedBase = buildSearchableCTE(buildArticleSearchFilters(filters));
+function buildSearchCtes(
+  query: string,
+  filters: ArticleSearchFilters,
+  authorizationCandidateLimit?: number,
+): Prisma.Sql {
+  const searchFilters = buildArticleSearchFilters(filters);
+  const searchable = buildSearchableCTE(searchFilters);
+  const authorizedRelation = authorizationCandidateLimit !== undefined
+    ? Prisma.sql`
+      authorized_ids AS MATERIALIZED (
+        ${buildAuthorizedArticleIdCTE(searchFilters)}
+      ),
+      ${buildHybridAuthorizationBatchCtes(
+        Prisma.sql`authorized_ids`,
+        authorizationCandidateLimit,
+      )},
+      authorized_base AS MATERIALIZED (
+        SELECT searchable.*
+        FROM authorized_budget
+        CROSS JOIN LATERAL (
+          ${searchable}
+        ) AS searchable
+        WHERE authorized_budget.authorized_count <= ${authorizationCandidateLimit}
+      )
+    `
+    : Prisma.sql`
+      authorized_base AS MATERIALIZED (
+        ${searchable}
+      )
+    `;
   const strict = buildSearchTsQuery(query);
   const fallback = buildFallbackSearchTsQuery(query);
   const fallbackSelect = fallback
@@ -314,9 +327,7 @@ function buildSearchCtes(query: string, filters: ArticleSearchFilters): Prisma.S
     : Prisma.sql`SELECT NULL::tsquery AS query WHERE FALSE`;
 
   return Prisma.sql`
-    authorized_base AS MATERIALIZED (
-      ${authorizedBase}
-    ),
+    ${authorizedRelation},
     strict_query AS MATERIALIZED (
       SELECT ${strict} AS query
     ),
@@ -343,6 +354,54 @@ function buildSearchCtes(query: string, filters: ArticleSearchFilters): Prisma.S
       WHERE NOT strict_match_exists.matched
     )
   `;
+}
+
+export function buildHybridAuthorizationBatchCtes(
+  authorizedSource: Prisma.Sql,
+  authorizationCandidateLimit = HYBRID_MAX_AUTHORIZED_CANDIDATES,
+): Prisma.Sql {
+  const candidateLimit = validateAuthorizationCandidateLimit(
+    authorizationCandidateLimit,
+  );
+  return Prisma.sql`
+    authorized_budget AS MATERIALIZED (
+      SELECT pg_catalog.count(*)::integer AS authorized_count
+      FROM (
+        SELECT id
+        FROM ${authorizedSource}
+        LIMIT ${candidateLimit + 1}
+      ) AS bounded_authorized
+    ),
+    authorized_batches AS MATERIALIZED (
+      SELECT
+        id,
+        (
+          (pg_catalog.row_number() OVER (ORDER BY id) - 1)
+          / ${HYBRID_VECTOR_AUTH_BATCH_SIZE}
+        )::bigint AS batch_number
+      FROM ${authorizedSource}
+      CROSS JOIN authorized_budget
+      WHERE authorized_budget.authorized_count <= ${candidateLimit}
+    ),
+    authorized_id_batches AS MATERIALIZED (
+      SELECT
+        batch_number,
+        pg_catalog.array_agg(id ORDER BY id) AS ids
+      FROM authorized_batches
+      GROUP BY batch_number
+    )
+  `;
+}
+
+function validateAuthorizationCandidateLimit(value: number): number {
+  if (
+    !Number.isSafeInteger(value) ||
+    value < 1 ||
+    value > HYBRID_MAX_AUTHORIZED_CANDIDATES
+  ) {
+    throw new RangeError("Hybrid authorization candidate limit is invalid");
+  }
+  return value;
 }
 
 function buildAuthorizationCtes(fused: Prisma.Sql): Prisma.Sql {

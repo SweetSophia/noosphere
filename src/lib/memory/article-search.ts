@@ -195,11 +195,7 @@ export function buildRestrictedScopeSql(
 export function buildSearchableCTE(
   filters: Prisma.Sql[],
 ): Prisma.Sql {
-  // Fallback to a tautology if no filters are provided, so the generated
-  // SQL is always valid (WHERE TRUE instead of bare WHERE).
-  const whereClause = filters.length > 0
-    ? Prisma.join(filters, " AND ")
-    : Prisma.sql`TRUE`;
+  const whereClause = buildWhereClause(filters);
 
   return Prisma.sql`
     SELECT
@@ -218,6 +214,25 @@ export function buildSearchableCTE(
     WHERE ${whereClause}
     GROUP BY a.id
   `;
+}
+
+/** Build the same authorized article relation without full-text documents. */
+export function buildAuthorizedArticleIdCTE(filters: Prisma.Sql[]): Prisma.Sql {
+  const whereClause = buildWhereClause(filters);
+  return Prisma.sql`
+    SELECT a.id
+    FROM "Article" a
+    INNER JOIN "Topic" tpc ON tpc.id = a."topicId"
+    WHERE ${whereClause}
+  `;
+}
+
+function buildWhereClause(filters: Prisma.Sql[]): Prisma.Sql {
+  // Fallback to a tautology if no filters are provided, so the generated
+  // SQL is always valid (WHERE TRUE instead of bare WHERE).
+  return filters.length > 0
+    ? Prisma.join(filters, " AND ")
+    : Prisma.sql`TRUE`;
 }
 
 /**

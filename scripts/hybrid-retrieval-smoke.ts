@@ -5,6 +5,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 
 import {
+  buildHybridAuthorizationBatchCtes,
   buildHybridCacheHitSql,
   buildHybridMissSql,
 } from "@/lib/memory/hybrid-retrieval-sql";
@@ -12,10 +13,12 @@ import {
   parseHybridQueryRows,
   searchHybridArticles,
 } from "@/lib/memory/hybrid-retrieval-runtime";
-import { readHybridRetrievalConfig } from "@/lib/memory/hybrid-retrieval";
+import {
+  HybridLexicalFallbackError,
+  readHybridRetrievalConfig,
+} from "@/lib/memory/hybrid-retrieval";
 import {
   HYBRID_MAX_AUTHORIZED_CANDIDATES,
-  HYBRID_VECTOR_AUTH_BATCH_SIZE,
 } from "@/lib/memory/hybrid-ranking";
 
 const databaseUrl = requireEnvironment("DATABASE_URL");
@@ -142,30 +145,7 @@ async function exerciseAuthorizationBudgetBoundary(): Promise<void> {
         SELECT series.value::text AS id
         FROM pg_catalog.generate_series(1, ${authorizedCount}) AS series(value)
       ),
-      authorized_budget AS MATERIALIZED (
-        SELECT pg_catalog.count(*)::integer AS authorized_count
-        FROM (
-          SELECT id
-          FROM authorized_base
-          LIMIT ${HYBRID_MAX_AUTHORIZED_CANDIDATES + 1}
-        ) AS bounded_authorized
-      ),
-      authorized_batches AS MATERIALIZED (
-        SELECT
-          id,
-          (
-            (pg_catalog.row_number() OVER (ORDER BY id) - 1)
-            / ${HYBRID_VECTOR_AUTH_BATCH_SIZE}
-          )::bigint AS batch_number
-        FROM authorized_base
-        CROSS JOIN authorized_budget
-        WHERE authorized_budget.authorized_count <= ${HYBRID_MAX_AUTHORIZED_CANDIDATES}
-      ),
-      authorized_id_batches AS MATERIALIZED (
-        SELECT batch_number, pg_catalog.array_agg(id ORDER BY id) AS ids
-        FROM authorized_batches
-        GROUP BY batch_number
-      )
+      ${buildHybridAuthorizationBatchCtes(Prisma.sql`authorized_base`)}
       SELECT pg_catalog.count(*) AS candidate_count
       FROM authorized_id_batches AS batch
       CROSS JOIN LATERAL noosphere_hybrid_c.vector_candidates(
@@ -185,6 +165,68 @@ async function exerciseAuthorizationBudgetBoundary(): Promise<void> {
     [{ candidate_count: 0n }],
     "an over-budget request must make zero lateral vector calls",
   );
+}
+
+type ExplainPlanNode = Record<string, unknown> & {
+  Plans?: ExplainPlanNode[];
+};
+
+function collectPlanNodes(value: unknown): ExplainPlanNode[] {
+  if (Array.isArray(value)) return value.flatMap(collectPlanNodes);
+  if (!value || typeof value !== "object") return [];
+  const record = value as ExplainPlanNode;
+  return [
+    ...(typeof record["Node Type"] === "string" ? [record] : []),
+    ...Object.values(record).flatMap(collectPlanNodes),
+  ];
+}
+
+async function exerciseProductionBudgetShortCircuit(): Promise<void> {
+  const query = buildHybridMissSql({
+    query: "hybrid recall",
+    profileId,
+    limit: 10,
+    offset: 0,
+    filters: { allowedScopes: ["*"] },
+    // A dimension mismatch is a vector-call canary: the over-budget plan must
+    // never reach the SECURITY DEFINER vector function.
+    vectorLiteral: "[1,0]",
+  }, 1);
+
+  await assert.rejects(
+    execute(query),
+    (error) =>
+      error instanceof HybridLexicalFallbackError &&
+      error.code === "authorized_candidate_limit_exceeded",
+    "the production miss query must classify an over-budget corpus",
+  );
+
+  const rows = await prisma.$queryRaw<Array<{ "QUERY PLAN": unknown }>>(
+    Prisma.sql`EXPLAIN (ANALYZE, FORMAT JSON) ${query}`,
+  );
+  assert.equal(rows.length, 1, "production short-circuit plan row");
+  const nodes = collectPlanNodes(rows[0]["QUERY PLAN"]);
+  const subplan = (name: string) => {
+    const node = nodes.find((candidate) => candidate["Subplan Name"] === `CTE ${name}`);
+    assert.ok(node, `production plan must contain CTE ${name}`);
+    return node;
+  };
+
+  const authorizedBase = subplan("authorized_base");
+  assert.equal(authorizedBase["Actual Rows"], 0, "authorized base must be empty over budget");
+  const authorizedBaseNodes = collectPlanNodes(authorizedBase.Plans ?? []);
+  const expensiveArticleScans = authorizedBaseNodes.filter(
+    (node) => node["Relation Name"] === "Article",
+  );
+  assert.ok(expensiveArticleScans.length > 0, "full-text Article plan must be visible");
+  assert.ok(
+    expensiveArticleScans.every((node) => node["Actual Loops"] === 0),
+    "full-text Article scans must never execute over budget",
+  );
+
+  for (const name of ["vector_batch_source", "fused", "lineage_locks", "hydrated"]) {
+    assert.equal(subplan(name)["Actual Rows"], 0, `${name} must receive zero rows`);
+  }
 }
 
 async function main(): Promise<void> {
@@ -323,6 +365,7 @@ try {
 
   await exerciseAuthorizationBatchBoundary();
   await exerciseAuthorizationBudgetBoundary();
+  await exerciseProductionBudgetShortCircuit();
 
   if (process.env.NOOSPHERE_HYBRID_RETRIEVAL_ENABLED === "true") {
     const runtimeRows = await searchHybridArticles(

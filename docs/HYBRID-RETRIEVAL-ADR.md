@@ -348,9 +348,9 @@ The vector leg processes at most 100,000 authorized articles in deterministic
 the classified `authorized_candidate_limit_exceeded` lexical fallback rather
 than truncating the exact vector set.
 
-Only bounded request-shape classifications (`window_exceeded`,
-`limit_unbounded`, and `authorized_candidate_limit_exceeded`), insufficient
-coverage, and transient provider network,
+Only bounded request-shape classifications (`window_exceeded` and
+`limit_unbounded`), the bounded authorization-cardinality classification
+`authorized_candidate_limit_exceeded`, insufficient coverage, and transient provider network,
 timeout, 408/429, or 5xx errors permit classified lexical fallback. Returned lexical results
 carry the bounded fallback reason in metadata and the same content-free code is
 logged. Profile/configuration drift,

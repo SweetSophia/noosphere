@@ -277,9 +277,9 @@ then pagination. Requests whose `offset + limit` exceeds 200 use lexical recall.
 The status filter is optional; Phase C never adds an implicit `published`
 predicate.
 
-Only bounded request-shape classifications (`window_exceeded`,
-`limit_unbounded`, and `authorized_candidate_limit_exceeded`), insufficient
-vector coverage, and transient provider
+Only bounded request-shape classifications (`window_exceeded` and
+`limit_unbounded`), the bounded authorization-cardinality classification
+`authorized_candidate_limit_exceeded`, insufficient vector coverage, and transient provider
 connection, timeout, HTTP 408/429, or HTTP 5xx failures use classified lexical fallback. Returned
 lexical results include a bounded fallback reason in provider metadata. Invalid
 configuration, schema/ACL drift, dimension or finite-vector errors, malformed

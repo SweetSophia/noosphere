@@ -38,10 +38,15 @@ test("miss query uses one shared authorized base for lexical and vector candidat
   assert.match(text, /authorized_batches AS MATERIALIZED/);
   assert.match(text, /authorized_id_batches AS MATERIALIZED/);
   assert.match(text, /authorized_budget AS MATERIALIZED/);
+  assert.match(text, /authorized_ids AS MATERIALIZED/);
+  assert.match(
+    text,
+    /authorized_base AS MATERIALIZED .* FROM authorized_budget CROSS JOIN LATERAL/s,
+  );
   assert.match(text, /authorized_budget\.authorized_count <= \?/);
   assert.equal(
     query.values.filter((value) => value === HYBRID_MAX_AUTHORIZED_CANDIDATES).length,
-    2,
+    3,
   );
   assert.equal(
     query.values.filter((value) => value === HYBRID_MAX_AUTHORIZED_CANDIDATES + 1).length,
