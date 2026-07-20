@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import { getEventListeners } from "node:events";
 import test from "node:test";
 import {
   HybridProviderError,
+  abortableDelay,
   canonicalEndpointIdentity,
   computeRetryDelayMs,
   endpointIdentitySha256,
@@ -87,6 +89,24 @@ test("L2 normalization and SQL vector serialization are deterministic", () => {
   );
   assert.deepEqual(normalized, [0.6, 0.8, 0]);
   assert.equal(vectorSqlLiteral(normalized), "[0.6,0.8,0]");
+});
+
+test("abortable delay releases its shutdown listener on every completion path", async () => {
+  const natural = new AbortController();
+  await abortableDelay(1, natural.signal);
+  assert.equal(getEventListeners(natural.signal, "abort").length, 0);
+
+  const cancelled = new AbortController();
+  const pending = abortableDelay(60_000, cancelled.signal);
+  assert.equal(getEventListeners(cancelled.signal, "abort").length, 1);
+  cancelled.abort(new Error("worker shutdown"));
+  await pending;
+  assert.equal(getEventListeners(cancelled.signal, "abort").length, 0);
+
+  const alreadyAborted = new AbortController();
+  alreadyAborted.abort(new Error("worker already stopping"));
+  await abortableDelay(60_000, alreadyAborted.signal);
+  assert.equal(getEventListeners(alreadyAborted.signal, "abort").length, 0);
 });
 
 test("provider request authenticates, bounds content, and returns one validated vector", async () => {

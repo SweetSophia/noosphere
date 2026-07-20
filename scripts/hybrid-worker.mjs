@@ -6,6 +6,7 @@ import pg from "pg";
 import {
   HYBRID_LIMITS,
   HybridProviderError,
+  abortableDelay,
   computeRetryDelayMs,
   parseProviderConfigs,
   providerConfigJsonFromEnv,
@@ -254,19 +255,4 @@ function errorCode(error) {
     return sanitizeErrorCode(`database_${error.code}`);
   }
   return "worker_internal";
-}
-
-function abortableDelay(milliseconds, signal) {
-  if (signal.aborted) return Promise.resolve();
-  return new Promise((resolve) => {
-    const onAbort = () => {
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, milliseconds);
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
 }

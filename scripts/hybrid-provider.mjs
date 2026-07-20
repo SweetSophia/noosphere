@@ -256,6 +256,21 @@ export function sanitizeErrorCode(code) {
   return normalized || "unknown";
 }
 
+export function abortableDelay(milliseconds, signal) {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 async function readBoundedBody(response, maxBytes) {
   const declared = Number(response.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) {
