@@ -77,16 +77,20 @@ cleanup() {
   close_write_fd "${read_committed_writer_in:-}"
   close_write_fd "${phase_b_consent_writer_in:-}"
   close_write_fd "${phase_b_authorize_worker_in:-}"
+  close_write_fd "${phase_c_auth_in:-}"
   cleanup_process "${read_committed_claim_pid:-}"
   cleanup_process "${read_committed_writer_pid:-}"
   cleanup_process "${phase_b_publish_pid:-}"
   cleanup_process "${phase_b_consent_writer_pid:-}"
   cleanup_process "${phase_b_authorize_worker_pid:-}"
   cleanup_process "${phase_b_content_update_pid:-}"
+  cleanup_process "${phase_c_auth_pid:-}"
+  cleanup_process "${phase_c_revoke_pid:-}"
   cleanup_process "${fixture_pid:-}"
   close_read_fd "${read_committed_writer_out:-}"
   close_read_fd "${phase_b_consent_writer_out:-}"
   close_read_fd "${phase_b_authorize_worker_out:-}"
+  close_read_fd "${phase_c_auth_out:-}"
   if [[ -n "${read_committed_claim_output:-}" && -f "$read_committed_claim_output" ]]; then
     rm -f -- "$read_committed_claim_output"
   fi
@@ -112,6 +116,12 @@ cleanup() {
   done
   if [[ -n "${phase_b_content_update_output:-}" && -f "$phase_b_content_update_output" ]]; then
     rm -f -- "$phase_b_content_update_output"
+  fi
+  if [[ -n "${phase_c_auth_output:-}" && -f "$phase_c_auth_output" ]]; then
+    rm -f -- "$phase_c_auth_output"
+  fi
+  if [[ -n "${phase_c_revoke_output:-}" && -f "$phase_c_revoke_output" ]]; then
+    rm -f -- "$phase_c_revoke_output"
   fi
   cleanup_container "$source_container"
   cleanup_container "$candidate_container"
@@ -199,6 +209,15 @@ activate_phase_b() {
   NOOSPHERE_HYBRID_ADMIN_DATABASE_URL="$candidate_admin" \
   NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$candidate_worker" \
     "$repo_root/scripts/activate-hybrid-worker.sh"
+}
+
+activate_phase_c() {
+  NOOSPHERE_BOOTSTRAP_DATABASE_URL="$candidate_bootstrap" \
+  DATABASE_URL="$candidate_migrator" \
+  NOOSPHERE_APP_DATABASE_URL="$candidate_app" \
+  NOOSPHERE_HYBRID_ADMIN_DATABASE_URL="$candidate_admin" \
+  NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$candidate_worker" \
+    "$repo_root/scripts/activate-hybrid-retrieval.sh"
 }
 
 expect_activation_failure() {
@@ -1399,4 +1418,275 @@ assert_equals '0:0:0:0' "$(psql "$candidate_worker" -XAtq -F ':' -v ON_ERROR_STO
 psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
   "DELETE FROM public.\"Article\" WHERE id='phase-b-restricted'" >/dev/null
 
-printf '[hybrid-storage-test] PASS: A3 storage plus Phase B provider, consent, backfill, lifecycle, queue, and worker matrices.\n'
+# Phase C adds an independently evidenced, application-only content-free
+# retrieval capability. It must preserve both exact prerequisite validators,
+# reject ACL drift, and enforce serving/current-vector behavior.
+activate_phase_c >/dev/null
+activate_phase_c >/dev/null
+expect_sql_failure 'application Phase C feature-state read' "$candidate_app" \
+  'SELECT * FROM noosphere_hybrid_c.feature_state'
+expect_sql_failure 'application Phase C structural manifest execution' "$candidate_app" \
+  'SELECT noosphere_hybrid_c.structural_manifest()'
+expect_sql_failure 'administrator Phase C schema usage' "$candidate_admin" \
+  'SELECT noosphere_hybrid_c.query_profile_snapshot(gen_random_uuid())'
+
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'GRANT EXECUTE ON FUNCTION noosphere_hybrid_c.structural_manifest() TO noosphere_app' >/dev/null
+if activate_phase_c >/dev/null 2>&1; then
+  die 'Phase C activation accepted an extra application routine grant'
+fi
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'REVOKE EXECUTE ON FUNCTION noosphere_hybrid_c.structural_manifest() FROM noosphere_app' >/dev/null
+activate_phase_c >/dev/null
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'REVOKE EXECUTE ON FUNCTION noosphere_hybrid_c.current_vector_membership(uuid,text[]) FROM noosphere_app' >/dev/null
+if activate_phase_c >/dev/null 2>&1; then
+  die 'Phase C activation accepted a missing application routine grant'
+fi
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'GRANT EXECUTE ON FUNCTION noosphere_hybrid_c.current_vector_membership(uuid,text[]) TO noosphere_app' >/dev/null
+activate_phase_c >/dev/null
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'GRANT USAGE ON SCHEMA noosphere_hybrid_c TO noosphere_app WITH GRANT OPTION' >/dev/null
+if activate_phase_c >/dev/null 2>&1; then
+  die 'Phase C activation accepted application schema USAGE with grant option'
+fi
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'REVOKE GRANT OPTION FOR USAGE ON SCHEMA noosphere_hybrid_c FROM noosphere_app' >/dev/null
+activate_phase_c >/dev/null
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'GRANT EXECUTE ON FUNCTION noosphere_hybrid_c.authorize_query_dispatch(uuid) TO noosphere_app WITH GRANT OPTION' >/dev/null
+if activate_phase_c >/dev/null 2>&1; then
+  die 'Phase C activation accepted application routine EXECUTE with grant option'
+fi
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION noosphere_hybrid_c.authorize_query_dispatch(uuid) FROM noosphere_app' >/dev/null
+activate_phase_c >/dev/null
+
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO public."Article" (
+  id, title, slug, content, excerpt, status, confidence, "topicId",
+  "restrictedTags", "createdAt", "updatedAt"
+) VALUES
+  ('phase-c-public-a', 'Phase C exact recall', 'phase-c-public-a',
+   'hybrid recall alpha', 'alpha', 'published', 'high', 'hybrid-topic',
+   ARRAY[]::text[], clock_timestamp(), clock_timestamp()),
+  ('phase-c-public-b', 'Phase C lexical recall', 'phase-c-public-b',
+   'hybrid recall beta', 'beta', 'reviewed', 'medium', 'hybrid-topic',
+   ARRAY[]::text[], clock_timestamp(), clock_timestamp()),
+  ('phase-c-financial', 'Phase C financial recall', 'phase-c-financial',
+   'hybrid recall financial', 'financial', 'published', 'high', 'hybrid-topic',
+   ARRAY['financial'], clock_timestamp(), clock_timestamp()),
+  ('phase-c-private', 'Phase C private recall', 'phase-c-private',
+   'hybrid recall private', 'private', 'draft', 'low', 'hybrid-topic',
+   ARRAY['private'], clock_timestamp(), clock_timestamp());
+SQL
+
+fixture_log=$(mktemp)
+HYBRID_FIXTURE_PORT=19876 node "$repo_root/scripts/hybrid-embedding-fixture-server.mjs" >"$fixture_log" 2>&1 &
+fixture_pid=$!
+for _ in $(seq 1 50); do
+  grep -q '^ready$' "$fixture_log" && break
+  kill -0 "$fixture_pid" 2>/dev/null || die 'Phase C embedding fixture server exited early'
+  sleep 0.1
+done
+grep -q '^ready$' "$fixture_log" || die 'Phase C embedding fixture server did not become ready'
+phase_c_fixture_endpoint='http://127.0.0.1:19876/v1/embeddings'
+phase_c_fixture_endpoint_sha=$(printf '%s' "$phase_c_fixture_endpoint" | sha256sum | awk '{print $1}')
+
+phase_c_profile=$(psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid.create_profile(
+     'openai-compatible','local','fixture-model','fixture-r1',3,
+     'cosine','none',32768,decode('$phase_c_fixture_endpoint_sha','hex'))")
+psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_b.set_profile_state('$phase_c_profile','preparing');
+   SELECT * FROM noosphere_hybrid_b.enqueue_profile_backfill('$phase_c_profile',1000)" >/dev/null
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "INSERT INTO noosphere_hybrid.article_embedding (
+     article_id, profile_id, revision, content_hash, dimensions, embedding
+   )
+   SELECT article.id, '$phase_c_profile', state.revision,
+          noosphere_hybrid.canonical_hash(article.title,article.excerpt,article.content,32768),
+          3,
+          CASE article.id
+            WHEN 'phase-c-public-a' THEN '[1,0,0]'::noosphere_vector.vector
+            WHEN 'phase-c-financial' THEN '[0.9,0.1,0]'::noosphere_vector.vector
+            WHEN 'phase-c-public-b' THEN '[0,1,0]'::noosphere_vector.vector
+            ELSE '[-1,0,0]'::noosphere_vector.vector
+          END
+   FROM public.\"Article\" AS article
+   JOIN noosphere_hybrid.article_embedding_state AS state ON state.article_id=article.id
+   WHERE article.id LIKE 'phase-c-%'" >/dev/null
+psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_b.set_profile_state('$phase_c_profile','serving')" >/dev/null
+
+assert_equals 'fixture-model:serving:1.00' "$(psql "$candidate_app" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  "SELECT model_identifier,profile_state,round(coverage,2)
+   FROM noosphere_hybrid_c.query_profile_snapshot('$phase_c_profile')")" \
+  'Phase C application profile snapshot'
+assert_equals t "$(psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_c.authorize_query_dispatch('$phase_c_profile')")" \
+  'Phase C local query dispatch authorization'
+assert_equals 'phase-c-public-a:phase-c-financial:phase-c-public-b' "$(psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT pg_catalog.string_agg(article_id, ':' ORDER BY distance, article_id)
+   FROM noosphere_hybrid_c.vector_candidates(
+     '$phase_c_profile','[1,0,0]',
+     ARRAY['phase-c-public-a','phase-c-public-b','phase-c-financial']::text[]
+   )")" 'Phase C deterministic content-free vector candidates'
+
+# Equal-distance truncation must use the exact same updatedAt/id tie-break as
+# vector rank assignment. With 201 candidates, the oldest row is outside the
+# fixed 200-depth set while the newest remains present.
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO public."Article" (
+  id, title, slug, content, excerpt, status, confidence, "topicId",
+  "restrictedTags", "createdAt", "updatedAt"
+)
+SELECT
+  'phase-c-tie-' || pg_catalog.lpad(series.value::text, 3, '0'),
+  'Phase C tied vector candidate',
+  'phase-c-tie-' || pg_catalog.lpad(series.value::text, 3, '0'),
+  'equal distance candidate',
+  'tie',
+  'published',
+  'high',
+  'hybrid-topic',
+  ARRAY[]::text[],
+  '2026-01-01 00:00:00+00'::timestamptz + series.value * interval '1 second',
+  '2026-01-01 00:00:00+00'::timestamptz + series.value * interval '1 second'
+FROM pg_catalog.generate_series(1, 201) AS series(value);
+SQL
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "INSERT INTO noosphere_hybrid.article_embedding (
+     article_id, profile_id, revision, content_hash, dimensions, embedding
+   )
+   SELECT article.id, '$phase_c_profile', state.revision,
+          noosphere_hybrid.canonical_hash(article.title,article.excerpt,article.content,32768),
+          3, '[0,1,0]'::noosphere_vector.vector
+   FROM public.\"Article\" AS article
+   JOIN noosphere_hybrid.article_embedding_state AS state ON state.article_id=article.id
+   WHERE article.id LIKE 'phase-c-tie-%'" >/dev/null
+assert_equals '200:f:t' "$(psql "$candidate_app" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  "SELECT pg_catalog.count(*),
+          pg_catalog.bool_or(article_id='phase-c-tie-001'),
+          pg_catalog.bool_or(article_id='phase-c-tie-201')
+   FROM noosphere_hybrid_c.vector_candidates(
+     '$phase_c_profile','[1,0,0]',
+     ARRAY(
+       SELECT id FROM public.\"Article\"
+       WHERE id LIKE 'phase-c-tie-%' ORDER BY id
+     )
+   )")" 'Phase C vector depth uses rank-consistent tie order'
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "DELETE FROM public.\"Article\" WHERE id LIKE 'phase-c-tie-%'" >/dev/null
+
+expect_sql_failure 'Phase C query dimension mismatch' "$candidate_app" \
+  "SELECT * FROM noosphere_hybrid_c.vector_candidates('$phase_c_profile','[1,0]',ARRAY['phase-c-public-a']::text[])"
+expect_sql_failure 'Phase C cosine zero query vector' "$candidate_app" \
+  "SELECT * FROM noosphere_hybrid_c.vector_candidates('$phase_c_profile','[0,0,0]',ARRAY['phase-c-public-a']::text[])"
+
+# Query egress uses the same short Phase B eligibility lock as consent and
+# lifecycle mutation. If authorization wins, revocation waits behind the
+# committed dispatch point; if revocation commits first, no query is authorized.
+phase_c_remote_dispatch_profile=$(psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid.create_profile(
+     'openai-compatible','remote','fixture-query-model','fixture-query-r1',3,
+     'cosine','none',32768,decode('$phase_c_fixture_endpoint_sha','hex'))")
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "UPDATE noosphere_hybrid.embedding_profile SET state='serving'
+   WHERE id='$phase_c_remote_dispatch_profile'" >/dev/null
+assert_equals t "$(psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_c.authorize_query_dispatch('$phase_c_remote_dispatch_profile')")" \
+  'Phase C remote query dispatch with consent'
+phase_c_revoke_output=$(mktemp)
+coproc PHASE_C_AUTH {
+  PGAPPNAME=noosphere-phase-c-query-authorization \
+    psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 2>&1
+}
+phase_c_auth_out=${PHASE_C_AUTH[0]}
+phase_c_auth_in=${PHASE_C_AUTH[1]}
+phase_c_auth_pid=$PHASE_C_AUTH_PID
+printf '%s\n' \
+  'BEGIN;' \
+  "SELECT 'authorization-ready:' || noosphere_hybrid_c.authorize_query_dispatch('$phase_c_remote_dispatch_profile');" \
+  >&"$phase_c_auth_in"
+IFS= read -r phase_c_auth_marker <&"$phase_c_auth_out"
+assert_equals authorization-ready:true "$phase_c_auth_marker" \
+  'Phase C query authorization readiness'
+PGAPPNAME=noosphere-phase-c-consent-revocation \
+  psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT noosphere_hybrid_b.set_embedding_consent(false,false)' >"$phase_c_revoke_output" 2>&1 &
+phase_c_revoke_pid=$!
+phase_c_revoke_wait=
+for _ in $(seq 1 100); do
+  phase_c_revoke_wait=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+    "SELECT wait_event_type FROM pg_catalog.pg_stat_activity
+     WHERE application_name='noosphere-phase-c-consent-revocation'")
+  [[ "$phase_c_revoke_wait" == Lock ]] && break
+  kill -0 "$phase_c_revoke_pid" 2>/dev/null || break
+  sleep 0.05
+done
+[[ "$phase_c_revoke_wait" == Lock ]] || die 'Phase C consent revocation did not serialize behind query authorization'
+printf '%s\n' 'COMMIT;' >&"$phase_c_auth_in"
+exec {phase_c_auth_in}>&-
+phase_c_auth_in=
+phase_c_auth_tail=$(cat <&"$phase_c_auth_out")
+exec {phase_c_auth_out}<&-
+phase_c_auth_out=
+wait "$phase_c_auth_pid" || die "Phase C query authorization failed: $phase_c_auth_tail"
+phase_c_auth_pid=
+wait "$phase_c_revoke_pid" || die "Phase C consent revocation failed: $(cat "$phase_c_revoke_output")"
+phase_c_revoke_pid=
+rm -f -- "$phase_c_revoke_output"
+phase_c_revoke_output=
+assert_equals f "$(psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_c.authorize_query_dispatch('$phase_c_remote_dispatch_profile')")" \
+  'Phase C remote query dispatch after committed consent revocation'
+psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT noosphere_hybrid_b.set_embedding_consent(true,true)' >/dev/null
+
+DATABASE_URL="$candidate_app" \
+NOOSPHERE_PHASE_C_ADMIN_DATABASE_URL="$candidate_admin" \
+NOOSPHERE_PHASE_C_BOOTSTRAP_DATABASE_URL="$candidate_bootstrap" \
+REDIS_URL= \
+NOOSPHERE_PHASE_C_TEST_PROFILE_ID="$phase_c_profile" \
+NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=true \
+NOOSPHERE_HYBRID_QUERY_PROFILE_ID="$phase_c_profile" \
+NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION=v1 \
+NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64="$(printf '{"v1":"%s"}' "$(printf 'phase-c-cache-test-key-material-32' | base64 -w0)" | base64 -w0)" \
+NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64="$(printf '[{"profileId":"%s","locality":"local","endpoint":"%s","apiKey":""}]' "$phase_c_profile" "$phase_c_fixture_endpoint" | base64 -w0)" \
+  node --import tsx "$repo_root/scripts/hybrid-retrieval-smoke.ts"
+assert_equals 1 "$(grep -c '^request$' "$fixture_log")" 'Phase C query embedding provider request count'
+kill "$fixture_pid" 2>/dev/null || true
+wait "$fixture_pid" 2>/dev/null || true
+fixture_pid=
+rm -f -- "$fixture_log"
+fixture_log=
+
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "UPDATE public.\"Article\" SET content='changed bytes', \"updatedAt\"=clock_timestamp()
+   WHERE id='phase-c-public-a'" >/dev/null
+assert_equals 0 "$(psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT count(*) FROM noosphere_hybrid_c.current_vector_membership(
+     '$phase_c_profile',ARRAY['phase-c-public-a']::text[])")" \
+  'Phase C stale revision membership rejection'
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "UPDATE public.\"Article\" SET \"deletedAt\"=clock_timestamp(), \"updatedAt\"=clock_timestamp()
+   WHERE id='phase-c-public-b'" >/dev/null
+assert_equals 0 "$(psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT count(*) FROM noosphere_hybrid_c.current_vector_membership(
+     '$phase_c_profile',ARRAY['phase-c-public-b']::text[])")" \
+  'Phase C deleted article membership rejection'
+
+psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT noosphere_hybrid_b.set_profile_state('$phase_c_profile','inactive')" >/dev/null
+expect_sql_failure 'Phase C inactive profile query' "$candidate_app" \
+  "SELECT * FROM noosphere_hybrid_c.vector_candidates(
+     '$phase_c_profile','[1,0,0]',ARRAY['phase-c-financial']::text[])"
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "DELETE FROM public.\"Article\" WHERE id LIKE 'phase-c-%'" >/dev/null
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "DELETE FROM noosphere_hybrid.embedding_profile
+   WHERE id='$phase_c_remote_dispatch_profile'" >/dev/null
+
+printf '[hybrid-storage-test] PASS: A3 storage, Phase B provider/worker, and Phase C retrieval capability matrices.\n'

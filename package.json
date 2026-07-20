@@ -26,6 +26,7 @@
     "postgres-image:check": "node scripts/check-postgres-image-policy.mjs",
     "hybrid-storage:activate": "bash scripts/activate-hybrid-storage.sh",
     "hybrid-worker:activate": "bash scripts/activate-hybrid-worker.sh",
+    "hybrid-retrieval:activate": "bash scripts/activate-hybrid-retrieval.sh",
     "hybrid:worker": "node scripts/hybrid-worker.mjs",
     "hybrid:backfill": "node scripts/hybrid-backfill.mjs",
     "hybrid:profile": "node scripts/hybrid-profile.mjs",
