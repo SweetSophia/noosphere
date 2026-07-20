@@ -57,6 +57,9 @@ COPY --from=builder --chown=noosphere:nodejs /app/.next/static ./.next/static
 COPY --from=prod-deps /app/prisma ./prisma
 COPY --from=prod-deps /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/docker ./docker
+COPY --from=builder --chown=noosphere:nodejs /app/scripts/hybrid-provider.mjs ./scripts/hybrid-provider.mjs
+COPY --from=builder --chown=noosphere:nodejs /app/scripts/hybrid-worker.mjs ./scripts/hybrid-worker.mjs
+COPY --from=builder --chown=noosphere:nodejs /app/scripts/check-hybrid-worker-health.mjs ./scripts/check-hybrid-worker-health.mjs
 COPY --from=prod-deps /app/node_modules ./node_modules
 
 # Make migration entrypoint executable (must happen before dropping to noosphere user)

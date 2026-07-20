@@ -12,6 +12,8 @@ services:
       NOOSPHERE_BOOTSTRAP_DATABASE_URL: postgresql://noosphere:${POSTGRES_PASSWORD}@db:5432/noosphere
       DATABASE_URL: postgresql://noosphere_migrator:${POSTGRES_MIGRATION_PASSWORD}@db:5432/noosphere
       NOOSPHERE_APP_DATABASE_URL: postgresql://noosphere_app:${POSTGRES_APP_PASSWORD}@db:5432/noosphere
+      POSTGRES_HYBRID_ADMIN_PASSWORD: ${POSTGRES_HYBRID_ADMIN_PASSWORD:-}
+      POSTGRES_HYBRID_WORKER_PASSWORD: ${POSTGRES_HYBRID_WORKER_PASSWORD:-}
       NOOSPHERE_ADMIN_PASSWORD: ${NOOSPHERE_ADMIN_PASSWORD:-}
       NOOSPHERE_ADMIN_PASSWORD_RESET: ${NOOSPHERE_ADMIN_PASSWORD_RESET:-false}
       NOOSPHERE_FORCE_ADMIN: ${NOOSPHERE_FORCE_ADMIN:-false}
@@ -29,6 +31,14 @@ services:
     entrypoint: ["/bin/sh", "-ceu", "--"]
     command:
       - |
+          if [ -n "$$POSTGRES_HYBRID_ADMIN_PASSWORD" ] || [ -n "$$POSTGRES_HYBRID_WORKER_PASSWORD" ]; then
+            if [ -z "$$POSTGRES_HYBRID_ADMIN_PASSWORD" ] || [ -z "$$POSTGRES_HYBRID_WORKER_PASSWORD" ]; then
+              echo 'Both Phase B database passwords must be configured together.' >&2
+              exit 78
+            fi
+            export NOOSPHERE_HYBRID_ADMIN_DATABASE_URL="postgresql://noosphere_hybrid_admin_login:$$POSTGRES_HYBRID_ADMIN_PASSWORD@db:5432/noosphere"
+            export NOOSPHERE_HYBRID_WORKER_DATABASE_URL="postgresql://noosphere_hybrid_worker_login:$$POSTGRES_HYBRID_WORKER_PASSWORD@db:5432/noosphere"
+          fi
           node docker/provision-database-roles.mjs
           node docker/migrate-or-baseline.mjs
           # Migrations may create tables or routines. Re-provision so the
@@ -92,6 +102,53 @@ services:
       timeout: 10s
       retries: 5
       start_period: 45s
+
+  hybrid-worker:
+    image: ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION:-latest}
+    profiles: ["hybrid"]
+    entrypoint:
+      - /bin/sh
+      - -ceu
+      - |
+          marker=/run/noosphere-pgvector/writer-authorized
+          actual="$$(cat "$$marker" 2>/dev/null || true)"
+          if [ "$$actual" != 'ghcr.io/sweetsophia/noosphere-postgres-pgvector@sha256:12bc9b34226803a04811a3ddd06feac14121c2c7ce369aaddbd778d242751292' ]; then
+            echo 'Noosphere writer authorization is incomplete; finish the guarded transition.' >&2
+            exit 78
+          fi
+          exec /app/docker/docker-entrypoint.sh "$$@"
+      - --
+    command: ["node", "scripts/hybrid-worker.mjs"]
+    container_name: noosphere-openclaw-hybrid-worker
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      SKIP_MIGRATION: "1"
+      NOOSPHERE_HYBRID_WORKER_DATABASE_URL: postgresql://noosphere_hybrid_worker_login:${POSTGRES_HYBRID_WORKER_PASSWORD:-HYBRID_WORKER_PASSWORD_NOT_CONFIGURED}@db:5432/noosphere
+      NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64: ${NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64:-W10=}
+      NOOSPHERE_HYBRID_WORKER_CONCURRENCY: ${NOOSPHERE_HYBRID_WORKER_CONCURRENCY:-4}
+      NOOSPHERE_HYBRID_LEASE_SECONDS: ${NOOSPHERE_HYBRID_LEASE_SECONDS:-120}
+      NOOSPHERE_HYBRID_MAX_ATTEMPTS: ${NOOSPHERE_HYBRID_MAX_ATTEMPTS:-8}
+      NOOSPHERE_HYBRID_WORKER_POLL_MS: ${NOOSPHERE_HYBRID_WORKER_POLL_MS:-1000}
+      NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS: ${NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS:-30000}
+      NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES: ${NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES:-4194304}
+      NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH: ${NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH:-1000}
+      NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH: ${NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH:-10000}
+      NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS: ${NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS:-300}
+      NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS: ${NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS:-1800}
+      NOOSPHERE_HYBRID_WORKER_HEALTH_FILE: /tmp/noosphere-hybrid-worker/health.json
+    volumes:
+      - noosphere_postgres_authorization:/run/noosphere-pgvector:ro
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "scripts/check-hybrid-worker-health.mjs"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   db:
     image: ghcr.io/sweetsophia/noosphere-postgres-pgvector@sha256:12bc9b34226803a04811a3ddd06feac14121c2c7ce369aaddbd778d242751292

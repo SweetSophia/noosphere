@@ -10,8 +10,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
 const immutableHelperRef = "a2067895023efc638e966ee827fea67385d8aa37";
-const verifiedInstallerRef = "26639cc2dfd6a831336387c6a66b9d3abdcc96fc";
-const verifiedInstallerSha256 = "3e882c1471e46e0fd8d944a0a2801b632fd34ec676e5703306e75eea8d9a649f";
+const verifiedInstallerRef = "994da8764c917520ca9535d7ae6d3b5cc8c904a1";
+const verifiedInstallerSha256 = "b9ce22fdf736101e05187517d1cca89db24fb619eb49abbbc75332ca6c8731a3";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
@@ -84,9 +84,9 @@ function expectExactDbImage(relativePath, image, authorizationKey) {
   expect(
       text.includes("/run/noosphere-pgvector/writer-authorized") &&
       text.includes("Noosphere writer authorization is incomplete") &&
-      countLiteral(text, `- ${authorizationKey}:/run/noosphere-pgvector:ro`) === 2 &&
+      countLiteral(text, `- ${authorizationKey}:/run/noosphere-pgvector:ro`) === 3 &&
       text.includes('command: ["node", "server.js"]'),
-    `${relativePath} must keep the app writer fail closed until guarded completion`,
+    `${relativePath} must keep the app and hybrid worker fail closed until guarded completion`,
   );
 }
 
@@ -193,6 +193,39 @@ expect(
     multilineInstallerValidation.stderr.includes("must not contain CR or LF characters"),
   "install-openclaw.sh must executable-test rejection of multiline runtime env values",
 );
+const installerProviderJson = '[{"profileId":"00000000-0000-4000-8000-000000000000","apiKey":"contains-$-and-#"}]';
+const installerProviderValidationEnv = {
+  ...process.env,
+  NOOSPHERE_INSTALLER_TEST_MODE: "hybrid-provider-config-validation",
+  NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON: installerProviderJson,
+  NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64: "",
+};
+const validInstallerProviderValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: installerProviderValidationEnv,
+});
+const duplicateInstallerProviderValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: {
+    ...installerProviderValidationEnv,
+    NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64: Buffer.from("[]", "utf8").toString("base64"),
+  },
+});
+const malformedInstallerProviderValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: {
+    ...installerProviderValidationEnv,
+    NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON: "",
+    NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64: "not-base64",
+  },
+});
+expect(
+  validInstallerProviderValidation.status === 0 &&
+    validInstallerProviderValidation.stdout.trim() === Buffer.from(installerProviderJson, "utf8").toString("base64") &&
+    duplicateInstallerProviderValidation.status !== 0 &&
+    malformedInstallerProviderValidation.status !== 0,
+  "install-openclaw.sh must executable-test canonical base64 provider configuration without Compose interpolation",
+);
 const helperArtifacts = [
   {
     label: "PostgreSQL switch guard",
@@ -237,6 +270,8 @@ for (const [runtimeKey, secretKey] of [
   ["POSTGRES_PASSWORD", "postgresPassword"],
   ["POSTGRES_MIGRATION_PASSWORD", "postgresMigrationPassword"],
   ["POSTGRES_APP_PASSWORD", "postgresAppPassword"],
+  ["POSTGRES_HYBRID_ADMIN_PASSWORD", "postgresHybridAdminPassword"],
+  ["POSTGRES_HYBRID_WORKER_PASSWORD", "postgresHybridWorkerPassword"],
   ["NEXTAUTH_SECRET", "nextAuthSecret"],
   ["NOOSPHERE_ADMIN_PASSWORD", "adminPassword"],
   ["NOOSPHERE_BOOTSTRAP_API_KEY", "apiKey"],
@@ -251,13 +286,17 @@ for (const [runtimeKey, secretKey] of [
 expect(
   installer.includes('ensure_runtime_env_secret POSTGRES_MIGRATION_PASSWORD "$POSTGRES_MIGRATION_PASSWORD"') &&
     installer.includes('ensure_runtime_env_secret POSTGRES_APP_PASSWORD "$POSTGRES_APP_PASSWORD"') &&
+    installer.includes('ensure_runtime_env_secret POSTGRES_HYBRID_ADMIN_PASSWORD "$POSTGRES_HYBRID_ADMIN_PASSWORD"') &&
+    installer.includes('ensure_runtime_env_secret POSTGRES_HYBRID_WORKER_PASSWORD "$POSTGRES_HYBRID_WORKER_PASSWORD"') &&
     installer.includes('ENV_REWRITE_FILE="$NOOSPHERE_HOME/.env"') &&
     installer.includes('.split(/\\r?\\n/)') &&
     installer.includes('if (/[\\r\\n]/.test(value))') &&
     installer.includes('reject_multiline_env_value POSTGRES_MIGRATION_PASSWORD "$POSTGRES_MIGRATION_PASSWORD"') &&
     installer.includes('reject_multiline_env_value POSTGRES_APP_PASSWORD "$POSTGRES_APP_PASSWORD"') &&
+    installer.includes('reject_multiline_env_value POSTGRES_HYBRID_ADMIN_PASSWORD "$POSTGRES_HYBRID_ADMIN_PASSWORD"') &&
+    installer.includes('reject_multiline_env_value POSTGRES_HYBRID_WORKER_PASSWORD "$POSTGRES_HYBRID_WORKER_PASSWORD"') &&
     installer.includes('process.stdout.write(`${retained.join("\\n")}\\n`)') &&
-    installer.includes("PostgreSQL bootstrap, migration, and application passwords must be distinct."),
+    installer.includes("PostgreSQL bootstrap, migration, application, hybrid-admin, and hybrid-worker passwords must be distinct."),
   "install-openclaw.sh must atomically rewrite role-separation secrets with a final newline and without reusing credentials",
 );
 const writeRuntimeEnvBlock =
@@ -269,8 +308,8 @@ const persistedRuntimeAssignments = Array.from(
   (match) => [match[1], match[2]],
 );
 expect(
-  persistedRuntimeAssignments.length === 19 &&
-    new Set(persistedRuntimeAssignments.map(([name]) => name)).size === 19 &&
+  persistedRuntimeAssignments.length === 32 &&
+    new Set(persistedRuntimeAssignments.map(([name]) => name)).size === 32 &&
     persistedRuntimeAssignments.every(([name, variable]) =>
       installer.includes(`reject_multiline_env_value ${name} "$${variable}"`),
     ),
@@ -280,6 +319,11 @@ const activationScript = read("scripts/activate-hybrid-storage.sh");
 const hybridFeatureSchema = read("docker/hybrid-storage/feature-schema.sql");
 const hybridActivationSql = read("docker/hybrid-storage/activate.sql");
 const hybridValidationSql = read("docker/hybrid-storage/validate.sql");
+const phaseBActivationScript = read("scripts/activate-hybrid-worker.sh");
+const phaseBFeatureSchema = read("docker/hybrid-storage/phase-b-schema.sql");
+const phaseBActivationSql = read("docker/hybrid-storage/activate-phase-b.sql");
+const phaseBValidationSql = read("docker/hybrid-storage/validate-phase-b.sql");
+const hybridWorkerScript = read("scripts/hybrid-worker.mjs");
 expect(
   activationScript.includes("validate_provenance_value source_url") &&
     activationScript.includes("validate_provenance_value built_image_digest") &&
@@ -294,6 +338,74 @@ expect(
     hybridValidationSql.includes("state.postgresql_server_version_num") &&
     hybridValidationSql.includes("'server_version_num'"),
   "hybrid feature evidence must persist and revalidate the exact PostgreSQL runtime",
+);
+expect(
+  phaseBActivationScript.includes("phase_b_source_sha256=$(\n") &&
+    phaseBActivationScript.includes("a3_source_sha256=$(\n") &&
+    phaseBActivationScript.includes('-v a3_source_sha256="$a3_source_sha256"') &&
+    phaseBActivationScript.includes('"$root_dir/docker/hybrid-storage/phase-b-schema.sql"') &&
+    phaseBActivationScript.includes('"$root_dir/docker/hybrid-storage/activate-phase-b.sql"') &&
+    phaseBActivationScript.includes('"$root_dir/docker/hybrid-storage/validate-phase-b.sql"') &&
+    phaseBActivationScript.includes("noosphere_hybrid_admin_login:true") &&
+    phaseBActivationScript.includes("noosphere_hybrid_worker_login:true"),
+  "Phase B activation must bind all SQL artifacts and verify both limited runtime identities",
+);
+expect(
+  phaseBFeatureSchema.includes("noosphere_hybrid_b.serialize_eligibility()") &&
+    phaseBFeatureSchema.includes("noosphere_hybrid_b.authorize_dispatch") &&
+    phaseBFeatureSchema.includes("noosphere_hybrid_b.release_stale_job") &&
+    phaseBFeatureSchema.includes("profile_backfill_state") &&
+    phaseBFeatureSchema.includes("lease_expired_max_attempts") &&
+    phaseBFeatureSchema.includes("noosphere_hybrid_b.structural_manifest()") &&
+    phaseBFeatureSchema.includes("noosphere_hybrid_b.set_embedding_consent") &&
+    phaseBFeatureSchema.includes("noosphere_hybrid_b.enqueue_profile_backfill") &&
+    phaseBFeatureSchema.includes("noosphere_hybrid_b.publish_embedding") &&
+    phaseBFeatureSchema.includes("profile_coverage < 0.95") &&
+    phaseBActivationSql.includes("REVOKE ALL ON ALL FUNCTIONS IN SCHEMA noosphere_hybrid_b FROM PUBLIC") &&
+    phaseBActivationSql.includes("\\ir validate.sql") &&
+    phaseBActivationSql.includes("'noosphere.activation.sql_sha256', :'a3_source_sha256'") &&
+    phaseBActivationSql.includes("REVOKE EXECUTE ON FUNCTION noosphere_hybrid.claim_jobs") &&
+    phaseBActivationSql.includes("REVOKE EXECUTE ON FUNCTION noosphere_hybrid.publish_embedding") &&
+    phaseBValidationSql.includes("Phase B table, constraint, index, or trigger structure drifted") &&
+    phaseBValidationSql.includes("Phase B ACLs exceed the exact owner and capability allowlist") &&
+    phaseBValidationSql.includes("noosphere_hybrid_b.authorize_dispatch(uuid,uuid,bigint)") &&
+    phaseBValidationSql.includes("noosphere_hybrid_b.release_stale_job(uuid,uuid,bigint,integer)") &&
+    hybridWorkerScript.includes("SELECT noosphere_hybrid_b.authorize_dispatch") &&
+    hybridWorkerScript.includes("SELECT noosphere_hybrid_b.release_stale_job") &&
+    hybridWorkerScript.includes("validateLeaseWindow") &&
+    hybridWorkerScript.includes("await client.query(\"COMMIT\")"),
+  "Phase B must retain exact A3 proof, dispatch/eligibility serialization, bounded backfill, coverage gating, structural drift detection, and exact ACL validation",
+);
+const applicationDockerfile = read("Dockerfile");
+expect(
+  applicationDockerfile.includes("/app/scripts/hybrid-provider.mjs ./scripts/hybrid-provider.mjs") &&
+    applicationDockerfile.includes("/app/scripts/hybrid-worker.mjs ./scripts/hybrid-worker.mjs") &&
+    applicationDockerfile.includes("/app/scripts/check-hybrid-worker-health.mjs ./scripts/check-hybrid-worker-health.mjs") &&
+    !applicationDockerfile.includes("/app/scripts ./scripts"),
+  "the production image must carry only the Phase B worker runtime scripts, not the repository script tree",
+);
+for (const composePath of ["docker-compose.yml", "docker-compose.noosphere.yml"]) {
+  const compose = read(composePath);
+  expect(
+    compose.includes("hybrid-worker:") &&
+      compose.includes('profiles: ["hybrid"]') &&
+    compose.includes("noosphere_hybrid_worker_login:") &&
+      compose.includes("export NOOSPHERE_HYBRID_ADMIN_DATABASE_URL=") &&
+      compose.includes("export NOOSPHERE_HYBRID_WORKER_DATABASE_URL=") &&
+      compose.includes("NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64") &&
+      compose.includes("scripts/check-hybrid-worker-health.mjs"),
+    `${composePath} must keep the limited Phase B worker behind the disabled hybrid profile`,
+  );
+}
+expect(
+  installer.includes("hybrid-worker:") &&
+    installer.includes('profiles: ["hybrid"]') &&
+    installer.includes("postgresHybridAdminPassword") &&
+    installer.includes("postgresHybridWorkerPassword") &&
+    installer.includes("export NOOSPHERE_HYBRID_ADMIN_DATABASE_URL=\"postgresql://noosphere_hybrid_admin_login:") &&
+    installer.includes("export NOOSPHERE_HYBRID_WORKER_DATABASE_URL=\"postgresql://noosphere_hybrid_worker_login:") &&
+    installer.includes("Both Phase B database passwords must be configured together."),
+  "install-openclaw.sh must persist distinct Phase B credentials and publish the disabled worker profile",
 );
 const installerProvisionIndexes = Array.from(
   installer.matchAll(/node docker\/provision-database-roles\.mjs/g),
