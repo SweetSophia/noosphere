@@ -1584,6 +1584,12 @@ expect_sql_failure 'Phase C query dimension mismatch' "$candidate_app" \
   "SELECT * FROM noosphere_hybrid_c.vector_candidates('$phase_c_profile','[1,0]',ARRAY['phase-c-public-a']::text[])"
 expect_sql_failure 'Phase C cosine zero query vector' "$candidate_app" \
   "SELECT * FROM noosphere_hybrid_c.vector_candidates('$phase_c_profile','[0,0,0]',ARRAY['phase-c-public-a']::text[])"
+expect_sql_failure 'Phase C vector authorization batch limit' "$candidate_app" \
+  "SELECT * FROM noosphere_hybrid_c.vector_candidates(
+     '$phase_c_profile','[1,0,0]',ARRAY(
+       SELECT 'phase-c-overflow-' || value::text
+       FROM pg_catalog.generate_series(1,1001) AS series(value)
+     ))"
 
 # Query egress uses the same short Phase B eligibility lock as consent and
 # lifecycle mutation. If authorization wins, revocation waits behind the
@@ -1645,6 +1651,7 @@ assert_equals f "$(psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
 psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
   'SELECT noosphere_hybrid_b.set_embedding_consent(true,true)' >/dev/null
 
+phase_c_cache_key_b64="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))')"
 DATABASE_URL="$candidate_app" \
 NOOSPHERE_PHASE_C_ADMIN_DATABASE_URL="$candidate_admin" \
 NOOSPHERE_PHASE_C_BOOTSTRAP_DATABASE_URL="$candidate_bootstrap" \
@@ -1653,9 +1660,10 @@ NOOSPHERE_PHASE_C_TEST_PROFILE_ID="$phase_c_profile" \
 NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=true \
 NOOSPHERE_HYBRID_QUERY_PROFILE_ID="$phase_c_profile" \
 NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION=v1 \
-NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64="$(printf '{"v1":"%s"}' "$(printf 'phase-c-cache-test-key-material-32' | base64 -w0)" | base64 -w0)" \
+NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64="$(printf '{"v1":"%s"}' "$phase_c_cache_key_b64" | base64 -w0)" \
 NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64="$(printf '[{"profileId":"%s","locality":"local","endpoint":"%s","apiKey":""}]' "$phase_c_profile" "$phase_c_fixture_endpoint" | base64 -w0)" \
   node --import tsx "$repo_root/scripts/hybrid-retrieval-smoke.ts"
+unset phase_c_cache_key_b64
 assert_equals 1 "$(grep -c '^request$' "$fixture_log")" 'Phase C query embedding provider request count'
 kill "$fixture_pid" 2>/dev/null || true
 wait "$fixture_pid" 2>/dev/null || true

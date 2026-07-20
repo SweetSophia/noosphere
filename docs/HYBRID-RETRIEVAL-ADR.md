@@ -161,7 +161,11 @@ A cache hit is not an authorization or eligibility decision. One current databas
 
 The existing strict full-text query and bounded conversational fallback remain the lexical behavior.
 
-Only classified transient embedding dependencies may degrade a request to lexical-only retrieval: connection timeout, temporary network failure, provider rate limiting, provider 5xx, or insufficient ready-vector coverage during rollout. Degradation emits bounded, content-free diagnostics and metrics.
+Only classified request-shape or transient embedding conditions may degrade a
+request to lexical-only retrieval: an unbounded/deep result window, connection
+timeout, temporary network failure, provider rate limiting, provider 5xx, or
+insufficient ready-vector coverage during rollout. Degradation emits bounded,
+content-free diagnostics and metrics.
 
 Invalid configuration, missing required feature schema, dimension mismatch, non-finite vectors, SQL errors, authorization invariant failures, and malformed provider responses are correctness faults. They must surface through readiness/status and operator-visible errors rather than being silently relabeled as an outage.
 
@@ -314,7 +318,12 @@ committed immediately before provider HTTP. Revocation that commits first
 suppresses query egress; provider latency holds no database lock.
 
 The runtime builds one materialized authorization-filtered article relation and
-uses it for both lexical and vector legs. Strict lexical search is attempted
+uses it for both lexical and vector legs. The vector leg partitions that same
+relation into deterministic batches of at most 1,000 IDs, keeps the best 200
+from each batch, then applies the exact distance/updatedAt/ID order globally and
+keeps the best 200. This is exact: any row outside a batch's first 200 already
+has 200 rows from that batch ahead of it and therefore cannot enter the global
+first 200. Strict lexical search is attempted
 first; only a zero-result strict set selects the bounded existing synonym
 fallback. Each leg is deduplicated and capped at 200. RRF uses ranks beginning
 at one and `k=60`; ties sort by raw score descending, best contributing rank
@@ -330,15 +339,22 @@ complete bounded ID and rank set. A cache hit is only a hint: one database
 statement rechecks the epoch, every lexical/vector contribution, current-vector
 membership, authorization, provenance, and content before returning results.
 Invalid hits become one miss; a valid empty set is authoritative. Cache-key
-rotation supports one active and up to two retained verification keys.
+rotation reads the active namespace first and then up to two retained-key
+namespaces during the 30-second cache TTL grace window. Writes always use the
+active key; operators remove retired keys after the grace window.
 
-Only insufficient coverage and transient provider network, timeout, 408/429,
-or 5xx errors permit classified lexical fallback. Profile/configuration drift,
+Only bounded request-shape classifications (`window_exceeded` and
+`limit_unbounded`), insufficient coverage, and transient provider network,
+timeout, 408/429, or 5xx errors permit classified lexical fallback. Returned lexical results
+carry the bounded fallback reason in metadata and the same content-free code is
+logged. Profile/configuration drift,
 unsupported protocol, provider response/model/revision/dimension errors,
 non-finite vectors, SQL errors, and authorization defects surface as correctness
 failures. Cosine query and stored-document vectors must have nonzero norm; zero
 cosine documents do not count toward serving coverage or vector membership.
-Requests beyond the bounded 200-result window use lexical recall.
+Requests beyond the bounded 200-result window use the explicit
+`window_exceeded`/`limit_unbounded` lexical classifications; they never return
+an incomplete hybrid page.
 Compose and the installer publish all Phase C settings with
 `NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false`; activation, provider/profile
 configuration, worker start, production backfill, and the rollout decision

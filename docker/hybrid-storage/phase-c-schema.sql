@@ -229,7 +229,7 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
   IF candidate_article_ids IS NULL
-    OR pg_catalog.cardinality(candidate_article_ids) > 100000
+    OR pg_catalog.cardinality(candidate_article_ids) > 1000
   THEN
     RAISE EXCEPTION 'Phase C candidate article set is invalid or too large'
       USING ERRCODE = '22023';

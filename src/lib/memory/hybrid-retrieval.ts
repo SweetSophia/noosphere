@@ -151,6 +151,9 @@ function readHybridCacheKeyringJson(
   if (raw && encoded) {
     throw new Error("Set only one hybrid cache HMAC keyring environment variable");
   }
+  if (raw && Buffer.byteLength(raw, "utf8") > 8_192) {
+    throw new Error("Hybrid cache HMAC keyring JSON exceeds 8192 bytes");
+  }
   if (!encoded) return raw ?? "";
   if (
     encoded.length > 8_192 ||
@@ -185,24 +188,29 @@ export async function runHybridRetrieval<Row>(
   }
   validateProfileSnapshot(profile);
 
-  if (profile.coverage < HYBRID_MINIMUM_COVERAGE) {
-    throw new HybridLexicalFallbackError("insufficient_vector_coverage");
-  }
   if (profile.profileState !== "serving") {
     throw new HybridCorrectnessError("query_profile_not_serving");
   }
+  if (profile.coverage < HYBRID_MINIMUM_COVERAGE) {
+    throw new HybridLexicalFallbackError("insufficient_vector_coverage");
+  }
 
-  const identity = cacheIdentity(normalizedRequest, profile, config.cacheKeyring);
-  const cached = await dependencies.readCache(identity, config.cacheKeyring);
-  if (cached) {
-    const hydrated = await dependencies.hydrateCached({
-      request: normalizedRequest,
-      profile,
-      identity,
-      cached,
-    });
-    if (hydrated.cacheValid && hydrated.epoch === identity.epoch) {
-      return hydrated.rows;
+  for (const identity of cacheIdentities(
+    normalizedRequest,
+    profile,
+    config.cacheKeyring,
+  )) {
+    const cached = await dependencies.readCache(identity, config.cacheKeyring);
+    if (cached) {
+      const hydrated = await dependencies.hydrateCached({
+        request: normalizedRequest,
+        profile,
+        identity,
+        cached,
+      });
+      if (hydrated.cacheValid && hydrated.epoch === identity.epoch) {
+        return hydrated.rows;
+      }
     }
   }
 
@@ -275,6 +283,36 @@ function cacheIdentity(
       allowedScopes: request.allowedScopes,
     },
     keyring,
+  );
+}
+
+function cacheIdentities(
+  request: HybridRetrievalRequest,
+  profile: HybridProfileSnapshot,
+  keyring: HybridCacheKeyring,
+): HybridCacheIdentity[] {
+  const versions = [
+    keyring.activeVersion,
+    ...[...keyring.keys.keys()].filter(
+      (version) => version !== keyring.activeVersion,
+    ),
+  ];
+  return versions.map((version) =>
+    buildHybridCacheIdentity(
+      {
+        query: request.query,
+        epoch: profile.cacheEpoch,
+        profileId: profile.profileId,
+        documentSchema: profile.documentSchemaVersion,
+        topicSlug: request.filters.topicSlug,
+        tagSlug: request.filters.tagSlug,
+        status: request.filters.status,
+        confidence: request.filters.confidence,
+        allowedScopes: request.allowedScopes,
+      },
+      keyring,
+      version,
+    ),
   );
 }
 

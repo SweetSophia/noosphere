@@ -8,6 +8,7 @@ import {
   type ArticleSearchFilters,
 } from "@/lib/memory/article-search";
 import type { HybridCachedCandidate } from "@/lib/cache/hybrid-search-cache";
+import { HYBRID_VECTOR_AUTH_BATCH_SIZE } from "@/lib/memory/hybrid-ranking";
 
 interface HybridSqlBaseInput {
   query: string;
@@ -35,9 +36,21 @@ export function buildHybridMissSql(input: HybridMissSqlInput): Prisma.Sql {
       SELECT cache_epoch
       FROM noosphere_hybrid_c.query_profile_snapshot(${input.profileId}::uuid)
     ),
-    authorized_ids AS MATERIALIZED (
-      SELECT coalesce(pg_catalog.array_agg(id ORDER BY id), ARRAY[]::text[]) AS ids
+    authorized_batches AS MATERIALIZED (
+      SELECT
+        id,
+        (
+          (pg_catalog.row_number() OVER (ORDER BY id) - 1)
+          / ${HYBRID_VECTOR_AUTH_BATCH_SIZE}
+        )::bigint AS batch_number
       FROM authorized_base
+    ),
+    authorized_id_batches AS MATERIALIZED (
+      SELECT
+        batch_number,
+        pg_catalog.array_agg(id ORDER BY id) AS ids
+      FROM authorized_batches
+      GROUP BY batch_number
     ),
     lexical_source AS MATERIALIZED (
       SELECT
@@ -59,18 +72,24 @@ export function buildHybridMissSql(input: HybridMissSqlInput): Prisma.Sql {
         )::integer AS lexical_rank
       FROM lexical_source
     ),
-    vector_source AS MATERIALIZED (
+    vector_batch_source AS MATERIALIZED (
       SELECT
         candidate.article_id AS id,
         source."updatedAt",
         candidate.distance
-      FROM authorized_ids
+      FROM authorized_id_batches AS batch
       CROSS JOIN LATERAL noosphere_hybrid_c.vector_candidates(
         ${input.profileId}::uuid,
         ${input.vectorLiteral},
-        authorized_ids.ids
+        batch.ids
       ) AS candidate
       JOIN authorized_base AS source ON source.id = candidate.article_id
+    ),
+    vector_source AS MATERIALIZED (
+      SELECT id, "updatedAt", distance
+      FROM vector_batch_source
+      ORDER BY distance ASC, "updatedAt" DESC, id ASC
+      LIMIT 200
     ),
     vector_ranked AS MATERIALIZED (
       SELECT
@@ -432,6 +451,10 @@ function buildFinalSelect(cacheValid: Prisma.Sql): Prisma.Sql {
       ${cacheValid} AS cache_valid,
       profile_epoch.cache_epoch::text AS epoch,
       cache_set.candidates,
+      pg_catalog.encode(
+        pg_catalog.sha256(pg_catalog.convert_to(cache_set.candidates::text, 'UTF8')),
+        'hex'
+      ) AS candidates_fingerprint,
       cache_set.fused_set_size,
       hydrated.*
     FROM profile_epoch

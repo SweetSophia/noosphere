@@ -162,11 +162,6 @@ export class NoosphereProvider implements MemoryProvider {
     query: string,
     options: MemoryProviderSearchOptions = {},
   ): Promise<MemoryResult[]> {
-    const normalizedQuery = query.trim();
-    if (!normalizedQuery) {
-      return [];
-    }
-
     const config = normalizeMemoryProviderConfig({
       ...this.descriptor.defaultConfig,
       ...options.config,
@@ -175,10 +170,21 @@ export class NoosphereProvider implements MemoryProvider {
       return [];
     }
 
+    // A globally enabled Phase C configuration must fail closed even for
+    // requests that can otherwise short-circuit without retrieval work.
+    const hybridConfig = readHybridRetrievalConfig(this.environment);
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) {
+      return [];
+    }
+
     const limit = resolveSearchLimit(options.limit, options.config, config);
+    if (limit === 0) {
+      return [];
+    }
     const metadata = (options.metadata ?? {}) as NoosphereSearchOptionsMetadata;
     const offset = normalizeOffset(metadata.offset);
-    const hybridConfig = readHybridRetrievalConfig(this.environment);
+    let hybridFallbackReason: string | undefined;
 
     if (
       hybridConfig.enabled &&
@@ -207,10 +213,18 @@ export class NoosphereProvider implements MemoryProvider {
         return rows.map((row) => this.toHybridMemoryResult(row));
       } catch (error) {
         if (!(error instanceof HybridLexicalFallbackError)) throw error;
-        console.warn("[hybrid-retrieval] lexical fallback", { code: error.code });
+        hybridFallbackReason = normalizeHybridFallbackReason(error.code);
+        console.warn("[hybrid-retrieval] lexical fallback", {
+          code: hybridFallbackReason,
+        });
       }
     } else if (hybridConfig.enabled) {
-      console.warn("[hybrid-retrieval] lexical fallback", { code: "window_exceeded" });
+      hybridFallbackReason = limit === undefined
+        ? "limit_unbounded"
+        : "window_exceeded";
+      console.warn("[hybrid-retrieval] lexical fallback", {
+        code: hybridFallbackReason,
+      });
     }
 
     const cacheVersion = await getSearchCacheVersion();
@@ -231,7 +245,8 @@ export class NoosphereProvider implements MemoryProvider {
     if (cacheKey) {
       const cachedResults = await getCachedSearchResults(cacheKey);
       if (cachedResults !== null) {
-        return this.hydrateEligibleArticleRefs(cachedResults);
+        const cachedArticles = await this.hydrateEligibleArticleRefs(cachedResults);
+        return annotateHybridFallback(cachedArticles, hybridFallbackReason);
       }
     }
 
@@ -254,7 +269,7 @@ export class NoosphereProvider implements MemoryProvider {
       void setCachedSearchResults(cacheKey, articles, cacheVersion);
     }
 
-    return articles;
+    return annotateHybridFallback(articles, hybridFallbackReason);
   }
 
   async getById(
@@ -707,6 +722,29 @@ export function createNoosphereProvider(
   settings: NoosphereProviderSettings = {},
 ): NoosphereProvider {
   return new NoosphereProvider(settings);
+}
+
+function normalizeHybridFallbackReason(code: string): string {
+  return /^[a-z][a-z0-9_]{0,63}$/.test(code)
+    ? code
+    : "transient_dependency";
+}
+
+function annotateHybridFallback(
+  results: MemoryResult[],
+  reason: string | undefined,
+): MemoryResult[] {
+  if (!reason) return results;
+  return results.map((result) =>
+    defineMemoryResult({
+      ...result,
+      metadata: {
+        ...result.metadata,
+        hybridFallback: true,
+        hybridFallbackReason: reason,
+      },
+    }),
+  );
 }
 
 function mapConfidenceScore(confidence: string | null): number | undefined {

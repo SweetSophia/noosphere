@@ -231,8 +231,85 @@ async function main() {
         return [];
       },
     });
-    await provider.search("hybrid recall", { limit: 10, metadata: { offset: 195 } });
+    const results = await provider.search("hybrid recall", { limit: 10, metadata: { offset: 195 } });
     assertEqual(hybridCalls, 0, "hybrid deep-window calls");
+    assertEqual(results.length, 0, "deep-window lexical result count");
+  });
+
+  test("Phase C returns limit zero without hybrid, cache, or database work", async () => {
+    let hybridCalls = 0;
+    let databaseCalls = 0;
+    const provider = new NoosphereProvider({
+      prisma: createMockPrisma({
+        $queryRaw: () => {
+          databaseCalls++;
+          throw new Error("zero limit must not query PostgreSQL");
+        },
+      }),
+      environment: hybridEnvironment(),
+      hybridSearch: async () => {
+        hybridCalls++;
+        throw new Error("zero limit must not request an embedding");
+      },
+    });
+
+    const results = await provider.search("hybrid recall", { limit: 0 });
+    assertEqual(results.length, 0, "zero-limit result count");
+    assertEqual(hybridCalls, 0, "zero-limit hybrid calls");
+    assertEqual(databaseCalls, 0, "zero-limit database calls");
+  });
+
+  test("limit zero still fails closed on invalid enabled Phase C configuration", async () => {
+    const provider = new NoosphereProvider({
+      prisma: createMockPrisma(),
+      environment: { NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: "true" },
+    });
+    let surfaced = false;
+    try {
+      await provider.search("hybrid recall", { limit: 0 });
+    } catch (error) {
+      surfaced = error instanceof HybridCorrectnessError;
+    }
+    assert(surfaced, "zero limit must not hide invalid enabled Phase C configuration");
+  });
+
+  test("an empty query still fails closed on invalid enabled Phase C configuration", async () => {
+    const provider = new NoosphereProvider({
+      prisma: createMockPrisma(),
+      environment: { NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: "true" },
+    });
+    let surfaced = false;
+    try {
+      await provider.search("   ", { limit: 0 });
+    } catch (error) {
+      surfaced = error instanceof HybridCorrectnessError;
+    }
+    assert(surfaced, "an empty query must not hide invalid enabled Phase C configuration");
+  });
+
+  test("classified hybrid fallback annotates each legacy result with a bounded reason", async () => {
+    const article = mockArticle({ id: "fallback-1" });
+    const provider = new NoosphereProvider({
+      prisma: createMockPrisma({
+        $queryRaw: withRecallHydrationQueries(() =>
+          Promise.resolve([mockSearchRow({ id: "fallback-1" })]),
+        ),
+        article: { findMany: findManyFromArticles([article]) },
+      }),
+      environment: hybridEnvironment(),
+      hybridSearch: async () => {
+        throw new HybridLexicalFallbackError("provider_http_503");
+      },
+    });
+
+    const results = await provider.search("hybrid recall");
+    assertEqual(results.length, 1, "annotated fallback result count");
+    assertEqual(results[0].metadata?.hybridFallback, true, "fallback marker");
+    assertEqual(
+      results[0].metadata?.hybridFallbackReason,
+      "provider_http_503",
+      "fallback reason",
+    );
   });
 
   test("search returns empty array when raw query yields no results", async () => {

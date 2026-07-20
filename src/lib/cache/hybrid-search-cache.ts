@@ -12,6 +12,7 @@ const HYBRID_CACHE_SCOPES_DOMAIN = "noosphere-hybrid-cache-v1/scopes";
 const HYBRID_CACHE_MAX_KEYS = 3;
 const HYBRID_CACHE_MIN_KEY_BYTES = 32;
 const HYBRID_CACHE_MAX_KEY_BYTES = 64;
+const HYBRID_CACHE_MAX_KEYRING_JSON_BYTES = 8_192;
 const HYBRID_CACHE_MAX_VALUE_BYTES = 65_536;
 const HYBRID_CACHE_MAX_CANDIDATES = HYBRID_CANDIDATE_DEPTH * 2;
 const HYBRID_CACHE_TTL_SECONDS = 30;
@@ -79,6 +80,12 @@ export function parseHybridCacheKeyring(input: {
   if (!isKeyVersion(input.activeVersion)) {
     throw new Error("Hybrid cache active key version is invalid");
   }
+  if (
+    Buffer.byteLength(input.encodedKeys, "utf8") >
+    HYBRID_CACHE_MAX_KEYRING_JSON_BYTES
+  ) {
+    throw new Error("Hybrid cache HMAC keyring JSON exceeds 8192 bytes");
+  }
 
   let parsed: unknown;
   try {
@@ -121,23 +128,27 @@ export function parseHybridCacheKeyring(input: {
 export function buildHybridCacheIdentity(
   input: HybridCacheIdentityInput,
   keyring: HybridCacheKeyring,
+  keyVersion = keyring.activeVersion,
 ): HybridCacheIdentity {
   const epoch = normalizeEpoch(input.epoch);
   const queryHash = sha256Hex(normalizeHybridQuery(input.query));
-  const activeKey = keyring.keys.get(keyring.activeVersion);
-  if (!activeKey) {
-    throw new Error("Hybrid cache active HMAC key is unavailable");
+  if (!isKeyVersion(keyVersion)) {
+    throw new Error("Hybrid cache HMAC key version is invalid");
+  }
+  const identityKey = keyring.keys.get(keyVersion);
+  if (!identityKey) {
+    throw new Error("Hybrid cache HMAC identity key is unavailable");
   }
 
   const scopes = [...new Set(input.allowedScopes ?? [])].sort();
   const scopeSetMac = hmacHex(
-    activeKey,
+    identityKey,
     HYBRID_CACHE_SCOPES_DOMAIN,
     canonicalJson(scopes),
   );
   const identity = {
     version: 1,
-    keyVersion: keyring.activeVersion,
+    keyVersion,
     epoch,
     profileId: requireBoundedString(input.profileId, "profile ID", 128),
     documentSchema: requireBoundedString(input.documentSchema, "document schema", 128),
@@ -159,8 +170,8 @@ export function buildHybridCacheIdentity(
   );
 
   return {
-    cacheKey: `${HYBRID_CACHE_PREFIX}${keyring.activeVersion}:${digest}`,
-    keyVersion: keyring.activeVersion,
+    cacheKey: `${HYBRID_CACHE_PREFIX}${keyVersion}:${digest}`,
+    keyVersion,
     epoch,
     queryHash,
     scopeSetMac,

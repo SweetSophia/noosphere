@@ -31,9 +31,12 @@ test("miss query uses one shared authorized base for lexical and vector candidat
 
   assert.equal((text.match(/authorized_base AS MATERIALIZED/g) ?? []).length, 1);
   assert.match(text, /lexical_source AS MATERIALIZED .* FROM authorized_base/s);
-  assert.match(text, /vector_source AS MATERIALIZED .* JOIN authorized_base/s);
+  assert.match(text, /authorized_batches AS MATERIALIZED/);
+  assert.match(text, /authorized_id_batches AS MATERIALIZED/);
+  assert.match(text, /vector_batch_source AS MATERIALIZED .* JOIN authorized_base/s);
   assert.match(text, /vector_candidates/);
-  assert.match(text, /LIMIT 200/);
+  assert.match(text, /pg_catalog\.array_agg\(id ORDER BY id\)/);
+  assert.match(text, /vector_source AS MATERIALIZED .* LIMIT 200/s);
   assert.match(text, /60 \+ lexical_rank/);
   assert.match(text, /60 \+ vector_rank/);
 });
@@ -76,6 +79,8 @@ test("miss query locks provenance before articles, normalizes before pagination,
     /FROM paged/,
   );
   assert.match(text, /jsonb_build_object\(\s*'id'/);
+  assert.match(text, /pg_catalog\.sha256/);
+  assert.match(text, /AS candidates_fingerprint/);
   assert.doesNotMatch(text, /pg_catalog\.least/);
   assert.match(text, /LEFT JOIN hydrated/);
 });

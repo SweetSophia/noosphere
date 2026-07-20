@@ -66,6 +66,70 @@ async function expectCacheInvalidatedBy(
   assert.deepEqual(stale.rows, [], `${label} must never hydrate stale cache content`);
 }
 
+async function exerciseAuthorizationBatchBoundary(): Promise<void> {
+  await prisma.$executeRaw(Prisma.sql`
+    INSERT INTO "Article" (
+      id, title, slug, content, excerpt, status, confidence, "topicId",
+      "restrictedTags", "createdAt", "updatedAt"
+    )
+    SELECT
+      'phase-c-batch-' || pg_catalog.lpad(series.value::text, 4, '0'),
+      'Phase C authorization batch boundary',
+      'phase-c-batch-' || pg_catalog.lpad(series.value::text, 4, '0'),
+      'authorization batch boundary',
+      'batch',
+      'published',
+      'low',
+      'hybrid-topic',
+      ARRAY[]::text[],
+      '2026-02-01 00:00:00+00'::timestamptz + series.value * interval '1 second',
+      '2026-02-01 00:00:00+00'::timestamptz + series.value * interval '1 second'
+    FROM pg_catalog.generate_series(1, 1001) AS series(value)
+  `);
+
+  try {
+    await bootstrapPool.query(
+      `INSERT INTO noosphere_hybrid.article_embedding (
+         article_id, profile_id, revision, content_hash, dimensions, embedding
+       )
+       SELECT article.id, $1::uuid, state.revision,
+              noosphere_hybrid.canonical_hash(article.title,article.excerpt,article.content,32768),
+              3, '[0,1,0]'::noosphere_vector.vector
+       FROM public."Article" AS article
+       JOIN noosphere_hybrid.article_embedding_state AS state ON state.article_id=article.id
+       WHERE article.id LIKE 'phase-c-batch-%'`,
+      [profileId],
+    );
+
+    const result = await execute(buildHybridMissSql({
+      query: "authorization batch boundary",
+      profileId,
+      limit: 200,
+      offset: 0,
+      filters: { allowedScopes: [], status: "published", confidence: "low" },
+      vectorLiteral: "[0,1,0]",
+    }));
+    const expectedIds = Array.from(
+      { length: 200 },
+      (_, index) => `phase-c-batch-${String(1001 - index).padStart(4, "0")}`,
+    );
+    assert.deepEqual(
+      result.candidates.map(({ id }) => id),
+      expectedIds,
+      "batched authorization must preserve the exact global top-200 order",
+    );
+    assert.deepEqual(
+      result.candidates.map(({ vectorRank }) => vectorRank),
+      Array.from({ length: 200 }, (_, index) => index + 1),
+      "batched authorization must assign one global deterministic vector rank",
+    );
+  } finally {
+    await prisma.$executeRaw(Prisma.sql`
+      DELETE FROM "Article" WHERE id LIKE 'phase-c-batch-%'
+    `);
+  }
+}
+
 async function main(): Promise<void> {
 try {
   const publicMiss = await execute(buildHybridMissSql({
@@ -199,6 +263,8 @@ try {
     vectorLiteral: "[1,0,0]",
   }));
   assert.ok(relaxed.rows.length > 0, "zero-result strict search must use bounded lexical fallback");
+
+  await exerciseAuthorizationBatchBoundary();
 
   if (process.env.NOOSPHERE_HYBRID_RETRIEVAL_ENABLED === "true") {
     const runtimeRows = await searchHybridArticles(

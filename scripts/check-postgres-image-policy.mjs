@@ -253,12 +253,29 @@ const weakInstallerHybridValidation = spawnSync("bash", [resolve(root, "install-
     NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON: JSON.stringify({ v1: "d2Vhaw==" }),
   },
 });
+const oversizedInstallerHybridValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: {
+    ...installerHybridValidationEnv,
+    NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON: "x".repeat(8_193),
+  },
+});
+const inheritedInstallerHybridValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: {
+    ...installerHybridValidationEnv,
+    NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION: "toString",
+  },
+});
 expect(
   validInstallerHybridValidation.status === 0 &&
     validInstallerHybridValidation.stdout.trim() === Buffer.from(installerHybridCacheJson, "utf8").toString("base64") &&
     ambiguousInstallerHybridValidation.status !== 0 &&
-    weakInstallerHybridValidation.status !== 0,
-  "install-openclaw.sh must executable-test disabled-by-default Phase C and strong authenticated-cache key material",
+    weakInstallerHybridValidation.status !== 0 &&
+    oversizedInstallerHybridValidation.status !== 0 &&
+    oversizedInstallerHybridValidation.stderr.includes("exceeds 8192 bytes") &&
+    inheritedInstallerHybridValidation.status !== 0,
+  "install-openclaw.sh must executable-test disabled-by-default Phase C plus bounded, strong authenticated-cache key material",
 );
 const helperArtifacts = [
   {
@@ -424,6 +441,7 @@ expect(
     phaseCFeatureSchema.includes("noosphere_hybrid_c.query_profile_coverage") &&
     phaseCFeatureSchema.includes("noosphere_hybrid_c.vector_candidates") &&
     phaseCFeatureSchema.includes("noosphere_hybrid_c.current_vector_membership") &&
+    phaseCFeatureSchema.includes("cardinality(candidate_article_ids) > 1000") &&
     phaseCFeatureSchema.includes("Phase C cosine query embedding has zero norm") &&
     phaseCActivationSql.includes("\\ir validate-phase-b.sql") &&
     phaseCActivationSql.includes("GRANT EXECUTE ON FUNCTION noosphere_hybrid_c.authorize_query_dispatch") &&

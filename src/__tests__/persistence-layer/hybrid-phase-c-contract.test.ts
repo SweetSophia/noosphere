@@ -53,4 +53,5 @@ test("vector routines fail closed on serving state, dimension, finiteness, and c
   assert.match(schema, /OPERATOR\(noosphere_vector\.<#>\)/);
   assert.match(schema, /ORDER BY 2 ASC, article\."updatedAt" DESC, embedding\.article_id ASC/);
   assert.match(schema, /LIMIT 200/);
+  assert.match(schema, /cardinality\(candidate_article_ids\) > 1000/);
 });

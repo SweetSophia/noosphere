@@ -58,6 +58,7 @@ type HybridRawQueryRow = {
   cache_valid: boolean;
   epoch: bigint | number | string;
   candidates: unknown;
+  candidates_fingerprint: string;
   fused_set_size: number | string;
   id: string | null;
   raw_rrf_score: number | string | null;
@@ -356,6 +357,10 @@ export function parseHybridQueryRows(rawRows: HybridRawQueryRow[]): {
   const first = rawRows[0];
   const cacheValid = requireBoolean(first.cache_valid, "cache_valid");
   const epoch = requireEpoch(first.epoch);
+  const candidatesFingerprint = requireSha256(
+    first.candidates_fingerprint,
+    "candidates_fingerprint",
+  );
   let candidates: HybridCacheResult["candidates"];
   try {
     candidates = validateHybridCachedCandidates(first.candidates);
@@ -366,12 +371,16 @@ export function parseHybridQueryRows(rawRows: HybridRawQueryRow[]): {
     throw new HybridCorrectnessError("hybrid_candidate_set_incomplete");
   }
 
-  const canonicalCandidates = JSON.stringify(candidates);
+  // candidates and fused_set_size originate in one materialized, single-row
+  // cache_set CTE. Validate that bounded set once, then compare the database's
+  // canonical JSONB fingerprint so repeated rows cannot silently disagree
+  // without paying to parse and canonicalize the whole set for every row.
   for (const row of rawRows) {
     if (
       row.cache_valid !== cacheValid ||
       requireEpoch(row.epoch) !== epoch ||
-      JSON.stringify(validateCandidateSet(row.candidates)) !== canonicalCandidates ||
+      requireSha256(row.candidates_fingerprint, "candidates_fingerprint") !==
+        candidatesFingerprint ||
       requireInteger(row.fused_set_size, "fused_set_size") !== candidates.length
     ) {
       throw new HybridCorrectnessError("hybrid_query_metadata_inconsistent");
@@ -384,6 +393,13 @@ export function parseHybridQueryRows(rawRows: HybridRawQueryRow[]): {
     candidates,
     rows: rawRows.flatMap((row) => (row.id === null ? [] : [parseArticleRow(row)])),
   };
+}
+
+function requireSha256(value: unknown, field: string): string {
+  if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) {
+    throw new HybridCorrectnessError(`hybrid_${field}_invalid`);
+  }
+  return value;
 }
 
 function parseArticleRow(row: HybridRawQueryRow): HybridArticleRow {
@@ -413,14 +429,6 @@ function parseArticleRow(row: HybridRawQueryRow): HybridArticleRow {
       ? row.tags
       : (() => { throw new HybridCorrectnessError("hybrid_row_tags_malformed"); })(),
   };
-}
-
-function validateCandidateSet(value: unknown): HybridCacheResult["candidates"] {
-  try {
-    return validateHybridCachedCandidates(value);
-  } catch {
-    throw new HybridCorrectnessError("hybrid_candidate_set_malformed");
-  }
 }
 
 export function canonicalizeHybridQueryDocument(

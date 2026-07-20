@@ -18,6 +18,7 @@ import {
 
 const profileId = "0198fe17-f4dd-7ee3-93e4-acde00000001";
 const encodedKey = randomBytes(32).toString("base64");
+const retainedEncodedKey = randomBytes(32).toString("base64");
 
 function enabledEnvironment(): Record<string, string | undefined> {
   return {
@@ -123,7 +124,7 @@ test("insufficient vector coverage is a typed lexical fallback before provider I
   const config = readHybridRetrievalConfig(enabledEnvironment());
   await assert.rejects(
     runHybridRetrieval(request, config, dependencies({
-      loadProfile: async () => profile({ profileState: "preparing", coverage: 0.94 }),
+      loadProfile: async () => profile({ coverage: 0.94 }),
       embedQuery: async () => {
         providerCalls++;
         return "[1,0,0]";
@@ -133,6 +134,61 @@ test("insufficient vector coverage is a typed lexical fallback before provider I
       error instanceof HybridLexicalFallbackError &&
       error.code === "insufficient_vector_coverage",
   );
+  assert.equal(providerCalls, 0);
+});
+
+test("a non-serving profile is a correctness failure before coverage fallback", async () => {
+  let providerCalls = 0;
+  await assert.rejects(
+    runHybridRetrieval(
+      request,
+      readHybridRetrievalConfig(enabledEnvironment()),
+      dependencies({
+        loadProfile: async () => profile({ profileState: "preparing", coverage: 0.1 }),
+        embedQuery: async () => {
+          providerCalls++;
+          return "[1,0,0]";
+        },
+      }),
+    ),
+    (error) =>
+      error instanceof HybridCorrectnessError &&
+      error.code === "query_profile_not_serving",
+  );
+  assert.equal(providerCalls, 0);
+});
+
+test("rotation reads a retained-key cache identity before paying for a new embedding", async () => {
+  const config = readHybridRetrievalConfig({
+    ...enabledEnvironment(),
+    NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION: "v2",
+    NOOSPHERE_HYBRID_CACHE_HMAC_KEYS: JSON.stringify({
+      v1: retainedEncodedKey,
+      v2: encodedKey,
+    }),
+  });
+  const attemptedVersions: string[] = [];
+  let providerCalls = 0;
+
+  const result = await runHybridRetrieval(request, config, dependencies({
+    readCache: async (identity) => {
+      attemptedVersions.push(identity.keyVersion);
+      return identity.keyVersion === "v1"
+        ? { epoch: "42", candidates: [] }
+        : null;
+    },
+    hydrateCached: async ({ identity }) => {
+      assert.equal(identity.keyVersion, "v1");
+      return { cacheValid: true, epoch: "42", candidates: [], rows: [] };
+    },
+    embedQuery: async () => {
+      providerCalls++;
+      return "[1,0,0]";
+    },
+  }));
+
+  assert.deepEqual(result, []);
+  assert.deepEqual(attemptedVersions, ["v2", "v1"]);
   assert.equal(providerCalls, 0);
 });
 

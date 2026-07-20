@@ -144,7 +144,7 @@ normalize_hybrid_retrieval_config() {
   if [[ -n "$NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON" ]]; then
     NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64="$(
       printf '%s' "$NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON" |
-        node -e 'let value=""; process.stdin.setEncoding("utf8"); process.stdin.on("data", chunk => value += chunk); process.stdin.on("end", () => { JSON.parse(value); process.stdout.write(Buffer.from(value, "utf8").toString("base64")); });'
+        node -e 'let size=0; const chunks=[]; process.stdin.on("data", chunk => { size += chunk.length; if (size > 8192) { console.error("hybrid cache keyring JSON exceeds 8192 bytes"); process.exit(1); } chunks.push(chunk); }); process.stdin.on("end", () => { const bytes=Buffer.concat(chunks); const value=bytes.toString("utf8"); if (!Buffer.from(value, "utf8").equals(bytes)) throw new Error("hybrid cache keyring JSON must be valid UTF-8"); JSON.parse(value); process.stdout.write(bytes.toString("base64")); });'
     )"
   fi
   if [[ "$NOOSPHERE_HYBRID_RETRIEVAL_ENABLED" == true && ! "$NOOSPHERE_HYBRID_QUERY_PROFILE_ID" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$ ]]; then
@@ -174,7 +174,7 @@ normalize_hybrid_retrieval_config() {
         const key = Buffer.from(value, "base64");
         if (key.toString("base64") !== value || key.length < 32 || key.length > 64) throw new Error("hybrid cache keys must be canonical base64 for 32-64 bytes");
       }
-      if ((enabled || active) && (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/.test(active) || !(active in parsed))) throw new Error("active hybrid cache key version is absent");
+      if ((enabled || active) && (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/.test(active) || !Object.hasOwn(parsed, active))) throw new Error("active hybrid cache key version is absent");
     '
 }
 
