@@ -41,7 +41,7 @@ test("miss query uses one shared authorized base for lexical and vector candidat
   assert.match(text, /authorized_ids AS MATERIALIZED/);
   assert.match(
     text,
-    /authorized_base AS MATERIALIZED .* FROM authorized_budget CROSS JOIN LATERAL/s,
+    /authorized_base AS MATERIALIZED .* FROM authorized_budget CROSS JOIN LATERAL \( SELECT gated_searchable\.\* FROM \( .* \) AS gated_searchable WHERE authorized_budget\.authorized_count <= \? \) AS searchable/s,
   );
   assert.match(text, /authorized_budget\.authorized_count <= \?/);
   assert.equal(

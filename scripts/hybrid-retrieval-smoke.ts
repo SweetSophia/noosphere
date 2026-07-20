@@ -224,9 +224,32 @@ async function exerciseProductionBudgetShortCircuit(): Promise<void> {
     "full-text Article scans must never execute over budget",
   );
 
-  for (const name of ["vector_batch_source", "fused", "lineage_locks", "hydrated"]) {
+  for (const name of ["vector_batch_source", "fused"]) {
     assert.equal(subplan(name)["Actual Rows"], 0, `${name} must receive zero rows`);
   }
+
+  const assertRelationsNeverScanned = (name: string, relationNames: string[]) => {
+    const cte = subplan(name);
+    assert.equal(cte["Actual Rows"], 0, `${name} must receive zero rows`);
+    const cteNodes = collectPlanNodes(cte.Plans ?? []);
+    for (const relationName of relationNames) {
+      const scans = cteNodes.filter(
+        (node) => node["Relation Name"] === relationName,
+      );
+      assert.ok(scans.length > 0, `${name} must expose its ${relationName} scan`);
+      assert.ok(
+        scans.every((node) => node["Actual Loops"] === 0),
+        `${name} must never scan ${relationName} over budget`,
+      );
+    }
+  };
+
+  assertRelationsNeverScanned("lineage_locks", [
+    "MemoryProvenanceEdge",
+    "MemoryLineageState",
+  ]);
+  assertRelationsNeverScanned("article_locks", ["Article"]);
+  assertRelationsNeverScanned("hydrated", ["Article", "Topic", "ArticleTag", "Tag"]);
 }
 
 async function main(): Promise<void> {

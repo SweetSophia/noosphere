@@ -310,9 +310,12 @@ function buildSearchCtes(
         SELECT searchable.*
         FROM authorized_budget
         CROSS JOIN LATERAL (
-          ${searchable}
+          SELECT gated_searchable.*
+          FROM (
+            ${searchable}
+          ) AS gated_searchable
+          WHERE authorized_budget.authorized_count <= ${authorizationCandidateLimit}
         ) AS searchable
-        WHERE authorized_budget.authorized_count <= ${authorizationCandidateLimit}
       )
     `
     : Prisma.sql`
