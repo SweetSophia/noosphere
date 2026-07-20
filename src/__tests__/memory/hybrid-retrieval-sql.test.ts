@@ -5,6 +5,7 @@ import {
   buildHybridCacheHitSql,
   buildHybridMissSql,
 } from "@/lib/memory/hybrid-retrieval-sql";
+import { HYBRID_CANDIDATE_DEPTH } from "@/lib/memory/hybrid-ranking";
 
 function sqlText(query: { strings: readonly string[] }): string {
   return query.strings.join("?").replace(/\s+/g, " ");
@@ -36,7 +37,12 @@ test("miss query uses one shared authorized base for lexical and vector candidat
   assert.match(text, /vector_batch_source AS MATERIALIZED .* JOIN authorized_base/s);
   assert.match(text, /vector_candidates/);
   assert.match(text, /pg_catalog\.array_agg\(id ORDER BY id\)/);
-  assert.match(text, /vector_source AS MATERIALIZED .* LIMIT 200/s);
+  assert.equal(
+    query.values.filter((value) => value === HYBRID_CANDIDATE_DEPTH).length,
+    2,
+  );
+  assert.match(text, /lexical_source AS MATERIALIZED .* LIMIT \?/s);
+  assert.match(text, /vector_source AS MATERIALIZED .* LIMIT \?/s);
   assert.match(text, /60 \+ lexical_rank/);
   assert.match(text, /60 \+ vector_rank/);
 });

@@ -8,7 +8,10 @@ import {
   type ArticleSearchFilters,
 } from "@/lib/memory/article-search";
 import type { HybridCachedCandidate } from "@/lib/cache/hybrid-search-cache";
-import { HYBRID_VECTOR_AUTH_BATCH_SIZE } from "@/lib/memory/hybrid-ranking";
+import {
+  HYBRID_CANDIDATE_DEPTH,
+  HYBRID_VECTOR_AUTH_BATCH_SIZE,
+} from "@/lib/memory/hybrid-ranking";
 
 interface HybridSqlBaseInput {
   query: string;
@@ -61,7 +64,7 @@ export function buildHybridMissSql(input: HybridMissSqlInput): Prisma.Sql {
       CROSS JOIN effective_query
       WHERE source.document @@ effective_query.query
       ORDER BY lexical_score DESC, source."updatedAt" DESC, source.id ASC
-      LIMIT 200
+      LIMIT ${HYBRID_CANDIDATE_DEPTH}
     ),
     lexical_ranked AS MATERIALIZED (
       SELECT
@@ -89,7 +92,7 @@ export function buildHybridMissSql(input: HybridMissSqlInput): Prisma.Sql {
       SELECT id, "updatedAt", distance
       FROM vector_batch_source
       ORDER BY distance ASC, "updatedAt" DESC, id ASC
-      LIMIT 200
+      LIMIT ${HYBRID_CANDIDATE_DEPTH}
     ),
     vector_ranked AS MATERIALIZED (
       SELECT
