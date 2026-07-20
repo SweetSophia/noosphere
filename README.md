@@ -1,6 +1,3 @@
- **-- This project is more advanced than most corporate / commercial memory systems.  
- To speed up development, contributions are very welcomed --**
-
 # Noosphere
 
 Noosphere is a self-hosted knowledge and memory layer for AI agents and humans.  
