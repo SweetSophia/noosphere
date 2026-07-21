@@ -46,11 +46,13 @@ export function buildHybridMissSql(
   );
   return Prisma.sql`
     WITH
-    ${search},
     profile_epoch AS MATERIALIZED (
-      SELECT cache_epoch
+      SELECT
+        cache_epoch,
+        (profile_state = 'serving' AND coverage >= 0.95) AS coverage_valid
       FROM noosphere_hybrid_c.query_profile_snapshot(${input.profileId}::uuid)
     ),
+    ${search},
     lexical_source AS MATERIALIZED (
       SELECT
         source.id,
@@ -166,11 +168,13 @@ export function buildHybridCacheHitSql(input: HybridCacheHitSqlInput): Prisma.Sq
   const encodedCandidates = JSON.stringify(input.candidates);
   return Prisma.sql`
     WITH
-    ${search},
     profile_epoch AS MATERIALIZED (
-      SELECT cache_epoch
+      SELECT
+        cache_epoch,
+        (profile_state = 'serving' AND coverage >= 0.95) AS coverage_valid
       FROM noosphere_hybrid_c.query_profile_snapshot(${input.profileId}::uuid)
     ),
+    ${search},
     cached_input AS MATERIALIZED (
       SELECT
         candidate.id,
@@ -300,7 +304,19 @@ function buildSearchCtes(
   const authorizedRelation = authorizationCandidateLimit !== undefined
     ? Prisma.sql`
       authorized_ids AS MATERIALIZED (
-        ${buildAuthorizedArticleIdCTE(searchFilters)}
+        SELECT coverage_gated.id
+        FROM profile_epoch
+        CROSS JOIN LATERAL (
+          SELECT gated_authorized.id
+          FROM (
+            ${buildAuthorizedArticleIdCTE(searchFilters)}
+          ) AS gated_authorized
+          WHERE profile_epoch.coverage_valid
+          -- This barrier preserves profile_epoch as a one-time outer gate;
+          -- without it PostgreSQL may pull up the subquery and scan Article
+          -- before applying the false coverage predicate.
+          OFFSET 0
+        ) AS coverage_gated
       ),
       ${buildHybridAuthorizationBatchCtes(
         Prisma.sql`authorized_ids`,
@@ -309,18 +325,25 @@ function buildSearchCtes(
       authorized_base AS MATERIALIZED (
         SELECT searchable.*
         FROM authorized_budget
+        CROSS JOIN profile_epoch
         CROSS JOIN LATERAL (
           SELECT gated_searchable.*
           FROM (
             ${searchable}
           ) AS gated_searchable
           WHERE authorized_budget.authorized_count <= ${authorizationCandidateLimit}
+            AND profile_epoch.coverage_valid
+          OFFSET 0
         ) AS searchable
       )
     `
     : Prisma.sql`
       authorized_base AS MATERIALIZED (
-        ${searchable}
+        SELECT gated_searchable.*
+        FROM (
+          ${searchable}
+        ) AS gated_searchable
+        WHERE (SELECT coverage_valid FROM profile_epoch)
       )
     `;
   const strict = buildSearchTsQuery(query);
@@ -538,6 +561,7 @@ function buildFinalSelect(
     SELECT
       ${cacheValid} AS cache_valid,
       ${authorizationBudgetValid} AS authorization_budget_valid,
+      profile_epoch.coverage_valid,
       profile_epoch.cache_epoch::text AS epoch,
       cache_set.candidates,
       pg_catalog.encode(

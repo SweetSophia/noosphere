@@ -152,6 +152,7 @@ BEGIN
           grantee.rolname = 'noosphere_hybrid_admin'
           AND procedure.oid::pg_catalog.regprocedure::text IN (
             'noosphere_hybrid_b.set_embedding_consent(boolean,boolean)',
+            'noosphere_hybrid_b.create_profile(text,noosphere_hybrid.profile_locality,text,text,integer,noosphere_hybrid.distance_metric,noosphere_hybrid.normalization_policy,integer,bytea)',
             'noosphere_hybrid_b.profile_coverage(uuid)',
             'noosphere_hybrid_b.profile_status(uuid)',
             'noosphere_hybrid_b.set_profile_state(uuid,noosphere_hybrid.profile_state)',
@@ -194,6 +195,7 @@ BEGIN
   IF NOT pg_catalog.has_schema_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b', 'USAGE')
     OR NOT pg_catalog.has_schema_privilege('noosphere_hybrid_worker', 'noosphere_hybrid_b', 'USAGE')
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b.set_embedding_consent(boolean,boolean)', 'EXECUTE')
+    OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b.create_profile(text,noosphere_hybrid.profile_locality,text,text,integer,noosphere_hybrid.distance_metric,noosphere_hybrid.normalization_policy,integer,bytea)', 'EXECUTE')
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b.profile_coverage(uuid)', 'EXECUTE')
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b.profile_status(uuid)', 'EXECUTE')
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b.set_profile_state(uuid,noosphere_hybrid.profile_state)', 'EXECUTE')
@@ -207,6 +209,7 @@ BEGIN
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_worker', 'noosphere_hybrid_b.queue_health()', 'EXECUTE')
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_worker', 'noosphere_hybrid_b.worker_readiness()', 'EXECUTE')
     OR pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid.set_profile_state(uuid,noosphere_hybrid.profile_state)', 'EXECUTE')
+    OR pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid.create_profile(text,noosphere_hybrid.profile_locality,text,text,integer,noosphere_hybrid.distance_metric,noosphere_hybrid.normalization_policy,integer,bytea)', 'EXECUTE')
     OR pg_catalog.has_function_privilege('noosphere_hybrid_worker', 'noosphere_hybrid.claim_jobs(integer,integer)', 'EXECUTE')
     OR pg_catalog.has_function_privilege('noosphere_hybrid_worker', 'noosphere_hybrid.publish_embedding(uuid,uuid,bigint,bigint,bytea,noosphere_vector.vector)', 'EXECUTE')
     OR pg_catalog.has_function_privilege('noosphere_hybrid_worker', 'noosphere_hybrid.fail_job(uuid,uuid,bigint,text,timestamptz,boolean)', 'EXECUTE')

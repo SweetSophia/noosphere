@@ -78,6 +78,7 @@ cleanup() {
   close_write_fd "${phase_b_consent_writer_in:-}"
   close_write_fd "${phase_b_authorize_worker_in:-}"
   close_write_fd "${phase_c_auth_in:-}"
+  close_write_fd "${phase_c_profile_writer_in:-}"
   cleanup_process "${read_committed_claim_pid:-}"
   cleanup_process "${read_committed_writer_pid:-}"
   cleanup_process "${phase_b_publish_pid:-}"
@@ -86,16 +87,22 @@ cleanup() {
   cleanup_process "${phase_b_content_update_pid:-}"
   cleanup_process "${phase_c_auth_pid:-}"
   cleanup_process "${phase_c_revoke_pid:-}"
+  cleanup_process "${phase_c_profile_writer_pid:-}"
+  cleanup_process "${phase_c_profile_create_pid:-}"
   cleanup_process "${fixture_pid:-}"
   close_read_fd "${read_committed_writer_out:-}"
   close_read_fd "${phase_b_consent_writer_out:-}"
   close_read_fd "${phase_b_authorize_worker_out:-}"
   close_read_fd "${phase_c_auth_out:-}"
+  close_read_fd "${phase_c_profile_writer_out:-}"
   if [[ -n "${read_committed_claim_output:-}" && -f "$read_committed_claim_output" ]]; then
     rm -f -- "$read_committed_claim_output"
   fi
   if [[ -n "${phase_b_publish_output:-}" && -f "$phase_b_publish_output" ]]; then
     rm -f -- "$phase_b_publish_output"
+  fi
+  if [[ -n "${phase_c_profile_create_output:-}" && -f "$phase_c_profile_create_output" ]]; then
+    rm -f -- "$phase_c_profile_create_output"
   fi
   if [[ -n "${fixture_log:-}" && -f "$fixture_log" ]]; then
     rm -f -- "$fixture_log"
@@ -902,7 +909,7 @@ expect_sql_failure 'administrator Phase B consent mutation' "$candidate_admin" \
 fixture_endpoint='http://127.0.0.1:19876/v1/embeddings'
 fixture_endpoint_sha=$(printf '%s' "$fixture_endpoint" | sha256sum | awk '{print $1}')
 local_profile=$(psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
-  "SELECT noosphere_hybrid.create_profile(
+  "SELECT noosphere_hybrid_b.create_profile(
      'openai-compatible','local','fixture-model','fixture-r1',3,
      'cosine','none',32768,decode('$fixture_endpoint_sha','hex'))")
 psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
@@ -1177,7 +1184,7 @@ SELECT
 FROM pg_catalog.generate_series(1, 99) AS series;
 SQL
 threshold_profile=$(psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
-  "SELECT noosphere_hybrid.create_profile(
+  "SELECT noosphere_hybrid_b.create_profile(
      'openai-compatible','local','threshold-model','threshold-r1',3,
      'cosine','none',32768,decode(repeat('55',32),'hex'))")
 psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
@@ -1249,7 +1256,7 @@ psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
 remote_fixture_endpoint='https://127.0.0.1:19876/v1/embeddings'
 remote_fixture_endpoint_sha=$(printf '%s' "$remote_fixture_endpoint" | sha256sum | awk '{print $1}')
 remote_profile=$(psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
-  "SELECT noosphere_hybrid.create_profile(
+  "SELECT noosphere_hybrid_b.create_profile(
      'openai-compatible','remote','fixture-model','fixture-r1',3,
      'cosine','none',32768,decode('$remote_fixture_endpoint_sha','hex'))")
 expect_sql_failure 'Phase B remote prepare without consent' "$candidate_admin" \
@@ -1423,6 +1430,90 @@ psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
 # reject ACL drift, and enforce serving/current-vector behavior.
 activate_phase_c >/dev/null
 activate_phase_c >/dev/null
+expect_sql_failure 'administrator unsynchronized A3 profile creation' "$candidate_admin" \
+  "SELECT noosphere_hybrid.create_profile(
+     'openai-compatible','local','forbidden-direct','r1',3,
+     'cosine','none',32768,decode(repeat('77',32),'hex'))"
+
+# Profile creation and Article mutation both change the exact profile/article
+# eligibility product. Hold an Article transaction after its coverage trigger,
+# prove the Phase B profile wrapper waits on the shared advisory lock, then
+# require the post-commit materialization to equal a fresh full recomputation.
+coproc PHASE_C_PROFILE_ARTICLE_WRITER { psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 2>&1; }
+phase_c_profile_writer_out=${PHASE_C_PROFILE_ARTICLE_WRITER[0]}
+phase_c_profile_writer_in=${PHASE_C_PROFILE_ARTICLE_WRITER[1]}
+phase_c_profile_writer_pid=$PHASE_C_PROFILE_ARTICLE_WRITER_PID
+printf '%s\n' \
+  'BEGIN;' \
+  'INSERT INTO public."Article" (id,title,slug,content,excerpt,status,confidence,"topicId","restrictedTags","createdAt","updatedAt") VALUES ('\''phase-c-profile-race'\'','\''Profile race'\'','\''phase-c-profile-race'\'','\''serialized coverage'\'','\'''\'','\''published'\'','\''high'\'','\''hybrid-topic'\'',ARRAY[]::text[],clock_timestamp(),clock_timestamp());' \
+  'SELECT '\''profile-race-writer-ready'\'';' >&"$phase_c_profile_writer_in"
+IFS= read -r phase_c_profile_writer_marker <&"$phase_c_profile_writer_out"
+assert_equals profile-race-writer-ready "$phase_c_profile_writer_marker" \
+  'Phase C profile/article race writer readiness'
+
+phase_c_profile_create_output=$(mktemp)
+PGAPPNAME=noosphere-hybrid-phase-c-profile-race \
+  psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+    "SELECT noosphere_hybrid_b.create_profile(
+       'openai-compatible','local','coverage-race-model','r1',3,
+       'cosine','none',32768,decode(repeat('77',32),'hex'))" \
+    >"$phase_c_profile_create_output" 2>&1 &
+phase_c_profile_create_pid=$!
+phase_c_profile_create_blocked=false
+for attempt in $(seq 1 100); do
+  phase_c_profile_create_wait=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+    "SELECT coalesce(wait_event_type, '') || ':' || coalesce(wait_event, '')
+     FROM pg_catalog.pg_stat_activity
+     WHERE application_name='noosphere-hybrid-phase-c-profile-race'")
+  if [[ "$phase_c_profile_create_wait" == Lock:* ]]; then
+    phase_c_profile_create_blocked=true
+    break
+  fi
+  kill -0 "$phase_c_profile_create_pid" >/dev/null 2>&1 || break
+  sleep 0.1
+done
+[[ "$phase_c_profile_create_blocked" == true ]] ||
+  die "Phase C profile creation did not serialize behind Article mutation: ${phase_c_profile_create_wait:-absent}"
+
+printf '%s\n' 'COMMIT;' >&"$phase_c_profile_writer_in"
+exec {phase_c_profile_writer_in}>&-
+phase_c_profile_writer_in=
+phase_c_profile_writer_tail=$(cat <&"$phase_c_profile_writer_out")
+exec {phase_c_profile_writer_out}<&-
+phase_c_profile_writer_out=
+if ! wait "$phase_c_profile_writer_pid"; then
+  die "Phase C profile/article race writer failed: $phase_c_profile_writer_tail"
+fi
+phase_c_profile_writer_pid=
+if ! wait "$phase_c_profile_create_pid"; then
+  phase_c_profile_create_failure=$(cat "$phase_c_profile_create_output")
+  rm -f -- "$phase_c_profile_create_output"
+  phase_c_profile_create_output=
+  die "Phase C serialized profile creation failed: $phase_c_profile_create_failure"
+fi
+phase_c_profile_create_pid=
+phase_c_profile_race_id=$(cat "$phase_c_profile_create_output")
+rm -f -- "$phase_c_profile_create_output"
+phase_c_profile_create_output=
+assert_equals t "$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT snapshot.eligible_count = exact.eligible_count
+          AND snapshot.ready_count = exact.ready_count
+   FROM noosphere_hybrid_c.query_profile_snapshot('$phase_c_profile_race_id') AS snapshot
+   CROSS JOIN noosphere_hybrid_c.query_profile_coverage('$phase_c_profile_race_id') AS exact")" \
+  'Phase C serialized profile coverage equality'
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "DELETE FROM noosphere_hybrid.embedding_profile WHERE id='$phase_c_profile_race_id'" >/dev/null
+psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
+  "DELETE FROM public.\"Article\" WHERE id='phase-c-profile-race'" >/dev/null
+
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'ALTER TABLE public."Article" DISABLE TRIGGER zz_noosphere_hybrid_c_article_coverage' >/dev/null
+if activate_phase_c >/dev/null 2>&1; then
+  die 'Phase C activation accepted a disabled coverage-maintenance trigger'
+fi
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'ALTER TABLE public."Article" ENABLE TRIGGER zz_noosphere_hybrid_c_article_coverage' >/dev/null
+activate_phase_c >/dev/null
 expect_sql_failure 'application Phase C feature-state read' "$candidate_app" \
   'SELECT * FROM noosphere_hybrid_c.feature_state'
 expect_sql_failure 'application Phase C structural manifest execution' "$candidate_app" \
@@ -1495,7 +1586,7 @@ phase_c_fixture_endpoint='http://127.0.0.1:19876/v1/embeddings'
 phase_c_fixture_endpoint_sha=$(printf '%s' "$phase_c_fixture_endpoint" | sha256sum | awk '{print $1}')
 
 phase_c_profile=$(psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
-  "SELECT noosphere_hybrid.create_profile(
+  "SELECT noosphere_hybrid_b.create_profile(
      'openai-compatible','local','fixture-model','fixture-r1',3,
      'cosine','none',32768,decode('$phase_c_fixture_endpoint_sha','hex'))")
 psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
@@ -1524,6 +1615,11 @@ assert_equals 'fixture-model:serving:1.00' "$(psql "$candidate_app" -XAtq -F ':'
   "SELECT model_identifier,profile_state,round(coverage,2)
    FROM noosphere_hybrid_c.query_profile_snapshot('$phase_c_profile')")" \
   'Phase C application profile snapshot'
+assert_equals f "$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT pg_catalog.pg_get_functiondef(
+      'noosphere_hybrid_c.query_profile_snapshot(uuid)'::pg_catalog.regprocedure
+    ) ~ 'query_profile_coverage|public\.\"Article\"'")" \
+  'Phase C profile snapshot has no corpus scan on its request path'
 assert_equals t "$(psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
   "SELECT noosphere_hybrid_c.authorize_query_dispatch('$phase_c_profile')")" \
   'Phase C local query dispatch authorization'
@@ -1595,7 +1691,7 @@ expect_sql_failure 'Phase C vector authorization batch limit' "$candidate_app" \
 # lifecycle mutation. If authorization wins, revocation waits behind the
 # committed dispatch point; if revocation commits first, no query is authorized.
 phase_c_remote_dispatch_profile=$(psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
-  "SELECT noosphere_hybrid.create_profile(
+  "SELECT noosphere_hybrid_b.create_profile(
      'openai-compatible','remote','fixture-query-model','fixture-query-r1',3,
      'cosine','none',32768,decode('$phase_c_fixture_endpoint_sha','hex'))")
 psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
@@ -1674,6 +1770,18 @@ fixture_log=
 psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
   "UPDATE public.\"Article\" SET content='changed bytes', \"updatedAt\"=clock_timestamp()
    WHERE id='phase-c-public-a'" >/dev/null
+assert_equals '2:t' "$(psql "$candidate_app" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+  "SELECT eligible_count-ready_count,coverage < 1
+   FROM noosphere_hybrid_c.query_profile_snapshot('$phase_c_profile')")" \
+  'Phase C materialized coverage refreshes after an article revision becomes stale'
+assert_equals t "$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT snapshot.eligible_count = exact.eligible_count
+      AND snapshot.ready_count = exact.ready_count
+      AND snapshot.coverage = exact.coverage
+   FROM noosphere_hybrid_c.profile_coverage_snapshot AS snapshot
+   CROSS JOIN noosphere_hybrid_c.query_profile_coverage('$phase_c_profile') AS exact
+   WHERE snapshot.profile_id='$phase_c_profile'")" \
+  'Phase C incremental coverage equals an exact corpus recomputation'
 assert_equals 0 "$(psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
   "SELECT count(*) FROM noosphere_hybrid_c.current_vector_membership(
      '$phase_c_profile',ARRAY['phase-c-public-a']::text[])")" \

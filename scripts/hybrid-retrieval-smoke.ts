@@ -455,13 +455,110 @@ try {
     `),
   );
 
-  await expectCacheInvalidatedBy("vector mutation", () =>
-    bootstrapPool.query(
+  const beforeZeroVector = await execute(buildHybridMissSql({
+    query: "hybrid recall",
+    profileId,
+    limit: 10,
+    offset: 0,
+    filters: { allowedScopes: ["*"] },
+    vectorLiteral: "[1,0,0]",
+  }));
+  await bootstrapPool.query(
       `UPDATE noosphere_hybrid.article_embedding
        SET embedding='[0,0,0]'::noosphere_vector.vector
        WHERE article_id='phase-c-public-a' AND profile_id=$1::uuid`,
       [profileId],
-    ),
+  );
+  const insufficientCoverageQuery = buildHybridCacheHitSql({
+    query: "hybrid recall",
+    profileId,
+    limit: 10,
+    offset: 0,
+    filters: { allowedScopes: ["*"] },
+    expectedEpoch: beforeZeroVector.epoch,
+    candidates: beforeZeroVector.candidates,
+  });
+  await assert.rejects(
+    execute(insufficientCoverageQuery),
+    (error) => error instanceof HybridLexicalFallbackError &&
+      error.code === "insufficient_vector_coverage",
+    "coverage loss between profile load and query execution must fail over to lexical recall",
+  );
+  const insufficientCoveragePlanRows = await prisma.$queryRaw<
+    Array<{ "QUERY PLAN": unknown }>
+  >(Prisma.sql`EXPLAIN (ANALYZE, FORMAT JSON) ${insufficientCoverageQuery}`);
+  const insufficientCoverageNodes = collectPlanNodes(
+    insufficientCoveragePlanRows[0]["QUERY PLAN"],
+  );
+  const gatedAuthorizedBase = insufficientCoverageNodes.find(
+    (node) => node["Subplan Name"] === "CTE authorized_base",
+  );
+  assert.ok(gatedAuthorizedBase, "coverage fallback plan must expose authorized_base");
+  const gatedArticleScans = collectPlanNodes(gatedAuthorizedBase.Plans ?? []).filter(
+    (node) => node["Relation Name"] === "Article",
+  );
+  assert.ok(gatedArticleScans.length > 0, "coverage fallback must expose Article scans");
+  assert.ok(
+    gatedArticleScans.every((node) => node["Actual Loops"] === 0),
+    "coverage fallback must skip every downstream Article scan",
+  );
+
+  const insufficientCoverageMissQuery = buildHybridMissSql({
+    query: "hybrid recall",
+    profileId,
+    limit: 10,
+    offset: 0,
+    filters: { allowedScopes: ["*"] },
+    vectorLiteral: "[1,0,0]",
+  });
+  await assert.rejects(
+    execute(insufficientCoverageMissQuery),
+    (error) => error instanceof HybridLexicalFallbackError &&
+      error.code === "insufficient_vector_coverage",
+    "a cache miss with insufficient coverage must fail over before search work",
+  );
+  const insufficientCoverageMissPlanRows = await prisma.$queryRaw<
+    Array<{ "QUERY PLAN": unknown }>
+  >(Prisma.sql`EXPLAIN (ANALYZE, FORMAT JSON) ${insufficientCoverageMissQuery}`);
+  const insufficientCoverageMissNodes = collectPlanNodes(
+    insufficientCoverageMissPlanRows[0]["QUERY PLAN"],
+  );
+  for (const relationName of [
+    "Article",
+    "Topic",
+    "ArticleTag",
+    "Tag",
+    "MemoryProvenanceEdge",
+    "MemoryLineageState",
+  ]) {
+    const scans = insufficientCoverageMissNodes.filter(
+      (node) => node["Relation Name"] === relationName,
+    );
+    assert.ok(scans.length > 0, `coverage miss plan must expose ${relationName} scans`);
+    const executedScans = scans.filter((node) => node["Actual Loops"] !== 0);
+    assert.ok(
+      executedScans.length === 0,
+      `coverage miss must skip every ${relationName} scan: ${JSON.stringify(
+        executedScans.map((node) => ({
+          nodeType: node["Node Type"],
+          parentRelationship: node["Parent Relationship"],
+          subplanName: node["Subplan Name"],
+          alias: node.Alias,
+          actualLoops: node["Actual Loops"],
+          actualRows: node["Actual Rows"],
+          filter: node.Filter,
+          indexCond: node["Index Cond"],
+        })),
+      )}`,
+    );
+  }
+  const vectorCalls = insufficientCoverageMissNodes.filter(
+    (node) => node["Function Name"] === "vector_candidates",
+  );
+  assert.ok(vectorCalls.length > 0, "coverage miss plan must expose vector_candidates");
+  assert.ok(
+    vectorCalls.every((node) => node["Actual Loops"] === 0),
+    "coverage miss must skip every vector candidate call",
   );
   const zeroCoverage = await prisma.$queryRaw<
     Array<{ eligible_count: bigint; ready_count: bigint; coverage: string }>

@@ -266,6 +266,16 @@ application, verify keyword recall, and then change
 endpoints use the same pinned `host.docker.internal:host-gateway` mapping as the
 worker.
 
+Phase C keeps coverage exact without scanning or hashing the corpus on the
+request path. Owner-only profile/article membership rows are refreshed in the
+same transaction as Article, embedding, profile, and consent mutations;
+statement-level delta triggers maintain the per-profile eligible and ready
+counters returned by the application capability. Article and embedding writes
+therefore update only the affected article across configured profiles. The
+only corpus-wide rebuilds are the intentionally rare profile initialization and
+remote-consent eligibility transitions, both serialized by Phase B's
+eligibility lock.
+
 Hybrid recall uses one authorization-filtered candidate relation for lexical
 and vector legs. The vector leg processes deterministic batches of at most
 1,000 authorized IDs up to a request-wide maximum of 100,000 authorized

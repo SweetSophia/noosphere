@@ -32,6 +32,12 @@ BEGIN
 END;
 $block$;
 
+-- Coverage snapshots are initialized from, and remain synchronized with, the
+-- same eligibility domain used by Phase B. Hold its transaction lock across
+-- schema creation, snapshot initialization, validation, and commit so no
+-- mutation can fall between the initial corpus scan and trigger installation.
+SELECT noosphere_hybrid_b.serialize_eligibility();
+
 -- Re-run both prerequisite validators in this transaction. A3's validator
 -- requires its original capability grants, so temporarily restore them before
 -- proving A3 and then return to Phase B's narrowed execution surface.
@@ -51,6 +57,11 @@ WHERE state.singleton;
 GRANT EXECUTE ON FUNCTION noosphere_hybrid.set_profile_state(
   uuid, noosphere_hybrid.profile_state
 ) TO noosphere_hybrid_admin;
+GRANT EXECUTE ON FUNCTION noosphere_hybrid.create_profile(
+  text, noosphere_hybrid.profile_locality, text, text, integer,
+  noosphere_hybrid.distance_metric, noosphere_hybrid.normalization_policy,
+  integer, bytea
+) TO noosphere_hybrid_admin;
 GRANT EXECUTE ON FUNCTION noosphere_hybrid.claim_jobs(integer, integer)
   TO noosphere_hybrid_worker;
 GRANT EXECUTE ON FUNCTION noosphere_hybrid.publish_embedding(
@@ -62,6 +73,11 @@ GRANT EXECUTE ON FUNCTION noosphere_hybrid.fail_job(
 \ir validate.sql
 REVOKE EXECUTE ON FUNCTION noosphere_hybrid.set_profile_state(
   uuid, noosphere_hybrid.profile_state
+) FROM noosphere_hybrid_admin;
+REVOKE EXECUTE ON FUNCTION noosphere_hybrid.create_profile(
+  text, noosphere_hybrid.profile_locality, text, text, integer,
+  noosphere_hybrid.distance_metric, noosphere_hybrid.normalization_policy,
+  integer, bytea
 ) FROM noosphere_hybrid_admin;
 REVOKE EXECUTE ON FUNCTION noosphere_hybrid.claim_jobs(integer, integer)
   FROM noosphere_hybrid_worker;
@@ -91,6 +107,26 @@ SELECT pg_catalog.to_regclass('noosphere_hybrid_c.feature_state') IS NULL AS fir
   SET LOCAL ROLE noosphere_hybrid_owner;
   \ir phase-c-schema.sql
   RESET ROLE;
+
+  CREATE TRIGGER zz_noosphere_hybrid_c_article_coverage
+  AFTER INSERT OR DELETE OR UPDATE OF
+    title, excerpt, content, "deletedAt", "recallQuarantinedAt", "restrictedTags"
+  ON public."Article"
+  FOR EACH ROW EXECUTE FUNCTION noosphere_hybrid_c.article_coverage_trigger();
+
+  CREATE TRIGGER zz_noosphere_hybrid_c_embedding_coverage
+  AFTER INSERT OR UPDATE OR DELETE ON noosphere_hybrid.article_embedding
+  FOR EACH ROW EXECUTE FUNCTION noosphere_hybrid_c.embedding_coverage_trigger();
+
+  CREATE TRIGGER zz_noosphere_hybrid_c_profile_coverage
+  AFTER INSERT OR UPDATE OF state ON noosphere_hybrid.embedding_profile
+  FOR EACH ROW EXECUTE FUNCTION noosphere_hybrid_c.profile_coverage_trigger();
+
+  CREATE TRIGGER zz_noosphere_hybrid_c_consent_coverage
+  AFTER INSERT OR UPDATE OR DELETE ON noosphere_hybrid_b.embedding_consent
+  FOR EACH STATEMENT EXECUTE FUNCTION noosphere_hybrid_c.consent_coverage_trigger();
+
+  SELECT noosphere_hybrid_c.refresh_all_profile_coverage();
 
   REVOKE ALL ON SCHEMA noosphere_hybrid_c FROM PUBLIC;
   REVOKE ALL ON ALL TABLES IN SCHEMA noosphere_hybrid_c FROM PUBLIC;

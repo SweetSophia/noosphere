@@ -414,6 +414,42 @@ BEGIN
 END;
 $function$;
 
+CREATE FUNCTION noosphere_hybrid_b.create_profile(
+  provider_protocol_arg text,
+  locality_arg noosphere_hybrid.profile_locality,
+  model_identifier_arg text,
+  model_revision_arg text,
+  dimensions_arg integer,
+  distance_metric_arg noosphere_hybrid.distance_metric,
+  normalization_policy_arg noosphere_hybrid.normalization_policy,
+  max_input_bytes_arg integer,
+  endpoint_identity_sha256_arg bytea
+)
+RETURNS uuid
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $function$
+BEGIN
+  -- Profile creation changes the Cartesian profile/article eligibility set.
+  -- Serialize it with Article, consent, and lifecycle mutations so Phase C's
+  -- AFTER INSERT refresh observes one complete side of every interleaving.
+  PERFORM noosphere_hybrid_b.serialize_eligibility();
+  RETURN noosphere_hybrid.create_profile(
+    provider_protocol_arg,
+    locality_arg,
+    model_identifier_arg,
+    model_revision_arg,
+    dimensions_arg,
+    distance_metric_arg,
+    normalization_policy_arg,
+    max_input_bytes_arg,
+    endpoint_identity_sha256_arg
+  );
+END;
+$function$;
+
 CREATE FUNCTION noosphere_hybrid_b.profile_coverage(target_profile_id uuid)
 RETURNS TABLE (eligible_count bigint, ready_count bigint, coverage numeric)
 LANGUAGE sql

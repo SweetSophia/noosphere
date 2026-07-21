@@ -16,6 +16,7 @@ function sentinelRow(
   return {
     cache_valid: true,
     authorization_budget_valid: true,
+    coverage_valid: true,
     epoch: "42",
     candidates,
     candidates_fingerprint: candidatesFingerprint,
@@ -57,6 +58,18 @@ test("row parsing classifies an exceeded authorization budget as lexical fallbac
   );
 });
 
+test("row parsing classifies a coverage race as lexical fallback", () => {
+  const row = sentinelRow([], "a".repeat(64));
+  row.coverage_valid = false;
+
+  assert.throws(
+    () => parseHybridQueryRows([row]),
+    (error) =>
+      error instanceof HybridLexicalFallbackError &&
+      error.code === "insufficient_vector_coverage",
+  );
+});
+
 test("row parsing rejects inconsistent authorization-budget metadata", () => {
   for (const budgetValues of [[false, true], [true, false]]) {
     const rows = budgetValues.map((authorizationBudgetValid) => {
@@ -72,6 +85,21 @@ test("row parsing rejects inconsistent authorization-budget metadata", () => {
         error.code === "hybrid_query_metadata_inconsistent",
     );
   }
+});
+
+test("row parsing rejects inconsistent coverage metadata", () => {
+  const rows = [
+    sentinelRow([], "a".repeat(64)),
+    sentinelRow([], "a".repeat(64)),
+  ];
+  rows[1].coverage_valid = false;
+
+  assert.throws(
+    () => parseHybridQueryRows(rows),
+    (error) =>
+      error instanceof HybridCorrectnessError &&
+      error.code === "hybrid_query_metadata_inconsistent",
+  );
 });
 
 test("over-budget fallback still rejects inconsistent query metadata", () => {

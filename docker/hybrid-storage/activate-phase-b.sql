@@ -46,6 +46,11 @@ WHERE state.singleton;
 GRANT EXECUTE ON FUNCTION noosphere_hybrid.set_profile_state(
   uuid, noosphere_hybrid.profile_state
 ) TO noosphere_hybrid_admin;
+GRANT EXECUTE ON FUNCTION noosphere_hybrid.create_profile(
+  text, noosphere_hybrid.profile_locality, text, text, integer,
+  noosphere_hybrid.distance_metric, noosphere_hybrid.normalization_policy,
+  integer, bytea
+) TO noosphere_hybrid_admin;
 GRANT EXECUTE ON FUNCTION noosphere_hybrid.claim_jobs(integer, integer)
   TO noosphere_hybrid_worker;
 GRANT EXECUTE ON FUNCTION noosphere_hybrid.publish_embedding(
@@ -57,6 +62,11 @@ GRANT EXECUTE ON FUNCTION noosphere_hybrid.fail_job(
 \ir validate.sql
 REVOKE EXECUTE ON FUNCTION noosphere_hybrid.set_profile_state(
   uuid, noosphere_hybrid.profile_state
+) FROM noosphere_hybrid_admin;
+REVOKE EXECUTE ON FUNCTION noosphere_hybrid.create_profile(
+  text, noosphere_hybrid.profile_locality, text, text, integer,
+  noosphere_hybrid.distance_metric, noosphere_hybrid.normalization_policy,
+  integer, bytea
 ) FROM noosphere_hybrid_admin;
 REVOKE EXECUTE ON FUNCTION noosphere_hybrid.claim_jobs(integer, integer)
   FROM noosphere_hybrid_worker;
@@ -104,6 +114,11 @@ SELECT pg_catalog.to_regclass('noosphere_hybrid_b.feature_state') IS NULL AS fir
 
   GRANT EXECUTE ON FUNCTION noosphere_hybrid_b.set_embedding_consent(boolean, boolean)
     TO noosphere_hybrid_admin;
+  GRANT EXECUTE ON FUNCTION noosphere_hybrid_b.create_profile(
+    text, noosphere_hybrid.profile_locality, text, text, integer,
+    noosphere_hybrid.distance_metric, noosphere_hybrid.normalization_policy,
+    integer, bytea
+  ) TO noosphere_hybrid_admin;
   GRANT EXECUTE ON FUNCTION noosphere_hybrid_b.profile_coverage(uuid)
     TO noosphere_hybrid_admin;
   GRANT EXECUTE ON FUNCTION noosphere_hybrid_b.profile_status(uuid)

@@ -41,7 +41,7 @@ test("miss query uses one shared authorized base for lexical and vector candidat
   assert.match(text, /authorized_ids AS MATERIALIZED/);
   assert.match(
     text,
-    /authorized_base AS MATERIALIZED .* FROM authorized_budget CROSS JOIN LATERAL \( SELECT gated_searchable\.\* FROM \( .* \) AS gated_searchable WHERE authorized_budget\.authorized_count <= \? \) AS searchable/s,
+    /authorized_base AS MATERIALIZED .* FROM authorized_budget CROSS JOIN profile_epoch CROSS JOIN LATERAL \( SELECT gated_searchable\.\* FROM \( .* \) AS gated_searchable WHERE authorized_budget\.authorized_count <= \? AND profile_epoch\.coverage_valid OFFSET 0 \) AS searchable/s,
   );
   assert.match(text, /authorized_budget\.authorized_count <= \?/);
   assert.equal(
@@ -55,6 +55,16 @@ test("miss query uses one shared authorized base for lexical and vector candidat
   assert.match(text, /AS authorization_budget_valid/);
   assert.match(text, /vector_batch_source AS MATERIALIZED .* JOIN authorized_base/s);
   assert.match(text, /vector_candidates/);
+  assert.match(text, /profile_state = 'serving' AND coverage >= 0\.95/);
+  assert.match(text, /FROM profile_epoch\s+CROSS JOIN LATERAL/s);
+  assert.match(text, /WHERE profile_epoch\.coverage_valid/);
+  assert.match(text, /OFFSET 0/);
+  assert.match(text, /FROM authorized_budget\s+CROSS JOIN profile_epoch\s+CROSS JOIN LATERAL/s);
+  assert.match(
+    text,
+    /authorized_budget\.authorized_count <= .*AND profile_epoch\.coverage_valid/s,
+  );
+  assert.match(text, /profile_epoch\.coverage_valid/);
   assert.match(text, /pg_catalog\.array_agg\(id ORDER BY id\)/);
   assert.equal(
     query.values.filter((value) => value === HYBRID_CANDIDATE_DEPTH).length,
@@ -125,6 +135,9 @@ test("cache-hit query rechecks epoch, lexical/vector contribution, authorization
   }));
 
   assert.match(text, /current_vector_membership/);
+  assert.match(text, /profile_state = 'serving' AND coverage >= 0\.95/);
+  assert.match(text, /WHERE \(SELECT coverage_valid FROM profile_epoch\)/);
+  assert.match(text, /profile_epoch\.coverage_valid/);
   assert.match(text, /candidate\."rawRrfScore" AS raw_rrf_score/);
   assert.match(text, /cache_epoch::text = .* FROM profile_epoch/);
   assert.match(text, /lexical_rank IS NULL OR/);
