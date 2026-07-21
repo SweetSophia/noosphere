@@ -8,8 +8,8 @@ import {
   type HybridCachedCandidate,
 } from "@/lib/cache/hybrid-search-cache";
 import type { ArticleSearchFilters } from "@/lib/memory/article-search";
+import { HYBRID_MINIMUM_COVERAGE } from "@/lib/memory/hybrid-ranking";
 
-const HYBRID_MINIMUM_COVERAGE = 0.95;
 const PROFILE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export class HybridCorrectnessError extends Error {

@@ -12,6 +12,7 @@ import type { HybridCachedCandidate } from "@/lib/cache/hybrid-search-cache";
 import {
   HYBRID_CANDIDATE_DEPTH,
   HYBRID_MAX_AUTHORIZED_CANDIDATES,
+  HYBRID_MINIMUM_COVERAGE,
   HYBRID_VECTOR_AUTH_BATCH_SIZE,
 } from "@/lib/memory/hybrid-ranking";
 
@@ -49,7 +50,7 @@ export function buildHybridMissSql(
     profile_epoch AS MATERIALIZED (
       SELECT
         cache_epoch,
-        (profile_state = 'serving' AND coverage >= 0.95) AS coverage_valid
+        (profile_state = 'serving' AND coverage >= ${HYBRID_MINIMUM_COVERAGE}) AS coverage_valid
       FROM noosphere_hybrid_c.query_profile_snapshot(${input.profileId}::uuid)
     ),
     ${search},
@@ -171,7 +172,7 @@ export function buildHybridCacheHitSql(input: HybridCacheHitSqlInput): Prisma.Sq
     profile_epoch AS MATERIALIZED (
       SELECT
         cache_epoch,
-        (profile_state = 'serving' AND coverage >= 0.95) AS coverage_valid
+        (profile_state = 'serving' AND coverage >= ${HYBRID_MINIMUM_COVERAGE}) AS coverage_valid
       FROM noosphere_hybrid_c.query_profile_snapshot(${input.profileId}::uuid)
     ),
     ${search},

@@ -8,6 +8,7 @@ import {
 import {
   HYBRID_CANDIDATE_DEPTH,
   HYBRID_MAX_AUTHORIZED_CANDIDATES,
+  HYBRID_MINIMUM_COVERAGE,
 } from "@/lib/memory/hybrid-ranking";
 
 function sqlText(query: { strings: readonly string[] }): string {
@@ -55,7 +56,11 @@ test("miss query uses one shared authorized base for lexical and vector candidat
   assert.match(text, /AS authorization_budget_valid/);
   assert.match(text, /vector_batch_source AS MATERIALIZED .* JOIN authorized_base/s);
   assert.match(text, /vector_candidates/);
-  assert.match(text, /profile_state = 'serving' AND coverage >= 0\.95/);
+  assert.match(text, /profile_state = 'serving' AND coverage >= \?/);
+  assert.equal(
+    query.values.filter((value) => value === HYBRID_MINIMUM_COVERAGE).length,
+    1,
+  );
   assert.match(text, /FROM profile_epoch\s+CROSS JOIN LATERAL/s);
   assert.match(text, /WHERE profile_epoch\.coverage_valid/);
   assert.match(text, /OFFSET 0/);
@@ -121,7 +126,7 @@ test("miss query locks provenance before articles, normalizes before pagination,
 });
 
 test("cache-hit query rechecks epoch, lexical/vector contribution, authorization, and full membership", () => {
-  const text = sqlText(buildHybridCacheHitSql({
+  const query = buildHybridCacheHitSql({
     query: "query",
     profileId: "0198fe17-f4dd-7ee3-93e4-acde00000001",
     expectedEpoch: "42",
@@ -132,10 +137,15 @@ test("cache-hit query rechecks epoch, lexical/vector contribution, authorization
     limit: 10,
     offset: 0,
     filters,
-  }));
+  });
+  const text = sqlText(query);
 
   assert.match(text, /current_vector_membership/);
-  assert.match(text, /profile_state = 'serving' AND coverage >= 0\.95/);
+  assert.match(text, /profile_state = 'serving' AND coverage >= \?/);
+  assert.equal(
+    query.values.filter((value) => value === HYBRID_MINIMUM_COVERAGE).length,
+    1,
+  );
   assert.match(text, /WHERE \(SELECT coverage_valid FROM profile_epoch\)/);
   assert.match(text, /profile_epoch\.coverage_valid/);
   assert.match(text, /candidate\."rawRrfScore" AS raw_rrf_score/);

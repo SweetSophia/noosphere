@@ -3,6 +3,7 @@ export const HYBRID_CANDIDATE_DEPTH = 200;
 export const HYBRID_MAX_WINDOW = 200;
 export const HYBRID_VECTOR_AUTH_BATCH_SIZE = 1_000;
 export const HYBRID_MAX_AUTHORIZED_CANDIDATES = 100_000;
+export const HYBRID_MINIMUM_COVERAGE = 0.95;
 
 export interface RankedHybridSource {
   id: string;
