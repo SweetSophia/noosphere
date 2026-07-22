@@ -18,7 +18,23 @@ BEGIN
     noosphere_crypto.digest(
       pg_catalog.convert_to(
         pg_catalog.string_agg(
-          pg_catalog.pg_get_functiondef(procedure.oid),
+          pg_catalog.format(
+            '%s|lang=%s|ret=%s|args=%s|vol=%s|strict=%s|secdef=%s|parallel=%s|config=%s|src=%s',
+            procedure.oid::pg_catalog.regprocedure::text,
+            (SELECT lanname FROM pg_catalog.pg_language WHERE oid = procedure.prolang),
+            pg_catalog.format_type(procedure.prorettype, NULL),
+            COALESCE((
+              SELECT pg_catalog.string_agg(pg_catalog.format_type(arg.oid, NULL), ',' ORDER BY arg.ord)
+              FROM pg_catalog.unnest(COALESCE(procedure.proallargtypes, procedure.proargtypes::oid[]))
+                WITH ORDINALITY AS arg(oid, ord)
+            ), ''),
+            procedure.provolatile,
+            procedure.proisstrict,
+            procedure.prosecdef,
+            COALESCE(procedure.proparallel, 'u'),
+            COALESCE(pg_catalog.array_to_string(procedure.proconfig, ','), ''),
+            procedure.prosrc
+          ),
           E'\n' ORDER BY procedure.oid::pg_catalog.regprocedure::text
         ),
         'UTF8'

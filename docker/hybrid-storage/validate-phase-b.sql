@@ -19,7 +19,23 @@ BEGIN
   FROM (
     SELECT
       procedure.oid::pg_catalog.regprocedure::text AS identity,
-      pg_catalog.pg_get_functiondef(procedure.oid) AS definition
+      pg_catalog.format(
+        '%s|lang=%s|ret=%s|args=%s|vol=%s|strict=%s|secdef=%s|parallel=%s|config=%s|src=%s',
+        procedure.oid::pg_catalog.regprocedure::text,
+        (SELECT lanname FROM pg_catalog.pg_language WHERE oid = procedure.prolang),
+        pg_catalog.format_type(procedure.prorettype, NULL),
+        COALESCE((
+          SELECT pg_catalog.string_agg(pg_catalog.format_type(arg.oid, NULL), ',' ORDER BY arg.ord)
+          FROM pg_catalog.unnest(COALESCE(procedure.proallargtypes, procedure.proargtypes::oid[]))
+            WITH ORDINALITY AS arg(oid, ord)
+        ), ''),
+        procedure.provolatile,
+        procedure.proisstrict,
+        procedure.prosecdef,
+        COALESCE(procedure.proparallel, 'u'),
+        COALESCE(pg_catalog.array_to_string(procedure.proconfig, ','), ''),
+        procedure.prosrc
+      ) AS definition
     FROM pg_catalog.pg_proc AS procedure
     JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
     WHERE namespace.nspname = 'noosphere_hybrid_b'
