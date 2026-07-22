@@ -145,54 +145,18 @@ SELECT pg_catalog.to_regclass('noosphere_hybrid_b.feature_state') IS NULL AS fir
   ) TO noosphere_hybrid_worker;
 
   SET LOCAL ROLE noosphere_hybrid_owner;
-  WITH manifest AS (
-    SELECT pg_catalog.string_agg(definition, E'\n' ORDER BY identity) AS body
-    FROM (
-      SELECT
-        procedure.oid::pg_catalog.regprocedure::text AS identity,
-        pg_catalog.format(
-          '%s|lang=%s|ret=%s|args=%s|vol=%s|strict=%s|secdef=%s|parallel=%s|config=%s|src=%s',
-          procedure.oid::pg_catalog.regprocedure::text,
-          (SELECT lanname FROM pg_catalog.pg_language WHERE oid = procedure.prolang),
-          pg_catalog.format_type(procedure.prorettype, NULL),
-          COALESCE((
-            SELECT pg_catalog.string_agg(pg_catalog.format_type(arg.oid, NULL), ',' ORDER BY arg.ord)
-            FROM pg_catalog.unnest(COALESCE(procedure.proallargtypes, procedure.proargtypes::oid[]))
-              WITH ORDINALITY AS arg(oid, ord)
-          ), ''),
-          procedure.provolatile,
-          procedure.proisstrict,
-          procedure.prosecdef,
-          COALESCE(procedure.proparallel, 'u'),
-          COALESCE(pg_catalog.array_to_string(procedure.proconfig, ','), ''),
-          procedure.prosrc
-        ) AS definition
-      FROM pg_catalog.pg_proc AS procedure
-      JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
-      WHERE namespace.nspname = 'noosphere_hybrid_b'
-      UNION ALL
-      SELECT
-        namespace.nspname || '.' || relation.relname || '.' || trigger.tgname,
-        pg_catalog.pg_get_triggerdef(trigger.oid, false)
-      FROM pg_catalog.pg_trigger AS trigger
-      JOIN pg_catalog.pg_class AS relation ON relation.oid = trigger.tgrelid
-      JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
-      WHERE NOT trigger.tgisinternal
-        AND trigger.tgname IN (
-          'noosphere_hybrid_b_article_guard',
-          'zz_noosphere_hybrid_b_article_dirty'
-        )
-    ) AS evidence(identity, definition)
-  )
   INSERT INTO noosphere_hybrid_b.feature_state (
     singleton, feature_version, source_sha256, manifest_sha256, structure_sha256
   )
-  SELECT
+  VALUES (
     true,
-    1,
+    2,
     pg_catalog.current_setting('noosphere.phase_b.source_sha256'),
     pg_catalog.encode(
-      noosphere_crypto.digest(pg_catalog.convert_to(manifest.body, 'UTF8'), 'sha256'),
+      noosphere_crypto.digest(
+        pg_catalog.convert_to(noosphere_hybrid_b.routine_manifest(), 'UTF8'),
+        'sha256'
+      ),
       'hex'
     ),
     pg_catalog.encode(
@@ -202,148 +166,10 @@ SELECT pg_catalog.to_regclass('noosphere_hybrid_b.feature_state') IS NULL AS fir
       ),
       'hex'
     )
-  FROM manifest;
+  );
   RESET ROLE;
 \else
-  -- -----------------------------------------------------------------
-  -- Upgrade path: advance an existing Phase B activation to the current
-  -- artifact set. Only runs when the source hash actually changed; same-
-  -- source re-validation falls through to \ir validate-phase-b.sql which
-  -- catches structural drift.
-  --
-  -- Scope limitation: this upgrade installs only the objects and grants
-  -- that changed in activate-phase-b.sql itself (the create_profile
-  -- wrapper and A3 entry-point revocation). Body edits to functions
-  -- defined in phase-b-schema.sql are NOT applied by this path because
-  -- that file uses non-idempotent CREATE FUNCTION. Such changes require
-  -- deprovision + re-activate from a verified backup.
-  --
-  -- Phase C coupling: advancing Phase B's source_sha256 invalidates
-  -- Phase C's recorded phase_b_source_sha256. Re-run Phase C activation
-  -- immediately after any Phase B upgrade.
-  -- -----------------------------------------------------------------
-  SELECT source_sha256 = pg_catalog.current_setting('noosphere.phase_b.source_sha256')
-    AS same_source
-  FROM noosphere_hybrid_b.feature_state WHERE singleton
-\gset
-
-  \if :same_source
-    -- Same artifact set: skip upgrade; validator below checks drift.
-  \else
-    -- Source changed: serialize, install revised objects/grants, and
-    -- advance provenance so validate-phase-b.sql passes with new hashes.
-    SELECT noosphere_hybrid_b.serialize_eligibility();
-
-    SET LOCAL ROLE noosphere_hybrid_owner;
-    CREATE OR REPLACE FUNCTION noosphere_hybrid_b.create_profile(
-      provider_protocol_arg text,
-      locality_arg noosphere_hybrid.profile_locality,
-      model_identifier_arg text,
-      model_revision_arg text,
-      dimensions_arg integer,
-      distance_metric_arg noosphere_hybrid.distance_metric,
-      normalization_policy_arg noosphere_hybrid.normalization_policy,
-      max_input_bytes_arg integer,
-      endpoint_identity_sha256_arg bytea
-    )
-    RETURNS uuid
-    LANGUAGE plpgsql
-    VOLATILE
-    SECURITY DEFINER
-    SET search_path = pg_catalog, pg_temp
-    AS $upgrade$
-BEGIN
-  -- Profile creation changes the Cartesian profile/article eligibility set.
-  -- Serialize it with Article, consent, and lifecycle mutations so Phase C's
-  -- AFTER INSERT refresh observes one complete side of every interleaving.
-  PERFORM noosphere_hybrid_b.serialize_eligibility();
-  RETURN noosphere_hybrid.create_profile(
-    provider_protocol_arg,
-    locality_arg,
-    model_identifier_arg,
-    model_revision_arg,
-    dimensions_arg,
-    distance_metric_arg,
-    normalization_policy_arg,
-    max_input_bytes_arg,
-    endpoint_identity_sha256_arg
-  );
-END;
-$upgrade$;
-    RESET ROLE;
-
-    REVOKE EXECUTE ON FUNCTION noosphere_hybrid.create_profile(
-      text, noosphere_hybrid.profile_locality, text, text, integer,
-      noosphere_hybrid.distance_metric, noosphere_hybrid.normalization_policy,
-      integer, bytea
-    ) FROM noosphere_hybrid_admin;
-    GRANT EXECUTE ON FUNCTION noosphere_hybrid_b.create_profile(
-      text, noosphere_hybrid.profile_locality, text, text, integer,
-      noosphere_hybrid.distance_metric, noosphere_hybrid.normalization_policy,
-      integer, bytea
-    ) TO noosphere_hybrid_admin;
-
-    SET LOCAL ROLE noosphere_hybrid_owner;
-    UPDATE noosphere_hybrid_b.feature_state
-    SET source_sha256 = pg_catalog.current_setting('noosphere.phase_b.source_sha256'),
-        manifest_sha256 = (
-          SELECT pg_catalog.encode(
-            noosphere_crypto.digest(
-              pg_catalog.convert_to(
-                pg_catalog.string_agg(definition, E'\n' ORDER BY identity),
-                'UTF8'
-              ),
-              'sha256'
-            ),
-            'hex'
-          )
-          FROM (
-            SELECT
-              procedure.oid::pg_catalog.regprocedure::text AS identity,
-              pg_catalog.format(
-                '%s|lang=%s|ret=%s|args=%s|vol=%s|strict=%s|secdef=%s|parallel=%s|config=%s|src=%s',
-                procedure.oid::pg_catalog.regprocedure::text,
-                (SELECT lanname FROM pg_catalog.pg_language WHERE oid = procedure.prolang),
-                pg_catalog.format_type(procedure.prorettype, NULL),
-                COALESCE((
-                  SELECT pg_catalog.string_agg(pg_catalog.format_type(arg.oid, NULL), ',' ORDER BY arg.ord)
-                  FROM pg_catalog.unnest(COALESCE(procedure.proallargtypes, procedure.proargtypes::oid[]))
-                    WITH ORDINALITY AS arg(oid, ord)
-                ), ''),
-                procedure.provolatile,
-                procedure.proisstrict,
-                procedure.prosecdef,
-                COALESCE(procedure.proparallel, 'u'),
-                COALESCE(pg_catalog.array_to_string(procedure.proconfig, ','), ''),
-                procedure.prosrc
-              ) AS definition
-            FROM pg_catalog.pg_proc AS procedure
-            JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
-            WHERE namespace.nspname = 'noosphere_hybrid_b'
-            UNION ALL
-            SELECT
-              namespace.nspname || '.' || relation.relname || '.' || trigger.tgname,
-              pg_catalog.pg_get_triggerdef(trigger.oid, false)
-            FROM pg_catalog.pg_trigger AS trigger
-            JOIN pg_catalog.pg_class AS relation ON relation.oid = trigger.tgrelid
-            JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
-            WHERE NOT trigger.tgisinternal
-              AND trigger.tgname IN (
-                'noosphere_hybrid_b_article_guard',
-                'zz_noosphere_hybrid_b_article_dirty'
-              )
-          ) AS evidence(identity, definition)
-        ),
-        structure_sha256 = pg_catalog.encode(
-          noosphere_crypto.digest(
-            pg_catalog.convert_to(noosphere_hybrid_b.structural_manifest(), 'UTF8'),
-            'sha256'
-          ),
-          'hex'
-        )
-    WHERE singleton;
-    RESET ROLE;
-  \endif
+  \ir upgrade-phase-b-v1-to-v2.sql
 \endif
 
 \ir validate-phase-b.sql

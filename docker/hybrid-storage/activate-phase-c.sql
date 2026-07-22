@@ -22,15 +22,12 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'exact Phase A3 activation is required before Phase C';
   END IF;
-  IF NOT EXISTS (
-    SELECT 1 FROM noosphere_hybrid_b.feature_state
-    WHERE singleton AND feature_version = 1
-      AND source_sha256 = pg_catalog.current_setting('noosphere.phase_b.source_sha256')
-  ) THEN
-    RAISE EXCEPTION 'exact Phase B activation is required before Phase C';
-  END IF;
 END;
 $block$;
+
+-- Phase C is the first consumer of the v2 capability boundary. Upgrade an
+-- exact historical v1 installation before validating or reading its state.
+\ir upgrade-phase-b-v1-to-v2.sql
 
 -- Coverage snapshots are initialized from, and remain synchronized with, the
 -- same eligibility domain used by Phase B. Hold its transaction lock across
@@ -144,31 +141,6 @@ SELECT pg_catalog.to_regclass('noosphere_hybrid_c.feature_state') IS NULL AS fir
     TO noosphere_app;
 
   SET LOCAL ROLE noosphere_hybrid_owner;
-  WITH manifest AS (
-    SELECT pg_catalog.string_agg(
-      pg_catalog.format(
-        '%s|lang=%s|ret=%s|args=%s|vol=%s|strict=%s|secdef=%s|parallel=%s|config=%s|src=%s',
-        procedure.oid::pg_catalog.regprocedure::text,
-        (SELECT lanname FROM pg_catalog.pg_language WHERE oid = procedure.prolang),
-        pg_catalog.format_type(procedure.prorettype, NULL),
-        COALESCE((
-          SELECT pg_catalog.string_agg(pg_catalog.format_type(arg.oid, NULL), ',' ORDER BY arg.ord)
-          FROM pg_catalog.unnest(COALESCE(procedure.proallargtypes, procedure.proargtypes::oid[]))
-            WITH ORDINALITY AS arg(oid, ord)
-        ), ''),
-        procedure.provolatile,
-        procedure.proisstrict,
-        procedure.prosecdef,
-        COALESCE(procedure.proparallel, 'u'),
-        COALESCE(pg_catalog.array_to_string(procedure.proconfig, ','), ''),
-        procedure.prosrc
-      ),
-      E'\n' ORDER BY procedure.oid::pg_catalog.regprocedure::text
-    ) AS body
-    FROM pg_catalog.pg_proc AS procedure
-    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
-    WHERE namespace.nspname = 'noosphere_hybrid_c'
-  )
   INSERT INTO noosphere_hybrid_c.feature_state (
     singleton,
     feature_version,
@@ -178,14 +150,17 @@ SELECT pg_catalog.to_regclass('noosphere_hybrid_c.feature_state') IS NULL AS fir
     manifest_sha256,
     structure_sha256
   )
-  SELECT
+  VALUES (
     true,
     1,
     :'a3_source_sha256',
     :'phase_b_source_sha256',
     pg_catalog.current_setting('noosphere.phase_c.source_sha256'),
     pg_catalog.encode(
-      noosphere_crypto.digest(pg_catalog.convert_to(manifest.body, 'UTF8'), 'sha256'),
+      noosphere_crypto.digest(
+        pg_catalog.convert_to(noosphere_hybrid_c.routine_manifest(), 'UTF8'),
+        'sha256'
+      ),
       'hex'
     ),
     pg_catalog.encode(
@@ -195,7 +170,7 @@ SELECT pg_catalog.to_regclass('noosphere_hybrid_c.feature_state') IS NULL AS fir
       ),
       'hex'
     )
-  FROM manifest;
+  );
   RESET ROLE;
 \endif
 

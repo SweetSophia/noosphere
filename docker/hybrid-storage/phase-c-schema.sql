@@ -118,6 +118,8 @@ AS $function$
   FROM evidence
 $function$;
 
+\ir phase-c-routine-manifest.sql
+
 CREATE FUNCTION noosphere_hybrid_c.authorize_query_dispatch(target_profile_id uuid)
 RETURNS boolean
 LANGUAGE plpgsql

@@ -19,7 +19,7 @@ need() {
   command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
 }
 
-for command_name in docker grep node npx psql sed xxd; do
+for command_name in base64 docker grep node npx patch psql sed sha256sum xxd; do
   need "$command_name"
 done
 [[ -f "$lock_file" ]] || die "missing image lock: $lock_file"
@@ -74,11 +74,24 @@ cleanup_process() {
 cleanup() {
   local status=$?
   trap - EXIT INT TERM
+  if [[ "${phase_c_restore_extension_owner_elevated:-false}" == true ]] \
+    && [[ -n "${candidate_bootstrap:-}" ]]; then
+    psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 \
+      -c 'ALTER ROLE noosphere_hybrid_extension_owner NOSUPERUSER' \
+      >/dev/null 2>&1 || true
+  fi
+  if [[ "${phase_b_v1_restore_extension_owner_elevated:-false}" == true ]] \
+    && [[ -n "${candidate_bootstrap:-}" ]]; then
+    psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 \
+      -c 'ALTER ROLE noosphere_hybrid_extension_owner NOSUPERUSER' \
+      >/dev/null 2>&1 || true
+  fi
   close_write_fd "${read_committed_writer_in:-}"
   close_write_fd "${phase_b_consent_writer_in:-}"
   close_write_fd "${phase_b_authorize_worker_in:-}"
   close_write_fd "${phase_c_auth_in:-}"
   close_write_fd "${phase_c_profile_writer_in:-}"
+  close_write_fd "${phase_b_v1_upgrade_locker_in:-}"
   cleanup_process "${read_committed_claim_pid:-}"
   cleanup_process "${read_committed_writer_pid:-}"
   cleanup_process "${phase_b_publish_pid:-}"
@@ -89,12 +102,16 @@ cleanup() {
   cleanup_process "${phase_c_revoke_pid:-}"
   cleanup_process "${phase_c_profile_writer_pid:-}"
   cleanup_process "${phase_c_profile_create_pid:-}"
+  cleanup_process "${phase_b_v1_upgrade_locker_pid:-}"
+  cleanup_process "${phase_b_v1_upgrade_activation_pid:-}"
+  cleanup_process "${phase_b_v1_legacy_profile_pid:-}"
   cleanup_process "${fixture_pid:-}"
   close_read_fd "${read_committed_writer_out:-}"
   close_read_fd "${phase_b_consent_writer_out:-}"
   close_read_fd "${phase_b_authorize_worker_out:-}"
   close_read_fd "${phase_c_auth_out:-}"
   close_read_fd "${phase_c_profile_writer_out:-}"
+  close_read_fd "${phase_b_v1_upgrade_locker_out:-}"
   if [[ -n "${read_committed_claim_output:-}" && -f "$read_committed_claim_output" ]]; then
     rm -f -- "$read_committed_claim_output"
   fi
@@ -104,9 +121,29 @@ cleanup() {
   if [[ -n "${phase_c_profile_create_output:-}" && -f "$phase_c_profile_create_output" ]]; then
     rm -f -- "$phase_c_profile_create_output"
   fi
+  if [[ -n "${phase_b_v1_upgrade_activation_output:-}" && -f "$phase_b_v1_upgrade_activation_output" ]]; then
+    rm -f -- "$phase_b_v1_upgrade_activation_output"
+  fi
+  if [[ -n "${phase_b_v1_legacy_profile_output:-}" && -f "$phase_b_v1_legacy_profile_output" ]]; then
+    rm -f -- "$phase_b_v1_legacy_profile_output"
+  fi
   if [[ -n "${fixture_log:-}" && -f "$fixture_log" ]]; then
     rm -f -- "$fixture_log"
   fi
+  if [[ -n "${phase_b_v1_fixture_dir:-}" && -d "$phase_b_v1_fixture_dir" ]]; then
+    rm -rf -- "$phase_b_v1_fixture_dir"
+  fi
+  for temporary_file in \
+    "${phase_c_dump_file:-}" \
+    "${phase_c_restore_toc_file:-}" \
+    "${phase_c_restore_filtered_toc_file:-}" \
+    "${phase_b_v1_dump_file:-}" \
+    "${phase_b_v1_restore_toc_file:-}" \
+    "${phase_b_v1_restore_filtered_toc_file:-}"; do
+    if [[ -n "$temporary_file" && -f "$temporary_file" ]]; then
+      rm -f -- "$temporary_file"
+    fi
+  done
   if [[ -n "${worker_health_file:-}" && -f "$worker_health_file" ]]; then
     rm -f -- "$worker_health_file"
   fi
@@ -129,6 +166,18 @@ cleanup() {
   fi
   if [[ -n "${phase_c_revoke_output:-}" && -f "$phase_c_revoke_output" ]]; then
     rm -f -- "$phase_c_revoke_output"
+  fi
+  if [[ -n "${candidate_bootstrap:-}" ]]; then
+    for temporary_database in \
+      "${phase_b_upgrade_database:-}" \
+      "${phase_b_v1_restore_database:-}" \
+      "${phase_c_restore_database:-}"; do
+      if [[ "$temporary_database" =~ ^[a-z0-9_]+$ ]]; then
+        psql "${candidate_bootstrap%/*}/postgres" -XAtq -v ON_ERROR_STOP=1 \
+          -c "DROP DATABASE IF EXISTS \"$temporary_database\" WITH (FORCE)" \
+          >/dev/null 2>&1 || true
+      fi
+    done
   fi
   cleanup_container "$source_container"
   cleanup_container "$candidate_container"
@@ -197,6 +246,19 @@ assert_equals() {
   local actual=$2
   local label=$3
   [[ "$actual" == "$expected" ]] || die "$label: expected '$expected', got '$actual'"
+}
+
+artifact_set_sha256() {
+  local artifact
+  for artifact in "$@"; do
+    sha256sum "$artifact" | awk '{print $1}'
+  done | sha256sum | awk '{print $1}'
+}
+
+database_url_for() {
+  local url=$1
+  local database=$2
+  printf '%s/%s' "${url%/*}" "$database"
 }
 
 activate_candidate() {
@@ -821,6 +883,282 @@ assert_equals '0:0:0' "$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c
 psql "$candidate_admin" -XAtq -v ON_ERROR_STOP=1 -c \
   "SELECT noosphere_hybrid.set_profile_state('$profile_id','inactive')" >/dev/null
 
+# Reconstruct the exact Phase B v1 artifacts from the PR base, activate them in
+# an A3 database clone, and prove the current Phase C driver performs the
+# versioned v1 -> v2 upgrade before installing C.
+phase_b_upgrade_database="noosphere_phase_b_upgrade_${run_id//[^a-zA-Z0-9]/_}"
+[[ "$phase_b_upgrade_database" =~ ^[a-z0-9_]+$ ]] ||
+  die 'generated Phase B upgrade database name is unsafe'
+psql "${candidate_bootstrap%/*}/postgres" -XAtq -v ON_ERROR_STOP=1 \
+  -c "CREATE DATABASE \"$phase_b_upgrade_database\" TEMPLATE noosphere" >/dev/null
+phase_b_upgrade_bootstrap=$(database_url_for "$candidate_bootstrap" "$phase_b_upgrade_database")
+phase_b_upgrade_migrator=$(database_url_for "$candidate_migrator" "$phase_b_upgrade_database")
+phase_b_upgrade_app=$(database_url_for "$candidate_app" "$phase_b_upgrade_database")
+phase_b_upgrade_admin=$(database_url_for "$candidate_admin" "$phase_b_upgrade_database")
+phase_b_upgrade_worker=$(database_url_for "$candidate_worker" "$phase_b_upgrade_database")
+
+# Establish the canonical current Phase B state independently of the legacy
+# clone. Both direct and restored v1 upgrades must converge on these hashes.
+activate_phase_b >/dev/null
+phase_b_fresh_manifest_sha256=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT manifest_sha256 FROM noosphere_hybrid_b.feature_state WHERE singleton')
+phase_b_fresh_structure_sha256=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT structure_sha256 FROM noosphere_hybrid_b.feature_state WHERE singleton')
+
+phase_b_v1_fixture_dir=$(mktemp -d)
+cp "$repo_root/docker/hybrid-storage/activate-phase-b.sql" \
+  "$repo_root/docker/hybrid-storage/phase-b-schema.sql" \
+  "$repo_root/docker/hybrid-storage/validate-phase-b.sql" \
+  "$repo_root/docker/hybrid-storage/validate.sql" \
+  "$phase_b_v1_fixture_dir/"
+base64 --decode "$repo_root/src/__tests__/fixtures/hybrid-storage/phase-b-v1.patch" \
+  | patch -s -d "$phase_b_v1_fixture_dir" -p0
+
+phase_b_v1_source_sha256=$(artifact_set_sha256 \
+  "$phase_b_v1_fixture_dir/phase-b-schema.sql" \
+  "$phase_b_v1_fixture_dir/activate-phase-b.sql" \
+  "$phase_b_v1_fixture_dir/validate-phase-b.sql")
+assert_equals \
+  '5a5cb62c29deceb44b91c0a0252607ce9460b2761dbeca7724963ad7043fca98' \
+  "$phase_b_v1_source_sha256" \
+  'Phase B v1 fixture artifact hash'
+a3_source_sha256=$(artifact_set_sha256 \
+  "$repo_root/docker/hybrid-storage/activate.sql" \
+  "$repo_root/docker/hybrid-storage/feature-schema.sql" \
+  "$repo_root/docker/hybrid-storage/validate.sql")
+psql "$phase_b_upgrade_bootstrap" -X -v ON_ERROR_STOP=1 \
+  -v a3_source_sha256="$a3_source_sha256" \
+  -v phase_b_source_sha256="$phase_b_v1_source_sha256" \
+  -f "$phase_b_v1_fixture_dir/activate-phase-b.sql" >/dev/null
+assert_equals 1 "$(psql "$phase_b_upgrade_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT feature_version FROM noosphere_hybrid_b.feature_state WHERE singleton')" \
+  'Phase B historical fixture activates as v1'
+
+# Preserve an exact v1 logical backup before upgrading the direct clone. The
+# restored copy below must pass the stable v1 catalog validator even when the
+# historical pg_get_functiondef representation changes.
+phase_b_v1_dump_file=$(mktemp)
+docker exec "$candidate_container" \
+  pg_dump -U noosphere_bootstrap -d "$phase_b_upgrade_database" --format=custom \
+  >"$phase_b_v1_dump_file"
+
+# Hold a lock compatible with the upgrader's SHARE lock but incompatible with
+# Phase C's trigger installation. This leaves the activation transaction open
+# after it has fenced legacy INSERTs, giving the old A3 create_profile call a
+# deterministic chance to queue behind the migration boundary.
+coproc PHASE_B_V1_UPGRADE_LOCKER {
+  PGAPPNAME=noosphere-hybrid-phase-b-v1-locker \
+    psql "$phase_b_upgrade_bootstrap" -XAtq -v ON_ERROR_STOP=1 2>&1
+}
+phase_b_v1_upgrade_locker_out=${PHASE_B_V1_UPGRADE_LOCKER[0]}
+phase_b_v1_upgrade_locker_in=${PHASE_B_V1_UPGRADE_LOCKER[1]}
+phase_b_v1_upgrade_locker_pid=$PHASE_B_V1_UPGRADE_LOCKER_PID
+printf '%s\n' \
+  'BEGIN;' \
+  'LOCK TABLE noosphere_hybrid.embedding_profile IN SHARE MODE;' \
+  'SELECT '\''phase-b-v1-locker-ready'\'';' >&"$phase_b_v1_upgrade_locker_in"
+IFS= read -r phase_b_v1_upgrade_locker_marker <&"$phase_b_v1_upgrade_locker_out"
+assert_equals phase-b-v1-locker-ready "$phase_b_v1_upgrade_locker_marker" \
+  'Phase B v1 upgrade lock fixture readiness'
+
+phase_b_v1_upgrade_activation_output=$(mktemp)
+PGAPPNAME=noosphere-hybrid-phase-b-v1-upgrade \
+NOOSPHERE_BOOTSTRAP_DATABASE_URL="$phase_b_upgrade_bootstrap" \
+DATABASE_URL="$phase_b_upgrade_migrator" \
+NOOSPHERE_APP_DATABASE_URL="$phase_b_upgrade_app" \
+NOOSPHERE_HYBRID_ADMIN_DATABASE_URL="$phase_b_upgrade_admin" \
+NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$phase_b_upgrade_worker" \
+  "$repo_root/scripts/activate-hybrid-retrieval.sh" \
+  >"$phase_b_v1_upgrade_activation_output" 2>&1 &
+phase_b_v1_upgrade_activation_pid=$!
+phase_b_v1_upgrade_fenced=false
+for attempt in $(seq 1 100); do
+  phase_b_v1_upgrade_lock_state=$(psql "$phase_b_upgrade_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+    "SELECT
+       pg_catalog.bool_or(lock_record.mode = 'ShareLock' AND lock_record.granted)::text
+       || ':' || coalesce(activity.wait_event_type, '')
+     FROM pg_catalog.pg_stat_activity AS activity
+     LEFT JOIN pg_catalog.pg_locks AS lock_record
+       ON lock_record.pid = activity.pid
+      AND lock_record.relation = 'noosphere_hybrid.embedding_profile'::pg_catalog.regclass
+     WHERE activity.application_name = 'noosphere-hybrid-phase-b-v1-upgrade'
+     GROUP BY activity.wait_event_type")
+  if [[ "$phase_b_v1_upgrade_lock_state" == true:Lock ]]; then
+    phase_b_v1_upgrade_fenced=true
+    break
+  fi
+  kill -0 "$phase_b_v1_upgrade_activation_pid" >/dev/null 2>&1 || break
+  sleep 0.1
+done
+[[ "$phase_b_v1_upgrade_fenced" == true ]] ||
+  die "Phase B v1 upgrade did not hold the legacy INSERT fence while Phase C waited: ${phase_b_v1_upgrade_lock_state:-absent}"
+
+phase_b_v1_legacy_profile_output=$(mktemp)
+PGAPPNAME=noosphere-hybrid-phase-b-v1-legacy-profile \
+  psql "$phase_b_upgrade_admin" -XAtq -v ON_ERROR_STOP=1 -c \
+    "SELECT noosphere_hybrid.create_profile(
+       'openai-compatible','local','legacy-upgrade-race','r1',3,
+       'cosine','none',32768,decode(repeat('88',32),'hex'))" \
+    >"$phase_b_v1_legacy_profile_output" 2>&1 &
+phase_b_v1_legacy_profile_pid=$!
+phase_b_v1_legacy_profile_blocked=false
+for attempt in $(seq 1 100); do
+  phase_b_v1_legacy_profile_wait=$(psql "$phase_b_upgrade_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+    "SELECT coalesce(wait_event_type, '') || ':' || coalesce(wait_event, '')
+     FROM pg_catalog.pg_stat_activity
+     WHERE application_name='noosphere-hybrid-phase-b-v1-legacy-profile'")
+  if [[ "$phase_b_v1_legacy_profile_wait" == Lock:* ]]; then
+    phase_b_v1_legacy_profile_blocked=true
+    break
+  fi
+  kill -0 "$phase_b_v1_legacy_profile_pid" >/dev/null 2>&1 || break
+  sleep 0.1
+done
+[[ "$phase_b_v1_legacy_profile_blocked" == true ]] ||
+  die "legacy profile creation did not serialize behind the v1 upgrade: ${phase_b_v1_legacy_profile_wait:-absent}"
+
+printf '%s\n' 'COMMIT;' >&"$phase_b_v1_upgrade_locker_in"
+exec {phase_b_v1_upgrade_locker_in}>&-
+phase_b_v1_upgrade_locker_in=
+phase_b_v1_upgrade_locker_tail=$(cat <&"$phase_b_v1_upgrade_locker_out")
+exec {phase_b_v1_upgrade_locker_out}<&-
+phase_b_v1_upgrade_locker_out=
+if ! wait "$phase_b_v1_upgrade_locker_pid"; then
+  die "Phase B v1 upgrade lock fixture failed: $phase_b_v1_upgrade_locker_tail"
+fi
+phase_b_v1_upgrade_locker_pid=
+if ! wait "$phase_b_v1_upgrade_activation_pid"; then
+  phase_b_v1_upgrade_activation_failure=$(tail -80 "$phase_b_v1_upgrade_activation_output")
+  die "Phase B v1 activation failed: $phase_b_v1_upgrade_activation_failure"
+fi
+phase_b_v1_upgrade_activation_pid=
+rm -f -- "$phase_b_v1_upgrade_activation_output"
+phase_b_v1_upgrade_activation_output=
+if ! wait "$phase_b_v1_legacy_profile_pid"; then
+  phase_b_v1_legacy_profile_failure=$(cat "$phase_b_v1_legacy_profile_output")
+  die "serialized legacy profile creation failed: $phase_b_v1_legacy_profile_failure"
+fi
+phase_b_v1_legacy_profile_pid=
+phase_b_v1_legacy_profile_id=$(cat "$phase_b_v1_legacy_profile_output")
+rm -f -- "$phase_b_v1_legacy_profile_output"
+phase_b_v1_legacy_profile_output=
+assert_equals t "$(psql "$phase_b_upgrade_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SELECT snapshot.eligible_count = exact.eligible_count
+          AND snapshot.ready_count = exact.ready_count
+   FROM noosphere_hybrid_c.query_profile_snapshot('$phase_b_v1_legacy_profile_id') AS snapshot
+   CROSS JOIN noosphere_hybrid_c.query_profile_coverage('$phase_b_v1_legacy_profile_id') AS exact")" \
+  'legacy profile coverage after concurrent v1 upgrade'
+
+phase_b_v2_source_sha256=$(artifact_set_sha256 \
+  "$repo_root/docker/hybrid-storage/phase-b-schema.sql" \
+  "$repo_root/docker/hybrid-storage/phase-b-routine-manifest.sql" \
+  "$repo_root/docker/hybrid-storage/activate-phase-b.sql" \
+  "$repo_root/docker/hybrid-storage/upgrade-phase-b-v1-to-v2.sql" \
+  "$repo_root/docker/hybrid-storage/validate-phase-b-v1.sql" \
+  "$repo_root/docker/hybrid-storage/validate-phase-b.sql")
+assert_equals "2:$phase_b_v2_source_sha256:t:f:t" "$(
+  psql "$phase_b_upgrade_bootstrap" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+    "SELECT state.feature_version,
+            state.source_sha256,
+            pg_catalog.has_function_privilege(
+              'noosphere_hybrid_admin',
+              'noosphere_hybrid_b.create_profile(text,noosphere_hybrid.profile_locality,text,text,integer,noosphere_hybrid.distance_metric,noosphere_hybrid.normalization_policy,integer,bytea)',
+              'EXECUTE'
+            ),
+            pg_catalog.has_function_privilege(
+              'noosphere_hybrid_admin',
+              'noosphere_hybrid.create_profile(text,noosphere_hybrid.profile_locality,text,text,integer,noosphere_hybrid.distance_metric,noosphere_hybrid.normalization_policy,integer,bytea)',
+              'EXECUTE'
+            ),
+            c.phase_b_source_sha256 = state.source_sha256
+     FROM noosphere_hybrid_b.feature_state AS state
+     CROSS JOIN noosphere_hybrid_c.feature_state AS c
+     WHERE state.singleton AND c.singleton"
+)" 'Phase C upgrades exact Phase B v1 before activation'
+assert_equals "$phase_b_fresh_manifest_sha256:$phase_b_fresh_structure_sha256" "$(
+  psql "$phase_b_upgrade_bootstrap" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+    'SELECT manifest_sha256, structure_sha256
+     FROM noosphere_hybrid_b.feature_state WHERE singleton'
+)" 'direct Phase B v1 upgrade converges on fresh v2 state'
+
+# Restore the untouched historical v1 dump into a clean database and upgrade
+# it through the same current Phase C driver. The persisted historical
+# pg_get_functiondef hash is deliberately not trusted after this round trip;
+# the pinned stable v1 catalog fingerprint must authenticate the installation.
+phase_b_v1_restore_database="noosphere_phase_b_v1_restore_${run_id//[^a-zA-Z0-9]/_}"
+[[ "$phase_b_v1_restore_database" =~ ^[a-z0-9_]+$ ]] ||
+  die 'generated Phase B v1 restore database name is unsafe'
+psql "${candidate_bootstrap%/*}/postgres" -XAtq -v ON_ERROR_STOP=1 \
+  -c "CREATE DATABASE \"$phase_b_v1_restore_database\" TEMPLATE template0" >/dev/null
+phase_b_v1_restore_bootstrap=$(database_url_for "$candidate_bootstrap" "$phase_b_v1_restore_database")
+phase_b_v1_restore_migrator=$(database_url_for "$candidate_migrator" "$phase_b_v1_restore_database")
+phase_b_v1_restore_app=$(database_url_for "$candidate_app" "$phase_b_v1_restore_database")
+phase_b_v1_restore_admin=$(database_url_for "$candidate_admin" "$phase_b_v1_restore_database")
+phase_b_v1_restore_worker=$(database_url_for "$candidate_worker" "$phase_b_v1_restore_database")
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 \
+  -c 'ALTER ROLE noosphere_hybrid_extension_owner SUPERUSER' >/dev/null
+phase_b_v1_restore_extension_owner_elevated=true
+phase_b_v1_restore_pgvector_version=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 \
+  -c "SELECT extversion FROM pg_catalog.pg_extension WHERE extname='vector'")
+psql "$phase_b_v1_restore_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SET ROLE noosphere_hybrid_extension_owner;
+   CREATE SCHEMA noosphere_vector AUTHORIZATION noosphere_hybrid_extension_owner;
+   CREATE EXTENSION vector WITH SCHEMA noosphere_vector
+     VERSION '$phase_b_v1_restore_pgvector_version';
+   CREATE SCHEMA noosphere_crypto AUTHORIZATION noosphere_hybrid_extension_owner;
+   CREATE EXTENSION pgcrypto WITH SCHEMA noosphere_crypto;
+   RESET ROLE" >/dev/null
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 \
+  -c 'ALTER ROLE noosphere_hybrid_extension_owner NOSUPERUSER' >/dev/null
+phase_b_v1_restore_extension_owner_elevated=false
+
+phase_b_v1_dump_container_path="/tmp/noosphere-phase-b-v1-$run_id.dump"
+phase_b_v1_restore_toc_container_path="/tmp/noosphere-phase-b-v1-$run_id.list"
+phase_b_v1_restore_toc_file=$(mktemp)
+phase_b_v1_restore_filtered_toc_file=$(mktemp)
+docker cp "$phase_b_v1_dump_file" "$candidate_container:$phase_b_v1_dump_container_path"
+docker exec "$candidate_container" pg_restore -l "$phase_b_v1_dump_container_path" \
+  >"$phase_b_v1_restore_toc_file"
+sed -E \
+  -e '/ (SCHEMA|EXTENSION) - (noosphere_crypto|noosphere_vector|pgcrypto|vector) /d' \
+  -e '/ COMMENT - EXTENSION (pgcrypto|vector) /d' \
+  "$phase_b_v1_restore_toc_file" >"$phase_b_v1_restore_filtered_toc_file"
+docker cp "$phase_b_v1_restore_filtered_toc_file" \
+  "$candidate_container:$phase_b_v1_restore_toc_container_path"
+docker exec "$candidate_container" \
+  pg_restore -U noosphere_bootstrap -d "$phase_b_v1_restore_database" \
+    --exit-on-error --use-list="$phase_b_v1_restore_toc_container_path" \
+    "$phase_b_v1_dump_container_path"
+docker exec "$candidate_container" unlink "$phase_b_v1_dump_container_path"
+docker exec "$candidate_container" unlink "$phase_b_v1_restore_toc_container_path"
+
+NOOSPHERE_BOOTSTRAP_DATABASE_URL="$phase_b_v1_restore_bootstrap" \
+DATABASE_URL="$phase_b_v1_restore_migrator" \
+NOOSPHERE_APP_DATABASE_URL="$phase_b_v1_restore_app" \
+NOOSPHERE_HYBRID_ADMIN_DATABASE_URL="$phase_b_v1_restore_admin" \
+NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$phase_b_v1_restore_worker" \
+  "$repo_root/scripts/activate-hybrid-retrieval.sh" >/dev/null
+assert_equals "2:$phase_b_v2_source_sha256:$phase_b_fresh_manifest_sha256:$phase_b_fresh_structure_sha256" "$(
+  psql "$phase_b_v1_restore_bootstrap" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+    'SELECT feature_version, source_sha256, manifest_sha256, structure_sha256
+     FROM noosphere_hybrid_b.feature_state WHERE singleton'
+)" 'restored Phase B v1 upgrades to canonical v2 state'
+
+psql "${candidate_bootstrap%/*}/postgres" -XAtq -v ON_ERROR_STOP=1 \
+  -c "DROP DATABASE \"$phase_b_v1_restore_database\" WITH (FORCE)" >/dev/null
+phase_b_v1_restore_database=
+rm -f -- "$phase_b_v1_dump_file"
+phase_b_v1_dump_file=
+rm -f -- "$phase_b_v1_restore_toc_file" "$phase_b_v1_restore_filtered_toc_file"
+phase_b_v1_restore_toc_file=
+phase_b_v1_restore_filtered_toc_file=
+
+psql "${candidate_bootstrap%/*}/postgres" -XAtq -v ON_ERROR_STOP=1 \
+  -c "DROP DATABASE \"$phase_b_upgrade_database\" WITH (FORCE)" >/dev/null
+phase_b_upgrade_database=
+rm -rf -- "$phase_b_v1_fixture_dir"
+phase_b_v1_fixture_dir=
+
 # Phase B is a separately evidenced layer. It must activate and repeat exactly
 # without weakening the immutable A3 validator underneath it.
 activate_phase_b >/dev/null
@@ -1430,6 +1768,88 @@ psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
 # reject ACL drift, and enforce serving/current-vector behavior.
 activate_phase_c >/dev/null
 activate_phase_c >/dev/null
+
+# Catalog-based routine manifests must survive a custom-format logical
+# backup/restore exactly. Re-run the complete current activation on the
+# restored database so both provenance validators exercise the round trip.
+phase_b_manifest_before_dump=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT manifest_sha256 FROM noosphere_hybrid_b.feature_state WHERE singleton')
+phase_c_manifest_before_dump=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT manifest_sha256 FROM noosphere_hybrid_c.feature_state WHERE singleton')
+phase_c_dump_file=$(mktemp)
+docker exec "$candidate_container" \
+  pg_dump -U noosphere_bootstrap -d noosphere --format=custom >"$phase_c_dump_file"
+
+phase_c_restore_database="noosphere_phase_c_restore_${run_id//[^a-zA-Z0-9]/_}"
+[[ "$phase_c_restore_database" =~ ^[a-z0-9_]+$ ]] ||
+  die 'generated Phase C restore database name is unsafe'
+psql "${candidate_bootstrap%/*}/postgres" -XAtq -v ON_ERROR_STOP=1 \
+  -c "CREATE DATABASE \"$phase_c_restore_database\" TEMPLATE template0" >/dev/null
+phase_c_restore_bootstrap=$(database_url_for "$candidate_bootstrap" "$phase_c_restore_database")
+phase_c_restore_migrator=$(database_url_for "$candidate_migrator" "$phase_c_restore_database")
+phase_c_restore_app=$(database_url_for "$candidate_app" "$phase_c_restore_database")
+phase_c_restore_admin=$(database_url_for "$candidate_admin" "$phase_c_restore_database")
+phase_c_restore_worker=$(database_url_for "$candidate_worker" "$phase_c_restore_database")
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 \
+  -c 'ALTER ROLE noosphere_hybrid_extension_owner SUPERUSER' >/dev/null
+phase_c_restore_extension_owner_elevated=true
+phase_c_restore_pgvector_version=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 \
+  -c "SELECT extversion FROM pg_catalog.pg_extension WHERE extname='vector'")
+psql "$phase_c_restore_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  "SET ROLE noosphere_hybrid_extension_owner;
+   CREATE SCHEMA noosphere_vector AUTHORIZATION noosphere_hybrid_extension_owner;
+   CREATE EXTENSION vector WITH SCHEMA noosphere_vector
+     VERSION '$phase_c_restore_pgvector_version';
+   CREATE SCHEMA noosphere_crypto AUTHORIZATION noosphere_hybrid_extension_owner;
+   CREATE EXTENSION pgcrypto WITH SCHEMA noosphere_crypto;
+   RESET ROLE" >/dev/null
+psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 \
+  -c 'ALTER ROLE noosphere_hybrid_extension_owner NOSUPERUSER' >/dev/null
+phase_c_restore_extension_owner_elevated=false
+
+phase_c_dump_container_path="/tmp/noosphere-phase-c-$run_id.dump"
+phase_c_restore_toc_container_path="/tmp/noosphere-phase-c-$run_id.list"
+phase_c_restore_toc_file=$(mktemp)
+phase_c_restore_filtered_toc_file=$(mktemp)
+docker cp "$phase_c_dump_file" "$candidate_container:$phase_c_dump_container_path"
+docker exec "$candidate_container" pg_restore -l "$phase_c_dump_container_path" \
+  >"$phase_c_restore_toc_file"
+sed -E \
+  -e '/ (SCHEMA|EXTENSION) - (noosphere_crypto|noosphere_vector|pgcrypto|vector) /d' \
+  -e '/ COMMENT - EXTENSION (pgcrypto|vector) /d' \
+  "$phase_c_restore_toc_file" >"$phase_c_restore_filtered_toc_file"
+docker cp "$phase_c_restore_filtered_toc_file" \
+  "$candidate_container:$phase_c_restore_toc_container_path"
+docker exec "$candidate_container" \
+  pg_restore -U noosphere_bootstrap -d "$phase_c_restore_database" \
+    --exit-on-error --use-list="$phase_c_restore_toc_container_path" \
+    "$phase_c_dump_container_path"
+docker exec "$candidate_container" unlink "$phase_c_dump_container_path"
+docker exec "$candidate_container" unlink "$phase_c_restore_toc_container_path"
+
+NOOSPHERE_BOOTSTRAP_DATABASE_URL="$phase_c_restore_bootstrap" \
+DATABASE_URL="$phase_c_restore_migrator" \
+NOOSPHERE_APP_DATABASE_URL="$phase_c_restore_app" \
+NOOSPHERE_HYBRID_ADMIN_DATABASE_URL="$phase_c_restore_admin" \
+NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$phase_c_restore_worker" \
+  "$repo_root/scripts/activate-hybrid-retrieval.sh" >/dev/null
+assert_equals "$phase_b_manifest_before_dump:$phase_c_manifest_before_dump" "$(
+  psql "$phase_c_restore_bootstrap" -XAtq -F ':' -v ON_ERROR_STOP=1 -c \
+    'SELECT b.manifest_sha256, c.manifest_sha256
+     FROM noosphere_hybrid_b.feature_state AS b
+     CROSS JOIN noosphere_hybrid_c.feature_state AS c
+     WHERE b.singleton AND c.singleton'
+)" 'Phase B and C routine manifests survive custom dump and restore'
+
+psql "${candidate_bootstrap%/*}/postgres" -XAtq -v ON_ERROR_STOP=1 \
+  -c "DROP DATABASE \"$phase_c_restore_database\" WITH (FORCE)" >/dev/null
+phase_c_restore_database=
+rm -f -- "$phase_c_dump_file"
+phase_c_dump_file=
+rm -f -- "$phase_c_restore_toc_file" "$phase_c_restore_filtered_toc_file"
+phase_c_restore_toc_file=
+phase_c_restore_filtered_toc_file=
+
 expect_sql_failure 'administrator unsynchronized A3 profile creation' "$candidate_admin" \
   "SELECT noosphere_hybrid.create_profile(
      'openai-compatible','local','forbidden-direct','r1',3,

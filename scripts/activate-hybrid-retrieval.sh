@@ -37,10 +37,14 @@ a3_source_sha256=$(artifact_set_sha256 \
   "$root_dir/docker/hybrid-storage/validate.sql")
 phase_b_source_sha256=$(artifact_set_sha256 \
   "$root_dir/docker/hybrid-storage/phase-b-schema.sql" \
+  "$root_dir/docker/hybrid-storage/phase-b-routine-manifest.sql" \
   "$root_dir/docker/hybrid-storage/activate-phase-b.sql" \
+  "$root_dir/docker/hybrid-storage/upgrade-phase-b-v1-to-v2.sql" \
+  "$root_dir/docker/hybrid-storage/validate-phase-b-v1.sql" \
   "$root_dir/docker/hybrid-storage/validate-phase-b.sql")
 phase_c_source_sha256=$(artifact_set_sha256 \
   "$root_dir/docker/hybrid-storage/phase-c-schema.sql" \
+  "$root_dir/docker/hybrid-storage/phase-c-routine-manifest.sql" \
   "$root_dir/docker/hybrid-storage/activate-phase-c.sql" \
   "$root_dir/docker/hybrid-storage/validate-phase-c.sql")
 

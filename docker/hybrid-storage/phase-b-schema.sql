@@ -4,7 +4,7 @@
 
 CREATE TABLE noosphere_hybrid_b.feature_state (
   singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
-  feature_version integer NOT NULL CHECK (feature_version = 1),
+  feature_version integer NOT NULL CHECK (feature_version = 2),
   source_sha256 text NOT NULL CHECK (source_sha256 ~ '^[a-f0-9]{64}$'),
   manifest_sha256 text NOT NULL CHECK (manifest_sha256 ~ '^[a-f0-9]{64}$'),
   structure_sha256 text NOT NULL CHECK (structure_sha256 ~ '^[a-f0-9]{64}$'),
@@ -121,6 +121,8 @@ AS $function$
   SELECT pg_catalog.string_agg(evidence.definition, E'\n' ORDER BY evidence.identity)
   FROM evidence
 $function$;
+
+\ir phase-b-routine-manifest.sql
 
 CREATE FUNCTION noosphere_hybrid_b.article_write_guard()
 RETURNS trigger

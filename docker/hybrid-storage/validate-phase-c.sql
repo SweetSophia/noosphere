@@ -16,36 +16,11 @@ BEGIN
 
   SELECT pg_catalog.encode(
     noosphere_crypto.digest(
-      pg_catalog.convert_to(
-        pg_catalog.string_agg(
-          pg_catalog.format(
-            '%s|lang=%s|ret=%s|args=%s|vol=%s|strict=%s|secdef=%s|parallel=%s|config=%s|src=%s',
-            procedure.oid::pg_catalog.regprocedure::text,
-            (SELECT lanname FROM pg_catalog.pg_language WHERE oid = procedure.prolang),
-            pg_catalog.format_type(procedure.prorettype, NULL),
-            COALESCE((
-              SELECT pg_catalog.string_agg(pg_catalog.format_type(arg.oid, NULL), ',' ORDER BY arg.ord)
-              FROM pg_catalog.unnest(COALESCE(procedure.proallargtypes, procedure.proargtypes::oid[]))
-                WITH ORDINALITY AS arg(oid, ord)
-            ), ''),
-            procedure.provolatile,
-            procedure.proisstrict,
-            procedure.prosecdef,
-            COALESCE(procedure.proparallel, 'u'),
-            COALESCE(pg_catalog.array_to_string(procedure.proconfig, ','), ''),
-            procedure.prosrc
-          ),
-          E'\n' ORDER BY procedure.oid::pg_catalog.regprocedure::text
-        ),
-        'UTF8'
-      ),
+      pg_catalog.convert_to(noosphere_hybrid_c.routine_manifest(), 'UTF8'),
       'sha256'
     ),
     'hex'
-  ) INTO actual_manifest_sha256
-  FROM pg_catalog.pg_proc AS procedure
-  JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
-  WHERE namespace.nspname = 'noosphere_hybrid_c';
+  ) INTO actual_manifest_sha256;
   IF actual_manifest_sha256 <> state.manifest_sha256 THEN
     RAISE EXCEPTION 'Phase C routine manifest drifted';
   END IF;
@@ -58,7 +33,10 @@ BEGIN
     'hex'
   ) INTO actual_structure_sha256;
   IF actual_structure_sha256 <> state.structure_sha256 THEN
-    RAISE EXCEPTION 'Phase C table, constraint, or index structure drifted';
+    RAISE EXCEPTION 'Phase C table, constraint, or index structure drifted'
+      USING DETAIL = pg_catalog.format(
+        'expected %s, got %s', state.structure_sha256, actual_structure_sha256
+      );
   END IF;
 
   IF NOT EXISTS (

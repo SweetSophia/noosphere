@@ -259,11 +259,9 @@ export NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION=v1
 export NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64="$keyring_b64"
 ```
 
-Persist these values in the mode-0600 runtime `.env`, recreate only the
-application container, verify keyword recall, and then change
-`NOOSPHERE_HYBRID_RETRIEVAL_ENABLED` to the exact string `true`.
-`docker compose restart` does **not** reload environment variables; use
-`docker compose up -d --no-deps --force-recreate app` after every `.env` change. The app reuses
+Persist these values in the mode-0600 runtime `.env`, restart only the
+application, verify keyword recall, and then change
+`NOOSPHERE_HYBRID_RETRIEVAL_ENABLED` to the exact string `true`. The app reuses
 `NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64` for query embeddings. Local provider
 endpoints use the same pinned `host.docker.internal:host-gateway` mapping as the
 worker.
@@ -306,10 +304,9 @@ are MAC-authenticated under `noosphere-hybrid-cache-v1/value`, and expire after
 
 To rotate normally, add a new 32–64 byte base64 key to the JSON object (maximum
 three keys), set its version active, base64-encode the complete JSON again, and
-recreate the app (`docker compose up -d --no-deps --force-recreate app`).
-Keep the prior version for at least the 30-second TTL, then remove it. For
-suspected compromise, remove the old version immediately and recreate; entries
-signed by the retired version become misses and rebuild from
+restart the app. Keep the prior version for at least the 30-second TTL, then
+remove it. For suspected compromise, remove the old version immediately and
+restart; entries signed by the retired version become misses and rebuild from
 the database. Never reuse a retired version label.
 
 ## Partial-state recovery
@@ -373,8 +370,7 @@ fallback, and normalization before pagination.
 
 Phase A3, Phase B, and Phase C are opt-in and are not activated by Docker
 Compose or the application at startup. Roll back Phase C by setting
-`NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false` and recreating the app
-(`docker compose up -d --no-deps --force-recreate app`); keyword recall
+`NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false` and restarting the app; keyword recall
 remains available and no stored content changes. Roll back Phase B by
 deactivating every profile, then
 stopping the worker with `docker compose --profile hybrid stop hybrid-worker`.

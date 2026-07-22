@@ -10,11 +10,66 @@ async function artifact(path: string): Promise<string> {
 
 test("Phase C is independently evidenced and validates exact A3 plus B before activation", async () => {
   const activation = await artifact("docker/hybrid-storage/activate-phase-c.sql");
+  const upgradeIndex = activation.indexOf("\\ir upgrade-phase-b-v1-to-v2.sql");
+  const validationIndex = activation.indexOf("\\ir validate-phase-b.sql");
+
   assert.match(activation, /\\ir validate\.sql/);
   assert.match(activation, /\\ir validate-phase-b\.sql/);
+  assert.ok(upgradeIndex >= 0, "Phase C must invoke the versioned Phase B upgrader");
+  assert.ok(
+    upgradeIndex < validationIndex,
+    "Phase C must upgrade Phase B before validating the current artifact set",
+  );
   assert.match(activation, /noosphere\.phase_c\.source_sha256/);
   assert.match(activation, /refusing partial or attacker-precreated Phase C schema/);
   assert.match(activation, /\\ir validate-phase-c\.sql/);
+});
+
+test("Phase B has an exact fail-closed v1 to v2 upgrade contract", async () => {
+  const activation = await artifact("docker/hybrid-storage/activate-phase-b.sql");
+  const upgrade = await artifact("docker/hybrid-storage/upgrade-phase-b-v1-to-v2.sql");
+  const v1Validation = await artifact("docker/hybrid-storage/validate-phase-b-v1.sql");
+  const validation = await artifact("docker/hybrid-storage/validate-phase-b.sql");
+  const retrievalActivation = await artifact("scripts/activate-hybrid-retrieval.sh");
+  const workerActivation = await artifact("scripts/activate-hybrid-worker.sh");
+  const worker = await artifact("scripts/hybrid-worker.mjs");
+
+  assert.match(activation, /\\ir upgrade-phase-b-v1-to-v2\.sql/);
+  assert.match(upgrade, /5a5cb62c29deceb44b91c0a0252607ce9460b2761dbeca7724963ad7043fca98/);
+  assert.match(upgrade, /\\ir validate-phase-b-v1\.sql/);
+  assert.match(upgrade, /feature_version = 2/);
+  assert.match(upgrade, /serialize_eligibility\(\)/);
+  assert.match(
+    upgrade,
+    /LOCK TABLE noosphere_hybrid\.embedding_profile IN SHARE MODE/,
+  );
+  assert.match(upgrade, /refusing to upgrade Phase B beneath an existing Phase C activation/);
+  assert.match(
+    v1Validation,
+    /e648c4e83359994349c5502bffa9739ac3401df7f00511722d7111fa8e981f98/,
+  );
+  assert.doesNotMatch(v1Validation, /pg_catalog\.pg_get_functiondef/);
+  assert.match(validation, /state\.feature_version <> 2/);
+  assert.match(retrievalActivation, /upgrade-phase-b-v1-to-v2\.sql/);
+  assert.match(workerActivation, /upgrade-phase-b-v1-to-v2\.sql/);
+  assert.match(worker, /row\.feature_version !== 2/);
+});
+
+test("Phase B and C routine manifests use stable catalog fields", async () => {
+  for (const path of [
+    "docker/hybrid-storage/phase-b-routine-manifest.sql",
+    "docker/hybrid-storage/phase-c-routine-manifest.sql",
+  ]) {
+    const manifest = await artifact(path);
+    assert.match(manifest, /procedure\.prosrc/);
+    assert.match(manifest, /procedure\.provolatile/);
+    assert.match(manifest, /procedure\.proisstrict/);
+    assert.match(manifest, /procedure\.proparallel/);
+    assert.match(manifest, /procedure\.prosecdef/);
+    assert.match(manifest, /ORDER BY setting COLLATE "C"/);
+    assert.doesNotMatch(manifest, /pg_get_functiondef/);
+    assert.doesNotMatch(manifest, /regprocedure::text/);
+  }
 });
 
 test("Phase B serializes profile creation before Phase C materializes coverage", async () => {
