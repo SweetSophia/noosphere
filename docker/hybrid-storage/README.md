@@ -259,9 +259,16 @@ export NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION=v1
 export NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64="$keyring_b64"
 ```
 
-Persist these values in the mode-0600 runtime `.env`, restart only the
-application, verify keyword recall, and then change
-`NOOSPHERE_HYBRID_RETRIEVAL_ENABLED` to the exact string `true`. The app reuses
+Persist these values in the mode-0600 runtime `.env`, recreate only the
+application container, and verify keyword recall:
+
+```bash
+docker compose up -d --no-deps --force-recreate app
+```
+
+Then change `NOOSPHERE_HYBRID_RETRIEVAL_ENABLED` to the exact string `true` and
+recreate the application container again with the same command. `docker compose
+restart` does not reload environment variables. The app reuses
 `NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64` for query embeddings. Local provider
 endpoints use the same pinned `host.docker.internal:host-gateway` mapping as the
 worker.
@@ -304,23 +311,39 @@ are MAC-authenticated under `noosphere-hybrid-cache-v1/value`, and expire after
 
 To rotate normally, add a new 32–64 byte base64 key to the JSON object (maximum
 three keys), set its version active, base64-encode the complete JSON again, and
-restart the app. Keep the prior version for at least the 30-second TTL, then
-remove it. For suspected compromise, remove the old version immediately and
-restart; entries signed by the retired version become misses and rebuild from
-the database. Never reuse a retired version label.
+run `docker compose up -d --no-deps --force-recreate app`. Keep the prior version
+for at least the 30-second TTL, then remove it and run the same recreation
+command again. For suspected compromise, remove the old version immediately and
+recreate the app with that command; entries signed by the retired version become
+misses and rebuild from the database. Never reuse a retired version label.
 
 ## Partial-state recovery
 
 `hybrid capability phase is partial or unsafe` is a fail-closed recovery stop,
-not a prompt to rerun provisioning. Stop the application, init job, and any
-future worker; preserve the complete error output; take and verify a database
-backup before changing catalog state. Inventory the named schemas, capability
-roles, and memberships read-only:
+not a prompt to rerun provisioning. Stop the application, init job, and current
+hybrid worker; preserve the complete error output; take and verify a database
+backup before changing catalog state. Inventory every phase schema, capability
+role, membership, and feature-evidence row read-only:
 
 ```sql
 SELECT nspname FROM pg_catalog.pg_namespace
-WHERE nspname IN ('noosphere_vector', 'noosphere_crypto', 'noosphere_hybrid')
+WHERE nspname IN (
+  'noosphere_vector', 'noosphere_crypto', 'noosphere_hybrid',
+  'noosphere_hybrid_b', 'noosphere_hybrid_c'
+)
 ORDER BY nspname;
+
+SELECT pg_catalog.format(
+  'SELECT %L AS phase, * FROM %s;', phase, feature_table
+)
+FROM (VALUES
+  ('phase_a3', pg_catalog.to_regclass('noosphere_hybrid.feature_state')),
+  ('phase_b', pg_catalog.to_regclass('noosphere_hybrid_b.feature_state')),
+  ('phase_c', pg_catalog.to_regclass('noosphere_hybrid_c.feature_state'))
+) AS inventory(phase, feature_table)
+WHERE feature_table IS NOT NULL
+ORDER BY phase
+\gexec
 
 SELECT rolname, rolcanlogin, rolsuper, rolcreatedb, rolcreaterole,
        rolinherit, rolreplication, rolbypassrls
@@ -340,12 +363,16 @@ ORDER BY member_name, granted_name;
 
 Activation is one transaction, so an interrupted supported activation cannot
 commit a partial phase. Treat partial state as manual/catalog drift or an
-unsupported earlier artifact. The default recovery is restoration of a verified
-pre-activation backup. Do not drop schemas, extensions, roles, memberships, or
-feature rows merely to make provisioning pass. Any manual reconciliation is an
-explicit DBA operation outside this phase: bind it to the preserved backup,
+unsupported earlier artifact. Identify the earliest affected phase from the
+schema and feature-evidence inventory, then restore the verified backup taken
+immediately before that phase. The supported exact Phase B v1-to-v2 upgrade is
+the only historical reconciliation path; do not rerun a later activator across
+unexplained partial state. Do not drop schemas, extensions, roles, memberships,
+or feature rows merely to make provisioning pass. Any manual reconciliation is
+an explicit DBA operation outside these phases: bind it to the preserved backup,
 prove object ownership and dependencies, and remove only independently verified
-A3 objects before starting again from the clean pre-activation state.
+objects from the affected phase before restarting from its clean
+pre-activation state.
 
 ## Verify
 
@@ -370,8 +397,9 @@ fallback, and normalization before pagination.
 
 Phase A3, Phase B, and Phase C are opt-in and are not activated by Docker
 Compose or the application at startup. Roll back Phase C by setting
-`NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false` and restarting the app; keyword recall
-remains available and no stored content changes. Roll back Phase B by
+`NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false`, running
+`docker compose up -d --no-deps --force-recreate app`, and verifying keyword
+recall; no stored content changes. Roll back Phase B by
 deactivating every profile, then
 stopping the worker with `docker compose --profile hybrid stop hybrid-worker`.
 Inactive profiles are excluded from work and retrieval while their local vector

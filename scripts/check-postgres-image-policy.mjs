@@ -11,7 +11,7 @@ const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
 const immutableHelperRef = "a2067895023efc638e966ee827fea67385d8aa37";
 const verifiedInstallerRef = "2d1b08f18da111e5942af3ce821d47afa72b9264";
-const verifiedInstallerSha256 = "3b8b4814287cc7715c66685d0a956a7098aabcb1632e3cec0bb5d175d0f6b778";
+const verifiedInstallerSha256 = "622df3c415d0380eb277fdd7036505215261229f114a4e1bab47faf1cfbaec9e";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
@@ -172,6 +172,7 @@ expectExactDbImage("docker-compose.noosphere.yml", candidateImage, "noosphere_po
 expectExactDbImage("install-openclaw.sh", candidateImage, "noosphere_postgres_authorization");
 
 const installer = read("install-openclaw.sh");
+const publishedImageEnv = read("noosphere.env.example");
 const installerValidationEnv = {
   ...process.env,
   NOOSPHERE_INSTALLER_TEST_MODE: "runtime-env-validation",
@@ -267,6 +268,24 @@ const inheritedInstallerHybridValidation = spawnSync("bash", [resolve(root, "ins
     NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION: "toString",
   },
 });
+const disabledActiveWithoutKeyringValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: {
+    ...installerHybridValidationEnv,
+    NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: "false",
+    NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION: "v1",
+    NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON: "",
+    NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64: "",
+  },
+});
+const disabledKeyringWithoutActiveValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: {
+    ...installerHybridValidationEnv,
+    NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: "false",
+    NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION: "",
+  },
+});
 expect(
   validInstallerHybridValidation.status === 0 &&
     validInstallerHybridValidation.stdout.trim() === Buffer.from(installerHybridCacheJson, "utf8").toString("base64") &&
@@ -274,7 +293,9 @@ expect(
     weakInstallerHybridValidation.status !== 0 &&
     oversizedInstallerHybridValidation.status !== 0 &&
     oversizedInstallerHybridValidation.stderr.includes("exceeds 8192 bytes") &&
-    inheritedInstallerHybridValidation.status !== 0,
+    inheritedInstallerHybridValidation.status !== 0 &&
+    disabledActiveWithoutKeyringValidation.status !== 0 &&
+    disabledKeyringWithoutActiveValidation.status !== 0,
   "install-openclaw.sh must executable-test disabled-by-default Phase C plus bounded, strong authenticated-cache key material",
 );
 const helperArtifacts = [
@@ -490,6 +511,16 @@ expect(
     installer.includes("NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: \\${NOOSPHERE_HYBRID_RETRIEVAL_ENABLED:-false}") &&
     installer.includes("NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64: \\${NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64:-}"),
   "install-openclaw.sh must persist Phase C settings while publishing exact recall as disabled by default",
+);
+expect(
+  publishedImageEnv.includes("NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false") &&
+    publishedImageEnv.includes("# NOOSPHERE_HYBRID_QUERY_PROFILE_ID=") &&
+    publishedImageEnv.includes("# NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64=") &&
+    publishedImageEnv.includes("# NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION=") &&
+    publishedImageEnv.includes("# NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64=") &&
+    publishedImageEnv.includes("# NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS=30000") &&
+    publishedImageEnv.includes("# NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES=4194304"),
+  "noosphere.env.example must publish the complete disabled-by-default Phase C surface",
 );
 const installerProvisionIndexes = Array.from(
   installer.matchAll(/node docker\/provision-database-roles\.mjs/g),

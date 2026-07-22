@@ -8,6 +8,20 @@ async function artifact(path: string): Promise<string> {
   return readFile(new URL(path, root), "utf8");
 }
 
+function functionDefinition(sql: string, qualifiedName: string): string {
+  const start = sql.indexOf(`CREATE FUNCTION ${qualifiedName}`);
+  assert.notEqual(start, -1, `${qualifiedName} definition must remain discoverable`);
+
+  const bodyStart = sql.indexOf("AS $function$", start);
+  assert.notEqual(bodyStart, -1, `${qualifiedName} body must use the canonical delimiter`);
+
+  const terminator = "$function$;";
+  const end = sql.indexOf(terminator, bodyStart + "AS $function$".length);
+  assert.notEqual(end, -1, `${qualifiedName} definition must be complete`);
+
+  return sql.slice(start, end + terminator.length);
+}
+
 test("Phase C is independently evidenced and validates exact A3 plus B before activation", async () => {
   const activation = await artifact("docker/hybrid-storage/activate-phase-c.sql");
   const upgradeIndex = activation.indexOf("\\ir upgrade-phase-b-v1-to-v2.sql");
@@ -41,6 +55,11 @@ test("Phase B has an exact fail-closed v1 to v2 upgrade contract", async () => {
   assert.match(upgrade, /serialize_eligibility\(\)/);
   assert.match(
     upgrade,
+    /CREATE OR REPLACE FUNCTION noosphere_hybrid_b\.structural_manifest\(\)/,
+  );
+  assert.match(upgrade, /convert_to\(evidence\.identity, 'UTF8'\)/);
+  assert.match(
+    upgrade,
     /LOCK TABLE noosphere_hybrid\.embedding_profile IN SHARE MODE/,
   );
   assert.match(upgrade, /refusing to upgrade Phase B beneath an existing Phase C activation/);
@@ -69,6 +88,18 @@ test("Phase B and C routine manifests use stable catalog fields", async () => {
     assert.match(manifest, /ORDER BY setting COLLATE "C"/);
     assert.doesNotMatch(manifest, /pg_get_functiondef/);
     assert.doesNotMatch(manifest, /regprocedure::text/);
+  }
+});
+
+test("Phase B and C structural manifests bind identities to definitions", async () => {
+  for (const path of [
+    "docker/hybrid-storage/phase-b-schema.sql",
+    "docker/hybrid-storage/phase-c-schema.sql",
+  ]) {
+    const schema = await artifact(path);
+    assert.match(schema, /convert_to\(evidence\.identity, 'UTF8'\)/);
+    assert.match(schema, /convert_to\(evidence\.definition, 'UTF8'\)/);
+    assert.match(schema, /ORDER BY evidence\.identity/);
   }
 });
 
@@ -114,31 +145,35 @@ test("application receives only content-free Phase C routines and no table acces
 
 test("vector routines fail closed on serving state, dimension, finiteness, and current article state", async () => {
   const schema = await artifact("docker/hybrid-storage/phase-c-schema.sql");
-  assert.match(schema, /profile\.state <> 'serving'/);
-  assert.match(schema, /vector_dims\(query_embedding\) <> profile\.dimensions/);
-  assert.match(schema, /vector_is_finite\(query_embedding\)/);
-  assert.match(schema, /profile\.distance_metric = 'cosine'/);
-  assert.match(schema, /vector_norm\(query_embedding\) = 0/);
-  assert.match(schema, /query_profile_coverage/);
-  assert.match(schema, /embedding\.revision = state\.revision/);
-  assert.match(schema, /embedding\.content_hash = noosphere_hybrid\.canonical_hash/);
-  assert.match(schema, /profile_article_is_eligible/);
-  assert.match(schema, /OPERATOR\(noosphere_vector\.<=>\)/);
-  assert.match(schema, /OPERATOR\(noosphere_vector\.<->\)/);
-  assert.match(schema, /OPERATOR\(noosphere_vector\.<#>\)/);
-  assert.match(schema, /ORDER BY 2 ASC, article\."updatedAt" DESC, embedding\.article_id ASC/);
-  assert.match(schema, /LIMIT 200/);
-  assert.match(schema, /cardinality\(candidate_article_ids\) > 1000/);
+  const candidates = functionDefinition(
+    schema,
+    "noosphere_hybrid_c.vector_candidates",
+  );
+
+  assert.match(candidates, /profile\.state <> 'serving'/);
+  assert.match(candidates, /vector_dims\(query_embedding\) <> profile\.dimensions/);
+  assert.match(candidates, /vector_is_finite\(query_embedding\)/);
+  assert.match(candidates, /profile\.distance_metric = 'cosine'/);
+  assert.match(candidates, /vector_norm\(query_embedding\) = 0/);
+  assert.match(candidates, /embedding\.revision = state\.revision/);
+  assert.match(candidates, /embedding\.content_hash = noosphere_hybrid\.canonical_hash/);
+  assert.match(candidates, /profile_article_is_eligible/);
+  assert.match(candidates, /OPERATOR\(noosphere_vector\.<=>\)/);
+  assert.match(candidates, /OPERATOR\(noosphere_vector\.<->\)/);
+  assert.match(candidates, /OPERATOR\(noosphere_vector\.<#>\)/);
+  assert.match(candidates, /ORDER BY 2 ASC, article\."updatedAt" DESC, embedding\.article_id ASC/);
+  assert.match(candidates, /LIMIT 200/);
+  assert.match(candidates, /cardinality\(candidate_article_ids\) > 1000/);
 });
 
 test("profile snapshots read exact materialized coverage without scanning the corpus", async () => {
   const activation = await artifact("docker/hybrid-storage/activate-phase-c.sql");
   const schema = await artifact("docker/hybrid-storage/phase-c-schema.sql");
-  const snapshotDefinition = schema.match(
-    /CREATE FUNCTION noosphere_hybrid_c\.query_profile_snapshot[\s\S]*?\$function\$;/,
-  )?.[0];
+  const snapshotDefinition = functionDefinition(
+    schema,
+    "noosphere_hybrid_c.query_profile_snapshot",
+  );
 
-  assert.ok(snapshotDefinition, "query_profile_snapshot definition must remain discoverable");
   assert.match(schema, /CREATE TABLE noosphere_hybrid_c\.profile_coverage_snapshot/);
   assert.match(schema, /CREATE TABLE noosphere_hybrid_c\.profile_coverage_member/);
   assert.match(schema, /CREATE FUNCTION noosphere_hybrid_c\.refresh_profile_article_coverage/);

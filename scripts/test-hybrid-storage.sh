@@ -913,6 +913,8 @@ cp "$repo_root/docker/hybrid-storage/activate-phase-b.sql" \
   "$phase_b_v1_fixture_dir/"
 base64 --decode "$repo_root/src/__tests__/fixtures/hybrid-storage/phase-b-v1.patch" \
   | patch -s -d "$phase_b_v1_fixture_dir" -p0
+patch -s -d "$phase_b_v1_fixture_dir" -p0 \
+  <"$repo_root/src/__tests__/fixtures/hybrid-storage/phase-b-v1-structural-manifest.patch"
 
 phase_b_v1_source_sha256=$(artifact_set_sha256 \
   "$phase_b_v1_fixture_dir/phase-b-schema.sql" \
@@ -1767,6 +1769,46 @@ psql "$candidate_app" -XAtq -v ON_ERROR_STOP=1 -c \
 # retrieval capability. It must preserve both exact prerequisite validators,
 # reject ACL drift, and enforce serving/current-vector behavior.
 activate_phase_c >/dev/null
+activate_phase_c >/dev/null
+
+# A same-signature body replacement preserves the routine identity and ACLs,
+# so the catalog manifest itself must reject it. Keep the tamper transactional
+# and then revalidate the untouched installation to prove the failed probe did
+# not leave state behind.
+if psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 <<SQL >/dev/null 2>&1
+BEGIN;
+SELECT pg_catalog.set_config(
+         'noosphere.phase_a3.source_sha256', state.a3_source_sha256, true
+       ),
+       pg_catalog.set_config(
+         'noosphere.phase_b.source_sha256', state.phase_b_source_sha256, true
+       ),
+       pg_catalog.set_config(
+         'noosphere.phase_c.source_sha256', state.source_sha256, true
+       )
+FROM noosphere_hybrid_c.feature_state AS state
+WHERE state.singleton;
+SET LOCAL ROLE noosphere_hybrid_owner;
+CREATE OR REPLACE FUNCTION noosphere_hybrid_c.vector_candidates(
+  uuid, text, text[]
+)
+RETURNS TABLE (article_id text, distance double precision)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS \$tamper\$
+BEGIN
+  RETURN;
+END;
+\$tamper\$;
+RESET ROLE;
+\i $repo_root/docker/hybrid-storage/validate-phase-c.sql
+ROLLBACK;
+SQL
+then
+  die 'Phase C same-signature routine body tamper unexpectedly validated'
+fi
 activate_phase_c >/dev/null
 
 # Catalog-based routine manifests must survive a custom-format logical

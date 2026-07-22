@@ -87,6 +87,10 @@ test("Phase C is exactly false by default and rejects ambiguous flag values", ()
     enabled: false,
   });
   assert.throws(
+    () => readHybridRetrievalConfig({ NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: "" }),
+    HybridCorrectnessError,
+  );
+  assert.throws(
     () => readHybridRetrievalConfig({ NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: "1" }),
     HybridCorrectnessError,
   );

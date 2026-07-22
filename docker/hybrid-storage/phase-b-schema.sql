@@ -118,7 +118,12 @@ AS $function$
         OR trigger_record.tgname LIKE 'zz_noosphere_hybrid_b%'
       )
   )
-  SELECT pg_catalog.string_agg(evidence.definition, E'\n' ORDER BY evidence.identity)
+  SELECT pg_catalog.string_agg(
+    pg_catalog.encode(pg_catalog.convert_to(evidence.identity, 'UTF8'), 'hex')
+      || ':' ||
+    pg_catalog.encode(pg_catalog.convert_to(evidence.definition, 'UTF8'), 'hex'),
+    E'\n' ORDER BY evidence.identity
+  )
   FROM evidence
 $function$;
 

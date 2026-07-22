@@ -162,10 +162,10 @@ A cache hit is not an authorization or eligibility decision. One current databas
 The existing strict full-text query and bounded conversational fallback remain the lexical behavior.
 
 Only classified request-shape or transient embedding conditions may degrade a
-request to lexical-only retrieval: an unbounded/deep result window, connection
-timeout, temporary network failure, provider rate limiting, provider 5xx, or
-insufficient ready-vector coverage during rollout. Degradation emits bounded,
-content-free diagnostics and metrics.
+request to lexical-only retrieval: `window_exceeded`, `limit_unbounded`,
+`authorized_candidate_limit_exceeded`, insufficient ready-vector coverage,
+connection timeout, temporary network failure, or provider HTTP 408, 429, or
+5xx. Degradation emits bounded, content-free diagnostics and metrics.
 
 Invalid configuration, missing required feature schema, dimension mismatch, non-finite vectors, SQL errors, authorization invariant failures, and malformed provider responses are correctness faults. They must surface through readiness/status and operator-visible errors rather than being silently relabeled as an outage.
 

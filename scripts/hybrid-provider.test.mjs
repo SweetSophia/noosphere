@@ -49,6 +49,18 @@ test("provider configs are unique, locality-bound, and require remote authentica
     { profileId, locality: "local", endpoint: "http://localhost:8080/a" },
     { profileId, locality: "local", endpoint: "http://localhost:8080/b" },
   ])), /Duplicate/);
+  assert.throws(() => parseProviderConfigs(JSON.stringify([{
+    profileId,
+    locality: "remote",
+    endpoint: "https://example.com/v1/embeddings",
+    apiKey: "not-a-byte-string-🔑",
+  }])), /credential/);
+  assert.throws(() => parseProviderConfigs(JSON.stringify([{
+    profileId,
+    locality: "remote",
+    endpoint: "https://example.com/v1/embeddings",
+    apiKey: "contains-\u0000-control",
+  }])), /credential/);
 });
 
 test("provider configuration base64 preserves Compose-sensitive credentials", () => {
@@ -129,6 +141,7 @@ test("provider request authenticates, bounds content, and returns one validated 
   });
   assert.deepEqual(embedding, [1, 2, 3]);
   assert.equal(observed.init.headers.authorization, `Bearer ${testApiKey}`);
+  assert.equal(observed.init.redirect, "manual");
   assert.equal(JSON.parse(observed.init.body).input, "fixture");
 
   await assert.rejects(
@@ -154,6 +167,56 @@ test("provider request authenticates, bounds content, and returns one validated 
       }),
     }),
     (error) => error instanceof HybridProviderError && error.code === "provider_response_too_large",
+  );
+});
+
+test("provider request keeps redirects and static request failures non-retryable", async () => {
+  const provider = {
+    profileId,
+    locality: "local",
+    endpoint: "http://127.0.0.1:8080/v1/embeddings",
+    endpointIdentitySha256: job.endpoint_identity_sha256,
+    apiKey: "",
+  };
+  await assert.rejects(
+    requestEmbedding(job, provider, {
+      fetchImpl: async (_url, init) => {
+        assert.equal(init.redirect, "manual");
+        return new Response(null, { status: 302, headers: { location: "http://127.0.0.1:8080/other" } });
+      },
+    }),
+    (error) => error instanceof HybridProviderError && error.code === "provider_http_302" && error.retryable === false,
+  );
+  await assert.rejects(
+    requestEmbedding(job, provider, {
+      fetchImpl: async () => { throw new TypeError("request construction failed"); },
+    }),
+    (error) => error instanceof HybridProviderError && error.code === "provider_request_failed" && error.retryable === false,
+  );
+  await assert.rejects(
+    requestEmbedding(job, provider, {
+      fetchImpl: async () => ({ ok: false, status: 600 }),
+    }),
+    (error) => error instanceof HybridProviderError && error.code === "provider_http_600" && error.retryable === false,
+  );
+});
+
+test("provider request retries only recognized transport failures", async () => {
+  const provider = {
+    profileId,
+    locality: "local",
+    endpoint: "http://127.0.0.1:8080/v1/embeddings",
+    endpointIdentitySha256: job.endpoint_identity_sha256,
+    apiKey: "",
+  };
+  const transportError = new TypeError("fetch failed", {
+    cause: Object.assign(new Error("connection reset"), { code: "ECONNRESET" }),
+  });
+  await assert.rejects(
+    requestEmbedding(job, provider, {
+      fetchImpl: async () => { throw transportError; },
+    }),
+    (error) => error instanceof HybridProviderError && error.code === "provider_network" && error.retryable === true,
   );
 });
 

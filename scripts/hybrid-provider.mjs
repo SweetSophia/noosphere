@@ -16,6 +16,19 @@ export const HYBRID_LIMITS = Object.freeze({
 
 export const HYBRID_LEASE_SAFETY_MARGIN_MS = 5_000;
 
+const RETRYABLE_TRANSPORT_CODES = new Set([
+  "EAI_AGAIN",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "ETIMEDOUT",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_SOCKET",
+]);
+
 export class HybridProviderError extends Error {
   constructor(code, message, { retryable = false, cause } = {}) {
     super(message, cause === undefined ? undefined : { cause });
@@ -99,7 +112,7 @@ export function parseProviderConfigs(raw) {
     const locality = entry.locality;
     const endpoint = canonicalEndpointIdentity(entry.endpoint, locality);
     const apiKey = entry.apiKey ?? "";
-    if (typeof apiKey !== "string" || apiKey.length > 8_192 || /[\r\n]/u.test(apiKey)) {
+    if (typeof apiKey !== "string" || apiKey.length > 8_192 || !isLegalHeaderValue(apiKey)) {
       throw new Error(`Hybrid provider credential is invalid for profile ${profileId}`);
     }
     if (locality === "remote" && apiKey.length === 0) {
@@ -172,7 +185,7 @@ export async function requestEmbedding(job, provider, options = {}) {
     const response = await fetchImpl(provider.endpoint, {
       method: "POST",
       headers,
-      redirect: "error",
+      redirect: "manual",
       signal: controller.signal,
       body: JSON.stringify({
         model: job.model_identifier,
@@ -181,7 +194,8 @@ export async function requestEmbedding(job, provider, options = {}) {
       }),
     });
     if (!response.ok) {
-      const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+      const retryable = response.status === 408 || response.status === 429 ||
+        (response.status >= 500 && response.status < 600);
       throw new HybridProviderError(`provider_http_${response.status}`, "Embedding provider returned a non-success status", { retryable });
     }
     const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
@@ -201,7 +215,10 @@ export async function requestEmbedding(job, provider, options = {}) {
     if (controller.signal.aborted) {
       throw new HybridProviderError("provider_timeout", "Embedding provider request timed out or was cancelled", { retryable: true, cause: error });
     }
-    throw new HybridProviderError("provider_network", "Embedding provider request failed", { retryable: true, cause: error });
+    if (isRetryableTransportError(error)) {
+      throw new HybridProviderError("provider_network", "Embedding provider request failed", { retryable: true, cause: error });
+    }
+    throw new HybridProviderError("provider_request_failed", "Embedding provider request failed", { cause: error });
   } finally {
     clearTimeout(timeout);
     outerSignal?.removeEventListener("abort", abortFromOuter);
@@ -254,6 +271,26 @@ export function computeRetryDelayMs(attemptCount, random = Math.random) {
 export function sanitizeErrorCode(code) {
   const normalized = String(code || "unknown").toLowerCase().replace(/[^a-z0-9_]/gu, "_").slice(0, 64);
   return normalized || "unknown";
+}
+
+function isLegalHeaderValue(value) {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (
+      codePoint === 0x09 ||
+      (codePoint >= 0x20 && codePoint <= 0x7e) ||
+      (codePoint >= 0x80 && codePoint <= 0xff)
+    ) {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+function isRetryableTransportError(error) {
+  const code = error?.cause?.code ?? error?.code;
+  return typeof code === "string" && RETRYABLE_TRANSPORT_CODES.has(code);
 }
 
 export function abortableDelay(milliseconds, signal) {

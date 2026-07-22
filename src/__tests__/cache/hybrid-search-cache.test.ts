@@ -20,6 +20,7 @@ const key2 = randomBytes(32).toString("base64");
 class FakeRedisClient {
   status = "wait";
   readonly store = new Map<string, string>();
+  readonly ttls = new Map<string, number>();
 
   async connect() {
     this.status = "ready";
@@ -33,8 +34,9 @@ class FakeRedisClient {
     return this.store.get(key) ?? null;
   }
 
-  async setex(key: string, _ttl: number, value: string) {
+  async setex(key: string, ttl: number, value: string) {
     this.store.set(key, value);
+    this.ttls.set(key, ttl);
     return "OK";
   }
 }
@@ -208,6 +210,7 @@ test("Redis stores only the authenticated content-free envelope and treats tampe
       candidates: [{ id: "article-1", rawRrfScore: 0.03, lexicalRank: 1 }],
     };
     await writeHybridSearchCache(built, result, keyring());
+    assert.equal(redis.ttls.get(built.cacheKey), 30);
     const raw = redis.store.get(built.cacheKey);
     assert.ok(raw);
     assert.doesNotMatch(raw!, /Remember|café|team:a|content|title|excerpt|embedding/);

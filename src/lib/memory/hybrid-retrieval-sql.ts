@@ -13,6 +13,7 @@ import {
   HYBRID_CANDIDATE_DEPTH,
   HYBRID_MAX_AUTHORIZED_CANDIDATES,
   HYBRID_MINIMUM_COVERAGE,
+  HYBRID_RRF_K,
   HYBRID_VECTOR_AUTH_BATCH_SIZE,
 } from "@/lib/memory/hybrid-ranking";
 
@@ -108,7 +109,7 @@ export function buildHybridMissSql(
         "updatedAt",
         lexical_rank,
         NULL::integer AS vector_rank,
-        1.0::double precision / (60 + lexical_rank) AS contribution
+        1.0::double precision / (${HYBRID_RRF_K} + lexical_rank) AS contribution
       FROM lexical_ranked
       UNION ALL
       SELECT
@@ -116,7 +117,7 @@ export function buildHybridMissSql(
         "updatedAt",
         NULL::integer AS lexical_rank,
         vector_rank,
-        1.0::double precision / (60 + vector_rank) AS contribution
+        1.0::double precision / (${HYBRID_RRF_K} + vector_rank) AS contribution
       FROM vector_ranked
     ),
     fused AS MATERIALIZED (

@@ -20,6 +20,7 @@ import {
   buildHybridCacheHitSql,
   buildHybridMissSql,
 } from "@/lib/memory/hybrid-retrieval-sql";
+import { HYBRID_CANDIDATE_DEPTH } from "@/lib/memory/hybrid-ranking";
 import {
   HYBRID_LIMITS,
   HybridProviderError,
@@ -545,7 +546,7 @@ function optionalRank<Key extends "lexicalRank" | "vectorRank">(
 ): Partial<Record<Key, number>> {
   if (value === null) return {};
   const rank = requireInteger(value, key);
-  if (rank < 1 || rank > 200) {
+  if (rank < 1 || rank > HYBRID_CANDIDATE_DEPTH) {
     throw new HybridCorrectnessError(`hybrid_${key}_malformed`);
   }
   return { [key]: rank } as Partial<Record<Key, number>>;

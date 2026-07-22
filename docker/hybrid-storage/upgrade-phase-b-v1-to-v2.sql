@@ -75,6 +75,86 @@ WHERE singleton
   SET LOCAL ROLE noosphere_hybrid_owner;
   \ir phase-b-routine-manifest.sql
 
+  CREATE OR REPLACE FUNCTION noosphere_hybrid_b.structural_manifest()
+  RETURNS text
+  LANGUAGE sql
+  STABLE
+  SECURITY DEFINER
+  SET search_path = pg_catalog, pg_temp
+  AS $function$
+  WITH evidence AS (
+    SELECT
+      pg_catalog.format('column:%s.%s:%s', namespace.nspname, relation.relname, attribute.attnum) AS identity,
+      pg_catalog.format(
+        '%I.%I.%I|%s|notnull=%s|identity=%s|generated=%s|default=%s',
+        namespace.nspname,
+        relation.relname,
+        attribute.attname,
+        pg_catalog.format_type(attribute.atttypid, attribute.atttypmod),
+        attribute.attnotnull,
+        attribute.attidentity,
+        attribute.attgenerated,
+        coalesce(pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid, false), '')
+      ) AS definition
+    FROM pg_catalog.pg_class AS relation
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+    JOIN pg_catalog.pg_attribute AS attribute ON attribute.attrelid = relation.oid
+    LEFT JOIN pg_catalog.pg_attrdef AS default_value
+      ON default_value.adrelid = relation.oid AND default_value.adnum = attribute.attnum
+    WHERE namespace.nspname = 'noosphere_hybrid_b'
+      AND relation.relkind IN ('r', 'p')
+      AND attribute.attnum > 0
+      AND NOT attribute.attisdropped
+
+    UNION ALL
+
+    SELECT
+      pg_catalog.format('constraint:%s.%s:%s', namespace.nspname, relation.relname, constraint_record.conname),
+      pg_catalog.pg_get_constraintdef(constraint_record.oid, false)
+    FROM pg_catalog.pg_constraint AS constraint_record
+    JOIN pg_catalog.pg_class AS relation ON relation.oid = constraint_record.conrelid
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+    WHERE namespace.nspname = 'noosphere_hybrid_b'
+
+    UNION ALL
+
+    SELECT
+      pg_catalog.format('index:%s.%s:%s', namespace.nspname, relation.relname, index_relation.relname),
+      pg_catalog.pg_get_indexdef(index_relation.oid, 0, false)
+    FROM pg_catalog.pg_index AS index_record
+    JOIN pg_catalog.pg_class AS relation ON relation.oid = index_record.indrelid
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+    JOIN pg_catalog.pg_class AS index_relation ON index_relation.oid = index_record.indexrelid
+    WHERE namespace.nspname = 'noosphere_hybrid_b'
+
+    UNION ALL
+
+    SELECT
+      pg_catalog.format('trigger:public.Article:%s', trigger_record.tgname),
+      pg_catalog.pg_get_triggerdef(trigger_record.oid, false)
+    FROM pg_catalog.pg_trigger AS trigger_record
+    JOIN pg_catalog.pg_class AS relation ON relation.oid = trigger_record.tgrelid
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+    JOIN pg_catalog.pg_proc AS procedure ON procedure.oid = trigger_record.tgfoid
+    JOIN pg_catalog.pg_namespace AS procedure_namespace ON procedure_namespace.oid = procedure.pronamespace
+    WHERE NOT trigger_record.tgisinternal
+      AND namespace.nspname = 'public'
+      AND relation.relname = 'Article'
+      AND (
+        procedure_namespace.nspname = 'noosphere_hybrid_b'
+        OR trigger_record.tgname LIKE 'noosphere_hybrid_b%'
+        OR trigger_record.tgname LIKE 'zz_noosphere_hybrid_b%'
+      )
+  )
+  SELECT pg_catalog.string_agg(
+    pg_catalog.encode(pg_catalog.convert_to(evidence.identity, 'UTF8'), 'hex')
+      || ':' ||
+    pg_catalog.encode(pg_catalog.convert_to(evidence.definition, 'UTF8'), 'hex'),
+    E'\n' ORDER BY evidence.identity
+  )
+  FROM evidence
+$function$;
+
   CREATE FUNCTION noosphere_hybrid_b.create_profile(
     provider_protocol_arg text,
     locality_arg noosphere_hybrid.profile_locality,

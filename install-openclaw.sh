@@ -159,7 +159,7 @@ normalize_hybrid_retrieval_config() {
       const active = process.env.HYBRID_CACHE_ACTIVE_VERSION || "";
       const encoded = process.env.HYBRID_CACHE_KEYRING_B64 || "";
       if (!encoded) {
-        if (enabled) throw new Error("Phase C requires a hybrid cache HMAC keyring");
+        if (enabled || active) throw new Error("hybrid cache active version and keyring must be configured together");
         process.exit(0);
       }
       if (encoded.length > 8192 || encoded.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) throw new Error("hybrid cache keyring must use canonical base64");
@@ -174,7 +174,7 @@ normalize_hybrid_retrieval_config() {
         const key = Buffer.from(value, "base64");
         if (key.toString("base64") !== value || key.length < 32 || key.length > 64) throw new Error("hybrid cache keys must be canonical base64 for 32-64 bytes");
       }
-      if ((enabled || active) && (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/.test(active) || !Object.hasOwn(parsed, active))) throw new Error("active hybrid cache key version is absent");
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/.test(active) || !Object.hasOwn(parsed, active)) throw new Error("active hybrid cache key version is absent");
     '
 }
 

@@ -9,6 +9,7 @@ import {
   HYBRID_CANDIDATE_DEPTH,
   HYBRID_MAX_AUTHORIZED_CANDIDATES,
   HYBRID_MINIMUM_COVERAGE,
+  HYBRID_RRF_K,
 } from "@/lib/memory/hybrid-ranking";
 
 function sqlText(query: { strings: readonly string[] }): string {
@@ -77,8 +78,10 @@ test("miss query uses one shared authorized base for lexical and vector candidat
   );
   assert.match(text, /lexical_source AS MATERIALIZED .* LIMIT \?/s);
   assert.match(text, /vector_source AS MATERIALIZED .* LIMIT \?/s);
-  assert.match(text, /60 \+ lexical_rank/);
-  assert.match(text, /60 \+ vector_rank/);
+  assert.equal(
+    query.values.filter((value) => value === HYBRID_RRF_K).length,
+    2,
+  );
 });
 
 test("miss query selects strict lexical matches before the bounded zero-result fallback", () => {

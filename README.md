@@ -106,10 +106,10 @@ installer:
 
 ```bash
 # Installer commit: 2d1b08f18da111e5942af3ce821d47afa72b9264
-# Expected SHA-256: 3b8b4814287cc7715c66685d0a956a7098aabcb1632e3cec0bb5d175d0f6b778
+# Expected SHA-256: 622df3c415d0380eb277fdd7036505215261229f114a4e1bab47faf1cfbaec9e
 installer="$(mktemp)"
 curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/2d1b08f18da111e5942af3ce821d47afa72b9264/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '3b8b4814287cc7715c66685d0a956a7098aabcb1632e3cec0bb5d175d0f6b778' "$installer" | sha256sum -c -
+printf '%s  %s\n' '622df3c415d0380eb277fdd7036505215261229f114a4e1bab47faf1cfbaec9e' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 openclaw noosphere doctor
 openclaw noosphere status

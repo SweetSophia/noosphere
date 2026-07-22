@@ -109,7 +109,7 @@ export function readHybridRetrievalConfig(
   env: Readonly<Record<string, string | undefined>>,
 ): HybridRetrievalConfig {
   const rawFlag = env.NOOSPHERE_HYBRID_RETRIEVAL_ENABLED;
-  if (rawFlag === undefined || rawFlag === "" || rawFlag === "false") {
+  if (rawFlag === undefined || rawFlag === "false") {
     return { enabled: false };
   }
   if (rawFlag !== "true") {

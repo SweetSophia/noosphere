@@ -44,6 +44,7 @@ import {
   searchHybridArticles,
   type HybridArticleRow,
 } from "@/lib/memory/hybrid-retrieval-runtime";
+import { HYBRID_MAX_WINDOW } from "@/lib/memory/hybrid-ranking";
 
 export interface NoosphereProviderSettings {
   /** Optional Prisma client override for scripts, tests, or alternate runtimes. */
@@ -189,7 +190,7 @@ export class NoosphereProvider implements MemoryProvider {
     if (
       hybridConfig.enabled &&
       limit !== undefined &&
-      offset + limit <= 200
+      offset + limit <= HYBRID_MAX_WINDOW
     ) {
       try {
         const rows = await this.hybridSearch(
