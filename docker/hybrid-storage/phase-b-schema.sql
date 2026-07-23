@@ -4,7 +4,7 @@
 
 CREATE TABLE noosphere_hybrid_b.feature_state (
   singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
-  feature_version integer NOT NULL CHECK (feature_version = 1),
+  feature_version integer NOT NULL CHECK (feature_version = 2),
   source_sha256 text NOT NULL CHECK (source_sha256 ~ '^[a-f0-9]{64}$'),
   manifest_sha256 text NOT NULL CHECK (manifest_sha256 ~ '^[a-f0-9]{64}$'),
   structure_sha256 text NOT NULL CHECK (structure_sha256 ~ '^[a-f0-9]{64}$'),
@@ -118,9 +118,16 @@ AS $function$
         OR trigger_record.tgname LIKE 'zz_noosphere_hybrid_b%'
       )
   )
-  SELECT pg_catalog.string_agg(evidence.definition, E'\n' ORDER BY evidence.identity)
+  SELECT pg_catalog.string_agg(
+    pg_catalog.encode(pg_catalog.convert_to(evidence.identity, 'UTF8'), 'hex')
+      || ':' ||
+    pg_catalog.encode(pg_catalog.convert_to(evidence.definition, 'UTF8'), 'hex'),
+    E'\n' ORDER BY evidence.identity
+  )
   FROM evidence
 $function$;
+
+\ir phase-b-routine-manifest.sql
 
 CREATE FUNCTION noosphere_hybrid_b.article_write_guard()
 RETURNS trigger
@@ -411,6 +418,42 @@ BEGIN
         completed_at = NULL;
   END IF;
   PERFORM noosphere_hybrid.bump_search_cache_epoch();
+END;
+$function$;
+
+CREATE FUNCTION noosphere_hybrid_b.create_profile(
+  provider_protocol_arg text,
+  locality_arg noosphere_hybrid.profile_locality,
+  model_identifier_arg text,
+  model_revision_arg text,
+  dimensions_arg integer,
+  distance_metric_arg noosphere_hybrid.distance_metric,
+  normalization_policy_arg noosphere_hybrid.normalization_policy,
+  max_input_bytes_arg integer,
+  endpoint_identity_sha256_arg bytea
+)
+RETURNS uuid
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $function$
+BEGIN
+  -- Profile creation changes the Cartesian profile/article eligibility set.
+  -- Serialize it with Article, consent, and lifecycle mutations so Phase C's
+  -- AFTER INSERT refresh observes one complete side of every interleaving.
+  PERFORM noosphere_hybrid_b.serialize_eligibility();
+  RETURN noosphere_hybrid.create_profile(
+    provider_protocol_arg,
+    locality_arg,
+    model_identifier_arg,
+    model_revision_arg,
+    dimensions_arg,
+    distance_metric_arg,
+    normalization_policy_arg,
+    max_input_bytes_arg,
+    endpoint_identity_sha256_arg
+  );
 END;
 $function$;
 

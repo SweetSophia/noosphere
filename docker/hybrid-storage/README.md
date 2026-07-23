@@ -2,8 +2,8 @@
 
 Phase A3 installs the storage boundary for future hybrid retrieval. The optional
 Phase B layer adds a provider worker, consent, backfill, and lifecycle controls.
-Neither phase changes the current keyword-only query path; exact hybrid recall
-remains a separate Phase C activation.
+The optional Phase C layer adds exact hybrid recall. All three activations are
+explicit, and the application feature flag remains exactly `false` by default.
 
 ## What activation installs
 
@@ -216,18 +216,143 @@ database lock or blocks Article writes. Publication performs its own exclusive,
 complete recheck, and failed authorization releases the exact stale lease
 immediately.
 
+## Activate Phase C
+
+Phase C is a third independently evidenced activation. It revalidates the exact
+A3 and Phase B artifact identities and capability boundaries in the same
+transaction, then grants the application only four content-free definer
+routines: profile readiness, query-dispatch authorization, bounded vector
+candidates, and current-vector membership. Query dispatch takes Phase B's
+eligibility lock in a short transaction immediately before provider HTTP, so a
+consent/profile revocation that commits first suppresses query egress. The
+application never receives table access to vectors, profiles, consent, or
+feature evidence.
+
+Run A3 and Phase B activation first, then provide the same five role-specific
+URLs and run:
+
+```bash
+npm run hybrid-retrieval:activate
+```
+
+Repeat invocation validates the exact Phase C source hash, structural manifest,
+owners, `SECURITY DEFINER` settings, search paths, ACLs, role memberships, and
+the complete A3+B prerequisite state. It does not start a worker, change a
+profile, backfill content, or enable recall.
+
+### Configure exact recall
+
+Keep recall disabled until one profile is `serving`, its current-vector coverage
+is at least 95%, and its provider mapping is present. Generate a cache keyring
+without printing the key into shell history:
+
+```bash
+keyring_b64="$({
+  key=$(openssl rand -base64 32)
+  printf '{"v1":"%s"}' "$key"
+} | base64 -w0)"
+unset key
+
+export NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false
+export NOOSPHERE_HYBRID_QUERY_PROFILE_ID='<serving-profile-uuid>'
+export NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION=v1
+export NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64="$keyring_b64"
+```
+
+Persist these values in the mode-0600 runtime `.env`, recreate only the
+application container, and verify keyword recall:
+
+```bash
+docker compose up -d --no-deps --force-recreate app
+```
+
+Then change `NOOSPHERE_HYBRID_RETRIEVAL_ENABLED` to the exact string `true` and
+recreate the application container again with the same command. `docker compose
+restart` does not reload environment variables. The app reuses
+`NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64` for query embeddings. Local provider
+endpoints use the same pinned `host.docker.internal:host-gateway` mapping as the
+worker.
+
+Phase C keeps coverage exact without scanning or hashing the corpus on the
+request path. Owner-only profile/article membership rows are refreshed in the
+same transaction as Article, embedding, profile, and consent mutations;
+statement-level delta triggers maintain the per-profile eligible and ready
+counters returned by the application capability. Article and embedding writes
+therefore update only the affected article across configured profiles. The
+only corpus-wide rebuilds are the intentionally rare profile initialization and
+remote-consent eligibility transitions, both serialized by Phase B's
+eligibility lock.
+
+Hybrid recall uses one authorization-filtered candidate relation for lexical
+and vector legs. The vector leg processes deterministic batches of at most
+1,000 authorized IDs up to a request-wide maximum of 100,000 authorized
+articles, globally reorders their batch-local top-200 sets, and keeps the exact
+first 200. Larger authorized sets use classified lexical fallback before any
+lateral vector calls. RRF is deterministic (`k=60`, depth 200 per leg), final
+authorization/current-content hydration, whole-set score normalization, and
+then pagination. Requests whose `offset + limit` exceeds 200 use lexical recall.
+The status filter is optional; Phase C never adds an implicit `published`
+predicate.
+
+Only bounded request-shape classifications (`window_exceeded` and
+`limit_unbounded`), the bounded authorization-cardinality classification
+`authorized_candidate_limit_exceeded`, insufficient vector coverage, and transient provider
+connection, timeout, HTTP 408/429, or HTTP 5xx failures use classified lexical fallback. Returned
+lexical results include a bounded fallback reason in provider metadata. Invalid
+configuration, schema/ACL drift, dimension or finite-vector errors, malformed
+provider responses, SQL failures, and authorization defects fail visibly.
+
+### Cache key rotation and compromise recovery
+
+Cache keys are content-free and contain a SHA-256 query digest plus an HMAC of
+the canonical scope set. Values contain only the complete bounded ID/rank set,
+are MAC-authenticated under `noosphere-hybrid-cache-v1/value`, and expire after
+30 seconds. Redis loss or unavailability is a safe cache miss.
+
+To rotate normally, add a new 32–64 byte base64 key to the JSON object (maximum
+three keys), set its version active, base64-encode the complete JSON again, and
+run `docker compose up -d --no-deps --force-recreate app`. Keep the prior version
+for at least the 30-second TTL, then remove it and run the same recreation
+command again. For suspected compromise, remove the old version immediately and
+recreate the app with that command; entries signed by the retired version become
+misses and rebuild from the database. Never reuse a retired version label.
+
 ## Partial-state recovery
 
 `hybrid capability phase is partial or unsafe` is a fail-closed recovery stop,
-not a prompt to rerun provisioning. Stop the application, init job, and any
-future worker; preserve the complete error output; take and verify a database
-backup before changing catalog state. Inventory the named schemas, capability
-roles, and memberships read-only:
+not a prompt to rerun provisioning. Stop the application, init job, and current
+hybrid worker; preserve the complete error output; take and verify a database
+backup before changing catalog state. Inventory every phase schema, capability
+role, membership, and feature-evidence row read-only:
 
 ```sql
 SELECT nspname FROM pg_catalog.pg_namespace
-WHERE nspname IN ('noosphere_vector', 'noosphere_crypto', 'noosphere_hybrid')
+WHERE nspname IN (
+  'noosphere_vector', 'noosphere_crypto', 'noosphere_hybrid',
+  'noosphere_hybrid_b', 'noosphere_hybrid_c'
+)
 ORDER BY nspname;
+
+SELECT pg_catalog.format(
+  'SELECT %L AS phase, * FROM %s;', phase, feature_table
+)
+FROM (VALUES
+  ('phase_a3', pg_catalog.to_regclass('noosphere_hybrid.feature_state')),
+  ('phase_b', pg_catalog.to_regclass('noosphere_hybrid_b.feature_state')),
+  ('phase_c', pg_catalog.to_regclass('noosphere_hybrid_c.feature_state'))
+) AS inventory(phase, feature_table)
+WHERE feature_table IS NOT NULL
+ORDER BY phase
+\gexec
+
+SELECT 'SELECT ''phase_b'' AS phase, * FROM noosphere_hybrid_b.worker_readiness();'
+WHERE pg_catalog.to_regprocedure('noosphere_hybrid_b.worker_readiness()') IS NOT NULL
+\gexec
+
+SELECT application_name, state, query_start, wait_event_type, wait_event
+FROM pg_catalog.pg_stat_activity
+WHERE application_name LIKE 'noosphere-hybrid-%'
+ORDER BY application_name;
 
 SELECT rolname, rolcanlogin, rolsuper, rolcreatedb, rolcreaterole,
        rolinherit, rolreplication, rolbypassrls
@@ -247,12 +372,16 @@ ORDER BY member_name, granted_name;
 
 Activation is one transaction, so an interrupted supported activation cannot
 commit a partial phase. Treat partial state as manual/catalog drift or an
-unsupported earlier artifact. The default recovery is restoration of a verified
-pre-activation backup. Do not drop schemas, extensions, roles, memberships, or
-feature rows merely to make provisioning pass. Any manual reconciliation is an
-explicit DBA operation outside this phase: bind it to the preserved backup,
+unsupported earlier artifact. Identify the earliest affected phase from the
+schema and feature-evidence inventory, then restore the verified backup taken
+immediately before that phase. The supported exact Phase B v1-to-v2 upgrade is
+the only historical reconciliation path; do not rerun a later activator across
+unexplained partial state. Do not drop schemas, extensions, roles, memberships,
+or feature rows merely to make provisioning pass. Any manual reconciliation is
+an explicit DBA operation outside these phases: bind it to the preserved backup,
 prove object ownership and dependencies, and remove only independently verified
-A3 objects before starting again from the clean pre-activation state.
+objects from the affected phase before restarting from its clean
+pre-activation state.
 
 ## Verify
 
@@ -268,12 +397,19 @@ diff`, and `db push` no-create/no-drop contract; effective privileges; malicious
 temporary-object shadowing; canonical bytes; profile bounds and immutability;
 restricted-content worker denial; lease expiry and stale completion;
 terminal-failure supersession; soft delete, restore, and hard delete; and
-cache-epoch coverage.
+cache-epoch coverage. It also executes the application-generated Phase C miss
+and cache-hit SQL as `noosphere_app`, including deterministic RRF, complete-set
+caching, scope/epoch rejection, explicit status filtering, bounded lexical
+fallback, and normalization before pagination.
 
 ## Rollback boundary
 
-Phase A3 and Phase B are opt-in and are not activated by Docker Compose or the
-application at startup. Roll back Phase B by deactivating every profile, then
+Phase A3, Phase B, and Phase C are opt-in and are not activated by Docker
+Compose or the application at startup. Roll back Phase C by setting
+`NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false`, running
+`docker compose up -d --no-deps --force-recreate app`, and verifying keyword
+recall; no stored content changes. Roll back Phase B by
+deactivating every profile, then
 stopping the worker with `docker compose --profile hybrid stop hybrid-worker`.
 Inactive profiles are excluded from work and retrieval while their local vector
 rows remain available for a controlled re-prepare/backfill. Revoking remote

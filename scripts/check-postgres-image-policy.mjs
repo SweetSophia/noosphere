@@ -10,8 +10,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
 const immutableHelperRef = "a2067895023efc638e966ee827fea67385d8aa37";
-const verifiedInstallerRef = "994da8764c917520ca9535d7ae6d3b5cc8c904a1";
-const verifiedInstallerSha256 = "b9ce22fdf736101e05187517d1cca89db24fb619eb49abbbc75332ca6c8731a3";
+const verifiedInstallerRef = "6bb3a21648b441654f3fdffde2affe7358de6e63";
+const verifiedInstallerSha256 = "622df3c415d0380eb277fdd7036505215261229f114a4e1bab47faf1cfbaec9e";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
@@ -172,6 +172,7 @@ expectExactDbImage("docker-compose.noosphere.yml", candidateImage, "noosphere_po
 expectExactDbImage("install-openclaw.sh", candidateImage, "noosphere_postgres_authorization");
 
 const installer = read("install-openclaw.sh");
+const publishedImageEnv = read("noosphere.env.example");
 const installerValidationEnv = {
   ...process.env,
   NOOSPHERE_INSTALLER_TEST_MODE: "runtime-env-validation",
@@ -225,6 +226,77 @@ expect(
     duplicateInstallerProviderValidation.status !== 0 &&
     malformedInstallerProviderValidation.status !== 0,
   "install-openclaw.sh must executable-test canonical base64 provider configuration without Compose interpolation",
+);
+const installerHybridCacheJson = JSON.stringify({
+  v1: Buffer.alloc(32, 7).toString("base64"),
+});
+const installerHybridValidationEnv = {
+  ...process.env,
+  NOOSPHERE_INSTALLER_TEST_MODE: "hybrid-retrieval-config-validation",
+  NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: "true",
+  NOOSPHERE_HYBRID_QUERY_PROFILE_ID: "00000000-0000-4000-8000-000000000000",
+  NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION: "v1",
+  NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON: installerHybridCacheJson,
+  NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64: "",
+};
+const validInstallerHybridValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: installerHybridValidationEnv,
+});
+const ambiguousInstallerHybridValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: { ...installerHybridValidationEnv, NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: "1" },
+});
+const weakInstallerHybridValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: {
+    ...installerHybridValidationEnv,
+    NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON: JSON.stringify({ v1: "d2Vhaw==" }),
+  },
+});
+const oversizedInstallerHybridValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: {
+    ...installerHybridValidationEnv,
+    NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON: "x".repeat(8_193),
+  },
+});
+const inheritedInstallerHybridValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: {
+    ...installerHybridValidationEnv,
+    NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION: "toString",
+  },
+});
+const disabledActiveWithoutKeyringValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: {
+    ...installerHybridValidationEnv,
+    NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: "false",
+    NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION: "v1",
+    NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON: "",
+    NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64: "",
+  },
+});
+const disabledKeyringWithoutActiveValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: {
+    ...installerHybridValidationEnv,
+    NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: "false",
+    NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION: "",
+  },
+});
+expect(
+  validInstallerHybridValidation.status === 0 &&
+    validInstallerHybridValidation.stdout.trim() === Buffer.from(installerHybridCacheJson, "utf8").toString("base64") &&
+    ambiguousInstallerHybridValidation.status !== 0 &&
+    weakInstallerHybridValidation.status !== 0 &&
+    oversizedInstallerHybridValidation.status !== 0 &&
+    oversizedInstallerHybridValidation.stderr.includes("exceeds 8192 bytes") &&
+    inheritedInstallerHybridValidation.status !== 0 &&
+    disabledActiveWithoutKeyringValidation.status !== 0 &&
+    disabledKeyringWithoutActiveValidation.status !== 0,
+  "install-openclaw.sh must executable-test disabled-by-default Phase C plus bounded, strong authenticated-cache key material",
 );
 const helperArtifacts = [
   {
@@ -308,8 +380,8 @@ const persistedRuntimeAssignments = Array.from(
   (match) => [match[1], match[2]],
 );
 expect(
-  persistedRuntimeAssignments.length === 32 &&
-    new Set(persistedRuntimeAssignments.map(([name]) => name)).size === 32 &&
+  persistedRuntimeAssignments.length === 36 &&
+    new Set(persistedRuntimeAssignments.map(([name]) => name)).size === 36 &&
     persistedRuntimeAssignments.every(([name, variable]) =>
       installer.includes(`reject_multiline_env_value ${name} "$${variable}"`),
     ),
@@ -323,6 +395,10 @@ const phaseBActivationScript = read("scripts/activate-hybrid-worker.sh");
 const phaseBFeatureSchema = read("docker/hybrid-storage/phase-b-schema.sql");
 const phaseBActivationSql = read("docker/hybrid-storage/activate-phase-b.sql");
 const phaseBValidationSql = read("docker/hybrid-storage/validate-phase-b.sql");
+const phaseCActivationScript = read("scripts/activate-hybrid-retrieval.sh");
+const phaseCFeatureSchema = read("docker/hybrid-storage/phase-c-schema.sql");
+const phaseCActivationSql = read("docker/hybrid-storage/activate-phase-c.sql");
+const phaseCValidationSql = read("docker/hybrid-storage/validate-phase-c.sql");
 const hybridWorkerScript = read("scripts/hybrid-worker.mjs");
 expect(
   activationScript.includes("validate_provenance_value source_url") &&
@@ -376,6 +452,26 @@ expect(
     hybridWorkerScript.includes("await client.query(\"COMMIT\")"),
   "Phase B must retain exact A3 proof, dispatch/eligibility serialization, bounded backfill, coverage gating, structural drift detection, and exact ACL validation",
 );
+expect(
+  phaseCActivationScript.includes("phase_c_source_sha256=$(artifact_set_sha256") &&
+    phaseCActivationScript.includes('-v a3_source_sha256="$a3_source_sha256"') &&
+    phaseCActivationScript.includes('-v phase_b_source_sha256="$phase_b_source_sha256"') &&
+    phaseCActivationScript.includes('-v phase_c_source_sha256="$phase_c_source_sha256"') &&
+    phaseCFeatureSchema.includes("noosphere_hybrid_c.query_profile_snapshot") &&
+    phaseCFeatureSchema.includes("noosphere_hybrid_c.authorize_query_dispatch") &&
+    phaseCFeatureSchema.includes("noosphere_hybrid_c.query_profile_coverage") &&
+    phaseCFeatureSchema.includes("noosphere_hybrid_c.vector_candidates") &&
+    phaseCFeatureSchema.includes("noosphere_hybrid_c.current_vector_membership") &&
+    phaseCFeatureSchema.includes("cardinality(candidate_article_ids) > 1000") &&
+    phaseCFeatureSchema.includes("Phase C cosine query embedding has zero norm") &&
+    phaseCActivationSql.includes("\\ir validate-phase-b.sql") &&
+    phaseCActivationSql.includes("GRANT EXECUTE ON FUNCTION noosphere_hybrid_c.authorize_query_dispatch") &&
+    phaseCActivationSql.includes("GRANT EXECUTE ON FUNCTION noosphere_hybrid_c.vector_candidates") &&
+    phaseCValidationSql.includes("Phase C table, constraint, or index structure drifted") &&
+    phaseCValidationSql.includes("NOT acl.is_grantable") &&
+    phaseCValidationSql.includes("Phase C ACLs exceed the exact owner and application allowlist"),
+  "Phase C activation must revalidate A3+B and expose only the exact application retrieval capability",
+);
 const applicationDockerfile = read("Dockerfile");
 expect(
   applicationDockerfile.includes("/app/scripts/hybrid-provider.mjs ./scripts/hybrid-provider.mjs") &&
@@ -393,6 +489,8 @@ for (const composePath of ["docker-compose.yml", "docker-compose.noosphere.yml"]
       compose.includes("export NOOSPHERE_HYBRID_ADMIN_DATABASE_URL=") &&
       compose.includes("export NOOSPHERE_HYBRID_WORKER_DATABASE_URL=") &&
       compose.includes("NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64") &&
+      compose.includes("NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: ${NOOSPHERE_HYBRID_RETRIEVAL_ENABLED:-false}") &&
+      compose.includes("NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64") &&
       compose.includes("scripts/check-hybrid-worker-health.mjs"),
     `${composePath} must keep the limited Phase B worker behind the disabled hybrid profile`,
   );
@@ -406,6 +504,23 @@ expect(
     installer.includes("export NOOSPHERE_HYBRID_WORKER_DATABASE_URL=\"postgresql://noosphere_hybrid_worker_login:") &&
     installer.includes("Both Phase B database passwords must be configured together."),
   "install-openclaw.sh must persist distinct Phase B credentials and publish the disabled worker profile",
+);
+expect(
+  installer.includes("NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=\${NOOSPHERE_HYBRID_RETRIEVAL_ENABLED}") &&
+    installer.includes("NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64=\${NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64}") &&
+    installer.includes("NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: \\${NOOSPHERE_HYBRID_RETRIEVAL_ENABLED:-false}") &&
+    installer.includes("NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64: \\${NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64:-}"),
+  "install-openclaw.sh must persist Phase C settings while publishing exact recall as disabled by default",
+);
+expect(
+  publishedImageEnv.includes("NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false") &&
+    publishedImageEnv.includes("# NOOSPHERE_HYBRID_QUERY_PROFILE_ID=") &&
+    publishedImageEnv.includes("# NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64=") &&
+    publishedImageEnv.includes("# NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION=") &&
+    publishedImageEnv.includes("# NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64=") &&
+    publishedImageEnv.includes("# NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS=30000") &&
+    publishedImageEnv.includes("# NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES=4194304"),
+  "noosphere.env.example must publish the complete disabled-by-default Phase C surface",
 );
 const installerProvisionIndexes = Array.from(
   installer.matchAll(/node docker\/provision-database-roles\.mjs/g),

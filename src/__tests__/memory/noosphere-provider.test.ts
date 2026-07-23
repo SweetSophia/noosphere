@@ -18,6 +18,10 @@ import {
 } from "@/lib/memory/noosphere";
 import type { MemoryCurationLevel } from "@/lib/memory/types";
 import {
+  HybridCorrectnessError,
+  HybridLexicalFallbackError,
+} from "@/lib/memory/hybrid-retrieval";
+import {
   createMockPrisma,
   createSequentialQueryRaw,
   findManyFromArticles,
@@ -142,6 +146,170 @@ async function main() {
       config: { enabled: false },
     });
     assertEqual(results.length, 0, "disabled results");
+  });
+
+  test("search uses Phase C within the bounded window and maps RRF metadata", async () => {
+    let hybridCalls = 0;
+    const provider = new NoosphereProvider({
+      prisma: createMockPrisma(),
+      environment: hybridEnvironment(),
+      hybridSearch: async (_prisma, request) => {
+        hybridCalls++;
+        assertEqual(request.offset, 2, "hybrid offset");
+        assertEqual(request.allowedScopes?.[0], "team:a", "hybrid scope");
+        return [{
+          id: "hybrid-1",
+          rawRrfScore: 2 / 61,
+          lexicalRank: 1,
+          vectorRank: 1,
+          relevanceScore: 1,
+          title: "Hybrid result",
+          slug: "hybrid-result",
+          content: "Current authorized content",
+          excerpt: null,
+          status: "published",
+          confidence: "high",
+          sourceUrl: null,
+          sourceType: null,
+          createdAt: new Date("2026-01-01T00:00:00Z"),
+          updatedAt: new Date("2026-01-02T00:00:00Z"),
+          lastReviewed: null,
+          authorId: null,
+          authorName: null,
+          topicId: "topic-1",
+          topicSlug: "engineering",
+          topicName: "Engineering",
+          tags: ["recall"],
+        }];
+      },
+      allowedScopes: ["team:a"],
+    });
+
+    const results = await provider.search("hybrid recall", {
+      limit: 10,
+      metadata: { offset: 2 },
+    });
+    assertEqual(hybridCalls, 1, "hybrid call count");
+    assertEqual(results[0].id, "hybrid-1", "hybrid result id");
+    assertEqual(results[0].relevanceScore, 1, "normalized relevance");
+    assertEqual(results[0].metadata?.hybridRawRrfScore, 2 / 61, "raw RRF metadata");
+  });
+
+  test("typed Phase C transient failures fall back while correctness failures surface", async () => {
+    const transient = new NoosphereProvider({
+      prisma: createMockPrisma({ $queryRaw: () => Promise.resolve([]) }),
+      environment: hybridEnvironment(),
+      hybridSearch: async () => {
+        throw new HybridLexicalFallbackError("provider_http_503");
+      },
+    });
+    assertEqual((await transient.search("hybrid recall")).length, 0, "lexical fallback result");
+
+    const correctness = new NoosphereProvider({
+      prisma: createMockPrisma(),
+      environment: hybridEnvironment(),
+      hybridSearch: async () => {
+        throw new HybridCorrectnessError("provider_vector_invalid");
+      },
+    });
+    let surfaced = false;
+    try {
+      await correctness.search("hybrid recall");
+    } catch (error) {
+      surfaced = error instanceof HybridCorrectnessError;
+    }
+    assert(surfaced, "correctness failure must surface");
+  });
+
+  test("Phase C uses classified lexical fallback for windows beyond 200", async () => {
+    let hybridCalls = 0;
+    const provider = new NoosphereProvider({
+      prisma: createMockPrisma({ $queryRaw: () => Promise.resolve([]) }),
+      environment: hybridEnvironment(),
+      hybridSearch: async () => {
+        hybridCalls++;
+        return [];
+      },
+    });
+    const results = await provider.search("hybrid recall", { limit: 10, metadata: { offset: 195 } });
+    assertEqual(hybridCalls, 0, "hybrid deep-window calls");
+    assertEqual(results.length, 0, "deep-window lexical result count");
+  });
+
+  test("Phase C returns limit zero without hybrid, cache, or database work", async () => {
+    let hybridCalls = 0;
+    let databaseCalls = 0;
+    const provider = new NoosphereProvider({
+      prisma: createMockPrisma({
+        $queryRaw: () => {
+          databaseCalls++;
+          throw new Error("zero limit must not query PostgreSQL");
+        },
+      }),
+      environment: hybridEnvironment(),
+      hybridSearch: async () => {
+        hybridCalls++;
+        throw new Error("zero limit must not request an embedding");
+      },
+    });
+
+    const results = await provider.search("hybrid recall", { limit: 0 });
+    assertEqual(results.length, 0, "zero-limit result count");
+    assertEqual(hybridCalls, 0, "zero-limit hybrid calls");
+    assertEqual(databaseCalls, 0, "zero-limit database calls");
+  });
+
+  test("limit zero still fails closed on invalid enabled Phase C configuration", async () => {
+    const provider = new NoosphereProvider({
+      prisma: createMockPrisma(),
+      environment: { NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: "true" },
+    });
+    let surfaced = false;
+    try {
+      await provider.search("hybrid recall", { limit: 0 });
+    } catch (error) {
+      surfaced = error instanceof HybridCorrectnessError;
+    }
+    assert(surfaced, "zero limit must not hide invalid enabled Phase C configuration");
+  });
+
+  test("an empty query still fails closed on invalid enabled Phase C configuration", async () => {
+    const provider = new NoosphereProvider({
+      prisma: createMockPrisma(),
+      environment: { NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: "true" },
+    });
+    let surfaced = false;
+    try {
+      await provider.search("   ", { limit: 0 });
+    } catch (error) {
+      surfaced = error instanceof HybridCorrectnessError;
+    }
+    assert(surfaced, "an empty query must not hide invalid enabled Phase C configuration");
+  });
+
+  test("classified hybrid fallback annotates each legacy result with a bounded reason", async () => {
+    const article = mockArticle({ id: "fallback-1" });
+    const provider = new NoosphereProvider({
+      prisma: createMockPrisma({
+        $queryRaw: withRecallHydrationQueries(() =>
+          Promise.resolve([mockSearchRow({ id: "fallback-1" })]),
+        ),
+        article: { findMany: findManyFromArticles([article]) },
+      }),
+      environment: hybridEnvironment(),
+      hybridSearch: async () => {
+        throw new HybridLexicalFallbackError("provider_http_503");
+      },
+    });
+
+    const results = await provider.search("hybrid recall");
+    assertEqual(results.length, 1, "annotated fallback result count");
+    assertEqual(results[0].metadata?.hybridFallback, true, "fallback marker");
+    assertEqual(
+      results[0].metadata?.hybridFallbackReason,
+      "provider_http_503",
+      "fallback reason",
+    );
   });
 
   test("search returns empty array when raw query yields no results", async () => {
@@ -544,6 +712,17 @@ async function main() {
   if (failCount > 0) {
     process.exit(1);
   }
+}
+
+function hybridEnvironment(): Record<string, string | undefined> {
+  return {
+    NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: "true",
+    NOOSPHERE_HYBRID_QUERY_PROFILE_ID: "0198fe17-f4dd-7ee3-93e4-acde00000001",
+    NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION: "v1",
+    NOOSPHERE_HYBRID_CACHE_HMAC_KEYS: JSON.stringify({
+      v1: Buffer.alloc(32, 7).toString("base64"),
+    }),
+  };
 }
 
 main().catch((err) => {

@@ -67,6 +67,8 @@ services:
     command: ["node", "server.js"]
     container_name: noosphere-app
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     labels:
       org.opencontainers.image.version: "${NOOSPHERE_VERSION:-1.11.0}"
     ports:
@@ -85,6 +87,13 @@ services:
       PG_CONN_TIMEOUT_MS: ${PG_CONN_TIMEOUT_MS:-5000}
       REDIS_URL: redis://redis:6379
       NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE: ${NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE:-120}
+      NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: ${NOOSPHERE_HYBRID_RETRIEVAL_ENABLED:-false}
+      NOOSPHERE_HYBRID_QUERY_PROFILE_ID: ${NOOSPHERE_HYBRID_QUERY_PROFILE_ID:-}
+      NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION: ${NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION:-}
+      NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64: ${NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64:-}
+      NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64: ${NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64:-W10=}
+      NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS: ${NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS:-30000}
+      NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES: ${NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES:-4194304}
     volumes:
       - ./uploads:/app/uploads:rw
       - ./uploads/images:/app/uploads/images:rw

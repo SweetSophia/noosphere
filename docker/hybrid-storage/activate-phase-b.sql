@@ -46,6 +46,11 @@ WHERE state.singleton;
 GRANT EXECUTE ON FUNCTION noosphere_hybrid.set_profile_state(
   uuid, noosphere_hybrid.profile_state
 ) TO noosphere_hybrid_admin;
+GRANT EXECUTE ON FUNCTION noosphere_hybrid.create_profile(
+  text, noosphere_hybrid.profile_locality, text, text, integer,
+  noosphere_hybrid.distance_metric, noosphere_hybrid.normalization_policy,
+  integer, bytea
+) TO noosphere_hybrid_admin;
 GRANT EXECUTE ON FUNCTION noosphere_hybrid.claim_jobs(integer, integer)
   TO noosphere_hybrid_worker;
 GRANT EXECUTE ON FUNCTION noosphere_hybrid.publish_embedding(
@@ -57,6 +62,11 @@ GRANT EXECUTE ON FUNCTION noosphere_hybrid.fail_job(
 \ir validate.sql
 REVOKE EXECUTE ON FUNCTION noosphere_hybrid.set_profile_state(
   uuid, noosphere_hybrid.profile_state
+) FROM noosphere_hybrid_admin;
+REVOKE EXECUTE ON FUNCTION noosphere_hybrid.create_profile(
+  text, noosphere_hybrid.profile_locality, text, text, integer,
+  noosphere_hybrid.distance_metric, noosphere_hybrid.normalization_policy,
+  integer, bytea
 ) FROM noosphere_hybrid_admin;
 REVOKE EXECUTE ON FUNCTION noosphere_hybrid.claim_jobs(integer, integer)
   FROM noosphere_hybrid_worker;
@@ -104,6 +114,11 @@ SELECT pg_catalog.to_regclass('noosphere_hybrid_b.feature_state') IS NULL AS fir
 
   GRANT EXECUTE ON FUNCTION noosphere_hybrid_b.set_embedding_consent(boolean, boolean)
     TO noosphere_hybrid_admin;
+  GRANT EXECUTE ON FUNCTION noosphere_hybrid_b.create_profile(
+    text, noosphere_hybrid.profile_locality, text, text, integer,
+    noosphere_hybrid.distance_metric, noosphere_hybrid.normalization_policy,
+    integer, bytea
+  ) TO noosphere_hybrid_admin;
   GRANT EXECUTE ON FUNCTION noosphere_hybrid_b.profile_coverage(uuid)
     TO noosphere_hybrid_admin;
   GRANT EXECUTE ON FUNCTION noosphere_hybrid_b.profile_status(uuid)
@@ -130,38 +145,18 @@ SELECT pg_catalog.to_regclass('noosphere_hybrid_b.feature_state') IS NULL AS fir
   ) TO noosphere_hybrid_worker;
 
   SET LOCAL ROLE noosphere_hybrid_owner;
-  WITH manifest AS (
-    SELECT pg_catalog.string_agg(definition, E'\n' ORDER BY identity) AS body
-    FROM (
-      SELECT
-        procedure.oid::pg_catalog.regprocedure::text AS identity,
-        pg_catalog.pg_get_functiondef(procedure.oid) AS definition
-      FROM pg_catalog.pg_proc AS procedure
-      JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
-      WHERE namespace.nspname = 'noosphere_hybrid_b'
-      UNION ALL
-      SELECT
-        namespace.nspname || '.' || relation.relname || '.' || trigger.tgname,
-        pg_catalog.pg_get_triggerdef(trigger.oid, false)
-      FROM pg_catalog.pg_trigger AS trigger
-      JOIN pg_catalog.pg_class AS relation ON relation.oid = trigger.tgrelid
-      JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
-      WHERE NOT trigger.tgisinternal
-        AND trigger.tgname IN (
-          'noosphere_hybrid_b_article_guard',
-          'zz_noosphere_hybrid_b_article_dirty'
-        )
-    ) AS evidence(identity, definition)
-  )
   INSERT INTO noosphere_hybrid_b.feature_state (
     singleton, feature_version, source_sha256, manifest_sha256, structure_sha256
   )
-  SELECT
+  VALUES (
     true,
-    1,
+    2,
     pg_catalog.current_setting('noosphere.phase_b.source_sha256'),
     pg_catalog.encode(
-      noosphere_crypto.digest(pg_catalog.convert_to(manifest.body, 'UTF8'), 'sha256'),
+      noosphere_crypto.digest(
+        pg_catalog.convert_to(noosphere_hybrid_b.routine_manifest(), 'UTF8'),
+        'sha256'
+      ),
       'hex'
     ),
     pg_catalog.encode(
@@ -171,8 +166,10 @@ SELECT pg_catalog.to_regclass('noosphere_hybrid_b.feature_state') IS NULL AS fir
       ),
       'hex'
     )
-  FROM manifest;
+  );
   RESET ROLE;
+\else
+  \ir upgrade-phase-b-v1-to-v2.sql
 \endif
 
 \ir validate-phase-b.sql

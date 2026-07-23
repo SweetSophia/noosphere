@@ -18,6 +18,11 @@ NOOSPHERE_BOOTSTRAP_SECRETS_FILE="${NOOSPHERE_BOOTSTRAP_SECRETS_FILE:-}"
 NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE="${NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE:-}"
 NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON="${NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON:-}"
 NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64="${NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64:-}"
+NOOSPHERE_HYBRID_RETRIEVAL_ENABLED="${NOOSPHERE_HYBRID_RETRIEVAL_ENABLED:-}"
+NOOSPHERE_HYBRID_QUERY_PROFILE_ID="${NOOSPHERE_HYBRID_QUERY_PROFILE_ID:-}"
+NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION="${NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION:-}"
+NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON="${NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON:-}"
+NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64="${NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64:-}"
 NOOSPHERE_HYBRID_WORKER_CONCURRENCY="${NOOSPHERE_HYBRID_WORKER_CONCURRENCY:-}"
 NOOSPHERE_HYBRID_LEASE_SECONDS="${NOOSPHERE_HYBRID_LEASE_SECONDS:-}"
 NOOSPHERE_HYBRID_MAX_ATTEMPTS="${NOOSPHERE_HYBRID_MAX_ATTEMPTS:-}"
@@ -124,6 +129,55 @@ normalize_hybrid_provider_config() {
     node -e 'let value=""; process.stdin.setEncoding("utf8"); process.stdin.on("data", chunk => value += chunk); process.stdin.on("end", () => { if (value.length > 174764 || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) throw new Error("provider configuration must be canonical base64"); const bytes=Buffer.from(value, "base64"); if (bytes.toString("base64") !== value) throw new Error("provider configuration must be canonical base64"); const parsed=JSON.parse(bytes.toString("utf8")); if (!Array.isArray(parsed) || parsed.length > 100) throw new Error("provider configuration must be an array of at most 100 entries"); });'
 }
 
+normalize_hybrid_retrieval_config() {
+  if [[ "$NOOSPHERE_HYBRID_RETRIEVAL_ENABLED" != false && "$NOOSPHERE_HYBRID_RETRIEVAL_ENABLED" != true ]]; then
+    echo 'NOOSPHERE_HYBRID_RETRIEVAL_ENABLED must be exactly true or false.' >&2
+    exit 1
+  fi
+  if [[ -n "$NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON" && -n "$NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64" ]]; then
+    echo 'Set only one of NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON or NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64.' >&2
+    exit 1
+  fi
+  if [[ -z "$NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON" && -z "$NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64" ]]; then
+    NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64="$(env_get "$NOOSPHERE_HOME/.env" NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64)"
+  fi
+  if [[ -n "$NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON" ]]; then
+    NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64="$(
+      printf '%s' "$NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON" |
+        node -e 'let size=0; const chunks=[]; process.stdin.on("data", chunk => { size += chunk.length; if (size > 8192) { console.error("hybrid cache keyring JSON exceeds 8192 bytes"); process.exit(1); } chunks.push(chunk); }); process.stdin.on("end", () => { const bytes=Buffer.concat(chunks); const value=bytes.toString("utf8"); if (!Buffer.from(value, "utf8").equals(bytes)) throw new Error("hybrid cache keyring JSON must be valid UTF-8"); JSON.parse(value); process.stdout.write(bytes.toString("base64")); });'
+    )"
+  fi
+  if [[ "$NOOSPHERE_HYBRID_RETRIEVAL_ENABLED" == true && ! "$NOOSPHERE_HYBRID_QUERY_PROFILE_ID" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$ ]]; then
+    echo 'NOOSPHERE_HYBRID_QUERY_PROFILE_ID must be a UUID when Phase C is enabled.' >&2
+    exit 1
+  fi
+  HYBRID_CACHE_ENABLED="$NOOSPHERE_HYBRID_RETRIEVAL_ENABLED" \
+  HYBRID_CACHE_ACTIVE_VERSION="$NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION" \
+  HYBRID_CACHE_KEYRING_B64="$NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64" \
+    node -e '
+      const enabled = process.env.HYBRID_CACHE_ENABLED === "true";
+      const active = process.env.HYBRID_CACHE_ACTIVE_VERSION || "";
+      const encoded = process.env.HYBRID_CACHE_KEYRING_B64 || "";
+      if (!encoded) {
+        if (enabled || active) throw new Error("hybrid cache active version and keyring must be configured together");
+        process.exit(0);
+      }
+      if (encoded.length > 8192 || encoded.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) throw new Error("hybrid cache keyring must use canonical base64");
+      const bytes = Buffer.from(encoded, "base64");
+      if (bytes.toString("base64") !== encoded) throw new Error("hybrid cache keyring must use canonical base64");
+      const parsed = JSON.parse(bytes.toString("utf8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("hybrid cache keyring must be an object");
+      const entries = Object.entries(parsed);
+      if (entries.length < 1 || entries.length > 3) throw new Error("hybrid cache keyring must contain one to three keys");
+      for (const [version, value] of entries) {
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/.test(version) || typeof value !== "string") throw new Error("hybrid cache keyring entry is invalid");
+        const key = Buffer.from(value, "base64");
+        if (key.toString("base64") !== value || key.length < 32 || key.length > 64) throw new Error("hybrid cache keys must be canonical base64 for 32-64 bytes");
+      }
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/.test(active) || !Object.hasOwn(parsed, active)) throw new Error("active hybrid cache key version is absent");
+    '
+}
+
 # This mode exercises the real installer guard without performing installation
 # side effects. It is used by the repository policy gate.
 if [[ "${NOOSPHERE_INSTALLER_TEST_MODE:-}" == runtime-env-validation ]]; then
@@ -133,6 +187,12 @@ fi
 if [[ "${NOOSPHERE_INSTALLER_TEST_MODE:-}" == hybrid-provider-config-validation ]]; then
   normalize_hybrid_provider_config
   printf '%s\n' "$NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64"
+  exit 0
+fi
+if [[ "${NOOSPHERE_INSTALLER_TEST_MODE:-}" == hybrid-retrieval-config-validation ]]; then
+  NOOSPHERE_HYBRID_RETRIEVAL_ENABLED="${NOOSPHERE_HYBRID_RETRIEVAL_ENABLED:-false}"
+  normalize_hybrid_retrieval_config
+  printf '%s\n' "$NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64"
   exit 0
 fi
 
@@ -165,6 +225,10 @@ PG_IDLE_TIMEOUT_MS=${PG_IDLE_TIMEOUT_MS}
 PG_CONN_TIMEOUT_MS=${PG_CONN_TIMEOUT_MS}
 NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE=${NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE}
 NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64=${NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64}
+NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=${NOOSPHERE_HYBRID_RETRIEVAL_ENABLED}
+NOOSPHERE_HYBRID_QUERY_PROFILE_ID=${NOOSPHERE_HYBRID_QUERY_PROFILE_ID}
+NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION=${NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION}
+NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64=${NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64}
 NOOSPHERE_HYBRID_WORKER_CONCURRENCY=${NOOSPHERE_HYBRID_WORKER_CONCURRENCY}
 NOOSPHERE_HYBRID_LEASE_SECONDS=${NOOSPHERE_HYBRID_LEASE_SECONDS}
 NOOSPHERE_HYBRID_MAX_ATTEMPTS=${NOOSPHERE_HYBRID_MAX_ATTEMPTS}
@@ -675,6 +739,11 @@ NOOSPHERE_ADMIN_PASSWORD_RESET="${NOOSPHERE_ADMIN_PASSWORD_RESET:-false}"
 NOOSPHERE_FORCE_ADMIN="${NOOSPHERE_FORCE_ADMIN:-false}"
 NOOSPHERE_BOOTSTRAP_SECRETS_FILE="${NOOSPHERE_BOOTSTRAP_SECRETS_FILE:-/tmp/noosphere-bootstrap-secrets/secrets.json}"
 normalize_hybrid_provider_config
+NOOSPHERE_HYBRID_RETRIEVAL_ENABLED="${NOOSPHERE_HYBRID_RETRIEVAL_ENABLED:-$(env_get "$NOOSPHERE_HOME/.env" NOOSPHERE_HYBRID_RETRIEVAL_ENABLED)}"
+NOOSPHERE_HYBRID_RETRIEVAL_ENABLED="${NOOSPHERE_HYBRID_RETRIEVAL_ENABLED:-false}"
+NOOSPHERE_HYBRID_QUERY_PROFILE_ID="${NOOSPHERE_HYBRID_QUERY_PROFILE_ID:-$(env_get "$NOOSPHERE_HOME/.env" NOOSPHERE_HYBRID_QUERY_PROFILE_ID)}"
+NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION="${NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION:-$(env_get "$NOOSPHERE_HOME/.env" NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION)}"
+normalize_hybrid_retrieval_config
 NOOSPHERE_HYBRID_WORKER_CONCURRENCY="${NOOSPHERE_HYBRID_WORKER_CONCURRENCY:-$(env_get "$NOOSPHERE_HOME/.env" NOOSPHERE_HYBRID_WORKER_CONCURRENCY)}"
 NOOSPHERE_HYBRID_WORKER_CONCURRENCY="${NOOSPHERE_HYBRID_WORKER_CONCURRENCY:-4}"
 NOOSPHERE_HYBRID_LEASE_SECONDS="${NOOSPHERE_HYBRID_LEASE_SECONDS:-$(env_get "$NOOSPHERE_HOME/.env" NOOSPHERE_HYBRID_LEASE_SECONDS)}"
@@ -718,6 +787,10 @@ reject_multiline_env_value PG_IDLE_TIMEOUT_MS "$PG_IDLE_TIMEOUT_MS"
 reject_multiline_env_value PG_CONN_TIMEOUT_MS "$PG_CONN_TIMEOUT_MS"
 reject_multiline_env_value NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE "$NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE"
 reject_multiline_env_value NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 "$NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64"
+reject_multiline_env_value NOOSPHERE_HYBRID_RETRIEVAL_ENABLED "$NOOSPHERE_HYBRID_RETRIEVAL_ENABLED"
+reject_multiline_env_value NOOSPHERE_HYBRID_QUERY_PROFILE_ID "$NOOSPHERE_HYBRID_QUERY_PROFILE_ID"
+reject_multiline_env_value NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION "$NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION"
+reject_multiline_env_value NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64 "$NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64"
 reject_multiline_env_value NOOSPHERE_HYBRID_WORKER_CONCURRENCY "$NOOSPHERE_HYBRID_WORKER_CONCURRENCY"
 reject_multiline_env_value NOOSPHERE_HYBRID_LEASE_SECONDS "$NOOSPHERE_HYBRID_LEASE_SECONDS"
 reject_multiline_env_value NOOSPHERE_HYBRID_MAX_ATTEMPTS "$NOOSPHERE_HYBRID_MAX_ATTEMPTS"
@@ -749,6 +822,7 @@ reject_multiline_env_value NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS "$NOOSPHE
 
 export NOOSPHERE_VERSION NOOSPHERE_PORT NOOSPHERE_IMAGE APP_URL BIND_ADDRESS POSTGRES_PASSWORD POSTGRES_MIGRATION_PASSWORD POSTGRES_APP_PASSWORD POSTGRES_HYBRID_ADMIN_PASSWORD POSTGRES_HYBRID_WORKER_PASSWORD NEXTAUTH_SECRET REDIS_URL NOOSPHERE_BOOTSTRAP_SECRETS_FILE NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE
 export NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 NOOSPHERE_HYBRID_WORKER_CONCURRENCY NOOSPHERE_HYBRID_LEASE_SECONDS NOOSPHERE_HYBRID_MAX_ATTEMPTS NOOSPHERE_HYBRID_WORKER_POLL_MS NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS
+export NOOSPHERE_HYBRID_RETRIEVAL_ENABLED NOOSPHERE_HYBRID_QUERY_PROFILE_ID NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64
 export NOOSPHERE_ADMIN_PASSWORD="$ADMIN_PASSWORD"
 export NOOSPHERE_BOOTSTRAP_API_KEY="$API_KEY"
 
@@ -765,6 +839,10 @@ else
   ensure_runtime_env_secret POSTGRES_HYBRID_ADMIN_PASSWORD "$POSTGRES_HYBRID_ADMIN_PASSWORD"
   ensure_runtime_env_secret POSTGRES_HYBRID_WORKER_PASSWORD "$POSTGRES_HYBRID_WORKER_PASSWORD"
   ensure_runtime_env_secret NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 "$NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64"
+  ensure_runtime_env_secret NOOSPHERE_HYBRID_RETRIEVAL_ENABLED "$NOOSPHERE_HYBRID_RETRIEVAL_ENABLED"
+  ensure_runtime_env_secret NOOSPHERE_HYBRID_QUERY_PROFILE_ID "$NOOSPHERE_HYBRID_QUERY_PROFILE_ID"
+  ensure_runtime_env_secret NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION "$NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION"
+  ensure_runtime_env_secret NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64 "$NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64"
   ensure_runtime_env_secret NOOSPHERE_HYBRID_WORKER_CONCURRENCY "$NOOSPHERE_HYBRID_WORKER_CONCURRENCY"
   ensure_runtime_env_secret NOOSPHERE_HYBRID_LEASE_SECONDS "$NOOSPHERE_HYBRID_LEASE_SECONDS"
   ensure_runtime_env_secret NOOSPHERE_HYBRID_MAX_ATTEMPTS "$NOOSPHERE_HYBRID_MAX_ATTEMPTS"
@@ -920,6 +998,8 @@ services:
     command: ["node", "server.js"]
     container_name: noosphere-openclaw-app
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "\${BIND_ADDRESS:-127.0.0.1}:\${NOOSPHERE_PORT:-6578}:3000"
     environment:
@@ -934,6 +1014,13 @@ services:
       PG_CONN_TIMEOUT_MS: \${PG_CONN_TIMEOUT_MS:-5000}
       REDIS_URL: \${REDIS_URL:-redis://redis:6379}
       NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE: \${NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE:-120}
+      NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: \${NOOSPHERE_HYBRID_RETRIEVAL_ENABLED:-false}
+      NOOSPHERE_HYBRID_QUERY_PROFILE_ID: \${NOOSPHERE_HYBRID_QUERY_PROFILE_ID:-}
+      NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION: \${NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION:-}
+      NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64: \${NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64:-}
+      NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64: \${NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64:-W10=}
+      NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS: \${NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS:-30000}
+      NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES: \${NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES:-4194304}
     volumes:
       - noosphere_uploads:/app/uploads:rw
       - noosphere_postgres_authorization:/run/noosphere-pgvector:ro
