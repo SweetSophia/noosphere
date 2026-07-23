@@ -483,6 +483,8 @@ assert_equals '160014:160014' "$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_S
 # database before the versioned upgrader reads any Phase B row type.
 candidate_a3_source_sha256=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
   'SELECT activation_sql_sha256 FROM noosphere_hybrid.feature_state WHERE singleton')
+[[ "$candidate_a3_source_sha256" =~ ^[a-f0-9]{64}$ ]] ||
+  die 'candidate A3 source SHA is missing or invalid before the Phase C prerequisite probe'
 zero_source_sha256=$(printf '0%.0s' {1..64})
 if phase_c_without_b_output=$(psql "$candidate_bootstrap" -X -v ON_ERROR_STOP=1 \
   -v a3_source_sha256="$candidate_a3_source_sha256" \
@@ -492,7 +494,7 @@ if phase_c_without_b_output=$(psql "$candidate_bootstrap" -X -v ON_ERROR_STOP=1 
   die 'Phase C activation unexpectedly accepted an A3-only database'
 fi
 [[ "$phase_c_without_b_output" == *'exact Phase B activation is required before Phase C'* ]] ||
-  die "Phase C missing-Phase-B failure was not operator-readable: $phase_c_without_b_output"
+  die "Phase C prerequisite probe did not reach the expected exact Phase B gate: $phase_c_without_b_output"
 
 # Deployment provisioning must reject any extra member of a hybrid capability,
 # not only drift attached to the four expected runtime logins.
