@@ -22,6 +22,12 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'exact Phase A3 activation is required before Phase C';
   END IF;
+  -- The versioned upgrader declares a Phase B row type, so fail visibly before
+  -- including it when Phase B has never been installed. Exact v1/v2 provenance
+  -- remains the upgrader's responsibility so the supported v1 path is allowed.
+  IF pg_catalog.to_regclass('noosphere_hybrid_b.feature_state') IS NULL THEN
+    RAISE EXCEPTION 'exact Phase B activation is required before Phase C';
+  END IF;
 END;
 $block$;
 

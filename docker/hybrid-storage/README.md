@@ -345,6 +345,15 @@ WHERE feature_table IS NOT NULL
 ORDER BY phase
 \gexec
 
+SELECT 'SELECT ''phase_b'' AS phase, * FROM noosphere_hybrid_b.worker_readiness();'
+WHERE pg_catalog.to_regprocedure('noosphere_hybrid_b.worker_readiness()') IS NOT NULL
+\gexec
+
+SELECT application_name, state, query_start, wait_event_type, wait_event
+FROM pg_catalog.pg_stat_activity
+WHERE application_name LIKE 'noosphere-hybrid-%'
+ORDER BY application_name;
+
 SELECT rolname, rolcanlogin, rolsuper, rolcreatedb, rolcreaterole,
        rolinherit, rolreplication, rolbypassrls
 FROM pg_catalog.pg_roles

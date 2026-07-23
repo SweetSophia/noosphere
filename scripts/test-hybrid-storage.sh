@@ -478,6 +478,15 @@ assert_equals '160014:160014' "$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_S
   "SELECT postgresql_server_version_num || ':' || pg_catalog.current_setting('server_version_num') FROM noosphere_hybrid.feature_state WHERE singleton")" \
   'activation PostgreSQL runtime provenance'
 
+# Phase C must fail with the documented prerequisite message on an A3-only
+# database. The versioned upgrader uses a Phase B row type and would otherwise
+# surface an implementation-level missing-relation error.
+if phase_c_without_b_output=$(activate_phase_c 2>&1); then
+  die 'Phase C activation unexpectedly accepted an A3-only database'
+fi
+[[ "$phase_c_without_b_output" == *'exact Phase B activation is required before Phase C'* ]] ||
+  die "Phase C missing-Phase-B failure was not operator-readable: $phase_c_without_b_output"
+
 # Deployment provisioning must reject any extra member of a hybrid capability,
 # not only drift attached to the four expected runtime logins.
 psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
@@ -1775,7 +1784,7 @@ activate_phase_c >/dev/null
 # so the catalog manifest itself must reject it. Keep the tamper transactional
 # and then revalidate the untouched installation to prove the failed probe did
 # not leave state behind.
-if psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 <<SQL >/dev/null 2>&1
+if phase_c_tamper_output=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 <<SQL 2>&1
 BEGIN;
 SELECT pg_catalog.set_config(
          'noosphere.phase_a3.source_sha256', state.a3_source_sha256, true
@@ -1790,7 +1799,9 @@ FROM noosphere_hybrid_c.feature_state AS state
 WHERE state.singleton;
 SET LOCAL ROLE noosphere_hybrid_owner;
 CREATE OR REPLACE FUNCTION noosphere_hybrid_c.vector_candidates(
-  uuid, text, text[]
+  target_profile_id uuid,
+  query_embedding_text text,
+  candidate_article_ids text[]
 )
 RETURNS TABLE (article_id text, distance double precision)
 LANGUAGE plpgsql
@@ -1806,9 +1817,11 @@ RESET ROLE;
 \i $repo_root/docker/hybrid-storage/validate-phase-c.sql
 ROLLBACK;
 SQL
-then
+); then
   die 'Phase C same-signature routine body tamper unexpectedly validated'
 fi
+[[ "$phase_c_tamper_output" == *'Phase C routine manifest drifted'* ]] ||
+  die "Phase C same-signature routine body tamper returned the wrong diagnostic: $phase_c_tamper_output"
 activate_phase_c >/dev/null
 
 # Catalog-based routine manifests must survive a custom-format logical

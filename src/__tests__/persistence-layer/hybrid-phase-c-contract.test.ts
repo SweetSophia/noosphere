@@ -35,6 +35,10 @@ test("Phase C is independently evidenced and validates exact A3 plus B before ac
     "Phase C must upgrade Phase B before validating the current artifact set",
   );
   assert.match(activation, /noosphere\.phase_c\.source_sha256/);
+  assert.match(
+    activation,
+    /to_regclass\('noosphere_hybrid_b\.feature_state'\) IS NULL[\s\S]*?exact Phase B activation is required before Phase C/,
+  );
   assert.match(activation, /refusing partial or attacker-precreated Phase C schema/);
   assert.match(activation, /\\ir validate-phase-c\.sql/);
 });
@@ -63,6 +67,10 @@ test("Phase B has an exact fail-closed v1 to v2 upgrade contract", async () => {
     /LOCK TABLE noosphere_hybrid\.embedding_profile IN SHARE MODE/,
   );
   assert.match(upgrade, /refusing to upgrade Phase B beneath an existing Phase C activation/);
+  assert.doesNotMatch(
+    upgrade,
+    /GRANT EXECUTE ON FUNCTION noosphere_hybrid\.create_profile/,
+  );
   assert.match(
     v1Validation,
     /e648c4e83359994349c5502bffa9739ac3401df7f00511722d7111fa8e981f98/,
@@ -72,6 +80,15 @@ test("Phase B has an exact fail-closed v1 to v2 upgrade contract", async () => {
   assert.match(retrievalActivation, /upgrade-phase-b-v1-to-v2\.sql/);
   assert.match(workerActivation, /upgrade-phase-b-v1-to-v2\.sql/);
   assert.match(worker, /row\.feature_version !== 2/);
+});
+
+test("partial-state recovery inventories Phase B readiness and live hybrid sessions safely", async () => {
+  const runbook = await artifact("docker/hybrid-storage/README.md");
+
+  assert.match(runbook, /to_regprocedure\('noosphere_hybrid_b\.worker_readiness\(\)'\)/);
+  assert.match(runbook, /noosphere_hybrid_b\.worker_readiness\(\)/);
+  assert.match(runbook, /FROM pg_catalog\.pg_stat_activity/);
+  assert.match(runbook, /application_name LIKE 'noosphere-hybrid-%'/);
 });
 
 test("Phase B and C routine manifests use stable catalog fields", async () => {

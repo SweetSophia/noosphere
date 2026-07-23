@@ -44,9 +44,9 @@ WHERE singleton
 \gset
 
 \if :phase_b_v1_upgrade_required
-  -- Prove the old installation before changing it. The historical validator
-  -- expects the original A3 create-profile grant, so expose it only inside
-  -- this uncommitted transaction and withdraw it immediately afterwards.
+  -- Prove the exact old installation before changing it. The historical
+  -- validator consumes the historical Phase B source hash but does not require
+  -- the superseded A3 create-profile grant.
   SELECT noosphere_hybrid_b.serialize_eligibility();
   -- Historical v1 profile creation does not participate in the Phase B
   -- eligibility advisory lock. Block its INSERT until the v2 wrapper and the
@@ -57,17 +57,7 @@ WHERE singleton
     '5a5cb62c29deceb44b91c0a0252607ce9460b2761dbeca7724963ad7043fca98',
     true
   );
-  GRANT EXECUTE ON FUNCTION noosphere_hybrid.create_profile(
-    text, noosphere_hybrid.profile_locality, text, text, integer,
-    noosphere_hybrid.distance_metric, noosphere_hybrid.normalization_policy,
-    integer, bytea
-  ) TO noosphere_hybrid_admin;
   \ir validate-phase-b-v1.sql
-  REVOKE EXECUTE ON FUNCTION noosphere_hybrid.create_profile(
-    text, noosphere_hybrid.profile_locality, text, text, integer,
-    noosphere_hybrid.distance_metric, noosphere_hybrid.normalization_policy,
-    integer, bytea
-  ) FROM noosphere_hybrid_admin;
   SELECT pg_catalog.set_config(
     'noosphere.phase_b.source_sha256', :'phase_b_source_sha256', true
   );
