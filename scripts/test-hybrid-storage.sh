@@ -478,10 +478,17 @@ assert_equals '160014:160014' "$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_S
   "SELECT postgresql_server_version_num || ':' || pg_catalog.current_setting('server_version_num') FROM noosphere_hybrid.feature_state WHERE singleton")" \
   'activation PostgreSQL runtime provenance'
 
+# Invoke the SQL directly so provisioning failures cannot satisfy this oracle.
 # Phase C must fail with the documented prerequisite message on an A3-only
-# database. The versioned upgrader uses a Phase B row type and would otherwise
-# surface an implementation-level missing-relation error.
-if phase_c_without_b_output=$(activate_phase_c 2>&1); then
+# database before the versioned upgrader reads any Phase B row type.
+candidate_a3_source_sha256=$(psql "$candidate_bootstrap" -XAtq -v ON_ERROR_STOP=1 -c \
+  'SELECT activation_sql_sha256 FROM noosphere_hybrid.feature_state WHERE singleton')
+zero_source_sha256=$(printf '0%.0s' {1..64})
+if phase_c_without_b_output=$(psql "$candidate_bootstrap" -X -v ON_ERROR_STOP=1 \
+  -v a3_source_sha256="$candidate_a3_source_sha256" \
+  -v phase_b_source_sha256="$zero_source_sha256" \
+  -v phase_c_source_sha256="$zero_source_sha256" \
+  -f "$repo_root/docker/hybrid-storage/activate-phase-c.sql" 2>&1); then
   die 'Phase C activation unexpectedly accepted an A3-only database'
 fi
 [[ "$phase_c_without_b_output" == *'exact Phase B activation is required before Phase C'* ]] ||

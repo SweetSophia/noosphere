@@ -85,8 +85,10 @@ test("Phase B has an exact fail-closed v1 to v2 upgrade contract", async () => {
 test("partial-state recovery inventories Phase B readiness and live hybrid sessions safely", async () => {
   const runbook = await artifact("docker/hybrid-storage/README.md");
 
-  assert.match(runbook, /to_regprocedure\('noosphere_hybrid_b\.worker_readiness\(\)'\)/);
-  assert.match(runbook, /noosphere_hybrid_b\.worker_readiness\(\)/);
+  assert.match(
+    runbook,
+    /SELECT 'SELECT ''phase_b'' AS phase, \* FROM noosphere_hybrid_b\.worker_readiness\(\);'\r?\nWHERE pg_catalog\.to_regprocedure\('noosphere_hybrid_b\.worker_readiness\(\)'\) IS NOT NULL\r?\n\\gexec/,
+  );
   assert.match(runbook, /FROM pg_catalog\.pg_stat_activity/);
   assert.match(runbook, /application_name LIKE 'noosphere-hybrid-%'/);
 });
