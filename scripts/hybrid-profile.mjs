@@ -18,7 +18,7 @@ try {
     const locality = arg("--locality");
     const endpoint = arg("--endpoint");
     const result = await pool.query(
-      `SELECT noosphere_hybrid.create_profile(
+      `SELECT noosphere_hybrid_b.create_profile(
          'openai-compatible', $1::noosphere_hybrid.profile_locality,
          $2::text, $3::text, $4::integer,
          $5::noosphere_hybrid.distance_metric,

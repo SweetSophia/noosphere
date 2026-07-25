@@ -6,21 +6,115 @@ DECLARE
   acl_drift text;
 BEGIN
   SELECT * INTO STRICT state FROM noosphere_hybrid_b.feature_state WHERE singleton;
-  IF state.feature_version <> 2
+  IF state.feature_version <> 1
     OR state.source_sha256 <> pg_catalog.current_setting('noosphere.phase_b.source_sha256')
   THEN
     RAISE EXCEPTION 'Phase B provenance does not exactly match';
   END IF;
 
+  -- Do not compare the historical pg_get_functiondef()-based value stored in
+  -- feature_state: that representation can change across a logical restore.
+  -- Authenticate the exact v1 routine/trigger inventory with stable catalog
+  -- fields instead, using a fingerprint pinned from the historical artifacts.
+  WITH routine_evidence AS (
+    SELECT
+      pg_catalog.format(
+        'routine:%I.%I(%s)',
+        namespace.nspname,
+        procedure.proname,
+        COALESCE((
+          SELECT pg_catalog.string_agg(
+            pg_catalog.format_type(argument.type_oid, NULL),
+            ',' ORDER BY argument.ordinality
+          )
+          FROM pg_catalog.unnest(procedure.proargtypes::pg_catalog.oid[])
+            WITH ORDINALITY AS argument(type_oid, ordinality)
+        ), '')
+      ) AS identity,
+      pg_catalog.format(
+        'kind=%s|lang=%s|ret=%s|allargs=%s|modes=%s|names=%s|vol=%s|strict=%s|secdef=%s|leakproof=%s|parallel=%s|cost=%s|rows=%s|config=%s|bin=%s|src=%s',
+        procedure.prokind,
+        language.lanname,
+        pg_catalog.format_type(procedure.prorettype, NULL),
+        COALESCE((
+          SELECT pg_catalog.string_agg(
+            pg_catalog.format_type(argument.type_oid, NULL),
+            ',' ORDER BY argument.ordinality
+          )
+          FROM pg_catalog.unnest(
+            COALESCE(procedure.proallargtypes, procedure.proargtypes::pg_catalog.oid[])
+          ) WITH ORDINALITY AS argument(type_oid, ordinality)
+        ), ''),
+        COALESCE(pg_catalog.array_to_string(procedure.proargmodes, ','), ''),
+        COALESCE(pg_catalog.array_to_string(procedure.proargnames, ','), ''),
+        procedure.provolatile,
+        procedure.proisstrict,
+        procedure.prosecdef,
+        procedure.proleakproof,
+        procedure.proparallel,
+        procedure.procost,
+        procedure.prorows,
+        COALESCE((
+          SELECT pg_catalog.string_agg(setting, ',' ORDER BY setting COLLATE "C")
+          FROM pg_catalog.unnest(procedure.proconfig) AS configuration(setting)
+        ), ''),
+        COALESCE(procedure.probin, ''),
+        procedure.prosrc
+      ) AS definition
+    FROM pg_catalog.pg_proc AS procedure
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
+    JOIN pg_catalog.pg_language AS language ON language.oid = procedure.prolang
+    WHERE namespace.nspname = 'noosphere_hybrid_b'
+  ), trigger_evidence AS (
+    SELECT
+      pg_catalog.format(
+        'trigger:%I.%I:%I', relation_namespace.nspname, relation.relname, trigger_record.tgname
+      ) AS identity,
+      pg_catalog.format(
+        'enabled=%s|type=%s|columns=%s|args=%s|oldtable=%s|newtable=%s|function=%I.%I',
+        trigger_record.tgenabled,
+        trigger_record.tgtype,
+        trigger_record.tgattr::text,
+        pg_catalog.encode(trigger_record.tgargs, 'hex'),
+        COALESCE(trigger_record.tgoldtable, ''),
+        COALESCE(trigger_record.tgnewtable, ''),
+        function_namespace.nspname,
+        trigger_function.proname
+      ) AS definition
+    FROM pg_catalog.pg_trigger AS trigger_record
+    JOIN pg_catalog.pg_class AS relation ON relation.oid = trigger_record.tgrelid
+    JOIN pg_catalog.pg_namespace AS relation_namespace
+      ON relation_namespace.oid = relation.relnamespace
+    JOIN pg_catalog.pg_proc AS trigger_function ON trigger_function.oid = trigger_record.tgfoid
+    JOIN pg_catalog.pg_namespace AS function_namespace
+      ON function_namespace.oid = trigger_function.pronamespace
+    WHERE NOT trigger_record.tgisinternal
+      AND trigger_record.tgname IN (
+        'noosphere_hybrid_b_article_guard',
+        'zz_noosphere_hybrid_b_article_dirty'
+      )
+  ), evidence AS (
+    SELECT identity, definition FROM routine_evidence
+    UNION ALL
+    SELECT identity, definition FROM trigger_evidence
+  )
   SELECT pg_catalog.encode(
     noosphere_crypto.digest(
-      pg_catalog.convert_to(noosphere_hybrid_b.routine_manifest(), 'UTF8'),
+      pg_catalog.convert_to(
+        pg_catalog.string_agg(
+          evidence.identity || '|' || evidence.definition,
+          E'\n' ORDER BY evidence.identity COLLATE "C"
+        ),
+        'UTF8'
+      ),
       'sha256'
     ),
     'hex'
-  ) INTO actual_manifest_sha256;
-  IF actual_manifest_sha256 <> state.manifest_sha256 THEN
-    RAISE EXCEPTION 'Phase B routine or trigger manifest drifted';
+  ) INTO actual_manifest_sha256
+  FROM evidence;
+  IF actual_manifest_sha256 <> 'e648c4e83359994349c5502bffa9739ac3401df7f00511722d7111fa8e981f98' THEN
+    RAISE EXCEPTION 'Phase B v1 stable routine or trigger manifest drifted'
+      USING DETAIL = pg_catalog.format('actual=%s', actual_manifest_sha256);
   END IF;
 
   SELECT pg_catalog.encode(
@@ -31,10 +125,7 @@ BEGIN
     'hex'
   ) INTO actual_structure_sha256;
   IF actual_structure_sha256 <> state.structure_sha256 THEN
-    RAISE EXCEPTION 'Phase B table, constraint, index, or trigger structure drifted'
-      USING DETAIL = pg_catalog.format(
-        'expected %s, got %s', state.structure_sha256, actual_structure_sha256
-      );
+    RAISE EXCEPTION 'Phase B table, constraint, index, or trigger structure drifted';
   END IF;
 
   IF NOT EXISTS (
@@ -138,7 +229,6 @@ BEGIN
           grantee.rolname = 'noosphere_hybrid_admin'
           AND procedure.oid::pg_catalog.regprocedure::text IN (
             'noosphere_hybrid_b.set_embedding_consent(boolean,boolean)',
-            'noosphere_hybrid_b.create_profile(text,noosphere_hybrid.profile_locality,text,text,integer,noosphere_hybrid.distance_metric,noosphere_hybrid.normalization_policy,integer,bytea)',
             'noosphere_hybrid_b.profile_coverage(uuid)',
             'noosphere_hybrid_b.profile_status(uuid)',
             'noosphere_hybrid_b.set_profile_state(uuid,noosphere_hybrid.profile_state)',
@@ -181,7 +271,6 @@ BEGIN
   IF NOT pg_catalog.has_schema_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b', 'USAGE')
     OR NOT pg_catalog.has_schema_privilege('noosphere_hybrid_worker', 'noosphere_hybrid_b', 'USAGE')
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b.set_embedding_consent(boolean,boolean)', 'EXECUTE')
-    OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b.create_profile(text,noosphere_hybrid.profile_locality,text,text,integer,noosphere_hybrid.distance_metric,noosphere_hybrid.normalization_policy,integer,bytea)', 'EXECUTE')
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b.profile_coverage(uuid)', 'EXECUTE')
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b.profile_status(uuid)', 'EXECUTE')
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid_b.set_profile_state(uuid,noosphere_hybrid.profile_state)', 'EXECUTE')
@@ -195,7 +284,6 @@ BEGIN
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_worker', 'noosphere_hybrid_b.queue_health()', 'EXECUTE')
     OR NOT pg_catalog.has_function_privilege('noosphere_hybrid_worker', 'noosphere_hybrid_b.worker_readiness()', 'EXECUTE')
     OR pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid.set_profile_state(uuid,noosphere_hybrid.profile_state)', 'EXECUTE')
-    OR pg_catalog.has_function_privilege('noosphere_hybrid_admin', 'noosphere_hybrid.create_profile(text,noosphere_hybrid.profile_locality,text,text,integer,noosphere_hybrid.distance_metric,noosphere_hybrid.normalization_policy,integer,bytea)', 'EXECUTE')
     OR pg_catalog.has_function_privilege('noosphere_hybrid_worker', 'noosphere_hybrid.claim_jobs(integer,integer)', 'EXECUTE')
     OR pg_catalog.has_function_privilege('noosphere_hybrid_worker', 'noosphere_hybrid.publish_embedding(uuid,uuid,bigint,bigint,bytea,noosphere_vector.vector)', 'EXECUTE')
     OR pg_catalog.has_function_privilege('noosphere_hybrid_worker', 'noosphere_hybrid.fail_job(uuid,uuid,bigint,text,timestamptz,boolean)', 'EXECUTE')

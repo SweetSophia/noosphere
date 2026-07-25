@@ -27,7 +27,10 @@ NOOSPHERE_HYBRID_WORKER_DATABASE_URL="$worker_url" \
 phase_b_source_sha256=$(
   for phase_b_artifact in \
     "$root_dir/docker/hybrid-storage/phase-b-schema.sql" \
+    "$root_dir/docker/hybrid-storage/phase-b-routine-manifest.sql" \
     "$root_dir/docker/hybrid-storage/activate-phase-b.sql" \
+    "$root_dir/docker/hybrid-storage/upgrade-phase-b-v1-to-v2.sql" \
+    "$root_dir/docker/hybrid-storage/validate-phase-b-v1.sql" \
     "$root_dir/docker/hybrid-storage/validate-phase-b.sql"; do
     sha256sum "$phase_b_artifact" | awk '{print $1}'
   done |

@@ -36,6 +36,15 @@ import {
   setCachedSearchResults,
 } from "@/lib/cache/search-cache";
 import { withSerializableRetry } from "@/lib/memory/capture/repository";
+import {
+  HybridLexicalFallbackError,
+  readHybridRetrievalConfig,
+} from "@/lib/memory/hybrid-retrieval";
+import {
+  searchHybridArticles,
+  type HybridArticleRow,
+} from "@/lib/memory/hybrid-retrieval-runtime";
+import { HYBRID_MAX_WINDOW } from "@/lib/memory/hybrid-ranking";
 
 export interface NoosphereProviderSettings {
   /** Optional Prisma client override for scripts, tests, or alternate runtimes. */
@@ -46,6 +55,12 @@ export interface NoosphereProviderSettings {
 
   /** Scopes for restricted-article filtering. */
   allowedScopes?: string[];
+
+  /** Environment override used by deterministic tests and isolated runtimes. */
+  environment?: Readonly<Record<string, string | undefined>>;
+
+  /** Phase C runtime override used by focused provider contract tests. */
+  hybridSearch?: typeof searchHybridArticles;
 }
 
 export interface NoosphereSearchOptionsMetadata extends MemoryProviderMetadata {
@@ -105,10 +120,14 @@ export class NoosphereProvider implements MemoryProvider {
 
   private readonly prisma: PrismaClient;
   private readonly allowedScopes?: string[];
+  private readonly environment: Readonly<Record<string, string | undefined>>;
+  private readonly hybridSearch: typeof searchHybridArticles;
 
   constructor(settings: NoosphereProviderSettings = {}) {
     this.prisma = settings.prisma ?? defaultPrisma;
     this.allowedScopes = settings.allowedScopes;
+    this.environment = settings.environment ?? process.env;
+    this.hybridSearch = settings.hybridSearch ?? searchHybridArticles;
 
     this.descriptor = {
       ...NOOSPHERE_PROVIDER_DESCRIPTOR,
@@ -144,11 +163,6 @@ export class NoosphereProvider implements MemoryProvider {
     query: string,
     options: MemoryProviderSearchOptions = {},
   ): Promise<MemoryResult[]> {
-    const normalizedQuery = query.trim();
-    if (!normalizedQuery) {
-      return [];
-    }
-
     const config = normalizeMemoryProviderConfig({
       ...this.descriptor.defaultConfig,
       ...options.config,
@@ -157,8 +171,62 @@ export class NoosphereProvider implements MemoryProvider {
       return [];
     }
 
+    // A globally enabled Phase C configuration must fail closed even for
+    // requests that can otherwise short-circuit without retrieval work.
+    const hybridConfig = readHybridRetrievalConfig(this.environment);
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) {
+      return [];
+    }
+
     const limit = resolveSearchLimit(options.limit, options.config, config);
+    if (limit === 0) {
+      return [];
+    }
     const metadata = (options.metadata ?? {}) as NoosphereSearchOptionsMetadata;
+    const offset = normalizeOffset(metadata.offset);
+    let hybridFallbackReason: string | undefined;
+
+    if (
+      hybridConfig.enabled &&
+      limit !== undefined &&
+      offset + limit <= HYBRID_MAX_WINDOW
+    ) {
+      try {
+        const rows = await this.hybridSearch(
+          this.prisma,
+          {
+            query: normalizedQuery,
+            limit,
+            offset,
+            filters: {
+              topicSlug: metadata.topicSlug ?? options.scope,
+              tagSlug: metadata.tagSlug,
+              status: metadata.status,
+              confidence: metadata.confidence,
+            },
+            allowedScopes: this.allowedScopes,
+            signal: options.signal,
+          },
+          hybridConfig,
+          this.environment,
+        );
+        return rows.map((row) => this.toHybridMemoryResult(row));
+      } catch (error) {
+        if (!(error instanceof HybridLexicalFallbackError)) throw error;
+        hybridFallbackReason = normalizeHybridFallbackReason(error.code);
+        console.warn("[hybrid-retrieval] lexical fallback", {
+          code: hybridFallbackReason,
+        });
+      }
+    } else if (hybridConfig.enabled) {
+      hybridFallbackReason = limit === undefined
+        ? "limit_unbounded"
+        : "window_exceeded";
+      console.warn("[hybrid-retrieval] lexical fallback", {
+        code: hybridFallbackReason,
+      });
+    }
 
     const cacheVersion = await getSearchCacheVersion();
     const cacheKey = cacheVersion === null
@@ -170,7 +238,7 @@ export class NoosphereProvider implements MemoryProvider {
           status: metadata.status,
           confidence: metadata.confidence,
           limit,
-          offset: normalizeOffset(metadata.offset),
+          offset,
           allowedScopes: this.allowedScopes,
           cacheVersion,
         });
@@ -178,14 +246,15 @@ export class NoosphereProvider implements MemoryProvider {
     if (cacheKey) {
       const cachedResults = await getCachedSearchResults(cacheKey);
       if (cachedResults !== null) {
-        return this.hydrateEligibleArticleRefs(cachedResults);
+        const cachedArticles = await this.hydrateEligibleArticleRefs(cachedResults);
+        return annotateHybridFallback(cachedArticles, hybridFallbackReason);
       }
     }
 
     // Cache miss - proceed with database query
     const rankedArticles = await this.searchArticles(normalizedQuery, {
       limit,
-      offset: normalizeOffset(metadata.offset),
+      offset,
       topicSlug: metadata.topicSlug ?? options.scope,
       tagSlug: metadata.tagSlug,
       status: metadata.status,
@@ -201,7 +270,7 @@ export class NoosphereProvider implements MemoryProvider {
       void setCachedSearchResults(cacheKey, articles, cacheVersion);
     }
 
-    return articles;
+    return annotateHybridFallback(articles, hybridFallbackReason);
   }
 
   async getById(
@@ -592,6 +661,24 @@ export class NoosphereProvider implements MemoryProvider {
     });
   }
 
+  private toHybridMemoryResult(row: HybridArticleRow): MemoryResult {
+    const result = this.toMemoryResultFromRow(
+      row,
+      row.tags,
+      row.relevanceScore,
+    );
+    return defineMemoryResult({
+      ...result,
+      metadata: removeUndefined({
+        ...result.metadata,
+        hybridAlgorithm: "rrf-v1",
+        hybridRawRrfScore: row.rawRrfScore,
+        hybridLexicalRank: row.lexicalRank,
+        hybridVectorRank: row.vectorRank,
+      }),
+    });
+  }
+
   private toMemoryResult(
     article: NoosphereArticle,
     relevanceScore?: number,
@@ -636,6 +723,29 @@ export function createNoosphereProvider(
   settings: NoosphereProviderSettings = {},
 ): NoosphereProvider {
   return new NoosphereProvider(settings);
+}
+
+function normalizeHybridFallbackReason(code: string): string {
+  return /^[a-z][a-z0-9_]{0,63}$/.test(code)
+    ? code
+    : "transient_dependency";
+}
+
+function annotateHybridFallback(
+  results: MemoryResult[],
+  reason: string | undefined,
+): MemoryResult[] {
+  if (!reason) return results;
+  return results.map((result) =>
+    defineMemoryResult({
+      ...result,
+      metadata: {
+        ...result.metadata,
+        hybridFallback: true,
+        hybridFallbackReason: reason,
+      },
+    }),
+  );
 }
 
 function mapConfidenceScore(confidence: string | null): number | undefined {

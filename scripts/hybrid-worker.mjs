@@ -210,7 +210,7 @@ async function assertReadiness(clientPool, configuredProviders) {
      FROM noosphere_hybrid_b.worker_readiness() AS readiness`,
   );
   const row = result.rows[0];
-  if (!row || row.current_user !== "noosphere_hybrid_worker_login" || row.feature_version !== 1) {
+  if (!row || row.current_user !== "noosphere_hybrid_worker_login" || row.feature_version !== 2) {
     throw new Error("Hybrid Phase B database readiness check failed");
   }
   const activeProfileIds = Array.isArray(row.active_profile_ids) ? row.active_profile_ids : [];
