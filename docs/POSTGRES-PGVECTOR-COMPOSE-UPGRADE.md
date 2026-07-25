@@ -43,10 +43,10 @@ Install and upgrade through the same command:
 
 ```bash
 # Installer commit: 6bb3a21648b441654f3fdffde2affe7358de6e63
-# Expected SHA-256: 622df3c415d0380eb277fdd7036505215261229f114a4e1bab47faf1cfbaec9e
+# Expected SHA-256: 6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c
 installer="$(mktemp)"
 curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/6bb3a21648b441654f3fdffde2affe7358de6e63/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '622df3c415d0380eb277fdd7036505215261229f114a4e1bab47faf1cfbaec9e' "$installer" | sha256sum -c -
+printf '%s  %s\n' '6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 ```
 

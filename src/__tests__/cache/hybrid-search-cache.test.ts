@@ -197,6 +197,11 @@ test("rotation changes identity and retired/compromised keys become unusable", (
     documentSchema: "article-v1",
     allowedScopes: [],
   }, rotated).cacheKey);
+  assert.deepEqual(
+    parseHybridCacheEnvelope(oldIdentity, oldValue, rotated),
+    { epoch: "42", candidates: [] },
+    "a retained key must authenticate its pre-rotation namespace",
+  );
   assert.equal(parseHybridCacheEnvelope(oldIdentity, oldValue, compromisedRemoved), null);
 });
 

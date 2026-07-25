@@ -17,6 +17,7 @@ import {
   type HybridRetrievalRequest,
 } from "@/lib/memory/hybrid-retrieval";
 import {
+  buildHybridAuthorizationBudgetSql,
   buildHybridCacheHitSql,
   buildHybridMissSql,
 } from "@/lib/memory/hybrid-retrieval-sql";
@@ -137,8 +138,10 @@ export async function searchHybridArticles(
           candidates: cached.candidates,
         }),
       ),
-    embedQuery: ({ query, profile, signal }) =>
-      embedHybridQuery(prisma, query, profile, signal, env),
+    authorizationBudgetAllows: ({ request: budgetRequest }) =>
+      authorizationBudgetAllows(prisma, budgetRequest),
+    embedQuery: ({ request: embedRequest, profile }) =>
+      embedHybridQuery(prisma, embedRequest, profile, env),
     searchMiss: async ({ request: missRequest, profile, vectorLiteral }) =>
       executeHybridQuery(
         prisma,
@@ -156,6 +159,30 @@ export async function searchHybridArticles(
       ),
     writeCache: writeHybridSearchCache,
   });
+}
+
+async function authorizationBudgetAllows(
+  prisma: PrismaClient,
+  request: HybridRetrievalRequest,
+): Promise<boolean> {
+  let rows: Array<{ authorization_budget_valid: boolean }>;
+  try {
+    rows = await prisma.$queryRaw<Array<{ authorization_budget_valid: boolean }>>(
+      buildHybridAuthorizationBudgetSql({
+        ...request.filters,
+        allowedScopes: request.allowedScopes,
+      }),
+    );
+  } catch (error) {
+    throw databaseCorrectnessError("authorization_budget_check_failed", error);
+  }
+  if (
+    rows.length !== 1 ||
+    typeof rows[0]?.authorization_budget_valid !== "boolean"
+  ) {
+    throw new HybridCorrectnessError("authorization_budget_check_malformed");
+  }
+  return rows[0].authorization_budget_valid;
 }
 
 async function loadHybridProfile(
@@ -226,11 +253,12 @@ async function loadHybridProfile(
 
 async function embedHybridQuery(
   prisma: PrismaClient,
-  query: string,
+  request: HybridRetrievalRequest,
   profile: HybridProfileSnapshot,
-  signal: AbortSignal | undefined,
   env: HybridEnvironment,
 ): Promise<string> {
+  const signal = request.signal;
+  const query = request.query;
   if (profile.locality === "remote" && !profile.remoteEgress) {
     throw new HybridCorrectnessError("remote_query_egress_not_consented");
   }
@@ -252,6 +280,15 @@ async function embedHybridQuery(
       HYBRID_LIMITS.responseBytes,
     );
     await authorizeHybridQueryDispatch(prisma, profile.profileId);
+    // Re-check the authorization budget immediately before paying for the
+    // embedding call. The orchestrator already preflighted above, but a
+    // burst-insert that lands between preflight and this call could otherwise
+    // slip a single paid embedding through before the miss query's
+    // authorization_budget_valid sentinel rejects the final result. Falling
+    // back here keeps the provider call inside the budget guarantee.
+    if (!await authorizationBudgetAllows(prisma, request)) {
+      throw new HybridLexicalFallbackError("authorized_candidate_limit_exceeded");
+    }
     const embedding = await requestEmbedding(
       {
         profile_id: profile.profileId,
@@ -287,7 +324,7 @@ async function embedHybridQuery(
       }
       throw new HybridCorrectnessError(error.code);
     }
-    throw new HybridCorrectnessError("query_provider_config_invalid");
+    throw new HybridCorrectnessError("query_provider_unexpected");
   }
 }
 
@@ -392,12 +429,14 @@ export function parseHybridQueryRows(rawRows: HybridRawQueryRow[]): {
   // cache_set CTE. Validate that bounded set once, then compare the database's
   // canonical JSONB fingerprint so repeated rows cannot silently disagree
   // without paying to parse and canonicalize the whole set for every row.
+  // The first row's fingerprint was already SHA-256-validated above, so a
+  // raw `===` comparison against that canonical value is sufficient for every
+  // subsequent row (a malformed row can never equal the validated value).
   for (const row of rawRows) {
     if (
       row.cache_valid !== cacheValid ||
       requireEpoch(row.epoch) !== epoch ||
-      requireSha256(row.candidates_fingerprint, "candidates_fingerprint") !==
-        candidatesFingerprint ||
+      row.candidates_fingerprint !== candidatesFingerprint ||
       requireInteger(row.fused_set_size, "fused_set_size") !== candidates.length
     ) {
       throw new HybridCorrectnessError("hybrid_query_metadata_inconsistent");

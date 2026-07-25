@@ -11,7 +11,7 @@ const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
 const immutableHelperRef = "a2067895023efc638e966ee827fea67385d8aa37";
 const verifiedInstallerRef = "6bb3a21648b441654f3fdffde2affe7358de6e63";
-const verifiedInstallerSha256 = "622df3c415d0380eb277fdd7036505215261229f114a4e1bab47faf1cfbaec9e";
+const verifiedInstallerSha256 = "6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
@@ -247,6 +247,10 @@ const ambiguousInstallerHybridValidation = spawnSync("bash", [resolve(root, "ins
   encoding: "utf8",
   env: { ...installerHybridValidationEnv, NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: "1" },
 });
+const blankInstallerHybridValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
+  encoding: "utf8",
+  env: { ...installerHybridValidationEnv, NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: "" },
+});
 const weakInstallerHybridValidation = spawnSync("bash", [resolve(root, "install-openclaw.sh")], {
   encoding: "utf8",
   env: {
@@ -290,6 +294,8 @@ expect(
   validInstallerHybridValidation.status === 0 &&
     validInstallerHybridValidation.stdout.trim() === Buffer.from(installerHybridCacheJson, "utf8").toString("base64") &&
     ambiguousInstallerHybridValidation.status !== 0 &&
+    blankInstallerHybridValidation.status !== 0 &&
+    blankInstallerHybridValidation.stderr.includes("must be exactly true or false") &&
     weakInstallerHybridValidation.status !== 0 &&
     oversizedInstallerHybridValidation.status !== 0 &&
     oversizedInstallerHybridValidation.stderr.includes("exceeds 8192 bytes") &&
@@ -489,7 +495,7 @@ for (const composePath of ["docker-compose.yml", "docker-compose.noosphere.yml"]
       compose.includes("export NOOSPHERE_HYBRID_ADMIN_DATABASE_URL=") &&
       compose.includes("export NOOSPHERE_HYBRID_WORKER_DATABASE_URL=") &&
       compose.includes("NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64") &&
-      compose.includes("NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: ${NOOSPHERE_HYBRID_RETRIEVAL_ENABLED:-false}") &&
+      compose.includes("NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: ${NOOSPHERE_HYBRID_RETRIEVAL_ENABLED-false}") &&
       compose.includes("NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64") &&
       compose.includes("scripts/check-hybrid-worker-health.mjs"),
     `${composePath} must keep the limited Phase B worker behind the disabled hybrid profile`,
@@ -508,7 +514,7 @@ expect(
 expect(
   installer.includes("NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=\${NOOSPHERE_HYBRID_RETRIEVAL_ENABLED}") &&
     installer.includes("NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64=\${NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64}") &&
-    installer.includes("NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: \\${NOOSPHERE_HYBRID_RETRIEVAL_ENABLED:-false}") &&
+    installer.includes("NOOSPHERE_HYBRID_RETRIEVAL_ENABLED: \\${NOOSPHERE_HYBRID_RETRIEVAL_ENABLED-false}") &&
     installer.includes("NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64: \\${NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64:-}"),
   "install-openclaw.sh must persist Phase C settings while publishing exact recall as disabled by default",
 );

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildHybridAuthorizationBudgetSql,
   buildHybridCacheHitSql,
   buildHybridMissSql,
 } from "@/lib/memory/hybrid-retrieval-sql";
@@ -52,7 +53,7 @@ test("miss query uses one shared authorized base for lexical and vector candidat
   );
   assert.equal(
     query.values.filter((value) => value === HYBRID_MAX_AUTHORIZED_CANDIDATES + 1).length,
-    1,
+    2,
   );
   assert.match(text, /AS authorization_budget_valid/);
   assert.match(text, /vector_batch_source AS MATERIALIZED .* JOIN authorized_base/s);
@@ -80,6 +81,57 @@ test("miss query uses one shared authorized base for lexical and vector candidat
   assert.match(text, /vector_source AS MATERIALIZED .* LIMIT \?/s);
   assert.equal(
     query.values.filter((value) => value === HYBRID_RRF_K).length,
+    2,
+  );
+});
+
+test("authorization preflight and miss query share the exact bounded filter relation", () => {
+  const preflight = buildHybridAuthorizationBudgetSql(filters);
+  const preflightText = sqlText(preflight);
+  const miss = buildHybridMissSql({
+    query: "query",
+    profileId: "0198fe17-f4dd-7ee3-93e4-acde00000001",
+    vectorLiteral: "[1,0,0]",
+    limit: 10,
+    offset: 0,
+    filters,
+  });
+  const missText = sqlText(miss);
+
+  for (const text of [preflightText, missText]) {
+    assert.match(text, /FROM "Article" a INNER JOIN "Topic" tpc/);
+    assert.match(text, /a\."deletedAt" IS NULL/);
+    assert.match(text, /a\."recallQuarantinedAt" IS NULL/);
+    assert.match(text, /tpc\.slug = \?/);
+    assert.match(text, /tag_filter\.slug = \?/);
+    assert.match(text, /a\.status = \?/);
+    assert.match(text, /a\.confidence = \?/);
+    assert.match(text, /a\."restrictedTags" && \?/);
+  }
+  assert.match(
+    preflightText,
+    /ORDER BY bounded_authorized\.id LIMIT \?/,
+  );
+  assert.match(
+    missText,
+    /ORDER BY gated_authorized\.id .* OFFSET 0 LIMIT \?/,
+  );
+  assert.equal(
+    preflight.values.filter(
+      (value) => value === HYBRID_MAX_AUTHORIZED_CANDIDATES,
+    ).length,
+    1,
+  );
+  assert.equal(
+    preflight.values.filter(
+      (value) => value === HYBRID_MAX_AUTHORIZED_CANDIDATES + 1,
+    ).length,
+    1,
+  );
+  assert.equal(
+    miss.values.filter(
+      (value) => value === HYBRID_MAX_AUTHORIZED_CANDIDATES + 1,
+    ).length,
     2,
   );
 });

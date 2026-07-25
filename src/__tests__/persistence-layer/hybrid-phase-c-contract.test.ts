@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { buildHybridMissSql } from "@/lib/memory/hybrid-retrieval-sql";
+
 const root = new URL("../../../", import.meta.url);
 
 async function artifact(path: string): Promise<string> {
@@ -20,6 +22,10 @@ function functionDefinition(sql: string, qualifiedName: string): string {
   assert.notEqual(end, -1, `${qualifiedName} definition must be complete`);
 
   return sql.slice(start, end + terminator.length);
+}
+
+function sqlText(query: { strings: readonly string[] }): string {
+  return query.strings.join("?").replace(/\s+/g, " ");
 }
 
 test("Phase C is independently evidenced and validates exact A3 plus B before activation", async () => {
@@ -144,8 +150,27 @@ test("Phase B serializes profile creation before Phase C materializes coverage",
 
 test("application receives only content-free Phase C routines and no table access", async () => {
   const activation = await artifact("docker/hybrid-storage/activate-phase-c.sql");
+  const schema = await artifact("docker/hybrid-storage/phase-c-schema.sql");
   const validation = await artifact("docker/hybrid-storage/validate-phase-c.sql");
   const activationScript = await artifact("scripts/activate-hybrid-retrieval.sh");
+  const definitions = {
+    authorize: functionDefinition(
+      schema,
+      "noosphere_hybrid_c.authorize_query_dispatch",
+    ),
+    snapshot: functionDefinition(
+      schema,
+      "noosphere_hybrid_c.query_profile_snapshot",
+    ),
+    candidates: functionDefinition(
+      schema,
+      "noosphere_hybrid_c.vector_candidates",
+    ),
+    membership: functionDefinition(
+      schema,
+      "noosphere_hybrid_c.current_vector_membership",
+    ),
+  };
 
   assert.match(activation, /GRANT USAGE ON SCHEMA noosphere_hybrid_c TO noosphere_app/);
   assert.match(activation, /query_profile_snapshot\(uuid\)/);
@@ -160,6 +185,17 @@ test("application receives only content-free Phase C routines and no table acces
   assert.match(activationScript, /has_schema_privilege\(current_user,'noosphere_hybrid_c','USAGE'\)/);
   assert.match(activationScript, /authorize_query_dispatch\(uuid\)','EXECUTE'/);
   assert.match(activationScript, /t:t:t:t:t/);
+  for (const definition of Object.values(definitions)) {
+    assert.match(definition, /SECURITY DEFINER/);
+    assert.match(definition, /SET search_path = pg_catalog, pg_temp/);
+  }
+  assert.match(definitions.authorize, /serialize_eligibility\(\)/);
+  assert.match(definitions.authorize, /profile\.state <> 'serving'/);
+  assert.match(definitions.snapshot, /profile_coverage_snapshot/);
+  assert.doesNotMatch(definitions.snapshot, /public\."Article"/);
+  assert.match(definitions.candidates, /cardinality\(candidate_article_ids\) > 1000/);
+  assert.match(definitions.membership, /cardinality\(candidate_article_ids\) > 400/);
+  assert.match(definitions.membership, /profile_article_is_eligible/);
 });
 
 test("vector routines fail closed on serving state, dimension, finiteness, and current article state", async () => {
@@ -183,6 +219,33 @@ test("vector routines fail closed on serving state, dimension, finiteness, and c
   assert.match(candidates, /ORDER BY 2 ASC, article\."updatedAt" DESC, embedding\.article_id ASC/);
   assert.match(candidates, /LIMIT 200/);
   assert.match(candidates, /cardinality\(candidate_article_ids\) > 1000/);
+
+  const generatedMiss = sqlText(buildHybridMissSql({
+    query: "query",
+    profileId: "0198fe17-f4dd-7ee3-93e4-acde00000001",
+    vectorLiteral: "[1,0,0]",
+    limit: 10,
+    offset: 0,
+    filters: { allowedScopes: [] },
+  }));
+  assert.match(
+    generatedMiss,
+    /ORDER BY distance ASC, "updatedAt" DESC, id ASC LIMIT \?/,
+  );
+  assert.match(
+    candidates,
+    /ORDER BY 2 ASC, article\."updatedAt" DESC, embedding\.article_id ASC/,
+  );
+});
+
+test("unexpected provider failures use a neutral bounded error taxonomy", async () => {
+  const runtime = await artifact("src/lib/memory/hybrid-retrieval-runtime.ts");
+
+  assert.match(
+    runtime,
+    /throw new HybridCorrectnessError\("query_provider_unexpected"\)/,
+  );
+  assert.doesNotMatch(runtime, /query_provider_config_invalid/);
 });
 
 test("profile snapshots read exact materialized coverage without scanning the corpus", async () => {

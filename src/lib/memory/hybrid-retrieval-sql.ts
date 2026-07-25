@@ -34,6 +34,28 @@ export interface HybridCacheHitSqlInput extends HybridSqlBaseInput {
   candidates: HybridCachedCandidate[];
 }
 
+export function buildHybridAuthorizationBudgetSql(
+  filters: ArticleSearchFilters,
+  authorizationCandidateLimit = HYBRID_MAX_AUTHORIZED_CANDIDATES,
+): Prisma.Sql {
+  const candidateLimit = validateAuthorizationCandidateLimit(
+    authorizationCandidateLimit,
+  );
+  const searchFilters = buildArticleSearchFilters(filters);
+  return Prisma.sql`
+    SELECT
+      pg_catalog.count(*) <= ${candidateLimit} AS authorization_budget_valid
+    FROM (
+      SELECT bounded_authorized.id
+      FROM (
+        ${buildAuthorizedArticleIdCTE(searchFilters)}
+      ) AS bounded_authorized
+      ORDER BY bounded_authorized.id
+      LIMIT ${candidateLimit + 1}
+    ) AS authorized_ids
+  `;
+}
+
 export function buildHybridMissSql(
   input: HybridMissSqlInput,
   authorizationCandidateLimit = HYBRID_MAX_AUTHORIZED_CANDIDATES,
@@ -314,10 +336,12 @@ function buildSearchCtes(
             ${buildAuthorizedArticleIdCTE(searchFilters)}
           ) AS gated_authorized
           WHERE profile_epoch.coverage_valid
+          ORDER BY gated_authorized.id
           -- This barrier preserves profile_epoch as a one-time outer gate;
           -- without it PostgreSQL may pull up the subquery and scan Article
           -- before applying the false coverage predicate.
           OFFSET 0
+          LIMIT ${authorizationCandidateLimit + 1}
         ) AS coverage_gated
       ),
       ${buildHybridAuthorizationBatchCtes(

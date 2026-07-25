@@ -413,6 +413,6 @@ deactivating every profile, then
 stopping the worker with `docker compose --profile hybrid stop hybrid-worker`.
 Inactive profiles are excluded from work and retrieval while their local vector
 rows remain available for a controlled re-prepare/backfill. Revoking remote
-consent hard-deletes affected remote artifacts. Do not drop either feature
-schema as an application migration. Removing activated storage is a separate,
+consent hard-deletes affected remote artifacts. Do not drop any activated
+feature schema as an application migration. Removing activated storage is a separate,
 explicit operator action that requires a backup and is outside this phase.

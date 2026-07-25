@@ -8,7 +8,10 @@ import {
   type HybridCachedCandidate,
 } from "@/lib/cache/hybrid-search-cache";
 import type { ArticleSearchFilters } from "@/lib/memory/article-search";
-import { HYBRID_MINIMUM_COVERAGE } from "@/lib/memory/hybrid-ranking";
+import {
+  HYBRID_MAX_WINDOW,
+  HYBRID_MINIMUM_COVERAGE,
+} from "@/lib/memory/hybrid-ranking";
 
 const PROFILE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -88,10 +91,12 @@ export interface HybridRetrievalDependencies<Row> {
     identity: HybridCacheIdentity;
     cached: HybridCacheResult;
   }): Promise<HybridQueryResponse<Row>>;
+  authorizationBudgetAllows(input: {
+    request: HybridRetrievalRequest;
+  }): Promise<boolean>;
   embedQuery(input: {
-    query: string;
+    request: HybridRetrievalRequest;
     profile: HybridProfileSnapshot;
-    signal?: AbortSignal;
   }): Promise<string>;
   searchMiss(input: {
     request: HybridRetrievalRequest;
@@ -214,10 +219,17 @@ export async function runHybridRetrieval<Row>(
     }
   }
 
+  if (!await dependencies.authorizationBudgetAllows({
+    request: normalizedRequest,
+  })) {
+    throw new HybridLexicalFallbackError(
+      "authorized_candidate_limit_exceeded",
+    );
+  }
+
   const vectorLiteral = await dependencies.embedQuery({
-    query: normalizedRequest.query,
+    request: normalizedRequest,
     profile,
-    signal: normalizedRequest.signal,
   });
   const miss = await dependencies.searchMiss({
     request: normalizedRequest,
@@ -247,6 +259,15 @@ function normalizeHybridRetrievalRequest(
   const query = normalizeHybridQuery(request.query);
   if (!query) {
     throw new HybridCorrectnessError("query_empty");
+  }
+  if (
+    !Number.isSafeInteger(request.limit) ||
+    request.limit < 1 ||
+    !Number.isSafeInteger(request.offset) ||
+    request.offset < 0 ||
+    request.offset + request.limit > HYBRID_MAX_WINDOW
+  ) {
+    throw new HybridCorrectnessError("pagination_invalid");
   }
   return {
     ...request,

@@ -61,6 +61,7 @@ function dependencies(
     loadProfile: async () => profile(),
     readCache: async () => null,
     hydrateCached: async () => ({ cacheValid: false, epoch: "42", candidates: [], rows: [] }),
+    authorizationBudgetAllows: async () => true,
     embedQuery: async () => "[1,0,0]",
     searchMiss: async () => ({
       cacheValid: true,
@@ -160,6 +161,33 @@ test("a non-serving profile is a correctness failure before coverage fallback", 
       error.code === "query_profile_not_serving",
   );
   assert.equal(providerCalls, 0);
+});
+
+test("an exceeded authorization budget falls back before paid embedding", async () => {
+  let providerCalls = 0;
+  let missCalls = 0;
+  await assert.rejects(
+    runHybridRetrieval(
+      request,
+      readHybridRetrievalConfig(enabledEnvironment()),
+      dependencies({
+        authorizationBudgetAllows: async () => false,
+        embedQuery: async () => {
+          providerCalls++;
+          return "[1,0,0]";
+        },
+        searchMiss: async () => {
+          missCalls++;
+          throw new Error("miss path must not run");
+        },
+      }),
+    ),
+    (error) =>
+      error instanceof HybridLexicalFallbackError &&
+      error.code === "authorized_candidate_limit_exceeded",
+  );
+  assert.equal(providerCalls, 0);
+  assert.equal(missCalls, 0);
 });
 
 test("rotation reads a retained-key cache identity before paying for a new embedding", async () => {
@@ -328,7 +356,7 @@ test("orchestration canonicalizes query and filters before cache, provider, and 
         observed.hydrated = hydrated;
         return { cacheValid: false, epoch: "42", candidates: [], rows: [] };
       },
-      embedQuery: async ({ query }) => {
+      embedQuery: async ({ request: { query } }) => {
         observed.providerQuery = query;
         return "[1,0,0]";
       },
@@ -368,4 +396,36 @@ test("normalization rejects a query that becomes empty before any profile or cac
     (error) => error instanceof HybridCorrectnessError && error.code === "query_empty",
   );
   assert.equal(profileCalls, 0);
+});
+
+test("core retrieval rejects invalid pagination before profile, cache, or provider work", async () => {
+  const invalidWindows = [
+    { limit: 0, offset: 0 },
+    { limit: -1, offset: 0 },
+    { limit: 1.5, offset: 0 },
+    { limit: 1, offset: -1 },
+    { limit: 1, offset: 0.5 },
+    { limit: 200, offset: 1 },
+    { limit: Number.MAX_SAFE_INTEGER, offset: 1 },
+  ];
+
+  for (const window of invalidWindows) {
+    let profileCalls = 0;
+    await assert.rejects(
+      runHybridRetrieval(
+        { ...request, ...window },
+        readHybridRetrievalConfig(enabledEnvironment()),
+        dependencies({
+          loadProfile: async () => {
+            profileCalls++;
+            return profile();
+          },
+        }),
+      ),
+      (error) =>
+        error instanceof HybridCorrectnessError &&
+        error.code === "pagination_invalid",
+    );
+    assert.equal(profileCalls, 0);
+  }
 });

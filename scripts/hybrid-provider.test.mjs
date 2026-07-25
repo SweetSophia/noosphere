@@ -201,6 +201,44 @@ test("provider request keeps redirects and static request failures non-retryable
   );
 });
 
+test("provider request classifies the HTTP status boundary as retryable or non-retryable", async () => {
+  const provider = {
+    profileId,
+    locality: "local",
+    endpoint: "http://127.0.0.1:8080/v1/embeddings",
+    endpointIdentitySha256: job.endpoint_identity_sha256,
+    apiKey: "",
+  };
+  // Boundary: 408 (Request Timeout) and 429 (Too Many Requests) must be retryable;
+  // every 5xx in the standard range must be retryable. 600 is out of range and
+  // is already covered by the preceding test.
+  for (const status of [408, 429, 500, 502, 503, 504]) {
+    await assert.rejects(
+      requestEmbedding(job, provider, {
+        fetchImpl: async () => ({ ok: false, status }),
+      }),
+      (error) =>
+        error instanceof HybridProviderError &&
+        error.code === `provider_http_${status}` &&
+        error.retryable === true,
+      `status ${status} should be retryable`,
+    );
+  }
+  // Other 4xx responses must be non-retryable (client errors are not transient).
+  for (const status of [400, 401, 403, 404, 410, 422, 451]) {
+    await assert.rejects(
+      requestEmbedding(job, provider, {
+        fetchImpl: async () => ({ ok: false, status }),
+      }),
+      (error) =>
+        error instanceof HybridProviderError &&
+        error.code === `provider_http_${status}` &&
+        error.retryable === false,
+      `status ${status} should be non-retryable`,
+    );
+  }
+});
+
 test("provider request retries only recognized transport failures", async () => {
   const provider = {
     profileId,
