@@ -258,6 +258,37 @@ test("provider request retries only recognized transport failures", async () => 
   );
 });
 
+test("provider request classifies newly-added transient transport codes as retryable", async () => {
+  const provider = {
+    profileId,
+    locality: "local",
+    endpoint: "http://127.0.0.1:8080/v1/embeddings",
+    endpointIdentitySha256: job.endpoint_identity_sha256,
+    apiKey: "",
+  };
+  for (const code of [
+    "ENETRESET",
+    "EPIPE",
+    "EHOSTDOWN",
+    "ENETDOWN",
+    "EAGAIN",
+    "ERR_TLS_CERT_ALTNAME_INVALID",
+    "ERR_TLS_CERT_HAS_EXPIRED",
+    "ERR_TLS_CERT_REJECTED",
+  ]) {
+    const transportError = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("transient transport failure"), { code }),
+    });
+    await assert.rejects(
+      requestEmbedding(job, provider, {
+        fetchImpl: async () => { throw transportError; },
+      }),
+      (error) => error instanceof HybridProviderError && error.code === "provider_network" && error.retryable === true,
+      `code ${code} should classify as a retryable provider_network error`,
+    );
+  }
+});
+
 test("retry delay is bounded exponential backoff with jitter", () => {
   assert.equal(computeRetryDelayMs(1, () => 0), 750);
   assert.equal(computeRetryDelayMs(2, () => 0.5), 2_000);
