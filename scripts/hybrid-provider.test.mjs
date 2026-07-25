@@ -267,14 +267,20 @@ test("provider request classifies newly-added transient transport codes as retry
     apiKey: "",
   };
   for (const code of [
-    "ENETRESET",
-    "EPIPE",
-    "EHOSTDOWN",
-    "ENETDOWN",
+    "CERT_HAS_EXPIRED",
+    "CERT_REJECTED",
+    "CERT_REVOKED",
+    "CERT_UNTRUSTED",
+    "DEPTH_ZERO_SELF_SIGNED_CERT",
     "EAGAIN",
+    "ENETDOWN",
+    "ENETRESET",
+    "EHOSTDOWN",
+    "EPIPE",
     "ERR_TLS_CERT_ALTNAME_INVALID",
-    "ERR_TLS_CERT_HAS_EXPIRED",
-    "ERR_TLS_CERT_REJECTED",
+    "SELF_SIGNED_CERT_IN_CHAIN",
+    "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+    "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
   ]) {
     const transportError = new TypeError("fetch failed", {
       cause: Object.assign(new Error("transient transport failure"), { code }),
@@ -287,6 +293,26 @@ test("provider request classifies newly-added transient transport codes as retry
       `code ${code} should classify as a retryable provider_network error`,
     );
   }
+});
+
+test("provider request leaves unknown transport codes non-retryable", async () => {
+  const provider = {
+    profileId,
+    locality: "local",
+    endpoint: "http://127.0.0.1:8080/v1/embeddings",
+    endpointIdentitySha256: job.endpoint_identity_sha256,
+    apiKey: "",
+  };
+  const unknownError = new TypeError("fetch failed", {
+    cause: Object.assign(new Error("unknown transport failure"), { code: "ENOTACODE" }),
+  });
+  await assert.rejects(
+    requestEmbedding(job, provider, {
+      fetchImpl: async () => { throw unknownError; },
+    }),
+    (error) => error instanceof HybridProviderError && error.code === "provider_request_failed" && error.retryable === false,
+    "unknown transport codes must remain non-retryable",
+  );
 });
 
 test("retry delay is bounded exponential backoff with jitter", () => {
