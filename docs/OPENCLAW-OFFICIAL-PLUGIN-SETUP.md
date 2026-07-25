@@ -40,10 +40,10 @@ flock --version
 Use the installer from the repository:
 
 ```bash
-# Installer commit: 6bb3a21648b441654f3fdffde2affe7358de6e63
+# Installer commit: 19ba70a9e8c40dbe01df6de9ca79725c708f3997
 # Expected SHA-256: 6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c
 installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/6bb3a21648b441654f3fdffde2affe7358de6e63/install-openclaw.sh -o "$installer"
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/19ba70a9e8c40dbe01df6de9ca79725c708f3997/install-openclaw.sh -o "$installer"
 printf '%s  %s\n' '6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 ```
@@ -417,10 +417,10 @@ curl -s https://<host>/api/memory/status \
 Use the guarded installer for upgrades as well as first-time setup:
 
 ```bash
-# Installer commit: 6bb3a21648b441654f3fdffde2affe7358de6e63
+# Installer commit: 19ba70a9e8c40dbe01df6de9ca79725c708f3997
 # Expected SHA-256: 6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c
 installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/6bb3a21648b441654f3fdffde2affe7358de6e63/install-openclaw.sh -o "$installer"
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/19ba70a9e8c40dbe01df6de9ca79725c708f3997/install-openclaw.sh -o "$installer"
 printf '%s  %s\n' '6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 openclaw noosphere doctor
@@ -550,10 +550,10 @@ then the install did not complete. A healthy run must continue with `Bootstrap c
 First use the reviewed installer revision and verify its checksum before execution:
 
 ```bash
-# Installer commit: 6bb3a21648b441654f3fdffde2affe7358de6e63
+# Installer commit: 19ba70a9e8c40dbe01df6de9ca79725c708f3997
 # Expected SHA-256: 6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c
 installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/6bb3a21648b441654f3fdffde2affe7358de6e63/install-openclaw.sh -o "$installer"
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/19ba70a9e8c40dbe01df6de9ca79725c708f3997/install-openclaw.sh -o "$installer"
 printf '%s  %s\n' '6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 ```
