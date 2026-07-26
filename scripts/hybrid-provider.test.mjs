@@ -258,6 +258,97 @@ test("provider request retries only recognized transport failures", async () => 
   );
 });
 
+test("provider request classifies transient transport codes as retryable", async () => {
+  const provider = {
+    profileId,
+    locality: "local",
+    endpoint: "http://127.0.0.1:8080/v1/embeddings",
+    endpointIdentitySha256: job.endpoint_identity_sha256,
+    apiKey: "",
+  };
+  for (const code of [
+    "EAGAIN",
+    "EAI_AGAIN",
+    "ECONNREFUSED",
+    "ECONNRESET",
+    "EHOSTDOWN",
+    "EHOSTUNREACH",
+    "ENETDOWN",
+    "ENETRESET",
+    "ENETUNREACH",
+    "ENOTFOUND",
+    "EPIPE",
+    "ETIMEDOUT",
+    "UND_ERR_CONNECT_TIMEOUT",
+    "UND_ERR_HEADERS_TIMEOUT",
+    "UND_ERR_SOCKET",
+  ]) {
+    const transportError = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("transient transport failure"), { code }),
+    });
+    await assert.rejects(
+      requestEmbedding(job, provider, {
+        fetchImpl: async () => { throw transportError; },
+      }),
+      (error) => error instanceof HybridProviderError && error.code === "provider_network" && error.retryable === true,
+      `code ${code} should classify as a retryable provider_network error`,
+    );
+  }
+});
+
+test("provider request classifies TLS certificate validation failures as non-retryable with a distinct sanitized code", async () => {
+  const provider = {
+    profileId,
+    locality: "local",
+    endpoint: "http://127.0.0.1:8080/v1/embeddings",
+    endpointIdentitySha256: job.endpoint_identity_sha256,
+    apiKey: "",
+  };
+  for (const code of [
+    "CERT_HAS_EXPIRED",
+    "CERT_NOT_YET_VALID",
+    "CERT_REJECTED",
+    "CERT_REVOKED",
+    "CERT_UNTRUSTED",
+    "DEPTH_ZERO_SELF_SIGNED_CERT",
+    "ERR_TLS_CERT_ALTNAME_INVALID",
+    "SELF_SIGNED_CERT_IN_CHAIN",
+    "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+    "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  ]) {
+    const transportError = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("certificate validation failure"), { code }),
+    });
+    await assert.rejects(
+      requestEmbedding(job, provider, {
+        fetchImpl: async () => { throw transportError; },
+      }),
+      (error) => error instanceof HybridProviderError && error.code === "provider_tls_certificate" && error.retryable === false,
+      `code ${code} should classify as a non-retryable provider_tls_certificate error`,
+    );
+  }
+});
+
+test("provider request leaves unknown transport codes non-retryable", async () => {
+  const provider = {
+    profileId,
+    locality: "local",
+    endpoint: "http://127.0.0.1:8080/v1/embeddings",
+    endpointIdentitySha256: job.endpoint_identity_sha256,
+    apiKey: "",
+  };
+  const unknownError = new TypeError("fetch failed", {
+    cause: Object.assign(new Error("unknown transport failure"), { code: "ENOTACODE" }),
+  });
+  await assert.rejects(
+    requestEmbedding(job, provider, {
+      fetchImpl: async () => { throw unknownError; },
+    }),
+    (error) => error instanceof HybridProviderError && error.code === "provider_request_failed" && error.retryable === false,
+    "unknown transport codes must remain non-retryable",
+  );
+});
+
 test("retry delay is bounded exponential backoff with jitter", () => {
   assert.equal(computeRetryDelayMs(1, () => 0), 750);
   assert.equal(computeRetryDelayMs(2, () => 0.5), 2_000);

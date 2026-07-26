@@ -111,6 +111,9 @@ jobs:
         env:
           DATABASE_URL: postgresql://noosphere_app:test-application@localhost:5432/test
 
+      - name: Run hybrid-provider transport tests
+        run: npm run test:hybrid-provider
+
       - name: Run memory tests
         run: npm run test:memory
 
