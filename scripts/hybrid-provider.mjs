@@ -16,14 +16,12 @@ export const HYBRID_LIMITS = Object.freeze({
 
 export const HYBRID_LEASE_SAFETY_MARGIN_MS = 5_000;
 
+// Transient transport-layer failures that can self-heal within the retry budget.
+// Per hybrid-retrieval ADR §7 these classify as `provider_network`: the worker
+// retries and queries degrade to lexical fallback.
 const RETRYABLE_TRANSPORT_CODES = new Set([
-  "CERT_HAS_EXPIRED",
-  "CERT_REJECTED",
-  "CERT_REVOKED",
-  "CERT_UNTRUSTED",
-  "DEPTH_ZERO_SELF_SIGNED_CERT",
-  "EAI_AGAIN",
   "EAGAIN",
+  "EAI_AGAIN",
   "ECONNREFUSED",
   "ECONNRESET",
   "EHOSTDOWN",
@@ -33,14 +31,29 @@ const RETRYABLE_TRANSPORT_CODES = new Set([
   "ENETUNREACH",
   "ENOTFOUND",
   "EPIPE",
-  "ERR_TLS_CERT_ALTNAME_INVALID",
   "ETIMEDOUT",
-  "SELF_SIGNED_CERT_IN_CHAIN",
-  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
-  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
   "UND_ERR_CONNECT_TIMEOUT",
   "UND_ERR_HEADERS_TIMEOUT",
   "UND_ERR_SOCKET",
+]);
+
+// Permanent TLS certificate validation failures: expired, not-yet-valid, revoked,
+// self-signed, untrusted chains, hostname mismatches, missing issuers.
+// No handshake retry fixes these. Per ADR §7 they are correctness faults that
+// must surface through readiness/status; they emit a distinct sanitized code so
+// operators can distinguish a cert outage from an ordinary socket blip in logs
+// and durable state.
+const NON_RETRYABLE_TLS_CERT_CODES = new Set([
+  "CERT_HAS_EXPIRED",
+  "CERT_NOT_YET_VALID",
+  "CERT_REJECTED",
+  "CERT_REVOKED",
+  "CERT_UNTRUSTED",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
 ]);
 
 export class HybridProviderError extends Error {
@@ -232,6 +245,9 @@ export async function requestEmbedding(job, provider, options = {}) {
     if (isRetryableTransportError(error)) {
       throw new HybridProviderError("provider_network", "Embedding provider request failed", { retryable: true, cause: error });
     }
+    if (isNonRetryableTlsCertificateError(error)) {
+      throw new HybridProviderError("provider_tls_certificate", "Embedding provider TLS certificate validation failed", { retryable: false, cause: error });
+    }
     throw new HybridProviderError("provider_request_failed", "Embedding provider request failed", { cause: error });
   } finally {
     clearTimeout(timeout);
@@ -305,6 +321,11 @@ function isLegalHeaderValue(value) {
 function isRetryableTransportError(error) {
   const code = error?.cause?.code ?? error?.code;
   return typeof code === "string" && RETRYABLE_TRANSPORT_CODES.has(code);
+}
+
+function isNonRetryableTlsCertificateError(error) {
+  const code = error?.cause?.code ?? error?.code;
+  return typeof code === "string" && NON_RETRYABLE_TLS_CERT_CODES.has(code);
 }
 
 export function abortableDelay(milliseconds, signal) {

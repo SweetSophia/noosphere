@@ -258,7 +258,7 @@ test("provider request retries only recognized transport failures", async () => 
   );
 });
 
-test("provider request classifies newly-added transient transport codes as retryable", async () => {
+test("provider request classifies transient transport codes as retryable", async () => {
   const provider = {
     profileId,
     locality: "local",
@@ -267,20 +267,21 @@ test("provider request classifies newly-added transient transport codes as retry
     apiKey: "",
   };
   for (const code of [
-    "CERT_HAS_EXPIRED",
-    "CERT_REJECTED",
-    "CERT_REVOKED",
-    "CERT_UNTRUSTED",
-    "DEPTH_ZERO_SELF_SIGNED_CERT",
     "EAGAIN",
+    "EAI_AGAIN",
+    "ECONNREFUSED",
+    "ECONNRESET",
+    "EHOSTDOWN",
+    "EHOSTUNREACH",
     "ENETDOWN",
     "ENETRESET",
-    "EHOSTDOWN",
+    "ENETUNREACH",
+    "ENOTFOUND",
     "EPIPE",
-    "ERR_TLS_CERT_ALTNAME_INVALID",
-    "SELF_SIGNED_CERT_IN_CHAIN",
-    "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
-    "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+    "ETIMEDOUT",
+    "UND_ERR_CONNECT_TIMEOUT",
+    "UND_ERR_HEADERS_TIMEOUT",
+    "UND_ERR_SOCKET",
   ]) {
     const transportError = new TypeError("fetch failed", {
       cause: Object.assign(new Error("transient transport failure"), { code }),
@@ -291,6 +292,39 @@ test("provider request classifies newly-added transient transport codes as retry
       }),
       (error) => error instanceof HybridProviderError && error.code === "provider_network" && error.retryable === true,
       `code ${code} should classify as a retryable provider_network error`,
+    );
+  }
+});
+
+test("provider request classifies TLS certificate validation failures as non-retryable with a distinct sanitized code", async () => {
+  const provider = {
+    profileId,
+    locality: "local",
+    endpoint: "http://127.0.0.1:8080/v1/embeddings",
+    endpointIdentitySha256: job.endpoint_identity_sha256,
+    apiKey: "",
+  };
+  for (const code of [
+    "CERT_HAS_EXPIRED",
+    "CERT_NOT_YET_VALID",
+    "CERT_REJECTED",
+    "CERT_REVOKED",
+    "CERT_UNTRUSTED",
+    "DEPTH_ZERO_SELF_SIGNED_CERT",
+    "ERR_TLS_CERT_ALTNAME_INVALID",
+    "SELF_SIGNED_CERT_IN_CHAIN",
+    "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+    "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  ]) {
+    const transportError = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("certificate validation failure"), { code }),
+    });
+    await assert.rejects(
+      requestEmbedding(job, provider, {
+        fetchImpl: async () => { throw transportError; },
+      }),
+      (error) => error instanceof HybridProviderError && error.code === "provider_tls_certificate" && error.retryable === false,
+      `code ${code} should classify as a non-retryable provider_tls_certificate error`,
     );
   }
 });
