@@ -527,6 +527,18 @@ authorization_volume_consumers() {
   docker ps -aq --no-trunc --filter "volume=$authorization_volume" | sort -u
 }
 
+assert_authorization_marker_file() {
+  local marker_name=$1 target_platform=${2:-${platform:-$(engine_platform)}}
+  [[ "$target_platform" =~ ^linux/(amd64|arm64)$ ]] || die 'authorization marker platform is invalid'
+  docker run --rm --network none --platform "$target_platform" \
+    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'path="/authorization/$1"; [ -f "$path" ] && [ ! -L "$path" ] && [ "$(stat -c "%u:%g:%a" "$path")" = "0:0:644" ]' \
+    -- "$marker_name" ||
+    die "authorization marker must be a root-owned regular file with mode 0644: $marker_name"
+}
+
 assert_authorization_consumers_managed() {
   local actual id db_id app_id
   actual=$(authorization_volume_consumers)
@@ -552,7 +564,7 @@ assert_authorization_volume() {
   [[ -z "$expected_fingerprint" || "$fingerprint" == "$expected_fingerprint" ]] ||
     die 'candidate-authorization volume fingerprint changed'
   if [[ "$require_marker" == true ]]; then
-    [[ "$target_platform" =~ ^linux/(amd64|arm64)$ ]] || die 'authorization marker platform is invalid'
+    assert_authorization_marker_file "$AUTH_MARKER" "$target_platform"
     marker=$(docker run --rm --network none --platform "$target_platform" \
       --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
       --mount type=tmpfs,destination=/var/lib/postgresql/data \
@@ -592,6 +604,7 @@ authorize_writer_marker() {
     --mount type=tmpfs,destination=/var/lib/postgresql/data \
     --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
     "umask 077; printf '%s\\n' '$CANDIDATE_IMAGE' > /authorization/$WRITER_MARKER.tmp; chmod 0644 /authorization/$WRITER_MARKER.tmp; sync; mv -f /authorization/$WRITER_MARKER.tmp /authorization/$WRITER_MARKER; sync"
+  assert_authorization_marker_file "$WRITER_MARKER"
 }
 
 revoke_writer_marker() {
@@ -619,6 +632,7 @@ assert_stale_authorization_volume() {
     --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
     --mount type=tmpfs,destination=/var/lib/postgresql/data \
     --entrypoint sh "$CANDIDATE_IMAGE" -ceu "cat /authorization/$AUTH_MARKER 2>/dev/null || true")
+  assert_authorization_marker_file "$AUTH_MARKER" "$target_platform"
   [[ "$marker" == "$SOURCE_IMAGE" ]] ||
     die 'authorization volume is not safely rebound to the exact source image'
   writer_marker=$(docker run --rm --network none --platform "$target_platform" \
@@ -626,6 +640,7 @@ assert_stale_authorization_volume() {
     --mount type=tmpfs,destination=/var/lib/postgresql/data \
     --entrypoint sh "$CANDIDATE_IMAGE" -ceu "cat /authorization/$WRITER_MARKER 2>/dev/null || true")
   if [[ "$expect_writer" == true ]]; then
+    assert_authorization_marker_file "$WRITER_MARKER" "$target_platform"
     [[ "$writer_marker" == "$SOURCE_IMAGE" ]] ||
       die 'writer authorization is not safely rebound to the exact source image'
   else
@@ -665,6 +680,7 @@ authorize_source_marker() {
       --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
       "umask 077; rm -f /authorization/$WRITER_MARKER; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$AUTH_MARKER.source-$run_id.tmp; chmod 0644 /authorization/$AUTH_MARKER.source-$run_id.tmp; sync; mv -f /authorization/$AUTH_MARKER.source-$run_id.tmp /authorization/$AUTH_MARKER; sync"
   fi
+  assert_stale_authorization_volume "$restart_app_after_switch"
 }
 
 engine_platform() {
@@ -957,6 +973,7 @@ attempt_source_recovery() (
     assert_container_volume_mount "$db_container"
     assert_image_identity "$db_container" "$SOURCE_IMAGE" source false
     assert_compose_authorization_gate "$SOURCE_IMAGE"
+    authorize_source_marker
     assert_stale_authorization_volume "$restart_app_after_switch"
     if [[ "$restart_app_after_switch" == true ]]; then
       restart_app

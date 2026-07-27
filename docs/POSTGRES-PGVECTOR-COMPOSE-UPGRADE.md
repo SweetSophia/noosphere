@@ -108,7 +108,7 @@ If `cmp` or `git diff` fails, stop. A verified recovery intentionally leaves a s
 
 ## Recovery and evidence
 
-The authorization volume contains only the pinned source/candidate image digests used by the startup gates. The guard publishes both marker files as root-owned mode `0644`: they remain immutable to the non-root application while UID 1001 can read the writer marker through the read-only volume mount. Treat any other marker mode, owner-writable consumer mount, or unexpected marker content as a failed authorization boundary.
+The authorization volume contains only the pinned source/candidate image digests used by the startup gates. The guard publishes both marker files as root-owned mode `0644`: they remain immutable to the non-root application while UID 1001 can read the writer marker through the read-only volume mount. A resumed legacy `recovered` journal atomically republishes its exact-source markers before restarting the writer. Treat a symlink, non-regular file, any other owner or mode, an owner-writable consumer mount, or unexpected marker content as a failed authorization boundary.
 
 The active journal is `<backup-dir>/<volume>.phase-a2b.json`. Verified source recovery durably checkpoints `recovered`, then either restarts and verifies the source app for a direct guard invocation or proves it remains stopped for an inherited installer transaction. The guard archives the journal as `.recovered-<run-id>` and exits non-zero so automation cannot mistake rollback for upgrade success. If interrupted after either the recovered checkpoint or the direct source-writer restart, the next invocation re-verifies the exact source and safely finishes recovery.
 

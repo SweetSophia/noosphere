@@ -48,6 +48,19 @@ lock_path_for_volume() {
   printf '%s/noosphere-pgvector-switch-%s.lock\n' "$lock_root" "$lock_key"
 }
 
+assert_marker_contract() {
+  local container=$1 marker_name=$2 expected=$3 marker_path
+  marker_path="/run/noosphere-pgvector/$marker_name"
+  docker exec "$container" sh -ceu \
+    'path=$1; [ -f "$path" ] && [ ! -L "$path" ] && [ "$(stat -c "%u:%g:%a" "$path")" = "0:0:644" ]' \
+    -- "$marker_path"
+  [[ $(docker exec --user 1001:1001 "$container" cat "$marker_path") == "$expected" ]]
+  if docker exec "$container" sh -ceu 'printf x >> "$1"' -- "$marker_path" >/dev/null 2>&1; then
+    echo "Authorization marker mount is writable: $marker_name" >&2
+    exit 1
+  fi
+}
+
 cleanup() {
   local status=$? id
   for id in $(docker ps -aq --filter "label=io.noosphere.pgvector-switch-run" --filter "name=noosphere-a2b"); do
@@ -244,6 +257,7 @@ services:
   app:
     image: $SOURCE_IMAGE
     platform: $PLATFORM
+    user: "1001:1001"
     container_name: $app_container
     entrypoint:
       - /bin/sh
@@ -460,10 +474,21 @@ fi
   --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
   --mount type=tmpfs,destination=/var/lib/postgresql/data \
   --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'cat /authorization/writer-authorized 2>/dev/null || true') == "$SOURCE_IMAGE" ]]
-[[ $(docker exec --user 1001:1001 "$db_container" cat /run/noosphere-pgvector/candidate-authorized) == "$SOURCE_IMAGE" ]]
-[[ $(docker exec --user 1001:1001 "$db_container" cat /run/noosphere-pgvector/writer-authorized) == "$SOURCE_IMAGE" ]]
 [[ $(docker compose -f "$compose_file" config --format json | jq -r '.services.db.image') == "$SOURCE_IMAGE" ]]
 grep -F "actual\" != '$SOURCE_IMAGE'" "$compose_file" >/dev/null
+
+# Reproduce the exact pre-fix production handoff: a durable recovered journal
+# paired with root-owned mode-0600 markers. The next recovered invocation must
+# atomically normalize both files before the UID-1001 writer can restart.
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'chmod 0600 /authorization/candidate-authorized /authorization/writer-authorized'
+if docker exec --user 1001:1001 "$db_container" cat /run/noosphere-pgvector/writer-authorized >/dev/null 2>&1; then
+  echo 'Legacy mode-0600 writer marker was unexpectedly readable by UID 1001' >&2
+  exit 1
+fi
 
 # The restored source gate must remain restartable after recovery. This catches
 # a crash-safe marker change that would otherwise strand the source on its next
@@ -487,6 +512,8 @@ if docker inspect "$app_container" >/dev/null 2>&1; then
   [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
 fi
 [[ $(docker inspect "$db_container" --format '{{.Config.Image}}') == "$SOURCE_IMAGE" ]]
+assert_marker_contract "$db_container" candidate-authorized "$SOURCE_IMAGE"
+assert_marker_contract "$db_container" writer-authorized "$SOURCE_IMAGE"
 docker compose -f "$compose_file" up -d app
 [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 docker exec "$db_container" psql -X -v ON_ERROR_STOP=1 -U noosphere -d noosphere -c \
@@ -517,8 +544,8 @@ install -m "$(stat -c '%a' "$compose_file")" "$target_compose" "$compose_file"
 [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 [[ $(docker compose -f "$compose_file" config --format json | jq -r '.services.db.image') == "$CANDIDATE_IMAGE" ]]
 [[ $(docker exec "$db_container" cat /run/noosphere-pgvector/writer-authorized) == "$CANDIDATE_IMAGE" ]]
-[[ $(docker exec --user 1001:1001 "$db_container" cat /run/noosphere-pgvector/candidate-authorized) == "$CANDIDATE_IMAGE" ]]
-[[ $(docker exec --user 1001:1001 "$db_container" cat /run/noosphere-pgvector/writer-authorized) == "$CANDIDATE_IMAGE" ]]
+assert_marker_contract "$db_container" candidate-authorized "$CANDIDATE_IMAGE"
+assert_marker_contract "$db_container" writer-authorized "$CANDIDATE_IMAGE"
 docker inspect "$app_container" | jq -e --arg candidate "$CANDIDATE_IMAGE" '
   .[0].Config.Entrypoint | any(type == "string" and contains("writer-authorized") and contains($candidate))
 ' >/dev/null
@@ -765,8 +792,8 @@ NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$new_installer_lock_path" \
   "${new_install_args[@]}" >> "$log_file" 2>&1
 exec 8>&-
 [[ $(docker exec "$new_db_container" cat /run/noosphere-pgvector/writer-authorized) == "$CANDIDATE_IMAGE" ]]
-[[ $(docker exec --user 1001:1001 "$new_db_container" cat /run/noosphere-pgvector/candidate-authorized) == "$CANDIDATE_IMAGE" ]]
-[[ $(docker exec --user 1001:1001 "$new_db_container" cat /run/noosphere-pgvector/writer-authorized) == "$CANDIDATE_IMAGE" ]]
+assert_marker_contract "$new_db_container" candidate-authorized "$CANDIDATE_IMAGE"
+assert_marker_contract "$new_db_container" writer-authorized "$CANDIDATE_IMAGE"
 docker compose -f "$new_compose_file" up -d --force-recreate app
 for _ in $(seq 1 30); do
   [[ $(docker inspect "$new_app_container" --format '{{.State.Running}}') == true ]] && break
