@@ -579,7 +579,7 @@ create_authorization_volume() {
     --mount "type=volume,source=$authorization_volume,target=/authorization" \
     --mount type=tmpfs,destination=/var/lib/postgresql/data \
     --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-    "umask 077; rm -f /authorization/$WRITER_MARKER; printf '%s\\n' '$CANDIDATE_IMAGE' > /authorization/$AUTH_MARKER.tmp; sync; mv -f /authorization/$AUTH_MARKER.tmp /authorization/$AUTH_MARKER; sync"
+    "umask 077; rm -f /authorization/$WRITER_MARKER; printf '%s\\n' '$CANDIDATE_IMAGE' > /authorization/$AUTH_MARKER.tmp; chmod 0644 /authorization/$AUTH_MARKER.tmp; sync; mv -f /authorization/$AUTH_MARKER.tmp /authorization/$AUTH_MARKER; sync"
   assert_authorization_volume '' true "${platform:-$(engine_platform)}"
 }
 
@@ -591,7 +591,7 @@ authorize_writer_marker() {
     --mount "type=volume,source=$authorization_volume,target=/authorization" \
     --mount type=tmpfs,destination=/var/lib/postgresql/data \
     --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-    "umask 077; printf '%s\\n' '$CANDIDATE_IMAGE' > /authorization/$WRITER_MARKER.tmp; sync; mv -f /authorization/$WRITER_MARKER.tmp /authorization/$WRITER_MARKER; sync"
+    "umask 077; printf '%s\\n' '$CANDIDATE_IMAGE' > /authorization/$WRITER_MARKER.tmp; chmod 0644 /authorization/$WRITER_MARKER.tmp; sync; mv -f /authorization/$WRITER_MARKER.tmp /authorization/$WRITER_MARKER; sync"
 }
 
 revoke_writer_marker() {
@@ -656,14 +656,14 @@ authorize_source_marker() {
       --mount "type=volume,source=$authorization_volume,target=/authorization" \
       --mount type=tmpfs,destination=/var/lib/postgresql/data \
       --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-      "umask 077; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$AUTH_MARKER.source-$run_id.tmp; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$WRITER_MARKER.source-$run_id.tmp; sync; mv -f /authorization/$AUTH_MARKER.source-$run_id.tmp /authorization/$AUTH_MARKER; mv -f /authorization/$WRITER_MARKER.source-$run_id.tmp /authorization/$WRITER_MARKER; sync"
+      "umask 077; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$AUTH_MARKER.source-$run_id.tmp; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$WRITER_MARKER.source-$run_id.tmp; chmod 0644 /authorization/$AUTH_MARKER.source-$run_id.tmp /authorization/$WRITER_MARKER.source-$run_id.tmp; sync; mv -f /authorization/$AUTH_MARKER.source-$run_id.tmp /authorization/$AUTH_MARKER; mv -f /authorization/$WRITER_MARKER.source-$run_id.tmp /authorization/$WRITER_MARKER; sync"
   else
     docker run --rm --network none --platform "${platform:-$(engine_platform)}" \
       --label "$LABEL_KEY=$run_id" \
       --mount "type=volume,source=$authorization_volume,target=/authorization" \
       --mount type=tmpfs,destination=/var/lib/postgresql/data \
       --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-      "umask 077; rm -f /authorization/$WRITER_MARKER; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$AUTH_MARKER.source-$run_id.tmp; sync; mv -f /authorization/$AUTH_MARKER.source-$run_id.tmp /authorization/$AUTH_MARKER; sync"
+      "umask 077; rm -f /authorization/$WRITER_MARKER; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$AUTH_MARKER.source-$run_id.tmp; chmod 0644 /authorization/$AUTH_MARKER.source-$run_id.tmp; sync; mv -f /authorization/$AUTH_MARKER.source-$run_id.tmp /authorization/$AUTH_MARKER; sync"
   fi
 }
 

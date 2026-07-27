@@ -41,10 +41,10 @@ Use the installer from the repository:
 
 ```bash
 # Installer commit: 19ba70a9e8c40dbe01df6de9ca79725c708f3997
-# Expected SHA-256: 6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c
+# Expected SHA-256: f52b356c836ef6bf6be5b60b943332088066ad4783142c43886da83f9229ad05
 installer="$(mktemp)"
 curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/19ba70a9e8c40dbe01df6de9ca79725c708f3997/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c' "$installer" | sha256sum -c -
+printf '%s  %s\n' 'f52b356c836ef6bf6be5b60b943332088066ad4783142c43886da83f9229ad05' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 ```
 
@@ -418,10 +418,10 @@ Use the guarded installer for upgrades as well as first-time setup:
 
 ```bash
 # Installer commit: 19ba70a9e8c40dbe01df6de9ca79725c708f3997
-# Expected SHA-256: 6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c
+# Expected SHA-256: f52b356c836ef6bf6be5b60b943332088066ad4783142c43886da83f9229ad05
 installer="$(mktemp)"
 curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/19ba70a9e8c40dbe01df6de9ca79725c708f3997/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c' "$installer" | sha256sum -c -
+printf '%s  %s\n' 'f52b356c836ef6bf6be5b60b943332088066ad4783142c43886da83f9229ad05' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 openclaw noosphere doctor
 ```
@@ -551,10 +551,10 @@ First use the reviewed installer revision and verify its checksum before executi
 
 ```bash
 # Installer commit: 19ba70a9e8c40dbe01df6de9ca79725c708f3997
-# Expected SHA-256: 6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c
+# Expected SHA-256: f52b356c836ef6bf6be5b60b943332088066ad4783142c43886da83f9229ad05
 installer="$(mktemp)"
 curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/19ba70a9e8c40dbe01df6de9ca79725c708f3997/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c' "$installer" | sha256sum -c -
+printf '%s  %s\n' 'f52b356c836ef6bf6be5b60b943332088066ad4783142c43886da83f9229ad05' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 ```
 

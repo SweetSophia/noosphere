@@ -43,10 +43,10 @@ Install and upgrade through the same command:
 
 ```bash
 # Installer commit: 19ba70a9e8c40dbe01df6de9ca79725c708f3997
-# Expected SHA-256: 6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c
+# Expected SHA-256: f52b356c836ef6bf6be5b60b943332088066ad4783142c43886da83f9229ad05
 installer="$(mktemp)"
 curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/19ba70a9e8c40dbe01df6de9ca79725c708f3997/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c' "$installer" | sha256sum -c -
+printf '%s  %s\n' 'f52b356c836ef6bf6be5b60b943332088066ad4783142c43886da83f9229ad05' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 ```
 
@@ -107,6 +107,8 @@ NOOSPHERE_POSTGRES_EVIDENCE=/absolute/private/path/postgres-pgvector/noosphere_p
 If `cmp` or `git diff` fails, stop. A verified recovery intentionally leaves a source-staged gate in the working tree. Do not reset, stash, or overwrite it; inspect the journal and keep the recovered source database and app state stable until the discrepancy is understood.
 
 ## Recovery and evidence
+
+The authorization volume contains only the pinned source/candidate image digests used by the startup gates. The guard publishes both marker files as root-owned mode `0644`: they remain immutable to the non-root application while UID 1001 can read the writer marker through the read-only volume mount. Treat any other marker mode, owner-writable consumer mount, or unexpected marker content as a failed authorization boundary.
 
 The active journal is `<backup-dir>/<volume>.phase-a2b.json`. Verified source recovery durably checkpoints `recovered`, then either restarts and verifies the source app for a direct guard invocation or proves it remains stopped for an inherited installer transaction. The guard archives the journal as `.recovered-<run-id>` and exits non-zero so automation cannot mistake rollback for upgrade success. If interrupted after either the recovered checkpoint or the direct source-writer restart, the next invocation re-verifies the exact source and safely finishes recovery.
 

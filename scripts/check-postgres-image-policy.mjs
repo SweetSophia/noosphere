@@ -11,7 +11,7 @@ const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
 const immutableHelperRef = "a2067895023efc638e966ee827fea67385d8aa37";
 const verifiedInstallerRef = "19ba70a9e8c40dbe01df6de9ca79725c708f3997";
-const verifiedInstallerSha256 = "6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c";
+const verifiedInstallerSha256 = "f52b356c836ef6bf6be5b60b943332088066ad4783142c43886da83f9229ad05";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
@@ -695,9 +695,15 @@ expect(
     switchScript.includes("authorize_source_marker") &&
     switchScript.includes("authorize_writer_marker") &&
     switchScript.includes("revoke_writer_marker") &&
+    switchScript.includes("chmod 0644 /authorization/$AUTH_MARKER.tmp") &&
+    switchScript.includes("chmod 0644 /authorization/$WRITER_MARKER.tmp") &&
+    switchScript.includes(
+      "chmod 0644 /authorization/$AUTH_MARKER.source-$run_id.tmp /authorization/$WRITER_MARKER.source-$run_id.tmp",
+    ) &&
+    switchScript.includes("chmod 0644 /authorization/$AUTH_MARKER.source-$run_id.tmp") &&
     switchScript.includes('gsub(candidate_image, source_image)') &&
     switchScript.includes('gsub(source_image, candidate_image)'),
-  "switch-pgvector-compose.sh must provision candidate authorization and rebind recovered desired state to source",
+  "switch-pgvector-compose.sh must provision non-root-readable candidate authorization and rebind recovered desired state to source",
 );
 
 const verifyScript = read("scripts/verify-deploy.sh");

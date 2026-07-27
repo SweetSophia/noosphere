@@ -96,6 +96,7 @@ services:
   app:
     image: $SOURCE_IMAGE
     platform: $PLATFORM
+    user: "1001:1001"
     container_name: $app_container
     command: ["/bin/sh", "-ceu", "trap 'exit 0' TERM INT; while :; do sleep 1; done"]
     depends_on:
@@ -459,6 +460,8 @@ fi
   --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
   --mount type=tmpfs,destination=/var/lib/postgresql/data \
   --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'cat /authorization/writer-authorized 2>/dev/null || true') == "$SOURCE_IMAGE" ]]
+[[ $(docker exec --user 1001:1001 "$db_container" cat /run/noosphere-pgvector/candidate-authorized) == "$SOURCE_IMAGE" ]]
+[[ $(docker exec --user 1001:1001 "$db_container" cat /run/noosphere-pgvector/writer-authorized) == "$SOURCE_IMAGE" ]]
 [[ $(docker compose -f "$compose_file" config --format json | jq -r '.services.db.image') == "$SOURCE_IMAGE" ]]
 grep -F "actual\" != '$SOURCE_IMAGE'" "$compose_file" >/dev/null
 
@@ -514,6 +517,8 @@ install -m "$(stat -c '%a' "$compose_file")" "$target_compose" "$compose_file"
 [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 [[ $(docker compose -f "$compose_file" config --format json | jq -r '.services.db.image') == "$CANDIDATE_IMAGE" ]]
 [[ $(docker exec "$db_container" cat /run/noosphere-pgvector/writer-authorized) == "$CANDIDATE_IMAGE" ]]
+[[ $(docker exec --user 1001:1001 "$db_container" cat /run/noosphere-pgvector/candidate-authorized) == "$CANDIDATE_IMAGE" ]]
+[[ $(docker exec --user 1001:1001 "$db_container" cat /run/noosphere-pgvector/writer-authorized) == "$CANDIDATE_IMAGE" ]]
 docker inspect "$app_container" | jq -e --arg candidate "$CANDIDATE_IMAGE" '
   .[0].Config.Entrypoint | any(type == "string" and contains("writer-authorized") and contains($candidate))
 ' >/dev/null
@@ -594,6 +599,7 @@ services:
   app:
     image: $CANDIDATE_IMAGE
     platform: $PLATFORM
+    user: "1001:1001"
     container_name: $new_app_container
     entrypoint:
       - /bin/sh
@@ -759,6 +765,8 @@ NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$new_installer_lock_path" \
   "${new_install_args[@]}" >> "$log_file" 2>&1
 exec 8>&-
 [[ $(docker exec "$new_db_container" cat /run/noosphere-pgvector/writer-authorized) == "$CANDIDATE_IMAGE" ]]
+[[ $(docker exec --user 1001:1001 "$new_db_container" cat /run/noosphere-pgvector/candidate-authorized) == "$CANDIDATE_IMAGE" ]]
+[[ $(docker exec --user 1001:1001 "$new_db_container" cat /run/noosphere-pgvector/writer-authorized) == "$CANDIDATE_IMAGE" ]]
 docker compose -f "$new_compose_file" up -d --force-recreate app
 for _ in $(seq 1 30); do
   [[ $(docker inspect "$new_app_container" --format '{{.State.Running}}') == true ]] && break
