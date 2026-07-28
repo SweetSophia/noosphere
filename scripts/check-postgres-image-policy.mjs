@@ -696,8 +696,13 @@ expect(
     switchScript.includes("authorize_writer_marker") &&
     switchScript.includes("revoke_writer_marker") &&
     switchScript.includes("assert_authorization_marker_file") &&
+    switchScript.includes("assert_authorization_marker_content") &&
+    switchScript.includes("authorization_marker_path_present") &&
     switchScript.includes("assert_legacy_authorization_state") &&
     switchScript.includes("normalize_legacy_authorization_state") &&
+    switchScript.includes('sha256sum "/authorization/$1"') &&
+    switchScript.includes("printf '%s\\n' \"$1\" | sha256sum") &&
+    switchScript.includes('[ -e "$path" ] || [ -L "$path" ]') &&
     switchScript.includes('"$(stat -c "%u:%g:%a" "$path")" = "0:0:644"') &&
     switchScript.includes("chmod 0644 /authorization/$AUTH_MARKER.tmp") &&
     switchScript.includes("chmod 0644 /authorization/$WRITER_MARKER.tmp") &&
@@ -710,7 +715,7 @@ expect(
     ) &&
     switchScript.includes('gsub(candidate_image, source_image)') &&
     switchScript.includes('gsub(source_image, candidate_image)'),
-  "switch-pgvector-compose.sh must normalize legacy root-owned mode-0600 markers, enforce mode 0644, and rebind recovered desired state to source",
+  "switch-pgvector-compose.sh must reject unsafe marker paths and inexact bytes, normalize legacy root-owned mode-0600 markers, enforce mode 0644, and rebind recovered desired state to source",
 );
 
 const verifyScript = read("scripts/verify-deploy.sh");

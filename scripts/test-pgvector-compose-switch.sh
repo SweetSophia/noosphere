@@ -61,6 +61,15 @@ assert_marker_contract() {
   fi
 }
 
+authorization_volume_marker_digest() {
+  local marker_name=$1
+  docker run --rm --network none --platform "$PLATFORM" \
+    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'sha256sum "/authorization/$1"' -- "$marker_name" | awk '{print $1}'
+}
+
 cleanup() {
   local status=$? id
   for id in $(docker ps -aq --filter "label=io.noosphere.pgvector-switch-run" --filter "name=noosphere-a2b"); do
@@ -368,15 +377,51 @@ compgen -G "$journal.recovered-*" >/dev/null
   --mount type=tmpfs,destination=/var/lib/postgresql/data \
   --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'cat /authorization/writer-authorized 2>/dev/null || true') == '' ]]
 
-# Reproduce an archived pre-fix deferred recovery: the active journal is gone,
-# the exact source marker remains root-owned 0600, and writer authorization is
-# intentionally absent. A fresh guarded invocation must normalize this state
-# before its strict 0644 preflight can proceed.
+# A dangling writer symlink is a present unsafe path, even though test -e is
+# false. Reject it without deleting the path or rewriting the source marker.
+source_marker_digest=$(printf '%s\n' "$SOURCE_IMAGE" | sha256sum | awk '{print $1}')
 docker run --rm --network none --platform "$PLATFORM" \
   --mount "type=volume,source=$authorization_volume,target=/authorization" \
   --mount type=tmpfs,destination=/var/lib/postgresql/data \
   --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-  'chmod 0600 /authorization/candidate-authorized; [ "$(stat -c "%u:%g:%a" /authorization/candidate-authorized)" = "0:0:600" ]; [ ! -e /authorization/writer-authorized ]'
+  'ln -s missing-writer-target /authorization/writer-authorized; [ -L /authorization/writer-authorized ]; [ ! -e /authorization/writer-authorized ]'
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" --defer-app-restart >> "$log_file" 2>&1; then
+  echo 'Archived recovery accepted a dangling writer marker symlink' >&2
+  exit 1
+fi
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$source_marker_digest" ]]
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  '[ -L /authorization/writer-authorized ] && [ ! -e /authorization/writer-authorized ]'
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'rm /authorization/writer-authorized'
+
+# Command substitution strips trailing newlines. Preserve malformed bytes across
+# the failed validation to prove rejection happens before normalization.
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n\n" "$1" > /authorization/candidate-authorized; chmod 0600 /authorization/candidate-authorized' \
+  -- "$SOURCE_IMAGE"
+malformed_source_digest=$(authorization_volume_marker_digest candidate-authorized)
+[[ "$malformed_source_digest" != "$source_marker_digest" ]]
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" --defer-app-restart >> "$log_file" 2>&1; then
+  echo 'Archived recovery accepted a source marker with extra trailing bytes' >&2
+  exit 1
+fi
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$malformed_source_digest" ]]
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n" "$1" > /authorization/candidate-authorized; chmod 0600 /authorization/candidate-authorized; [ "$(stat -c "%u:%g:%a" /authorization/candidate-authorized)" = "0:0:600" ]; [ ! -e /authorization/writer-authorized ]' \
+  -- "$SOURCE_IMAGE"
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$source_marker_digest" ]]
 
 # Ordinary Compose must remain unable to publish a writer after the installer
 # requested deferred ownership and released its failed transaction.
@@ -565,6 +610,44 @@ docker inspect "$app_container" | jq -e --arg candidate "$CANDIDATE_IMAGE" '
 docker exec "$db_container" psql -X -v ON_ERROR_STOP=1 -U noosphere -d noosphere -c \
   "INSERT INTO \"Topic\" VALUES ('topic-2', 'Post-commit write');" >/dev/null
 
+# Completed evidence must likewise reject a dangling writer symlink without
+# stopping the active app or mutating the marker paths.
+candidate_marker_digest=$(printf '%s\n' "$CANDIDATE_IMAGE" | sha256sum | awk '{print $1}')
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'rm /authorization/writer-authorized; ln -s missing-writer-target /authorization/writer-authorized; [ -L /authorization/writer-authorized ]; [ ! -e /authorization/writer-authorized ]'
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" --defer-app-restart >> "$log_file" 2>&1; then
+  echo 'Completed evidence accepted a dangling writer marker symlink' >&2
+  exit 1
+fi
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$candidate_marker_digest" ]]
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  '[ -L /authorization/writer-authorized ] && rm /authorization/writer-authorized; printf "%s\n" "$1" > /authorization/writer-authorized; chmod 0644 /authorization/writer-authorized' \
+  -- "$CANDIDATE_IMAGE"
+
+# Bash cannot represent NUL bytes in variables. An exact digest comparison must
+# reject a marker with a trailing NUL and leave the active app and bytes intact.
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n\000" "$1" > /authorization/writer-authorized' \
+  -- "$CANDIDATE_IMAGE"
+malformed_writer_digest=$(authorization_volume_marker_digest writer-authorized)
+[[ "$malformed_writer_digest" != "$candidate_marker_digest" ]]
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" --defer-app-restart >> "$log_file" 2>&1; then
+  echo 'Completed evidence accepted a writer marker with trailing NUL bytes' >&2
+  exit 1
+fi
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+[[ $(authorization_volume_marker_digest writer-authorized) == "$malformed_writer_digest" ]]
+
 # Reproduce pre-fix completed evidence. Both exact candidate markers are
 # root-owned 0600 while the complete journal remains active; the deferred
 # verification and later --authorize-writer handoff must normalize and resume.
@@ -572,8 +655,10 @@ docker run --rm --network none --platform "$PLATFORM" \
   --mount "type=volume,source=$authorization_volume,target=/authorization" \
   --mount type=tmpfs,destination=/var/lib/postgresql/data \
   --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-  '[ "$(cat /authorization/candidate-authorized)" = "$1" ]; [ "$(cat /authorization/writer-authorized)" = "$1" ]; chmod 0600 /authorization/candidate-authorized /authorization/writer-authorized; [ "$(stat -c "%u:%g:%a" /authorization/candidate-authorized)" = "0:0:600" ]; [ "$(stat -c "%u:%g:%a" /authorization/writer-authorized)" = "0:0:600" ]' \
+  'printf "%s\n" "$1" > /authorization/writer-authorized; chmod 0600 /authorization/candidate-authorized /authorization/writer-authorized; [ "$(stat -c "%u:%g:%a" /authorization/candidate-authorized)" = "0:0:600" ]; [ "$(stat -c "%u:%g:%a" /authorization/writer-authorized)" = "0:0:600" ]' \
   -- "$CANDIDATE_IMAGE"
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$candidate_marker_digest" ]]
+[[ $(authorization_volume_marker_digest writer-authorized) == "$candidate_marker_digest" ]]
 exec 8>"$installer_lock_path"
 flock -w 5 8
 NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$installer_lock_path" \

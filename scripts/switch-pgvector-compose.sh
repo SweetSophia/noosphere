@@ -561,49 +561,55 @@ assert_legacy_authorization_marker_file() {
   esac
 }
 
-authorization_marker_value() {
+authorization_marker_digest() {
   local marker_name=$1 target_platform=${2:-${platform:-$(engine_platform)}}
   docker run --rm --network none --platform "$target_platform" \
     --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
     --mount type=tmpfs,destination=/var/lib/postgresql/data \
-    --entrypoint sh "$CANDIDATE_IMAGE" -ceu "cat /authorization/$marker_name"
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'sha256sum "/authorization/$1"' -- "$marker_name" | awk '{print $1}'
 }
 
-authorization_marker_exists() {
+expected_authorization_marker_digest() {
+  printf '%s\n' "$1" | sha256sum | awk '{print $1}'
+}
+
+assert_authorization_marker_content() {
+  local marker_name=$1 expected_image=$2 target_platform=${3:-${platform:-$(engine_platform)}} actual_digest expected_digest
+  actual_digest=$(authorization_marker_digest "$marker_name" "$target_platform") ||
+    die "authorization marker is missing or unreadable: $marker_name"
+  expected_digest=$(expected_authorization_marker_digest "$expected_image")
+  [[ "$actual_digest" == "$expected_digest" ]] ||
+    die "authorization marker contains unexpected bytes: $marker_name"
+}
+
+authorization_marker_path_present() {
   local marker_name=$1 target_platform=${2:-${platform:-$(engine_platform)}}
   docker run --rm --network none --platform "$target_platform" \
     --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
     --mount type=tmpfs,destination=/var/lib/postgresql/data \
-    --entrypoint sh "$CANDIDATE_IMAGE" -ceu "test -e /authorization/$marker_name"
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'path="/authorization/$1"; [ -e "$path" ] || [ -L "$path" ]' -- "$marker_name"
 }
 
 assert_legacy_authorization_state() {
-  local expected_image=$1 writer_policy=$2 target_platform=${3:-${platform:-$(engine_platform)}} marker writer_marker
+  local expected_image=$1 writer_policy=$2 target_platform=${3:-${platform:-$(engine_platform)}}
   assert_authorization_consumers_managed
   assert_legacy_authorization_marker_file "$AUTH_MARKER" "$target_platform"
-  marker=$(authorization_marker_value "$AUTH_MARKER" "$target_platform") ||
-    die 'candidate-authorization marker is missing'
-  [[ "$marker" == "$expected_image" ]] ||
-    die 'candidate-authorization marker names an unexpected image'
+  assert_authorization_marker_content "$AUTH_MARKER" "$expected_image" "$target_platform"
   case "$writer_policy" in
     required)
       assert_legacy_authorization_marker_file "$WRITER_MARKER" "$target_platform"
-      writer_marker=$(authorization_marker_value "$WRITER_MARKER" "$target_platform") ||
-        die 'writer-authorization marker is missing'
-      [[ "$writer_marker" == "$expected_image" ]] ||
-        die 'writer-authorization marker names an unexpected image'
+      assert_authorization_marker_content "$WRITER_MARKER" "$expected_image" "$target_platform"
       ;;
     absent)
-      ! authorization_marker_exists "$WRITER_MARKER" "$target_platform" ||
+      ! authorization_marker_path_present "$WRITER_MARKER" "$target_platform" ||
         die 'deferred source recovery unexpectedly published writer authorization'
       ;;
     optional)
-      if authorization_marker_exists "$WRITER_MARKER" "$target_platform"; then
+      if authorization_marker_path_present "$WRITER_MARKER" "$target_platform"; then
         assert_legacy_authorization_marker_file "$WRITER_MARKER" "$target_platform"
-        writer_marker=$(authorization_marker_value "$WRITER_MARKER" "$target_platform") ||
-          die 'writer-authorization marker is unreadable'
-        [[ "$writer_marker" == "$expected_image" ]] ||
-          die 'writer-authorization marker names an unexpected image'
+        assert_authorization_marker_content "$WRITER_MARKER" "$expected_image" "$target_platform"
       fi
       ;;
     *) die "invalid writer-marker policy: $writer_policy" ;;
@@ -614,7 +620,7 @@ normalize_legacy_authorization_state() {
   local expected_image=$1 writer_policy=$2 target_platform=${3:-${platform:-$(engine_platform)}}
   local writer_present=false normalization_id="normalize-$BASHPID"
   assert_legacy_authorization_state "$expected_image" "$writer_policy" "$target_platform"
-  if authorization_marker_exists "$WRITER_MARKER" "$target_platform"; then
+  if authorization_marker_path_present "$WRITER_MARKER" "$target_platform"; then
     writer_present=true
   fi
   if [[ "$writer_present" == true ]]; then
@@ -633,14 +639,12 @@ normalize_legacy_authorization_state() {
       "umask 077; rm -f /authorization/$WRITER_MARKER; printf '%s\\n' '$expected_image' > /authorization/$AUTH_MARKER.$normalization_id.tmp; chmod 0644 /authorization/$AUTH_MARKER.$normalization_id.tmp; sync; mv -f /authorization/$AUTH_MARKER.$normalization_id.tmp /authorization/$AUTH_MARKER; sync"
   fi
   assert_authorization_marker_file "$AUTH_MARKER" "$target_platform"
-  [[ $(authorization_marker_value "$AUTH_MARKER" "$target_platform") == "$expected_image" ]] ||
-    die 'normalized candidate-authorization marker names an unexpected image'
+  assert_authorization_marker_content "$AUTH_MARKER" "$expected_image" "$target_platform"
   if [[ "$writer_present" == true ]]; then
     assert_authorization_marker_file "$WRITER_MARKER" "$target_platform"
-    [[ $(authorization_marker_value "$WRITER_MARKER" "$target_platform") == "$expected_image" ]] ||
-      die 'normalized writer-authorization marker names an unexpected image'
+    assert_authorization_marker_content "$WRITER_MARKER" "$expected_image" "$target_platform"
   else
-    ! authorization_marker_exists "$WRITER_MARKER" "$target_platform" ||
+    ! authorization_marker_path_present "$WRITER_MARKER" "$target_platform" ||
       die 'normalization unexpectedly published writer authorization'
   fi
 }
@@ -658,7 +662,7 @@ assert_authorization_consumers_managed() {
 }
 
 assert_authorization_volume() {
-  local expected_fingerprint=${1:-} require_marker=${2:-true} target_platform=${3:-${platform:-}} labels fingerprint marker actual
+  local expected_fingerprint=${1:-} require_marker=${2:-true} target_platform=${3:-${platform:-}} labels fingerprint
   [[ $(docker volume inspect "$authorization_volume" --format '{{.Driver}}') == local ]] ||
     die "$authorization_volume must use the local volume driver"
   labels=$(docker volume inspect "$authorization_volume" --format '{{json .Labels}}')
@@ -671,12 +675,7 @@ assert_authorization_volume() {
     die 'candidate-authorization volume fingerprint changed'
   if [[ "$require_marker" == true ]]; then
     assert_authorization_marker_file "$AUTH_MARKER" "$target_platform"
-    marker=$(docker run --rm --network none --platform "$target_platform" \
-      --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
-      --mount type=tmpfs,destination=/var/lib/postgresql/data \
-      --entrypoint sh "$CANDIDATE_IMAGE" -ceu "cat /authorization/$AUTH_MARKER") ||
-      die 'candidate-authorization marker is missing'
-    [[ "$marker" == "$CANDIDATE_IMAGE" ]] || die 'candidate-authorization marker names another image'
+    assert_authorization_marker_content "$AUTH_MARKER" "$CANDIDATE_IMAGE" "$target_platform"
   fi
   printf '%s' "$fingerprint"
 }
@@ -711,6 +710,7 @@ authorize_writer_marker() {
     --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
     "umask 077; printf '%s\\n' '$CANDIDATE_IMAGE' > /authorization/$WRITER_MARKER.tmp; chmod 0644 /authorization/$WRITER_MARKER.tmp; sync; mv -f /authorization/$WRITER_MARKER.tmp /authorization/$WRITER_MARKER; sync"
   assert_authorization_marker_file "$WRITER_MARKER"
+  assert_authorization_marker_content "$WRITER_MARKER" "$CANDIDATE_IMAGE"
 }
 
 revoke_writer_marker() {
