@@ -40,11 +40,11 @@ flock --version
 Use the installer from the repository:
 
 ```bash
-# Installer commit: 89f569986009ba93386ce0fdd0c00bcdb557bb73
-# Expected SHA-256: db6630a22f4b34e6b6ba02b951eefe8b026663dd03d89f8aa2648397041b091f
+# Installer commit: b4215e61e64e704ae3d8b30ea864d50fa59044b4
+# Expected SHA-256: 1702ce46f9a8ebf2155e75b56822678f9fc24bc39f656dc360665375b4c58a0a
 installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/89f569986009ba93386ce0fdd0c00bcdb557bb73/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' 'db6630a22f4b34e6b6ba02b951eefe8b026663dd03d89f8aa2648397041b091f' "$installer" | sha256sum -c -
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/b4215e61e64e704ae3d8b30ea864d50fa59044b4/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' '1702ce46f9a8ebf2155e75b56822678f9fc24bc39f656dc360665375b4c58a0a' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 ```
 
@@ -417,11 +417,11 @@ curl -s https://<host>/api/memory/status \
 Use the guarded installer for upgrades as well as first-time setup:
 
 ```bash
-# Installer commit: 89f569986009ba93386ce0fdd0c00bcdb557bb73
-# Expected SHA-256: db6630a22f4b34e6b6ba02b951eefe8b026663dd03d89f8aa2648397041b091f
+# Installer commit: b4215e61e64e704ae3d8b30ea864d50fa59044b4
+# Expected SHA-256: 1702ce46f9a8ebf2155e75b56822678f9fc24bc39f656dc360665375b4c58a0a
 installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/89f569986009ba93386ce0fdd0c00bcdb557bb73/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' 'db6630a22f4b34e6b6ba02b951eefe8b026663dd03d89f8aa2648397041b091f' "$installer" | sha256sum -c -
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/b4215e61e64e704ae3d8b30ea864d50fa59044b4/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' '1702ce46f9a8ebf2155e75b56822678f9fc24bc39f656dc360665375b4c58a0a' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 openclaw noosphere doctor
 ```
@@ -550,11 +550,11 @@ then the install did not complete. A healthy run must continue with `Bootstrap c
 First use the reviewed installer revision and verify its checksum before execution:
 
 ```bash
-# Installer commit: 89f569986009ba93386ce0fdd0c00bcdb557bb73
-# Expected SHA-256: db6630a22f4b34e6b6ba02b951eefe8b026663dd03d89f8aa2648397041b091f
+# Installer commit: b4215e61e64e704ae3d8b30ea864d50fa59044b4
+# Expected SHA-256: 1702ce46f9a8ebf2155e75b56822678f9fc24bc39f656dc360665375b4c58a0a
 installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/89f569986009ba93386ce0fdd0c00bcdb557bb73/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' 'db6630a22f4b34e6b6ba02b951eefe8b026663dd03d89f8aa2648397041b091f' "$installer" | sha256sum -c -
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/b4215e61e64e704ae3d8b30ea864d50fa59044b4/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' '1702ce46f9a8ebf2155e75b56822678f9fc24bc39f656dc360665375b4c58a0a' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 ```
 
