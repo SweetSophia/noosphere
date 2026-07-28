@@ -62,9 +62,9 @@ assert_marker_contract() {
 }
 
 authorization_volume_marker_digest() {
-  local marker_name=$1
+  local marker_name=$1 marker_volume=${2:-$authorization_volume}
   docker run --rm --network none --platform "$PLATFORM" \
-    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+    --mount "type=volume,source=$marker_volume,target=/authorization,readonly" \
     --mount type=tmpfs,destination=/var/lib/postgresql/data \
     --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
     'sha256sum "/authorization/$1"' -- "$marker_name" | awk '{print $1}'
@@ -478,6 +478,57 @@ wait "$switch_pid" 2>/dev/null || true
 # test before exercising the legitimate recovery path.
 saved_journal="$tmp_dir/journal.saved.json"
 install -m 600 "$journal" "$saved_journal"
+
+# Incomplete candidate evidence must authenticate the persisted authorization
+# state before recovery stops containers or republishes source markers.
+candidate_marker_digest=$(authorization_volume_marker_digest candidate-authorized)
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'ln -s missing-writer-target /authorization/writer-authorized; [ -L /authorization/writer-authorized ]; [ ! -e /authorization/writer-authorized ]'
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" >> "$log_file" 2>&1; then
+  echo 'Candidate-authorized recovery accepted a dangling writer marker symlink' >&2
+  exit 1
+fi
+[[ $(jq -r '.phase' "$journal") == candidate-authorized ]]
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$candidate_marker_digest" ]]
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  '[ -L /authorization/writer-authorized ] && [ ! -e /authorization/writer-authorized ]'
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'rm /authorization/writer-authorized'
+
+# The adjacent candidate-online recovery phase uses the same persisted marker
+# contract. Exercise it explicitly with malformed exact bytes and prove the
+# failed preflight leaves both the journal and marker bytes unchanged.
+candidate_online_journal="$tmp_dir/journal.candidate-online.json"
+jq '.phase = "candidate-online-verified"' "$saved_journal" > "$candidate_online_journal"
+install -m 600 "$candidate_online_journal" "$journal"
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n\000" "$1" > /authorization/writer-authorized; chmod 0644 /authorization/writer-authorized' \
+  -- "$CANDIDATE_IMAGE"
+malformed_writer_digest=$(authorization_volume_marker_digest writer-authorized)
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" >> "$log_file" 2>&1; then
+  echo 'Candidate-online recovery accepted malformed writer marker bytes' >&2
+  exit 1
+fi
+[[ $(jq -r '.phase' "$journal") == candidate-online-verified ]]
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$candidate_marker_digest" ]]
+[[ $(authorization_volume_marker_digest writer-authorized) == "$malformed_writer_digest" ]]
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'rm /authorization/writer-authorized'
+install -m 600 "$saved_journal" "$journal"
+
 tampered_journal="$tmp_dir/journal.tampered.json"
 jq '.originalComposeSha256 = "0000000000000000000000000000000000000000000000000000000000000000"' \
   "$journal" > "$tampered_journal"
@@ -819,6 +870,30 @@ fi
 [[ $(jq -r '.phase' "$new_install_journal") == claim-created ]]
 [[ $(docker volume inspect "$new_authorization_volume" --format "{{index .Labels \"io.noosphere.pgvector-authorization-run\"}}") == \
    "$(jq -r '.runId' "$new_install_journal")" ]]
+
+# A claim-created resume may inherit a fully published candidate marker from a
+# crash boundary, but any writer pathname is invalid and must survive rejection.
+new_candidate_marker_digest=$(authorization_volume_marker_digest candidate-authorized "$new_authorization_volume")
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$new_authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'ln -s missing-writer-target /authorization/writer-authorized; [ -L /authorization/writer-authorized ]; [ ! -e /authorization/writer-authorized ]'
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" --prepare-new-install "${new_install_args[@]}" >> "$log_file" 2>&1; then
+  echo 'Claim-created new-install resume accepted a dangling writer marker symlink' >&2
+  exit 1
+fi
+[[ $(jq -r '.phase' "$new_install_journal") == claim-created ]]
+[[ $(authorization_volume_marker_digest candidate-authorized "$new_authorization_volume") == "$new_candidate_marker_digest" ]]
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$new_authorization_volume,target=/authorization,readonly" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  '[ -L /authorization/writer-authorized ] && [ ! -e /authorization/writer-authorized ]'
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$new_authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'rm /authorization/writer-authorized'
 
 "$ROOT_DIR/scripts/switch-pgvector-compose.sh" --prepare-new-install "${new_install_args[@]}" >> "$log_file" 2>&1
 [[ $(jq -r '.phase + "|" + .mode + "|" + .platform' "$new_install_journal") == "provisioning|new-install|$PLATFORM" ]]

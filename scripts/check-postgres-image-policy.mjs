@@ -699,6 +699,7 @@ expect(
     switchScript.includes("assert_authorization_marker_content") &&
     switchScript.includes("authorization_marker_path_present") &&
     switchScript.includes("assert_legacy_authorization_state") &&
+    switchScript.includes("assert_pending_authorization_state") &&
     switchScript.includes("normalize_legacy_authorization_state") &&
     switchScript.includes('sha256sum "/authorization/$1"') &&
     switchScript.includes("printf '%s\\n' \"$1\" | sha256sum") &&
@@ -710,6 +711,15 @@ expect(
       "chmod 0644 /authorization/$AUTH_MARKER.source-$run_id.tmp /authorization/$WRITER_MARKER.source-$run_id.tmp",
     ) &&
     switchScript.includes("0:0:600|0:0:644") &&
+    switchScript.includes(
+      'assert_pending_authorization_state "$CANDIDATE_IMAGE" "$stored_platform"',
+    ) &&
+    switchScript.includes(
+      'assert_legacy_authorization_state "$CANDIDATE_IMAGE" absent "$stored_platform"',
+    ) &&
+    switchScript.includes(
+      "pending authorization state unexpectedly contains writer authorization",
+    ) &&
     switchScript.includes(
       "rm -f /authorization/$WRITER_MARKER; printf '%s\\\\n' '$SOURCE_IMAGE' > /authorization/$AUTH_MARKER.source-$run_id.tmp; chmod 0644 /authorization/$AUTH_MARKER.source-$run_id.tmp",
     ) &&

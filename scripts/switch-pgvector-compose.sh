@@ -370,6 +370,7 @@ validate_journal() {
         if docker volume inspect "$authorization_volume" >/dev/null 2>&1; then
           assert_authorization_volume '' false "$stored_platform" >/dev/null
           [[ -z $(authorization_volume_consumers) ]] || die 'unprovisioned authorization volume has an unexpected consumer'
+          assert_pending_authorization_state "$CANDIDATE_IMAGE" "$stored_platform"
         fi
       else
         jq -e '.volumeFingerprint | type == "string" and test("^[a-f0-9]{64}$")' "$journal" >/dev/null ||
@@ -456,7 +457,15 @@ validate_journal() {
         fi
       fi
       case "$evidence_phase" in
-        candidate-authorized|candidate-online-verified|complete)
+        candidate-authorized|candidate-online-verified)
+          jq -e '.authorizationVolumeFingerprint | type == "string" and test("^[a-f0-9]{64}$")' "$journal" >/dev/null ||
+            die 'transition journal contains an invalid authorization volume fingerprint'
+          if [[ "$journal_phase" != recovered ]]; then
+            assert_authorization_volume "$(jq -er '.authorizationVolumeFingerprint' "$journal")" false "$stored_platform" >/dev/null
+            assert_legacy_authorization_state "$CANDIDATE_IMAGE" absent "$stored_platform"
+          fi
+          ;;
+        complete)
           jq -e '.authorizationVolumeFingerprint | type == "string" and test("^[a-f0-9]{64}$")' "$journal" >/dev/null ||
             die 'transition journal contains an invalid authorization volume fingerprint'
           ;;
@@ -616,6 +625,16 @@ assert_legacy_authorization_state() {
   esac
 }
 
+assert_pending_authorization_state() {
+  local expected_image=$1 target_platform=${2:-${platform:-$(engine_platform)}}
+  if authorization_marker_path_present "$AUTH_MARKER" "$target_platform"; then
+    assert_legacy_authorization_marker_file "$AUTH_MARKER" "$target_platform"
+    assert_authorization_marker_content "$AUTH_MARKER" "$expected_image" "$target_platform"
+  fi
+  ! authorization_marker_path_present "$WRITER_MARKER" "$target_platform" ||
+    die 'pending authorization state unexpectedly contains writer authorization'
+}
+
 normalize_legacy_authorization_state() {
   local expected_image=$1 writer_policy=$2 target_platform=${3:-${platform:-$(engine_platform)}}
   local writer_present=false normalization_id="normalize-$BASHPID"
@@ -683,6 +702,8 @@ assert_authorization_volume() {
 create_authorization_volume() {
   if docker volume inspect "$authorization_volume" >/dev/null 2>&1; then
     assert_authorization_volume '' false "${platform:-$(engine_platform)}" >/dev/null
+    [[ -z $(authorization_volume_consumers) ]] || die 'candidate-authorization volume has an unexpected consumer'
+    assert_pending_authorization_state "$CANDIDATE_IMAGE" "${platform:-$(engine_platform)}"
   else
     docker volume create --driver local \
       --label "$AUTH_DATA_LABEL_KEY=$volume" \
