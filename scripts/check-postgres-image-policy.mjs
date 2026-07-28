@@ -701,16 +701,17 @@ expect(
     switchScript.includes("assert_legacy_authorization_state") &&
     switchScript.includes("assert_pending_authorization_state") &&
     switchScript.includes("normalize_legacy_authorization_state") &&
+    switchScript.includes("publish_authorization_marker") &&
     switchScript.includes('sha256sum "/authorization/$1"') &&
     switchScript.includes("printf '%s\\n' \"$1\" | sha256sum") &&
     switchScript.includes('[ -e "$path" ] || [ -L "$path" ]') &&
     switchScript.includes('[ -f "$path" ] && [ ! -L "$path" ] || exit 1') &&
     switchScript.includes('"$(stat -c "%u:%g:%a" "$path")" = "0:0:644"') &&
-    switchScript.includes("chmod 0644 /authorization/$AUTH_MARKER.tmp") &&
-    switchScript.includes("chmod 0644 /authorization/$WRITER_MARKER.tmp") &&
-    switchScript.includes(
-      "chmod 0644 /authorization/$AUTH_MARKER.source-$run_id.tmp /authorization/$WRITER_MARKER.source-$run_id.tmp",
-    ) &&
+    switchScript.includes('temp=$(mktemp "/authorization/.$marker.XXXXXX")') &&
+    switchScript.includes('mv -f -- "$temp" "$target"') &&
+    !switchScript.includes("> /authorization/$AUTH_MARKER.tmp") &&
+    !switchScript.includes("> /authorization/$WRITER_MARKER.tmp") &&
+    !switchScript.includes(".source-$run_id.tmp") &&
     switchScript.includes("0:0:600|0:0:644") &&
     switchScript.includes(
       'assert_pending_authorization_state "$CANDIDATE_IMAGE" "$stored_platform"',
@@ -720,9 +721,6 @@ expect(
     ) &&
     switchScript.includes(
       "pending authorization state unexpectedly contains writer authorization",
-    ) &&
-    switchScript.includes(
-      "rm -f /authorization/$WRITER_MARKER; printf '%s\\\\n' '$SOURCE_IMAGE' > /authorization/$AUTH_MARKER.source-$run_id.tmp; chmod 0644 /authorization/$AUTH_MARKER.source-$run_id.tmp",
     ) &&
     switchScript.includes('gsub(candidate_image, source_image)') &&
     switchScript.includes('gsub(source_image, candidate_image)'),
@@ -749,13 +747,13 @@ expect(
 expect(
   switchScript.includes("empty_authorization_marker_digest()") &&
     switchScript.includes(
-      'if [[ "$actual_digest" != "$(empty_authorization_marker_digest)" ]]; then\n' +
-        '      assert_authorization_marker_content "$AUTH_MARKER" "$expected_image" "$target_platform"',
+      '[[ "$actual_digest" == "$(empty_authorization_marker_digest)" ]] ||\n' +
+        '      die "pending authorization marker must remain empty: $AUTH_MARKER"',
     ),
   "switch-pgvector-compose.sh must accept only a metadata-safe zero-length pending candidate marker before publication",
 );
 const existingJournalValidation = switchScript.indexOf(
-  'if [[ -f "$journal" ]]; then\n  validate_journal',
+  'if path_present "$journal"; then\n  validate_journal',
 );
 const firstManagedMutationActivation = switchScript.indexOf(
   'fail_closed_on_die=true\n      recover_source',
@@ -764,8 +762,30 @@ const firstManagedMutationActivation = switchScript.indexOf(
 expect(
   existingJournalValidation >= 0 &&
     firstManagedMutationActivation > existingJournalValidation &&
+    switchScript.includes('path_present() {\n  [[ -e "$1" || -L "$1" ]]') &&
+    switchScript.includes('if path_present "$target"; then\n    assert_owned_regular_file "$target"') &&
     switchScript.includes('[[ "$fail_closed_on_die" == true ]] || exit "$status"'),
   "switch-pgvector-compose.sh must leave a running app untouched when journal or marker preflight validation fails",
+);
+const freshStaleState = switchScript.indexOf("stale_authorization_fingerprint=''");
+const freshStalePreflight = switchScript.indexOf(
+  'assert_stale_authorization_volume "$app_was_running"',
+  freshStaleState,
+);
+const freshStaleFailClosed = switchScript.indexOf(
+  "fail_closed_on_die=true",
+  freshStalePreflight,
+);
+expect(
+  freshStaleState >= 0 &&
+    freshStalePreflight > freshStaleState &&
+    freshStaleFailClosed > freshStalePreflight &&
+    switchScript.includes(
+      'authorizationVolumeFingerprint:(if $authorizationVolumeFingerprint == "" then null else $authorizationVolumeFingerprint end)',
+    ) &&
+    switchScript.includes("transition authorization volume appeared after its journal claim") &&
+    switchScript.includes("recovered transition evidence lacks an authorization volume fingerprint"),
+  "switch-pgvector-compose.sh must bind early authorization state and validate it before fail-closed mutation",
 );
 
 const verifyScript = read("scripts/verify-deploy.sh");
