@@ -5,8 +5,8 @@ import { NoosphereMemoryClient } from "./client.js";
 const PLUGIN_ID = "noosphere-memory";
 const DEFAULT_COMPOSE_FILE = "~/.noosphere/docker-compose.yml";
 const DEFAULT_LOG_TAIL = 80;
-const VERIFIED_INSTALLER_REF = "47bdff096d740c41e3d8c8050ce67b0894def50a";
-const VERIFIED_INSTALLER_SHA256 = "e4d165f4ff9825005f56797377ee9b38e365281b54450a20e3274ba897b1ef71";
+const VERIFIED_INSTALLER_REF = "7f0dee77b68d5dcf1797d33b3fbf0240ad9445c9";
+const VERIFIED_INSTALLER_SHA256 = "82d956342c04bd64d8f77a84f03685308139d2aee09d1e9a09b850af1850000e";
 const VERIFIED_INSTALLER_URL = `https://raw.githubusercontent.com/SweetSophia/noosphere/${VERIFIED_INSTALLER_REF}/install-openclaw.sh`;
 export function getVerifiedInstallerCommands() {
     return [
