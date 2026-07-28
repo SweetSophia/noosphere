@@ -368,6 +368,16 @@ compgen -G "$journal.recovered-*" >/dev/null
   --mount type=tmpfs,destination=/var/lib/postgresql/data \
   --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'cat /authorization/writer-authorized 2>/dev/null || true') == '' ]]
 
+# Reproduce an archived pre-fix deferred recovery: the active journal is gone,
+# the exact source marker remains root-owned 0600, and writer authorization is
+# intentionally absent. A fresh guarded invocation must normalize this state
+# before its strict 0644 preflight can proceed.
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'chmod 0600 /authorization/candidate-authorized; [ "$(stat -c "%u:%g:%a" /authorization/candidate-authorized)" = "0:0:600" ]; [ ! -e /authorization/writer-authorized ]'
+
 # Ordinary Compose must remain unable to publish a writer after the installer
 # requested deferred ownership and released its failed transaction.
 docker compose -f "$compose_file" up -d --force-recreate app >> "$log_file" 2>&1 || true
@@ -554,6 +564,16 @@ docker inspect "$app_container" | jq -e --arg candidate "$CANDIDATE_IMAGE" '
 # application row counts: legitimate writes after commit must not be rolled back.
 docker exec "$db_container" psql -X -v ON_ERROR_STOP=1 -U noosphere -d noosphere -c \
   "INSERT INTO \"Topic\" VALUES ('topic-2', 'Post-commit write');" >/dev/null
+
+# Reproduce pre-fix completed evidence. Both exact candidate markers are
+# root-owned 0600 while the complete journal remains active; the deferred
+# verification and later --authorize-writer handoff must normalize and resume.
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  '[ "$(cat /authorization/candidate-authorized)" = "$1" ]; [ "$(cat /authorization/writer-authorized)" = "$1" ]; chmod 0600 /authorization/candidate-authorized /authorization/writer-authorized; [ "$(stat -c "%u:%g:%a" /authorization/candidate-authorized)" = "0:0:600" ]; [ "$(stat -c "%u:%g:%a" /authorization/writer-authorized)" = "0:0:600" ]' \
+  -- "$CANDIDATE_IMAGE"
 exec 8>"$installer_lock_path"
 flock -w 5 8
 NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$installer_lock_path" \
@@ -563,6 +583,7 @@ if docker exec "$db_container" test -e /run/noosphere-pgvector/writer-authorized
   echo 'Deferred completed-evidence verification published writer authorization' >&2
   exit 1
 fi
+assert_marker_contract "$db_container" candidate-authorized "$CANDIDATE_IMAGE"
 docker compose -f "$compose_file" up -d --force-recreate app >> "$log_file" 2>&1 || true
 for _ in $(seq 1 30); do
   [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]] && break
@@ -572,6 +593,8 @@ done
 NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$installer_lock_path" \
   "$ROOT_DIR/scripts/switch-pgvector-compose.sh" --authorize-writer "${switch_args[@]}" >> "$log_file" 2>&1
 exec 8>&-
+assert_marker_contract "$db_container" candidate-authorized "$CANDIDATE_IMAGE"
+assert_marker_contract "$db_container" writer-authorized "$CANDIDATE_IMAGE"
 docker compose -f "$compose_file" up -d --force-recreate app
 [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 [[ $(docker exec "$db_container" psql -XAtq -U noosphere -d noosphere -c 'SELECT count(*) FROM "Topic";') == 3 ]]

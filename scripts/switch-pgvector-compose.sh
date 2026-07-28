@@ -377,7 +377,12 @@ validate_journal() {
         assert_new_install_volume_claim "$(jq -er '.volumeFingerprint' "$journal")" >/dev/null
         jq -e '.authorizationVolumeFingerprint | type == "string" and test("^[a-f0-9]{64}$")' "$journal" >/dev/null ||
           die 'new-install evidence contains an invalid authorization volume fingerprint'
-        assert_authorization_volume "$(jq -er '.authorizationVolumeFingerprint' "$journal")" true "$stored_platform" >/dev/null
+        assert_authorization_volume "$(jq -er '.authorizationVolumeFingerprint' "$journal")" false "$stored_platform" >/dev/null
+        if [[ "$journal_phase" == complete ]]; then
+          assert_legacy_authorization_state "$CANDIDATE_IMAGE" optional "$stored_platform"
+        else
+          assert_authorization_volume "$(jq -er '.authorizationVolumeFingerprint' "$journal")" true "$stored_platform" >/dev/null
+        fi
       fi
       if [[ "$journal_phase" == complete ]]; then
         for signature in dataSignature schemaSignature migrationSignature; do
@@ -457,7 +462,8 @@ validate_journal() {
           ;;
       esac
       if [[ "$journal_phase" == complete ]]; then
-        assert_authorization_volume "$(jq -er '.authorizationVolumeFingerprint' "$journal")" true "$stored_platform" >/dev/null
+        assert_authorization_volume "$(jq -er '.authorizationVolumeFingerprint' "$journal")" false "$stored_platform" >/dev/null
+        assert_legacy_authorization_state "$CANDIDATE_IMAGE" optional "$stored_platform"
       fi
       ;;
     *) die "transition journal contains an invalid mode: $journal_mode" ;;
@@ -537,6 +543,106 @@ assert_authorization_marker_file() {
     'path="/authorization/$1"; [ -f "$path" ] && [ ! -L "$path" ] && [ "$(stat -c "%u:%g:%a" "$path")" = "0:0:644" ]' \
     -- "$marker_name" ||
     die "authorization marker must be a root-owned regular file with mode 0644: $marker_name"
+}
+
+assert_legacy_authorization_marker_file() {
+  local marker_name=$1 target_platform=${2:-${platform:-$(engine_platform)}} metadata
+  [[ "$target_platform" =~ ^linux/(amd64|arm64)$ ]] || die 'authorization marker platform is invalid'
+  metadata=$(docker run --rm --network none --platform "$target_platform" \
+    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'path="/authorization/$1"; [ -f "$path" ] && [ ! -L "$path" ]; stat -c "%u:%g:%a" "$path"' \
+    -- "$marker_name") ||
+    die "legacy authorization marker must be a root-owned regular file: $marker_name"
+  case "$metadata" in
+    0:0:600|0:0:644) ;;
+    *) die "legacy authorization marker must have mode 0600 or 0644: $marker_name" ;;
+  esac
+}
+
+authorization_marker_value() {
+  local marker_name=$1 target_platform=${2:-${platform:-$(engine_platform)}}
+  docker run --rm --network none --platform "$target_platform" \
+    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu "cat /authorization/$marker_name"
+}
+
+authorization_marker_exists() {
+  local marker_name=$1 target_platform=${2:-${platform:-$(engine_platform)}}
+  docker run --rm --network none --platform "$target_platform" \
+    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu "test -e /authorization/$marker_name"
+}
+
+assert_legacy_authorization_state() {
+  local expected_image=$1 writer_policy=$2 target_platform=${3:-${platform:-$(engine_platform)}} marker writer_marker
+  assert_authorization_consumers_managed
+  assert_legacy_authorization_marker_file "$AUTH_MARKER" "$target_platform"
+  marker=$(authorization_marker_value "$AUTH_MARKER" "$target_platform") ||
+    die 'candidate-authorization marker is missing'
+  [[ "$marker" == "$expected_image" ]] ||
+    die 'candidate-authorization marker names an unexpected image'
+  case "$writer_policy" in
+    required)
+      assert_legacy_authorization_marker_file "$WRITER_MARKER" "$target_platform"
+      writer_marker=$(authorization_marker_value "$WRITER_MARKER" "$target_platform") ||
+        die 'writer-authorization marker is missing'
+      [[ "$writer_marker" == "$expected_image" ]] ||
+        die 'writer-authorization marker names an unexpected image'
+      ;;
+    absent)
+      ! authorization_marker_exists "$WRITER_MARKER" "$target_platform" ||
+        die 'deferred source recovery unexpectedly published writer authorization'
+      ;;
+    optional)
+      if authorization_marker_exists "$WRITER_MARKER" "$target_platform"; then
+        assert_legacy_authorization_marker_file "$WRITER_MARKER" "$target_platform"
+        writer_marker=$(authorization_marker_value "$WRITER_MARKER" "$target_platform") ||
+          die 'writer-authorization marker is unreadable'
+        [[ "$writer_marker" == "$expected_image" ]] ||
+          die 'writer-authorization marker names an unexpected image'
+      fi
+      ;;
+    *) die "invalid writer-marker policy: $writer_policy" ;;
+  esac
+}
+
+normalize_legacy_authorization_state() {
+  local expected_image=$1 writer_policy=$2 target_platform=${3:-${platform:-$(engine_platform)}}
+  local writer_present=false normalization_id="normalize-$BASHPID"
+  assert_legacy_authorization_state "$expected_image" "$writer_policy" "$target_platform"
+  if authorization_marker_exists "$WRITER_MARKER" "$target_platform"; then
+    writer_present=true
+  fi
+  if [[ "$writer_present" == true ]]; then
+    docker run --rm --network none --platform "$target_platform" \
+      --label "$LABEL_KEY=${run_id:-legacy-normalization}" \
+      --mount "type=volume,source=$authorization_volume,target=/authorization" \
+      --mount type=tmpfs,destination=/var/lib/postgresql/data \
+      --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+      "umask 077; printf '%s\\n' '$expected_image' > /authorization/$AUTH_MARKER.$normalization_id.tmp; printf '%s\\n' '$expected_image' > /authorization/$WRITER_MARKER.$normalization_id.tmp; chmod 0644 /authorization/$AUTH_MARKER.$normalization_id.tmp /authorization/$WRITER_MARKER.$normalization_id.tmp; sync; mv -f /authorization/$AUTH_MARKER.$normalization_id.tmp /authorization/$AUTH_MARKER; mv -f /authorization/$WRITER_MARKER.$normalization_id.tmp /authorization/$WRITER_MARKER; sync"
+  else
+    docker run --rm --network none --platform "$target_platform" \
+      --label "$LABEL_KEY=${run_id:-legacy-normalization}" \
+      --mount "type=volume,source=$authorization_volume,target=/authorization" \
+      --mount type=tmpfs,destination=/var/lib/postgresql/data \
+      --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+      "umask 077; rm -f /authorization/$WRITER_MARKER; printf '%s\\n' '$expected_image' > /authorization/$AUTH_MARKER.$normalization_id.tmp; chmod 0644 /authorization/$AUTH_MARKER.$normalization_id.tmp; sync; mv -f /authorization/$AUTH_MARKER.$normalization_id.tmp /authorization/$AUTH_MARKER; sync"
+  fi
+  assert_authorization_marker_file "$AUTH_MARKER" "$target_platform"
+  [[ $(authorization_marker_value "$AUTH_MARKER" "$target_platform") == "$expected_image" ]] ||
+    die 'normalized candidate-authorization marker names an unexpected image'
+  if [[ "$writer_present" == true ]]; then
+    assert_authorization_marker_file "$WRITER_MARKER" "$target_platform"
+    [[ $(authorization_marker_value "$WRITER_MARKER" "$target_platform") == "$expected_image" ]] ||
+      die 'normalized writer-authorization marker names an unexpected image'
+  else
+    ! authorization_marker_exists "$WRITER_MARKER" "$target_platform" ||
+      die 'normalization unexpectedly published writer authorization'
+  fi
 }
 
 assert_authorization_consumers_managed() {
@@ -619,7 +725,7 @@ revoke_writer_marker() {
 }
 
 assert_stale_authorization_volume() {
-  local expect_writer=${1:-true} labels marker writer_marker target_platform=${platform:-$(engine_platform)}
+  local expect_writer=${1:-true} labels writer_policy=absent target_platform=${platform:-$(engine_platform)}
   [[ $(docker volume inspect "$authorization_volume" --format '{{.Driver}}') == local ]] ||
     die "$authorization_volume must use the local volume driver"
   labels=$(docker volume inspect "$authorization_volume" --format '{{json .Labels}}')
@@ -628,25 +734,10 @@ assert_stale_authorization_volume() {
       .[$dataKey] == $data and .[$imageKey] == $image and
       (.[$runKey] | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$"))
     ' >/dev/null <<< "$labels" || die 'stale authorization volume has invalid ownership labels'
-  marker=$(docker run --rm --network none --platform "$target_platform" \
-    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
-    --mount type=tmpfs,destination=/var/lib/postgresql/data \
-    --entrypoint sh "$CANDIDATE_IMAGE" -ceu "cat /authorization/$AUTH_MARKER 2>/dev/null || true")
-  assert_authorization_marker_file "$AUTH_MARKER" "$target_platform"
-  [[ "$marker" == "$SOURCE_IMAGE" ]] ||
-    die 'authorization volume is not safely rebound to the exact source image'
-  writer_marker=$(docker run --rm --network none --platform "$target_platform" \
-    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
-    --mount type=tmpfs,destination=/var/lib/postgresql/data \
-    --entrypoint sh "$CANDIDATE_IMAGE" -ceu "cat /authorization/$WRITER_MARKER 2>/dev/null || true")
   if [[ "$expect_writer" == true ]]; then
-    assert_authorization_marker_file "$WRITER_MARKER" "$target_platform"
-    [[ "$writer_marker" == "$SOURCE_IMAGE" ]] ||
-      die 'writer authorization is not safely rebound to the exact source image'
-  else
-    [[ -z "$writer_marker" ]] || die 'deferred source recovery unexpectedly published writer authorization'
+    writer_policy=required
   fi
-  assert_authorization_consumers_managed
+  normalize_legacy_authorization_state "$SOURCE_IMAGE" "$writer_policy" "$target_platform"
 }
 
 authorize_source_marker() {
@@ -1118,6 +1209,7 @@ if [[ -f "$journal" ]]; then
       [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
         die 'app writer remained running during completed-evidence verification'
     fi
+    normalize_legacy_authorization_state "$CANDIDATE_IMAGE" optional "$(jq -er '.platform' "$journal")"
     revoke_writer_marker
     load_journal_baseline
     assert_volume_contract "$expected_volume" >/dev/null
@@ -1152,6 +1244,7 @@ if [[ -f "$journal" ]]; then
       [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
         die 'app writer remained running during completed new-install verification'
     fi
+    normalize_legacy_authorization_state "$CANDIDATE_IMAGE" optional "$(jq -er '.platform' "$journal")"
     revoke_writer_marker
     [[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]] || die 'completed new-install evidence exists but database is not running'
     assert_image_identity "$db_container" "$CANDIDATE_IMAGE" candidate false

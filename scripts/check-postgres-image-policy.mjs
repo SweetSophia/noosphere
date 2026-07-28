@@ -696,16 +696,21 @@ expect(
     switchScript.includes("authorize_writer_marker") &&
     switchScript.includes("revoke_writer_marker") &&
     switchScript.includes("assert_authorization_marker_file") &&
+    switchScript.includes("assert_legacy_authorization_state") &&
+    switchScript.includes("normalize_legacy_authorization_state") &&
     switchScript.includes('"$(stat -c "%u:%g:%a" "$path")" = "0:0:644"') &&
     switchScript.includes("chmod 0644 /authorization/$AUTH_MARKER.tmp") &&
     switchScript.includes("chmod 0644 /authorization/$WRITER_MARKER.tmp") &&
     switchScript.includes(
       "chmod 0644 /authorization/$AUTH_MARKER.source-$run_id.tmp /authorization/$WRITER_MARKER.source-$run_id.tmp",
     ) &&
-    switchScript.includes("chmod 0644 /authorization/$AUTH_MARKER.source-$run_id.tmp") &&
+    switchScript.includes("0:0:600|0:0:644") &&
+    switchScript.includes(
+      "rm -f /authorization/$WRITER_MARKER; printf '%s\\\\n' '$SOURCE_IMAGE' > /authorization/$AUTH_MARKER.source-$run_id.tmp; chmod 0644 /authorization/$AUTH_MARKER.source-$run_id.tmp",
+    ) &&
     switchScript.includes('gsub(candidate_image, source_image)') &&
     switchScript.includes('gsub(source_image, candidate_image)'),
-  "switch-pgvector-compose.sh must enforce root-owned mode-0644 marker files and rebind recovered desired state to source",
+  "switch-pgvector-compose.sh must normalize legacy root-owned mode-0600 markers, enforce mode 0644, and rebind recovered desired state to source",
 );
 
 const verifyScript = read("scripts/verify-deploy.sh");
