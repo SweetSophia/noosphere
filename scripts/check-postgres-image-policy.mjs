@@ -704,6 +704,7 @@ expect(
     switchScript.includes('sha256sum "/authorization/$1"') &&
     switchScript.includes("printf '%s\\n' \"$1\" | sha256sum") &&
     switchScript.includes('[ -e "$path" ] || [ -L "$path" ]') &&
+    switchScript.includes('[ -f "$path" ] && [ ! -L "$path" ] || exit 1') &&
     switchScript.includes('"$(stat -c "%u:%g:%a" "$path")" = "0:0:644"') &&
     switchScript.includes("chmod 0644 /authorization/$AUTH_MARKER.tmp") &&
     switchScript.includes("chmod 0644 /authorization/$WRITER_MARKER.tmp") &&
@@ -726,6 +727,45 @@ expect(
     switchScript.includes('gsub(candidate_image, source_image)') &&
     switchScript.includes('gsub(source_image, candidate_image)'),
   "switch-pgvector-compose.sh must reject unsafe marker paths and inexact bytes, normalize legacy root-owned mode-0600 markers, enforce mode 0644, and rebind recovered desired state to source",
+);
+const recoveredEvidenceValidation = switchScript.indexOf(
+  'stored_authorization_fingerprint=$(jq -er \'.authorizationVolumeFingerprint\' "$journal")',
+);
+const recoveredSourceStateValidation = switchScript.indexOf(
+  'if [[ "$journal_phase" == recovered ]]; then\n' +
+    '            assert_legacy_authorization_state "$SOURCE_IMAGE" optional "$stored_platform"',
+  recoveredEvidenceValidation,
+);
+const recoveredMutation = switchScript.indexOf(
+  'if [[ "$journal_phase" == recovered ]]; then\n' +
+    '    if docker inspect "$app_container"',
+);
+expect(
+  recoveredEvidenceValidation >= 0 &&
+    recoveredSourceStateValidation > recoveredEvidenceValidation &&
+    recoveredMutation > recoveredSourceStateValidation,
+  "switch-pgvector-compose.sh must authenticate recovered candidate-derived authorization evidence before managed recovery mutation",
+);
+expect(
+  switchScript.includes("empty_authorization_marker_digest()") &&
+    switchScript.includes(
+      'if [[ "$actual_digest" != "$(empty_authorization_marker_digest)" ]]; then\n' +
+        '      assert_authorization_marker_content "$AUTH_MARKER" "$expected_image" "$target_platform"',
+    ),
+  "switch-pgvector-compose.sh must accept only a metadata-safe zero-length pending candidate marker before publication",
+);
+const existingJournalValidation = switchScript.indexOf(
+  'if [[ -f "$journal" ]]; then\n  validate_journal',
+);
+const firstManagedMutationActivation = switchScript.indexOf(
+  'fail_closed_on_die=true\n      recover_source',
+  existingJournalValidation,
+);
+expect(
+  existingJournalValidation >= 0 &&
+    firstManagedMutationActivation > existingJournalValidation &&
+    switchScript.includes('[[ "$fail_closed_on_die" == true ]] || exit "$status"'),
+  "switch-pgvector-compose.sh must leave a running app untouched when journal or marker preflight validation fails",
 );
 
 const verifyScript = read("scripts/verify-deploy.sh");

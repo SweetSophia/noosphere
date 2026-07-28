@@ -318,7 +318,7 @@ assert_owned_regular_file() {
 
 validate_journal() {
   local stored_volume stored_source stored_candidate stored_platform stored_authorization expected_run_dir
-  local stored_engine_id stored_docker_endpoint
+  local stored_engine_id stored_docker_endpoint stored_authorization_fingerprint
   local stored_original stored_candidate_compose stored_source_override stored_backup
   local stored_original_sha stored_candidate_sha stored_override_sha stored_backup_sha
   local evidence_file signature evidence_phase
@@ -460,8 +460,11 @@ validate_journal() {
         candidate-authorized|candidate-online-verified)
           jq -e '.authorizationVolumeFingerprint | type == "string" and test("^[a-f0-9]{64}$")' "$journal" >/dev/null ||
             die 'transition journal contains an invalid authorization volume fingerprint'
-          if [[ "$journal_phase" != recovered ]]; then
-            assert_authorization_volume "$(jq -er '.authorizationVolumeFingerprint' "$journal")" false "$stored_platform" >/dev/null
+          stored_authorization_fingerprint=$(jq -er '.authorizationVolumeFingerprint' "$journal")
+          assert_authorization_volume "$stored_authorization_fingerprint" false "$stored_platform" >/dev/null
+          if [[ "$journal_phase" == recovered ]]; then
+            assert_legacy_authorization_state "$SOURCE_IMAGE" optional "$stored_platform"
+          else
             assert_legacy_authorization_state "$CANDIDATE_IMAGE" absent "$stored_platform"
           fi
           ;;
@@ -561,7 +564,7 @@ assert_legacy_authorization_marker_file() {
     --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
     --mount type=tmpfs,destination=/var/lib/postgresql/data \
     --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-    'path="/authorization/$1"; [ -f "$path" ] && [ ! -L "$path" ]; stat -c "%u:%g:%a" "$path"' \
+    'path="/authorization/$1"; [ -f "$path" ] && [ ! -L "$path" ] || exit 1; stat -c "%u:%g:%a" "$path"' \
     -- "$marker_name") ||
     die "legacy authorization marker must be a root-owned regular file: $marker_name"
   case "$metadata" in
@@ -581,6 +584,10 @@ authorization_marker_digest() {
 
 expected_authorization_marker_digest() {
   printf '%s\n' "$1" | sha256sum | awk '{print $1}'
+}
+
+empty_authorization_marker_digest() {
+  printf %s '' | sha256sum | awk '{print $1}'
 }
 
 assert_authorization_marker_content() {
@@ -626,10 +633,14 @@ assert_legacy_authorization_state() {
 }
 
 assert_pending_authorization_state() {
-  local expected_image=$1 target_platform=${2:-${platform:-$(engine_platform)}}
+  local expected_image=$1 target_platform=${2:-${platform:-$(engine_platform)}} actual_digest
   if authorization_marker_path_present "$AUTH_MARKER" "$target_platform"; then
     assert_legacy_authorization_marker_file "$AUTH_MARKER" "$target_platform"
-    assert_authorization_marker_content "$AUTH_MARKER" "$expected_image" "$target_platform"
+    actual_digest=$(authorization_marker_digest "$AUTH_MARKER" "$target_platform") ||
+      die "authorization marker is missing or unreadable: $AUTH_MARKER"
+    if [[ "$actual_digest" != "$(empty_authorization_marker_digest)" ]]; then
+      assert_authorization_marker_content "$AUTH_MARKER" "$expected_image" "$target_platform"
+    fi
   fi
   ! authorization_marker_path_present "$WRITER_MARKER" "$target_platform" ||
     die 'pending authorization state unexpectedly contains writer authorization'
@@ -1188,6 +1199,7 @@ recover_source() {
 on_error() {
   local line=$1 status=$2 durable_phase=$journal_phase
   [[ "$operation_complete" == true || "$rollback_active" == true || ! -f "$journal" ]] && exit "$status"
+  [[ "$fail_closed_on_die" == true ]] || exit "$status"
   durable_phase=$(jq -r '.phase // empty' "$journal" 2>/dev/null || printf '%s' "$journal_phase")
   if [[ "$durable_phase" == complete ]]; then
     docker stop --time 60 "$app_container" >/dev/null 2>&1 || true
@@ -1207,7 +1219,6 @@ on_error() {
   recover_source "failure near line $line (exit $status)"
 }
 trap 'on_error "$LINENO" "$?"' ERR
-fail_closed_on_die=true
 
 if [[ -f "$journal" ]]; then
   validate_journal
@@ -1216,6 +1227,7 @@ if [[ -f "$journal" ]]; then
       die 'switch evidence cannot be used by a new-install operation'
     if [[ "$journal_phase" != complete ]]; then
       [[ "$mode" == switch ]] || die 'writer authorization requires complete switch evidence'
+      fail_closed_on_die=true
       recover_source "incomplete prior journal phase $journal_phase"
     fi
     assert_candidate_authorization_gate
@@ -1225,6 +1237,7 @@ if [[ -f "$journal" ]]; then
     fi
     [[ "$mode" != authorize-writer || "$current_app_was_running" == false ]] ||
       die 'writer authorization requires the app container to remain stopped'
+    fail_closed_on_die=true
     docker stop --time 60 "$app_container" >/dev/null 2>&1 || true
     if docker inspect "$app_container" >/dev/null 2>&1; then
       [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
@@ -1260,6 +1273,7 @@ if [[ -f "$journal" ]]; then
     [[ "$mode" != authorize-writer || "$current_app_was_running" == false ]] ||
       die 'writer authorization requires the app container to remain stopped'
     [[ "$mode" != switch ]] || app_was_running=$current_app_was_running
+    fail_closed_on_die=true
     docker stop --time 60 "$app_container" >/dev/null 2>&1 || true
     if docker inspect "$app_container" >/dev/null 2>&1; then
       [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
@@ -1309,6 +1323,7 @@ if [[ "$mode" == prepare-new-install ]]; then
         platform:$platform,dockerEngineId:$dockerEngineId,dockerEndpoint:$dockerEndpoint,
         probeDatabase:$probeDatabase,composeFile:$composeFile,dbService:$dbService,
         dbContainer:$dbContainer,appContainer:$appContainer}' > "$temp"
+    fail_closed_on_die=true
     write_json_atomic "$journal" "$temp"
     rm -f "$temp"
     validate_journal
@@ -1320,6 +1335,7 @@ if [[ "$mode" == prepare-new-install ]]; then
     die "new-install preparation cannot resume phase $journal_phase"
   run_id=$(jq -er '.runId' "$journal")
   if [[ "$journal_phase" == claim-created ]]; then
+    fail_closed_on_die=true
     if ! docker volume inspect "$volume" >/dev/null 2>&1; then
       docker volume create --driver local \
         --label "$NEW_INSTALL_LABEL_KEY=$run_id" \
@@ -1343,6 +1359,7 @@ if [[ "$mode" == prepare-new-install ]]; then
   fi
 
   if docker inspect "$app_container" >/dev/null 2>&1; then
+    fail_closed_on_die=true
     [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
       die 'app writer must remain stopped until new-install evidence is complete'
   fi
@@ -1365,6 +1382,7 @@ if [[ "$mode" == record-new-install ]]; then
   assert_candidate_authorization_gate
   [[ -f "$journal" && "$journal_mode" == new-install && "$journal_phase" == provisioning ]] ||
     die 'new-install finalization requires prepared provisioning evidence'
+  fail_closed_on_die=true
   if docker inspect "$app_container" >/dev/null 2>&1; then
     [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
       die 'app writer must remain stopped until new-install evidence is complete'
@@ -1416,6 +1434,7 @@ if docker volume inspect "$authorization_volume" >/dev/null 2>&1; then
   # deferred recovery, where the source gate is present but writer permission
   # intentionally is not. Bind the stale-marker expectation to observed app
   # state instead of accidentally re-authorizing it here.
+  fail_closed_on_die=true
   assert_stale_authorization_volume "$app_was_running"
   stale_authorization_volume=true
 fi
@@ -1458,6 +1477,7 @@ jq -n --arg phase preparing --arg mode switch --arg runId "$run_id" --arg volume
     dbService:$dbService,dbContainer:$dbContainer,appContainer:$appContainer,platform:$platform,
     dockerEngineId:$dockerEngineId,dockerEndpoint:$dockerEndpoint,probeDatabase:$probeDatabase,
     authorizationVolume:$authorizationVolume}' > "$temp"
+fail_closed_on_die=true
 write_json_atomic "$journal" "$temp"
 rm -f "$temp"
 validate_journal
