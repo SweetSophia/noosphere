@@ -707,6 +707,113 @@ recovered_journal_saved="$tmp_dir/journal.recovered.saved.json"
 install -m 600 "$journal" "$recovered_journal_saved"
 recovered_failure_log="$tmp_dir/recovered-marker-failure.log"
 
+# The legacy journal's app state is part of the authorization claim. Reject
+# both contradictory combinations before binding the fingerprint or stopping
+# the running app.
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'rm -f /authorization/writer-authorized; sync'
+jq '.recoveredFromPhase = "baseline-recorded" | del(.authorizationVolumeFingerprint) | .appWasRunning = true' \
+  "$recovered_journal_saved" > "$journal"
+chmod 0600 "$journal"
+contradictory_journal_digest=$(sha256sum "$journal" | awk '{print $1}')
+: > "$recovered_failure_log"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$recovered_failure_log" 2>&1; then
+  echo 'Legacy recovered evidence accepted appWasRunning=true without writer authorization' >&2
+  exit 1
+fi
+grep -F 'legacy authorization marker must be a root-owned regular file: writer-authorized' "$recovered_failure_log" >/dev/null
+[[ $(sha256sum "$journal" | awk '{print $1}') == "$contradictory_journal_digest" ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+! authorization_volume_marker_digest writer-authorized >/dev/null 2>&1
+
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n" "$1" > /authorization/writer-authorized; chmod 0600 /authorization/writer-authorized; sync' \
+  -- "$SOURCE_IMAGE"
+jq '.recoveredFromPhase = "baseline-recorded" | del(.authorizationVolumeFingerprint) | .appWasRunning = false' \
+  "$recovered_journal_saved" > "$journal"
+chmod 0600 "$journal"
+contradictory_journal_digest=$(sha256sum "$journal" | awk '{print $1}')
+: > "$recovered_failure_log"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$recovered_failure_log" 2>&1; then
+  echo 'Legacy recovered evidence accepted appWasRunning=false with writer authorization' >&2
+  exit 1
+fi
+grep -F 'deferred source recovery unexpectedly published writer authorization' "$recovered_failure_log" >/dev/null
+[[ $(sha256sum "$journal" | awk '{print $1}') == "$contradictory_journal_digest" ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+[[ $(authorization_volume_marker_digest writer-authorized) == "$source_marker_digest" ]]
+
+# A container with the expected managed name is not trusted unless its exact
+# authorization mount is read-only.
+docker rm -f "$app_container" >/dev/null
+docker run -d --name "$app_container" --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/run/noosphere-pgvector" \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'sleep 300' >/dev/null
+jq '.recoveredFromPhase = "baseline-recorded" | del(.authorizationVolumeFingerprint) | .appWasRunning = true' \
+  "$recovered_journal_saved" > "$journal"
+chmod 0600 "$journal"
+readonly_journal_digest=$(sha256sum "$journal" | awk '{print $1}')
+: > "$recovered_failure_log"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$recovered_failure_log" 2>&1; then
+  echo 'Legacy recovered evidence accepted a read-write managed authorization consumer' >&2
+  exit 1
+fi
+grep -F 'must mount the candidate-authorization volume read-only at /run/noosphere-pgvector' "$recovered_failure_log" >/dev/null
+[[ $(sha256sum "$journal" | awk '{print $1}') == "$readonly_journal_digest" ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+docker rm -f "$app_container" >/dev/null
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'chmod 0644 /authorization/writer-authorized; sync'
+docker compose -f "$compose_file" up -d app
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+
+# The matching deferred state remains valid when the old journal omitted the
+# fingerprint entirely. Bind it under the inherited installer lock, archive
+# the verified recovery evidence, and keep both app and writer authorization
+# stopped.
+docker stop --time 60 "$app_container" >/dev/null
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'rm -f /authorization/writer-authorized; sync'
+jq '.recoveredFromPhase = "baseline-recorded" | del(.authorizationVolumeFingerprint) | .appWasRunning = false' \
+  "$recovered_journal_saved" > "$journal"
+chmod 0600 "$journal"
+deferred_recovered_journal="$journal.recovered-$(jq -r '.runId' "$journal")"
+exec 8>"$installer_lock_path"
+flock -w 5 8
+if NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$installer_lock_path" \
+  "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" --defer-app-restart > "$recovered_failure_log" 2>&1; then
+  echo 'Deferred legacy recovered evidence unexpectedly reported switch success' >&2
+  exit 1
+fi
+exec 8>&-
+[[ ! -f "$journal" && -f "$deferred_recovered_journal" ]]
+[[ $(jq -r '.authorizationVolumeFingerprint' "$deferred_recovered_journal") == "$(authorization_volume_fingerprint)" ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
+! authorization_volume_marker_digest writer-authorized >/dev/null 2>&1
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$source_marker_digest" ]]
+rm -f "$deferred_recovered_journal"
+install -m 600 "$recovered_journal_saved" "$journal"
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n" "$1" > /authorization/writer-authorized; chmod 0644 /authorization/writer-authorized; sync' \
+  -- "$SOURCE_IMAGE"
+docker compose -f "$compose_file" up -d app
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+
 # Exact volume labels alone are insufficient: reject malformed legacy source
 # marker bytes before upgrading the journal or stopping the running writer.
 docker run --rm --network none --platform "$PLATFORM" \
@@ -765,7 +872,8 @@ grep -F 'candidate-authorization volume fingerprint changed' "$recovered_failure
 cat "$recovered_failure_log" >> "$log_file"
 [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 [[ $(jq -r '.phase' "$journal") == recovered ]]
-install -m 600 "$recovered_journal_saved" "$journal"
+jq '.appWasRunning = true' "$recovered_journal_saved" > "$journal"
+chmod 0600 "$journal"
 
 docker run --rm --network none --platform "$PLATFORM" \
   --mount "type=volume,source=$authorization_volume,target=/authorization" \
@@ -823,7 +931,7 @@ if NOOSPHERE_A2B_FAIL_AFTER_PHASE=recovery-writer-restarted \
 fi
 [[ $(jq -r '.phase' "$journal") == recovered ]]
 if docker inspect "$app_container" >/dev/null 2>&1; then
-  [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
+  [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 fi
 [[ $(docker inspect "$db_container" --format '{{.Config.Image}}') == "$SOURCE_IMAGE" ]]
 assert_marker_contract "$db_container" candidate-authorized "$SOURCE_IMAGE"
@@ -838,7 +946,7 @@ if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" >> "$log_f
   exit 1
 fi
 [[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]]
-[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 [[ $(docker inspect "$db_container" --format '{{.Config.Image}}') == "$SOURCE_IMAGE" ]]
 [[ $(docker exec "$db_container" psql -XAtq -U noosphere -d noosphere -c \
   "SELECT count(*) FROM \"Topic\" WHERE id = 'topic-recovery-write';") == 1 ]]

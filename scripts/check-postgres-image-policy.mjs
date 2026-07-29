@@ -729,10 +729,12 @@ expect(
 const recoveredEvidenceValidation = switchScript.indexOf(
   'stored_authorization_fingerprint=$(jq -er \'.authorizationVolumeFingerprint\' "$journal")',
 );
+const recoveredWriterPolicy = switchScript.indexOf(
+  'case "$(jq -r \'.appWasRunning\' "$journal")" in',
+);
 const recoveredSourceStateValidation = switchScript.indexOf(
-  'if [[ "$journal_phase" == recovered ]]; then\n' +
-    '            assert_legacy_authorization_state "$SOURCE_IMAGE" optional "$stored_platform"',
-  recoveredEvidenceValidation,
+  'assert_legacy_authorization_state "$SOURCE_IMAGE" "$recovered_writer_policy" "$stored_platform"',
+  recoveredWriterPolicy,
 );
 const recoveredMutation = switchScript.indexOf(
   'if [[ "$journal_phase" == recovered ]]; then\n' +
@@ -740,9 +742,10 @@ const recoveredMutation = switchScript.indexOf(
 );
 expect(
   recoveredEvidenceValidation >= 0 &&
-    recoveredSourceStateValidation > recoveredEvidenceValidation &&
+    recoveredWriterPolicy >= 0 &&
+    recoveredSourceStateValidation > recoveredWriterPolicy &&
     recoveredMutation > recoveredSourceStateValidation,
-  "switch-pgvector-compose.sh must authenticate recovered candidate-derived authorization evidence before managed recovery mutation",
+  "switch-pgvector-compose.sh must bind recovered writer-marker requirements to the journal app state before managed recovery mutation",
 );
 expect(
   switchScript.includes("empty_authorization_marker_digest()") &&
@@ -776,6 +779,21 @@ const freshStaleFailClosed = switchScript.indexOf(
   "fail_closed_on_die=true",
   freshStalePreflight,
 );
+const legacyBinding = switchScript.indexOf(
+  "bind_legacy_recovered_authorization_volume()",
+);
+const legacyBindingVolumeRevalidation = switchScript.indexOf(
+  'current_fingerprint=$(assert_authorization_volume "$expected_fingerprint" false "$target_platform")',
+  legacyBinding,
+);
+const legacyBindingMarkerRevalidation = switchScript.indexOf(
+  'assert_legacy_authorization_state "$expected_image" "$writer_policy" "$target_platform"',
+  legacyBindingVolumeRevalidation,
+);
+const legacyBindingRename = switchScript.indexOf(
+  'write_json_atomic "$journal" "$temp"',
+  legacyBindingMarkerRevalidation,
+);
 expect(
   freshStaleState >= 0 &&
     freshStalePreflight > freshStaleState &&
@@ -786,9 +804,15 @@ expect(
     switchScript.includes("transition authorization volume appeared after its journal claim") &&
     switchScript.includes("bind_legacy_recovered_authorization_volume") &&
     switchScript.includes('assert_authorization_volume \'\' false "$stored_platform"') &&
-    switchScript.includes('assert_legacy_authorization_state "$SOURCE_IMAGE" optional "$stored_platform"') &&
-    switchScript.includes("legacy recovered authorization volume changed before durable binding"),
-  "switch-pgvector-compose.sh must bind early authorization state and validate it before fail-closed mutation",
+    switchScript.includes("true) recovered_writer_policy=required") &&
+    switchScript.includes("false) recovered_writer_policy=absent") &&
+    legacyBindingVolumeRevalidation > legacyBinding &&
+    legacyBindingMarkerRevalidation > legacyBindingVolumeRevalidation &&
+    legacyBindingRename > legacyBindingMarkerRevalidation &&
+    switchScript.includes('[.[0].Mounts[] | select(.Name == $volume)]') &&
+    switchScript.includes('.[0].Destination == "/run/noosphere-pgvector"') &&
+    switchScript.includes(".[0].RW == false"),
+  "switch-pgvector-compose.sh must validate journal-bound marker state and read-only consumers immediately before binding early authorization evidence",
 );
 
 const verifyScript = read("scripts/verify-deploy.sh");
