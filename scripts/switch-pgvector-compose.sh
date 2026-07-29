@@ -325,12 +325,26 @@ assert_owned_regular_file() {
   [[ $(stat -c '%u' "$path") == "$(id -u)" ]] || die "evidence file is not owned by the current user: $path"
 }
 
+bind_legacy_recovered_authorization_volume() {
+  local expected_fingerprint=$1 current_fingerprint temp
+  current_fingerprint=$(authorization_volume_fingerprint)
+  [[ "$current_fingerprint" == "$expected_fingerprint" ]] ||
+    die 'legacy recovered authorization volume changed before durable binding'
+  temp=$(mktemp "$backup_dir/.legacy-recovered-journal.XXXXXX")
+  jq --arg authorizationVolumeFingerprint "$expected_fingerprint" \
+    '.authorizationVolumeFingerprint = $authorizationVolumeFingerprint' "$journal" > "$temp"
+  write_json_atomic "$journal" "$temp"
+  rm -f "$temp"
+  [[ $(jq -er '.authorizationVolumeFingerprint' "$journal") == "$expected_fingerprint" ]] ||
+    die 'legacy recovered authorization volume binding was not persisted'
+}
+
 validate_journal() {
   local stored_volume stored_source stored_candidate stored_platform stored_authorization expected_run_dir
   local stored_engine_id stored_docker_endpoint stored_authorization_fingerprint
   local stored_original stored_candidate_compose stored_source_override stored_backup
   local stored_original_sha stored_candidate_sha stored_override_sha stored_backup_sha
-  local evidence_file signature evidence_phase
+  local evidence_file signature evidence_phase legacy_recovered_authorization_fingerprint=''
 
   assert_owned_regular_file "$journal"
   [[ $(stat -c '%a' "$journal") == 600 ]] || die 'transition journal mode must be 0600'
@@ -474,9 +488,12 @@ validate_journal() {
             die 'transition journal contains an invalid early authorization volume fingerprint'
           stored_authorization_fingerprint=$(jq -r '.authorizationVolumeFingerprint // empty' "$journal")
           if [[ "$journal_phase" == recovered && -z "$stored_authorization_fingerprint" ]]; then
-            die 'recovered transition evidence lacks an authorization volume fingerprint'
-          fi
-          if docker volume inspect "$authorization_volume" >/dev/null 2>&1; then
+            docker volume inspect "$authorization_volume" >/dev/null 2>&1 ||
+              die 'recovered transition authorization volume is missing'
+            stored_authorization_fingerprint=$(assert_authorization_volume '' false "$stored_platform")
+            assert_legacy_authorization_state "$SOURCE_IMAGE" optional "$stored_platform"
+            legacy_recovered_authorization_fingerprint=$stored_authorization_fingerprint
+          elif docker volume inspect "$authorization_volume" >/dev/null 2>&1; then
             [[ -n "$stored_authorization_fingerprint" ]] ||
               die 'transition authorization volume appeared after its journal claim'
             [[ $(authorization_volume_fingerprint) == "$stored_authorization_fingerprint" ]] ||
@@ -509,6 +526,9 @@ validate_journal() {
       ;;
     *) die "transition journal contains an invalid mode: $journal_mode" ;;
   esac
+  if [[ -n "$legacy_recovered_authorization_fingerprint" && "$mode" == switch ]]; then
+    bind_legacy_recovered_authorization_volume "$legacy_recovered_authorization_fingerprint"
+  fi
   journal_validated=true
 }
 

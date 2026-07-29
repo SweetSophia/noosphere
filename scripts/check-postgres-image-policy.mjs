@@ -784,7 +784,10 @@ expect(
       'authorizationVolumeFingerprint:(if $authorizationVolumeFingerprint == "" then null else $authorizationVolumeFingerprint end)',
     ) &&
     switchScript.includes("transition authorization volume appeared after its journal claim") &&
-    switchScript.includes("recovered transition evidence lacks an authorization volume fingerprint"),
+    switchScript.includes("bind_legacy_recovered_authorization_volume") &&
+    switchScript.includes('assert_authorization_volume \'\' false "$stored_platform"') &&
+    switchScript.includes('assert_legacy_authorization_state "$SOURCE_IMAGE" optional "$stored_platform"') &&
+    switchScript.includes("legacy recovered authorization volume changed before durable binding"),
   "switch-pgvector-compose.sh must bind early authorization state and validate it before fail-closed mutation",
 );
 

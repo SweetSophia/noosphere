@@ -73,6 +73,12 @@ authorization_volume_marker_digest() {
     'sha256sum "/authorization/$1"' -- "$marker_name" | awk '{print $1}'
 }
 
+authorization_volume_fingerprint() {
+  docker volume inspect "$authorization_volume" |
+    jq -Sc '.[0] | {Name,Driver,Mountpoint,CreatedAt,Scope,Labels,Options}' |
+    sha256sum | awk '{print $1}'
+}
+
 cleanup() {
   local status=$? id
   for id in $(docker ps -aq --filter "label=io.noosphere.pgvector-switch-run" --filter "name=noosphere-a2b"); do
@@ -375,13 +381,13 @@ probe=$(jq -r '.probeDatabase' "$journal")
 active_run=$(jq -r '.runId' "$journal")
 
 # An authorization volume that appears after an early journal recorded its
-# absence is unclaimed state. Reject both the original and recovered-from-early
-# journal forms without stopping the app or changing either evidence object.
+# absence is unclaimed state. Reject both the original journal and a recovered
+# journal whose volume labels do not bind the exact guarded run.
 saved_preparing_journal="$tmp_dir/journal.preparing.saved.json"
 install -m 600 "$journal" "$saved_preparing_journal"
 docker volume create --driver local \
   --label "io.noosphere.pgvector-authorization-data=$volume" \
-  --label "io.noosphere.pgvector-authorization-run=$active_run" \
+  --label "io.noosphere.pgvector-authorization-run=unclaimed-$active_run" \
   --label "io.noosphere.pgvector-authorization-image=$CANDIDATE_IMAGE" \
   "$authorization_volume" >/dev/null
 docker run --rm --network none --platform "$PLATFORM" \
@@ -405,10 +411,10 @@ jq '.recoveredFromPhase = .phase | .phase = "recovered"' "$saved_preparing_journ
 chmod 0600 "$journal"
 : > "$early_auth_log"
 if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$early_auth_log" 2>&1; then
-  echo 'Recovered-from-preparing evidence accepted an unbound authorization volume' >&2
+  echo 'Recovered-from-preparing evidence accepted a mismatched authorization-volume run claim' >&2
   exit 1
 fi
-grep -F 'recovered transition evidence lacks an authorization volume fingerprint' "$early_auth_log" >/dev/null
+grep -F 'candidate-authorization volume does not match this guarded transaction' "$early_auth_log" >/dev/null
 [[ $(jq -r '.phase + "|" + .recoveredFromPhase' "$journal") == 'recovered|preparing' ]]
 [[ $(authorization_volume_marker_digest candidate-authorized) == "$early_marker_digest" ]]
 [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
@@ -700,6 +706,54 @@ docker compose -f "$compose_file" up -d app
 recovered_journal_saved="$tmp_dir/journal.recovered.saved.json"
 install -m 600 "$journal" "$recovered_journal_saved"
 recovered_failure_log="$tmp_dir/recovered-marker-failure.log"
+
+# Exact volume labels alone are insufficient: reject malformed legacy source
+# marker bytes before upgrading the journal or stopping the running writer.
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n\000" "$1" > /authorization/writer-authorized; chmod 0600 /authorization/writer-authorized' \
+  -- "$SOURCE_IMAGE"
+jq '.recoveredFromPhase = "baseline-recorded" | .authorizationVolumeFingerprint = null | .appWasRunning = true' \
+  "$recovered_journal_saved" > "$journal"
+chmod 0600 "$journal"
+: > "$recovered_failure_log"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$recovered_failure_log" 2>&1; then
+  echo 'Legacy recovered evidence accepted malformed source writer bytes' >&2
+  exit 1
+fi
+grep -F 'authorization marker contains unexpected bytes: writer-authorized' "$recovered_failure_log" >/dev/null
+[[ $(jq -r '.authorizationVolumeFingerprint' "$journal") == null ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n" "$1" > /authorization/writer-authorized; chmod 0600 /authorization/writer-authorized; sync' \
+  -- "$SOURCE_IMAGE"
+
+# Old helpers could publish verified source recovery before journals carried an
+# authorization-volume fingerprint. Accept only an exact run-labeled volume
+# with exact source markers, then atomically bind its fingerprint before any
+# fail-closed writer stop. Inject a later fault so this disposable fixture can
+# inspect the upgraded active journal before the ordinary retry archives it.
+jq '.recoveredFromPhase = "baseline-recorded" | .authorizationVolumeFingerprint = null | .appWasRunning = true' \
+  "$recovered_journal_saved" > "$journal"
+chmod 0600 "$journal"
+: > "$recovered_failure_log"
+if NOOSPHERE_A2B_FAIL_AFTER_PHASE=recovery-writer-restarted \
+  "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$recovered_failure_log" 2>&1; then
+  echo 'Legacy recovered evidence unexpectedly reported switch success' >&2
+  exit 1
+fi
+grep -F 'test fault injected after journal phase recovery-writer-restarted' "$recovered_failure_log" >/dev/null
+grep -F 'manual recovery evidence:' "$recovered_failure_log" >/dev/null
+[[ $(jq -r '.phase + "|" + .recoveredFromPhase' "$journal") == 'recovered|baseline-recorded' ]]
+[[ $(jq -r '.authorizationVolumeFingerprint' "$journal") == "$(authorization_volume_fingerprint)" ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+install -m 600 "$recovered_journal_saved" "$journal"
+
 jq '.authorizationVolumeFingerprint = ("0" * 64)' "$recovered_journal_saved" > "$journal"
 chmod 0600 "$journal"
 : > "$recovered_failure_log"
