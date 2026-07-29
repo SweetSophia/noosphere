@@ -42,11 +42,11 @@ Docker administrator access is an explicit trust boundary. The lock serializes t
 Install and upgrade through the same command:
 
 ```bash
-# Installer commit: 7f0dee77b68d5dcf1797d33b3fbf0240ad9445c9
-# Expected SHA-256: 82d956342c04bd64d8f77a84f03685308139d2aee09d1e9a09b850af1850000e
+# Installer commit: 3b140ecf8a58487f71f023200f038336a09d2353
+# Expected SHA-256: 1aef44be230f18ddcb672274fc7a994e7232cb96a7b20e70c8d5a11ca91d6559
 installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/7f0dee77b68d5dcf1797d33b3fbf0240ad9445c9/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '82d956342c04bd64d8f77a84f03685308139d2aee09d1e9a09b850af1850000e' "$installer" | sha256sum -c -
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/3b140ecf8a58487f71f023200f038336a09d2353/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' '1aef44be230f18ddcb672274fc7a994e7232cb96a7b20e70c8d5a11ca91d6559' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 ```
 
@@ -108,7 +108,7 @@ If `cmp` or `git diff` fails, stop. A verified recovery intentionally leaves a s
 
 ## Recovery and evidence
 
-The authorization volume contains only the pinned source/candidate image digests used by the startup gates. The guard publishes both marker files as root-owned mode `0644`: they remain immutable to the non-root application while UID 1001 can read the writer marker through the read-only volume mount. A resumed legacy `recovered` journal atomically republishes its exact-source markers before restarting the writer. Treat a symlink, non-regular file, any other owner or mode, an owner-writable consumer mount, or unexpected marker content as a failed authorization boundary.
+The authorization volume contains only the pinned source/candidate image digests used by the startup gates. The guard publishes both marker files as root-owned mode `0644`: they remain immutable to the non-root application while UID 1001 can read the writer marker through the read-only volume mount. A resumed legacy `recovered` journal atomically republishes its exact-source markers before restarting the writer. If that historical journal predates the authorization fingerprint field, the guard accepts only the exact run/data/image-labeled local volume with exact source marker bytes, then durably binds its current fingerprint before stopping a writer. Treat a symlink, non-regular file, any other owner or mode, an owner-writable consumer mount, mismatched ownership labels, or unexpected marker content as a failed authorization boundary.
 
 The active journal is `<backup-dir>/<volume>.phase-a2b.json`. Verified source recovery durably checkpoints `recovered`, then either restarts and verifies the source app for a direct guard invocation or proves it remains stopped for an inherited installer transaction. The guard archives the journal as `.recovered-<run-id>` and exits non-zero so automation cannot mistake rollback for upgrade success. If interrupted after either the recovered checkpoint or the direct source-writer restart, the next invocation re-verifies the exact source and safely finishes recovery.
 
