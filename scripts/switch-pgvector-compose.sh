@@ -205,6 +205,10 @@ fi
 
 journal="$backup_dir/${volume}.phase-a2b.json"
 
+path_present() {
+  [[ -e "$1" || -L "$1" ]]
+}
+
 fsync_path() {
   node -e '
     const fs = require("node:fs");
@@ -220,6 +224,9 @@ sha256_file() {
 
 write_json_atomic() {
   local target=$1 source=$2 temp
+  if path_present "$target"; then
+    assert_owned_regular_file "$target"
+  fi
   temp=$(mktemp "${target}.tmp.XXXXXX")
   install -m 600 "$source" "$temp"
   fsync_path "$temp"
@@ -241,11 +248,13 @@ phase_checkpoint() {
 }
 
 update_journal() {
-  local phase=$1 temp
+  local phase=$1 temp authorization_fingerprint
   temp=$(mktemp "$backup_dir/.journal.XXXXXX")
   if [[ "$phase" == recovered ]]; then
-    jq --arg phase "$phase" \
-      'if .phase == $phase then . else .recoveredFromPhase = .phase | .phase = $phase end' \
+    authorization_fingerprint=$(authorization_volume_fingerprint)
+    jq --arg phase "$phase" --arg authorizationVolumeFingerprint "$authorization_fingerprint" \
+      'if .phase == $phase then . else .recoveredFromPhase = .phase | .phase = $phase end |
+       .authorizationVolumeFingerprint = $authorizationVolumeFingerprint' \
       "$journal" > "$temp"
   else
     jq --arg phase "$phase" '.phase = $phase' "$journal" > "$temp"
@@ -318,7 +327,7 @@ assert_owned_regular_file() {
 
 validate_journal() {
   local stored_volume stored_source stored_candidate stored_platform stored_authorization expected_run_dir
-  local stored_engine_id stored_docker_endpoint
+  local stored_engine_id stored_docker_endpoint stored_authorization_fingerprint
   local stored_original stored_candidate_compose stored_source_override stored_backup
   local stored_original_sha stored_candidate_sha stored_override_sha stored_backup_sha
   local evidence_file signature evidence_phase
@@ -370,6 +379,7 @@ validate_journal() {
         if docker volume inspect "$authorization_volume" >/dev/null 2>&1; then
           assert_authorization_volume '' false "$stored_platform" >/dev/null
           [[ -z $(authorization_volume_consumers) ]] || die 'unprovisioned authorization volume has an unexpected consumer'
+          assert_pending_authorization_state "$CANDIDATE_IMAGE" "$stored_platform"
         fi
       else
         jq -e '.volumeFingerprint | type == "string" and test("^[a-f0-9]{64}$")' "$journal" >/dev/null ||
@@ -377,7 +387,12 @@ validate_journal() {
         assert_new_install_volume_claim "$(jq -er '.volumeFingerprint' "$journal")" >/dev/null
         jq -e '.authorizationVolumeFingerprint | type == "string" and test("^[a-f0-9]{64}$")' "$journal" >/dev/null ||
           die 'new-install evidence contains an invalid authorization volume fingerprint'
-        assert_authorization_volume "$(jq -er '.authorizationVolumeFingerprint' "$journal")" true "$stored_platform" >/dev/null
+        assert_authorization_volume "$(jq -er '.authorizationVolumeFingerprint' "$journal")" false "$stored_platform" >/dev/null
+        if [[ "$journal_phase" == complete ]]; then
+          assert_legacy_authorization_state "$CANDIDATE_IMAGE" optional "$stored_platform"
+        else
+          assert_authorization_volume "$(jq -er '.authorizationVolumeFingerprint' "$journal")" true "$stored_platform" >/dev/null
+        fi
       fi
       if [[ "$journal_phase" == complete ]]; then
         for signature in dataSignature schemaSignature migrationSignature; do
@@ -451,13 +466,45 @@ validate_journal() {
         fi
       fi
       case "$evidence_phase" in
-        candidate-authorized|candidate-online-verified|complete)
+        preparing|baseline-recorded|backup-restored|candidate-verified|source-rollback-verified|final-candidate-maintenance-verified)
+          jq -e '
+            (.authorizationVolumeFingerprint == null) or
+            (.authorizationVolumeFingerprint | type == "string" and test("^[a-f0-9]{64}$"))
+          ' "$journal" >/dev/null ||
+            die 'transition journal contains an invalid early authorization volume fingerprint'
+          stored_authorization_fingerprint=$(jq -r '.authorizationVolumeFingerprint // empty' "$journal")
+          if [[ "$journal_phase" == recovered && -z "$stored_authorization_fingerprint" ]]; then
+            die 'recovered transition evidence lacks an authorization volume fingerprint'
+          fi
+          if docker volume inspect "$authorization_volume" >/dev/null 2>&1; then
+            [[ -n "$stored_authorization_fingerprint" ]] ||
+              die 'transition authorization volume appeared after its journal claim'
+            [[ $(authorization_volume_fingerprint) == "$stored_authorization_fingerprint" ]] ||
+              die 'transition authorization volume fingerprint changed'
+            assert_stale_authorization_volume optional
+          elif [[ "$journal_phase" == recovered ]]; then
+            die 'recovered transition authorization volume is missing'
+          fi
+          ;;
+        candidate-authorized|candidate-online-verified)
+          jq -e '.authorizationVolumeFingerprint | type == "string" and test("^[a-f0-9]{64}$")' "$journal" >/dev/null ||
+            die 'transition journal contains an invalid authorization volume fingerprint'
+          stored_authorization_fingerprint=$(jq -er '.authorizationVolumeFingerprint' "$journal")
+          assert_authorization_volume "$stored_authorization_fingerprint" false "$stored_platform" >/dev/null
+          if [[ "$journal_phase" == recovered ]]; then
+            assert_legacy_authorization_state "$SOURCE_IMAGE" optional "$stored_platform"
+          else
+            assert_legacy_authorization_state "$CANDIDATE_IMAGE" absent "$stored_platform"
+          fi
+          ;;
+        complete)
           jq -e '.authorizationVolumeFingerprint | type == "string" and test("^[a-f0-9]{64}$")' "$journal" >/dev/null ||
             die 'transition journal contains an invalid authorization volume fingerprint'
           ;;
       esac
       if [[ "$journal_phase" == complete ]]; then
-        assert_authorization_volume "$(jq -er '.authorizationVolumeFingerprint' "$journal")" true "$stored_platform" >/dev/null
+        assert_authorization_volume "$(jq -er '.authorizationVolumeFingerprint' "$journal")" false "$stored_platform" >/dev/null
+        assert_legacy_authorization_state "$CANDIDATE_IMAGE" optional "$stored_platform"
       fi
       ;;
     *) die "transition journal contains an invalid mode: $journal_mode" ;;
@@ -527,6 +574,167 @@ authorization_volume_consumers() {
   docker ps -aq --no-trunc --filter "volume=$authorization_volume" | sort -u
 }
 
+assert_authorization_marker_file() {
+  local marker_name=$1 target_platform=${2:-${platform:-$(engine_platform)}}
+  [[ "$target_platform" =~ ^linux/(amd64|arm64)$ ]] || die 'authorization marker platform is invalid'
+  docker run --rm --network none --platform "$target_platform" \
+    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'path="/authorization/$1"; [ -f "$path" ] && [ ! -L "$path" ] && [ "$(stat -c "%u:%g:%a" "$path")" = "0:0:644" ]' \
+    -- "$marker_name" ||
+    die "authorization marker must be a root-owned regular file with mode 0644: $marker_name"
+}
+
+assert_legacy_authorization_marker_file() {
+  local marker_name=$1 target_platform=${2:-${platform:-$(engine_platform)}} metadata
+  [[ "$target_platform" =~ ^linux/(amd64|arm64)$ ]] || die 'authorization marker platform is invalid'
+  metadata=$(docker run --rm --network none --platform "$target_platform" \
+    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'path="/authorization/$1"; [ -f "$path" ] && [ ! -L "$path" ] || exit 1; stat -c "%u:%g:%a" "$path"' \
+    -- "$marker_name") ||
+    die "legacy authorization marker must be a root-owned regular file: $marker_name"
+  case "$metadata" in
+    0:0:600|0:0:644) ;;
+    *) die "legacy authorization marker must have mode 0600 or 0644: $marker_name" ;;
+  esac
+}
+
+authorization_marker_digest() {
+  local marker_name=$1 target_platform=${2:-${platform:-$(engine_platform)}}
+  docker run --rm --network none --platform "$target_platform" \
+    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'sha256sum "/authorization/$1"' -- "$marker_name" | awk '{print $1}'
+}
+
+expected_authorization_marker_digest() {
+  printf '%s\n' "$1" | sha256sum | awk '{print $1}'
+}
+
+empty_authorization_marker_digest() {
+  printf %s '' | sha256sum | awk '{print $1}'
+}
+
+assert_authorization_marker_content() {
+  local marker_name=$1 expected_image=$2 target_platform=${3:-${platform:-$(engine_platform)}} actual_digest expected_digest
+  actual_digest=$(authorization_marker_digest "$marker_name" "$target_platform") ||
+    die "authorization marker is missing or unreadable: $marker_name"
+  expected_digest=$(expected_authorization_marker_digest "$expected_image")
+  [[ "$actual_digest" == "$expected_digest" ]] ||
+    die "authorization marker contains unexpected bytes: $marker_name"
+}
+
+authorization_marker_path_present() {
+  local marker_name=$1 target_platform=${2:-${platform:-$(engine_platform)}}
+  docker run --rm --network none --platform "$target_platform" \
+    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'path="/authorization/$1"; [ -e "$path" ] || [ -L "$path" ]' -- "$marker_name"
+}
+
+publish_authorization_marker() {
+  local marker_name=$1 expected_image=$2 target_platform=${3:-${platform:-$(engine_platform)}}
+  [[ "$marker_name" == "$AUTH_MARKER" || "$marker_name" == "$WRITER_MARKER" ]] ||
+    die "refusing unsupported authorization marker publication: $marker_name"
+  [[ "$expected_image" == "$SOURCE_IMAGE" || "$expected_image" == "$CANDIDATE_IMAGE" ]] ||
+    die 'refusing unsupported authorization marker image'
+  docker run --rm --network none --platform "$target_platform" \
+    --label "$LABEL_KEY=${run_id:-marker-publication}" \
+    --mount "type=volume,source=$authorization_volume,target=/authorization" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'marker=$1; expected=$2
+     target="/authorization/$marker"
+     temp=$(mktemp "/authorization/.$marker.XXXXXX")
+     trap '\''rm -f -- "$temp"'\'' EXIT
+     printf "%s\n" "$expected" > "$temp"
+     chmod 0644 "$temp"
+     sync
+     mv -f -- "$temp" "$target"
+     trap - EXIT
+     sync' \
+    -- "$marker_name" "$expected_image"
+}
+
+remove_authorization_marker() {
+  local marker_name=$1 target_platform=${2:-${platform:-$(engine_platform)}}
+  [[ "$marker_name" == "$AUTH_MARKER" || "$marker_name" == "$WRITER_MARKER" ]] ||
+    die "refusing unsupported authorization marker removal: $marker_name"
+  docker run --rm --network none --platform "$target_platform" \
+    --label "$LABEL_KEY=${run_id:-marker-removal}" \
+    --mount "type=volume,source=$authorization_volume,target=/authorization" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'rm -f -- "/authorization/$1"; sync' -- "$marker_name"
+}
+
+assert_legacy_authorization_state() {
+  local expected_image=$1 writer_policy=$2 target_platform=${3:-${platform:-$(engine_platform)}}
+  assert_authorization_consumers_managed
+  assert_legacy_authorization_marker_file "$AUTH_MARKER" "$target_platform"
+  assert_authorization_marker_content "$AUTH_MARKER" "$expected_image" "$target_platform"
+  case "$writer_policy" in
+    required)
+      assert_legacy_authorization_marker_file "$WRITER_MARKER" "$target_platform"
+      assert_authorization_marker_content "$WRITER_MARKER" "$expected_image" "$target_platform"
+      ;;
+    absent)
+      ! authorization_marker_path_present "$WRITER_MARKER" "$target_platform" ||
+        die 'deferred source recovery unexpectedly published writer authorization'
+      ;;
+    optional)
+      if authorization_marker_path_present "$WRITER_MARKER" "$target_platform"; then
+        assert_legacy_authorization_marker_file "$WRITER_MARKER" "$target_platform"
+        assert_authorization_marker_content "$WRITER_MARKER" "$expected_image" "$target_platform"
+      fi
+      ;;
+    *) die "invalid writer-marker policy: $writer_policy" ;;
+  esac
+}
+
+assert_pending_authorization_state() {
+  local _expected_image=$1 target_platform=${2:-${platform:-$(engine_platform)}} actual_digest
+  if authorization_marker_path_present "$AUTH_MARKER" "$target_platform"; then
+    assert_legacy_authorization_marker_file "$AUTH_MARKER" "$target_platform"
+    actual_digest=$(authorization_marker_digest "$AUTH_MARKER" "$target_platform") ||
+      die "authorization marker is missing or unreadable: $AUTH_MARKER"
+    [[ "$actual_digest" == "$(empty_authorization_marker_digest)" ]] ||
+      die "pending authorization marker must remain empty: $AUTH_MARKER"
+  fi
+  ! authorization_marker_path_present "$WRITER_MARKER" "$target_platform" ||
+    die 'pending authorization state unexpectedly contains writer authorization'
+}
+
+normalize_legacy_authorization_state() {
+  local expected_image=$1 writer_policy=$2 target_platform=${3:-${platform:-$(engine_platform)}}
+  local writer_present=false
+  assert_legacy_authorization_state "$expected_image" "$writer_policy" "$target_platform"
+  if authorization_marker_path_present "$WRITER_MARKER" "$target_platform"; then
+    writer_present=true
+  fi
+  if [[ "$writer_present" == true ]]; then
+    publish_authorization_marker "$AUTH_MARKER" "$expected_image" "$target_platform"
+    publish_authorization_marker "$WRITER_MARKER" "$expected_image" "$target_platform"
+  else
+    remove_authorization_marker "$WRITER_MARKER" "$target_platform"
+    publish_authorization_marker "$AUTH_MARKER" "$expected_image" "$target_platform"
+  fi
+  assert_authorization_marker_file "$AUTH_MARKER" "$target_platform"
+  assert_authorization_marker_content "$AUTH_MARKER" "$expected_image" "$target_platform"
+  if [[ "$writer_present" == true ]]; then
+    assert_authorization_marker_file "$WRITER_MARKER" "$target_platform"
+    assert_authorization_marker_content "$WRITER_MARKER" "$expected_image" "$target_platform"
+  else
+    ! authorization_marker_path_present "$WRITER_MARKER" "$target_platform" ||
+      die 'normalization unexpectedly published writer authorization'
+  fi
+}
+
 assert_authorization_consumers_managed() {
   local actual id db_id app_id
   actual=$(authorization_volume_consumers)
@@ -540,7 +748,7 @@ assert_authorization_consumers_managed() {
 }
 
 assert_authorization_volume() {
-  local expected_fingerprint=${1:-} require_marker=${2:-true} target_platform=${3:-${platform:-}} labels fingerprint marker actual
+  local expected_fingerprint=${1:-} require_marker=${2:-true} target_platform=${3:-${platform:-}} labels fingerprint
   [[ $(docker volume inspect "$authorization_volume" --format '{{.Driver}}') == local ]] ||
     die "$authorization_volume must use the local volume driver"
   labels=$(docker volume inspect "$authorization_volume" --format '{{json .Labels}}')
@@ -552,13 +760,8 @@ assert_authorization_volume() {
   [[ -z "$expected_fingerprint" || "$fingerprint" == "$expected_fingerprint" ]] ||
     die 'candidate-authorization volume fingerprint changed'
   if [[ "$require_marker" == true ]]; then
-    [[ "$target_platform" =~ ^linux/(amd64|arm64)$ ]] || die 'authorization marker platform is invalid'
-    marker=$(docker run --rm --network none --platform "$target_platform" \
-      --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
-      --mount type=tmpfs,destination=/var/lib/postgresql/data \
-      --entrypoint sh "$CANDIDATE_IMAGE" -ceu "cat /authorization/$AUTH_MARKER") ||
-      die 'candidate-authorization marker is missing'
-    [[ "$marker" == "$CANDIDATE_IMAGE" ]] || die 'candidate-authorization marker names another image'
+    assert_authorization_marker_file "$AUTH_MARKER" "$target_platform"
+    assert_authorization_marker_content "$AUTH_MARKER" "$CANDIDATE_IMAGE" "$target_platform"
   fi
   printf '%s' "$fingerprint"
 }
@@ -566,6 +769,8 @@ assert_authorization_volume() {
 create_authorization_volume() {
   if docker volume inspect "$authorization_volume" >/dev/null 2>&1; then
     assert_authorization_volume '' false "${platform:-$(engine_platform)}" >/dev/null
+    [[ -z $(authorization_volume_consumers) ]] || die 'candidate-authorization volume has an unexpected consumer'
+    assert_pending_authorization_state "$CANDIDATE_IMAGE" "${platform:-$(engine_platform)}"
   else
     docker volume create --driver local \
       --label "$AUTH_DATA_LABEL_KEY=$volume" \
@@ -574,39 +779,27 @@ create_authorization_volume() {
       "$authorization_volume" >/dev/null
   fi
   [[ -z $(authorization_volume_consumers) ]] || die 'candidate-authorization volume has an unexpected consumer'
-  docker run --rm --network none --platform "${platform:-$(engine_platform)}" \
-    --label "$LABEL_KEY=$run_id" \
-    --mount "type=volume,source=$authorization_volume,target=/authorization" \
-    --mount type=tmpfs,destination=/var/lib/postgresql/data \
-    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-    "umask 077; rm -f /authorization/$WRITER_MARKER; printf '%s\\n' '$CANDIDATE_IMAGE' > /authorization/$AUTH_MARKER.tmp; sync; mv -f /authorization/$AUTH_MARKER.tmp /authorization/$AUTH_MARKER; sync"
+  remove_authorization_marker "$WRITER_MARKER"
+  publish_authorization_marker "$AUTH_MARKER" "$CANDIDATE_IMAGE"
   assert_authorization_volume '' true "${platform:-$(engine_platform)}"
 }
 
 authorize_writer_marker() {
   assert_authorization_volume '' true "${platform:-$(engine_platform)}" >/dev/null
   assert_authorization_consumers_managed
-  docker run --rm --network none --platform "${platform:-$(engine_platform)}" \
-    --label "$LABEL_KEY=$run_id" \
-    --mount "type=volume,source=$authorization_volume,target=/authorization" \
-    --mount type=tmpfs,destination=/var/lib/postgresql/data \
-    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-    "umask 077; printf '%s\\n' '$CANDIDATE_IMAGE' > /authorization/$WRITER_MARKER.tmp; sync; mv -f /authorization/$WRITER_MARKER.tmp /authorization/$WRITER_MARKER; sync"
+  publish_authorization_marker "$WRITER_MARKER" "$CANDIDATE_IMAGE"
+  assert_authorization_marker_file "$WRITER_MARKER"
+  assert_authorization_marker_content "$WRITER_MARKER" "$CANDIDATE_IMAGE"
 }
 
 revoke_writer_marker() {
   assert_authorization_volume '' true "${platform:-$(engine_platform)}" >/dev/null
   assert_authorization_consumers_managed
-  docker run --rm --network none --platform "${platform:-$(engine_platform)}" \
-    --label "$LABEL_KEY=$run_id" \
-    --mount "type=volume,source=$authorization_volume,target=/authorization" \
-    --mount type=tmpfs,destination=/var/lib/postgresql/data \
-    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-    "rm -f /authorization/$WRITER_MARKER; sync"
+  remove_authorization_marker "$WRITER_MARKER"
 }
 
 assert_stale_authorization_volume() {
-  local expect_writer=${1:-true} labels marker writer_marker target_platform=${platform:-$(engine_platform)}
+  local expect_writer=${1:-true} labels writer_policy=absent target_platform=${platform:-$(engine_platform)}
   [[ $(docker volume inspect "$authorization_volume" --format '{{.Driver}}') == local ]] ||
     die "$authorization_volume must use the local volume driver"
   labels=$(docker volume inspect "$authorization_volume" --format '{{json .Labels}}')
@@ -615,23 +808,13 @@ assert_stale_authorization_volume() {
       .[$dataKey] == $data and .[$imageKey] == $image and
       (.[$runKey] | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$"))
     ' >/dev/null <<< "$labels" || die 'stale authorization volume has invalid ownership labels'
-  marker=$(docker run --rm --network none --platform "$target_platform" \
-    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
-    --mount type=tmpfs,destination=/var/lib/postgresql/data \
-    --entrypoint sh "$CANDIDATE_IMAGE" -ceu "cat /authorization/$AUTH_MARKER 2>/dev/null || true")
-  [[ "$marker" == "$SOURCE_IMAGE" ]] ||
-    die 'authorization volume is not safely rebound to the exact source image'
-  writer_marker=$(docker run --rm --network none --platform "$target_platform" \
-    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
-    --mount type=tmpfs,destination=/var/lib/postgresql/data \
-    --entrypoint sh "$CANDIDATE_IMAGE" -ceu "cat /authorization/$WRITER_MARKER 2>/dev/null || true")
-  if [[ "$expect_writer" == true ]]; then
-    [[ "$writer_marker" == "$SOURCE_IMAGE" ]] ||
-      die 'writer authorization is not safely rebound to the exact source image'
-  else
-    [[ -z "$writer_marker" ]] || die 'deferred source recovery unexpectedly published writer authorization'
-  fi
-  assert_authorization_consumers_managed
+  case "$expect_writer" in
+    true) writer_policy=required ;;
+    false) writer_policy=absent ;;
+    optional) writer_policy=optional ;;
+    *) die "invalid stale writer-marker policy: $expect_writer" ;;
+  esac
+  assert_legacy_authorization_state "$SOURCE_IMAGE" "$writer_policy" "$target_platform"
 }
 
 authorize_source_marker() {
@@ -646,25 +829,23 @@ authorize_source_marker() {
   labels=$(docker volume inspect "$authorization_volume" --format '{{json .Labels}}')
   if ! jq -e --arg run "$run_id" --arg runKey "$AUTH_RUN_LABEL_KEY" '.[$runKey] == $run' >/dev/null <<< "$labels"; then
     assert_stale_authorization_volume "$restart_app_after_switch"
+    if [[ "$restart_app_after_switch" == true ]]; then
+      normalize_legacy_authorization_state "$SOURCE_IMAGE" required
+    else
+      normalize_legacy_authorization_state "$SOURCE_IMAGE" absent
+    fi
     return 0
   fi
   assert_authorization_volume '' false "${platform:-$(engine_platform)}" >/dev/null
   assert_authorization_consumers_managed
   if [[ "$restart_app_after_switch" == true ]]; then
-    docker run --rm --network none --platform "${platform:-$(engine_platform)}" \
-      --label "$LABEL_KEY=$run_id" \
-      --mount "type=volume,source=$authorization_volume,target=/authorization" \
-      --mount type=tmpfs,destination=/var/lib/postgresql/data \
-      --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-      "umask 077; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$AUTH_MARKER.source-$run_id.tmp; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$WRITER_MARKER.source-$run_id.tmp; sync; mv -f /authorization/$AUTH_MARKER.source-$run_id.tmp /authorization/$AUTH_MARKER; mv -f /authorization/$WRITER_MARKER.source-$run_id.tmp /authorization/$WRITER_MARKER; sync"
+    publish_authorization_marker "$AUTH_MARKER" "$SOURCE_IMAGE"
+    publish_authorization_marker "$WRITER_MARKER" "$SOURCE_IMAGE"
   else
-    docker run --rm --network none --platform "${platform:-$(engine_platform)}" \
-      --label "$LABEL_KEY=$run_id" \
-      --mount "type=volume,source=$authorization_volume,target=/authorization" \
-      --mount type=tmpfs,destination=/var/lib/postgresql/data \
-      --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-      "umask 077; rm -f /authorization/$WRITER_MARKER; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$AUTH_MARKER.source-$run_id.tmp; sync; mv -f /authorization/$AUTH_MARKER.source-$run_id.tmp /authorization/$AUTH_MARKER; sync"
+    remove_authorization_marker "$WRITER_MARKER"
+    publish_authorization_marker "$AUTH_MARKER" "$SOURCE_IMAGE"
   fi
+  assert_stale_authorization_volume "$restart_app_after_switch"
 }
 
 engine_platform() {
@@ -764,7 +945,8 @@ sql() {
 
 assert_cluster_vector_absent() {
   local container=$1 db installed databases probe=$probe_database
-  [[ -n "$probe" && -f "$journal" ]] || die 'template0 probe requires a durable journal claim'
+  [[ -n "$probe" ]] && path_present "$journal" ||
+    die 'template0 probe requires a durable journal claim'
   [[ $(jq -er '.probeDatabase' "$journal") == "$probe" ]] ||
     die 'template0 probe does not match durable journal ownership'
 
@@ -957,6 +1139,7 @@ attempt_source_recovery() (
     assert_container_volume_mount "$db_container"
     assert_image_identity "$db_container" "$SOURCE_IMAGE" source false
     assert_compose_authorization_gate "$SOURCE_IMAGE"
+    authorize_source_marker
     assert_stale_authorization_volume "$restart_app_after_switch"
     if [[ "$restart_app_after_switch" == true ]]; then
       restart_app
@@ -1058,7 +1241,10 @@ recover_source() {
 
 on_error() {
   local line=$1 status=$2 durable_phase=$journal_phase
-  [[ "$operation_complete" == true || "$rollback_active" == true || ! -f "$journal" ]] && exit "$status"
+  if [[ "$operation_complete" == true || "$rollback_active" == true ]] || ! path_present "$journal"; then
+    exit "$status"
+  fi
+  [[ "$fail_closed_on_die" == true ]] || exit "$status"
   durable_phase=$(jq -r '.phase // empty' "$journal" 2>/dev/null || printf '%s' "$journal_phase")
   if [[ "$durable_phase" == complete ]]; then
     docker stop --time 60 "$app_container" >/dev/null 2>&1 || true
@@ -1078,15 +1264,15 @@ on_error() {
   recover_source "failure near line $line (exit $status)"
 }
 trap 'on_error "$LINENO" "$?"' ERR
-fail_closed_on_die=true
 
-if [[ -f "$journal" ]]; then
+if path_present "$journal"; then
   validate_journal
   if [[ "$journal_mode" == switch ]]; then
     [[ "$mode" == switch || "$mode" == authorize-writer ]] ||
       die 'switch evidence cannot be used by a new-install operation'
     if [[ "$journal_phase" != complete ]]; then
       [[ "$mode" == switch ]] || die 'writer authorization requires complete switch evidence'
+      fail_closed_on_die=true
       recover_source "incomplete prior journal phase $journal_phase"
     fi
     assert_candidate_authorization_gate
@@ -1096,11 +1282,13 @@ if [[ -f "$journal" ]]; then
     fi
     [[ "$mode" != authorize-writer || "$current_app_was_running" == false ]] ||
       die 'writer authorization requires the app container to remain stopped'
+    fail_closed_on_die=true
     docker stop --time 60 "$app_container" >/dev/null 2>&1 || true
     if docker inspect "$app_container" >/dev/null 2>&1; then
       [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
         die 'app writer remained running during completed-evidence verification'
     fi
+    normalize_legacy_authorization_state "$CANDIDATE_IMAGE" optional "$(jq -er '.platform' "$journal")"
     revoke_writer_marker
     load_journal_baseline
     assert_volume_contract "$expected_volume" >/dev/null
@@ -1130,11 +1318,13 @@ if [[ -f "$journal" ]]; then
     [[ "$mode" != authorize-writer || "$current_app_was_running" == false ]] ||
       die 'writer authorization requires the app container to remain stopped'
     [[ "$mode" != switch ]] || app_was_running=$current_app_was_running
+    fail_closed_on_die=true
     docker stop --time 60 "$app_container" >/dev/null 2>&1 || true
     if docker inspect "$app_container" >/dev/null 2>&1; then
       [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
         die 'app writer remained running during completed new-install verification'
     fi
+    normalize_legacy_authorization_state "$CANDIDATE_IMAGE" optional "$(jq -er '.platform' "$journal")"
     revoke_writer_marker
     [[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]] || die 'completed new-install evidence exists but database is not running'
     assert_image_identity "$db_container" "$CANDIDATE_IMAGE" candidate false
@@ -1155,7 +1345,7 @@ fi
 
 if [[ "$mode" == prepare-new-install ]]; then
   assert_candidate_authorization_gate
-  if [[ ! -f "$journal" ]]; then
+  if ! path_present "$journal"; then
     docker inspect "$db_container" >/dev/null 2>&1 && die 'new-install database container already exists without a durable claim'
     docker inspect "$app_container" >/dev/null 2>&1 && die 'new-install app container already exists without a durable claim'
     docker volume inspect "$volume" >/dev/null 2>&1 && die 'PostgreSQL volume already exists without a durable new-install claim'
@@ -1178,6 +1368,7 @@ if [[ "$mode" == prepare-new-install ]]; then
         platform:$platform,dockerEngineId:$dockerEngineId,dockerEndpoint:$dockerEndpoint,
         probeDatabase:$probeDatabase,composeFile:$composeFile,dbService:$dbService,
         dbContainer:$dbContainer,appContainer:$appContainer}' > "$temp"
+    fail_closed_on_die=true
     write_json_atomic "$journal" "$temp"
     rm -f "$temp"
     validate_journal
@@ -1189,6 +1380,7 @@ if [[ "$mode" == prepare-new-install ]]; then
     die "new-install preparation cannot resume phase $journal_phase"
   run_id=$(jq -er '.runId' "$journal")
   if [[ "$journal_phase" == claim-created ]]; then
+    fail_closed_on_die=true
     if ! docker volume inspect "$volume" >/dev/null 2>&1; then
       docker volume create --driver local \
         --label "$NEW_INSTALL_LABEL_KEY=$run_id" \
@@ -1212,6 +1404,7 @@ if [[ "$mode" == prepare-new-install ]]; then
   fi
 
   if docker inspect "$app_container" >/dev/null 2>&1; then
+    fail_closed_on_die=true
     [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
       die 'app writer must remain stopped until new-install evidence is complete'
   fi
@@ -1232,8 +1425,10 @@ fi
 
 if [[ "$mode" == record-new-install ]]; then
   assert_candidate_authorization_gate
-  [[ -f "$journal" && "$journal_mode" == new-install && "$journal_phase" == provisioning ]] ||
+  path_present "$journal" &&
+    [[ "$journal_mode" == new-install && "$journal_phase" == provisioning ]] ||
     die 'new-install finalization requires prepared provisioning evidence'
+  fail_closed_on_die=true
   if docker inspect "$app_container" >/dev/null 2>&1; then
     [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
       die 'app writer must remain stopped until new-install evidence is complete'
@@ -1267,7 +1462,7 @@ fi
 
 [[ "$mode" == switch ]] || die "unsupported operation mode: $mode"
 
-[[ ! -f "$journal" ]] || die 'completed evidence exists; current state should have returned earlier'
+! path_present "$journal" || die 'completed evidence exists; current state should have returned earlier'
 [[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]] || die 'source database must be running'
 docker inspect "$app_container" >/dev/null 2>&1 || die 'managed app container must exist before the switch'
 app_was_running=$(docker inspect "$app_container" --format '{{.State.Running}}')
@@ -1280,12 +1475,20 @@ expected_volume=$(assert_volume_contract)
 assert_volume_consumers "$db_container"
 assert_candidate_authorization_gate
 stale_authorization_volume=false
+stale_authorization_fingerprint=''
 if docker volume inspect "$authorization_volume" >/dev/null 2>&1; then
   # A stopped managed writer may legitimately be resuming an installer-owned
   # deferred recovery, where the source gate is present but writer permission
   # intentionally is not. Bind the stale-marker expectation to observed app
   # state instead of accidentally re-authorizing it here.
   assert_stale_authorization_volume "$app_was_running"
+  stale_authorization_fingerprint=$(authorization_volume_fingerprint)
+  fail_closed_on_die=true
+  if [[ "$app_was_running" == true ]]; then
+    normalize_legacy_authorization_state "$SOURCE_IMAGE" required
+  else
+    normalize_legacy_authorization_state "$SOURCE_IMAGE" absent
+  fi
   stale_authorization_volume=true
 fi
 
@@ -1318,6 +1521,7 @@ jq -n --arg phase preparing --arg mode switch --arg runId "$run_id" --arg volume
   --arg sourceOverrideSha256 "$source_override_sha" --arg composeFile "$compose_file" --arg dbService "$db_service" \
   --arg dbContainer "$db_container" --arg appContainer "$app_container" --arg platform "$platform" \
   --arg authorizationVolume "$authorization_volume" --arg probeDatabase "$probe_database" \
+  --arg authorizationVolumeFingerprint "$stale_authorization_fingerprint" \
   --arg dockerEngineId "$engine_id" --arg dockerEndpoint "$docker_host" \
   --argjson appWasRunning "$app_was_running" \
   '{phase:$phase,mode:$mode,runId:$runId,volume:$volume,appWasRunning:$appWasRunning,volumeFingerprint:$volumeFingerprint,
@@ -1326,10 +1530,12 @@ jq -n --arg phase preparing --arg mode switch --arg runId "$run_id" --arg volume
     candidateComposeSha256:$candidateComposeSha256,sourceOverrideSha256:$sourceOverrideSha256,composeFile:$composeFile,
     dbService:$dbService,dbContainer:$dbContainer,appContainer:$appContainer,platform:$platform,
     dockerEngineId:$dockerEngineId,dockerEndpoint:$dockerEndpoint,probeDatabase:$probeDatabase,
-    authorizationVolume:$authorizationVolume}' > "$temp"
+    authorizationVolume:$authorizationVolume,
+    authorizationVolumeFingerprint:(if $authorizationVolumeFingerprint == "" then null else $authorizationVolumeFingerprint end)}' > "$temp"
 write_json_atomic "$journal" "$temp"
 rm -f "$temp"
 validate_journal
+fail_closed_on_die=true
 phase_checkpoint preparing
 
 if [[ "$app_was_running" == true ]]; then

@@ -9,9 +9,9 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
-const immutableHelperRef = "a2067895023efc638e966ee827fea67385d8aa37";
-const verifiedInstallerRef = "19ba70a9e8c40dbe01df6de9ca79725c708f3997";
-const verifiedInstallerSha256 = "6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c";
+const immutableHelperRef = "70b388f0df5f3295cc135916f556e2b8de47aed9";
+const verifiedInstallerRef = "7f0dee77b68d5dcf1797d33b3fbf0240ad9445c9";
+const verifiedInstallerSha256 = "82d956342c04bd64d8f77a84f03685308139d2aee09d1e9a09b850af1850000e";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
@@ -695,9 +695,97 @@ expect(
     switchScript.includes("authorize_source_marker") &&
     switchScript.includes("authorize_writer_marker") &&
     switchScript.includes("revoke_writer_marker") &&
+    switchScript.includes("assert_authorization_marker_file") &&
+    switchScript.includes("assert_authorization_marker_content") &&
+    switchScript.includes("authorization_marker_path_present") &&
+    switchScript.includes("assert_legacy_authorization_state") &&
+    switchScript.includes("assert_pending_authorization_state") &&
+    switchScript.includes("normalize_legacy_authorization_state") &&
+    switchScript.includes("publish_authorization_marker") &&
+    switchScript.includes('sha256sum "/authorization/$1"') &&
+    switchScript.includes("printf '%s\\n' \"$1\" | sha256sum") &&
+    switchScript.includes('[ -e "$path" ] || [ -L "$path" ]') &&
+    switchScript.includes('[ -f "$path" ] && [ ! -L "$path" ] || exit 1') &&
+    switchScript.includes('"$(stat -c "%u:%g:%a" "$path")" = "0:0:644"') &&
+    switchScript.includes('temp=$(mktemp "/authorization/.$marker.XXXXXX")') &&
+    switchScript.includes('mv -f -- "$temp" "$target"') &&
+    !switchScript.includes("> /authorization/$AUTH_MARKER.tmp") &&
+    !switchScript.includes("> /authorization/$WRITER_MARKER.tmp") &&
+    !switchScript.includes(".source-$run_id.tmp") &&
+    switchScript.includes("0:0:600|0:0:644") &&
+    switchScript.includes(
+      'assert_pending_authorization_state "$CANDIDATE_IMAGE" "$stored_platform"',
+    ) &&
+    switchScript.includes(
+      'assert_legacy_authorization_state "$CANDIDATE_IMAGE" absent "$stored_platform"',
+    ) &&
+    switchScript.includes(
+      "pending authorization state unexpectedly contains writer authorization",
+    ) &&
     switchScript.includes('gsub(candidate_image, source_image)') &&
     switchScript.includes('gsub(source_image, candidate_image)'),
-  "switch-pgvector-compose.sh must provision candidate authorization and rebind recovered desired state to source",
+  "switch-pgvector-compose.sh must reject unsafe marker paths and inexact bytes, normalize legacy root-owned mode-0600 markers, enforce mode 0644, and rebind recovered desired state to source",
+);
+const recoveredEvidenceValidation = switchScript.indexOf(
+  'stored_authorization_fingerprint=$(jq -er \'.authorizationVolumeFingerprint\' "$journal")',
+);
+const recoveredSourceStateValidation = switchScript.indexOf(
+  'if [[ "$journal_phase" == recovered ]]; then\n' +
+    '            assert_legacy_authorization_state "$SOURCE_IMAGE" optional "$stored_platform"',
+  recoveredEvidenceValidation,
+);
+const recoveredMutation = switchScript.indexOf(
+  'if [[ "$journal_phase" == recovered ]]; then\n' +
+    '    if docker inspect "$app_container"',
+);
+expect(
+  recoveredEvidenceValidation >= 0 &&
+    recoveredSourceStateValidation > recoveredEvidenceValidation &&
+    recoveredMutation > recoveredSourceStateValidation,
+  "switch-pgvector-compose.sh must authenticate recovered candidate-derived authorization evidence before managed recovery mutation",
+);
+expect(
+  switchScript.includes("empty_authorization_marker_digest()") &&
+    switchScript.includes(
+      '[[ "$actual_digest" == "$(empty_authorization_marker_digest)" ]] ||\n' +
+        '      die "pending authorization marker must remain empty: $AUTH_MARKER"',
+    ),
+  "switch-pgvector-compose.sh must accept only a metadata-safe zero-length pending candidate marker before publication",
+);
+const existingJournalValidation = switchScript.indexOf(
+  'if path_present "$journal"; then\n  validate_journal',
+);
+const firstManagedMutationActivation = switchScript.indexOf(
+  'fail_closed_on_die=true\n      recover_source',
+  existingJournalValidation,
+);
+expect(
+  existingJournalValidation >= 0 &&
+    firstManagedMutationActivation > existingJournalValidation &&
+    switchScript.includes('path_present() {\n  [[ -e "$1" || -L "$1" ]]') &&
+    switchScript.includes('if path_present "$target"; then\n    assert_owned_regular_file "$target"') &&
+    switchScript.includes('[[ "$fail_closed_on_die" == true ]] || exit "$status"'),
+  "switch-pgvector-compose.sh must leave a running app untouched when journal or marker preflight validation fails",
+);
+const freshStaleState = switchScript.indexOf("stale_authorization_fingerprint=''");
+const freshStalePreflight = switchScript.indexOf(
+  'assert_stale_authorization_volume "$app_was_running"',
+  freshStaleState,
+);
+const freshStaleFailClosed = switchScript.indexOf(
+  "fail_closed_on_die=true",
+  freshStalePreflight,
+);
+expect(
+  freshStaleState >= 0 &&
+    freshStalePreflight > freshStaleState &&
+    freshStaleFailClosed > freshStalePreflight &&
+    switchScript.includes(
+      'authorizationVolumeFingerprint:(if $authorizationVolumeFingerprint == "" then null else $authorizationVolumeFingerprint end)',
+    ) &&
+    switchScript.includes("transition authorization volume appeared after its journal claim") &&
+    switchScript.includes("recovered transition evidence lacks an authorization volume fingerprint"),
+  "switch-pgvector-compose.sh must bind early authorization state and validate it before fail-closed mutation",
 );
 
 const verifyScript = read("scripts/verify-deploy.sh");
