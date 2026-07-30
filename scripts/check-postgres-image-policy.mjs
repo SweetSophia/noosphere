@@ -812,6 +812,20 @@ expect(
   "switch-pgvector-compose.sh must validate journal-bound marker state and read-only consumers immediately before binding early authorization evidence",
 );
 
+const switchTestScript = read("scripts/test-pgvector-compose-switch.sh");
+expect(
+  switchTestScript.includes(
+    'switch_script=${PGVECTOR_SWITCH_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}',
+  ) &&
+    switchTestScript.includes("command jq \"$@\" || status=$?") &&
+    switchTestScript.includes(
+      "[[ $(<\"$fixture_log\") == 'fixture: candidate-authorization volume fingerprint changed' ]]",
+    ) &&
+    switchTestScript.includes('[[ $(<"$assert_count_file") == 2 ]]') &&
+    switchTestScript.includes('[[ ! -e "$write_called_file" ]]'),
+  "test-pgvector-compose-switch.sh must prove the post-render mutation is rejected by the second volume assertion before journal replacement",
+);
+
 const verifyScript = read("scripts/verify-deploy.sh");
 const evidenceFileGuard = verifyScript.indexOf('[[ -f "$POSTGRES_EVIDENCE" ]]');
 const postgresVersionQuery = verifyScript.indexOf('postgres_version="$(docker exec');

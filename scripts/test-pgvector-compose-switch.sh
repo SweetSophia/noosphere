@@ -12,7 +12,7 @@ PLATFORM=${1:-linux/amd64}
 }
 
 test_legacy_recovered_authorization_binding_mutation() (
-  local fixture_dir backup_dir journal state_file fixture_log
+  local fixture_dir backup_dir journal state_file fixture_log assert_count_file write_called_file switch_script
   local expected_fingerprint mutated_fingerprint original_digest
   fixture_dir=$(mktemp -d)
   trap 'rm -rf "$fixture_dir"' EXIT
@@ -20,12 +20,16 @@ test_legacy_recovered_authorization_binding_mutation() (
   journal="$fixture_dir/journal.json"
   state_file="$fixture_dir/authorization-volume-fingerprint"
   fixture_log="$fixture_dir/binding.log"
+  assert_count_file="$fixture_dir/assert-count"
+  write_called_file="$fixture_dir/write-called"
+  switch_script=${PGVECTOR_SWITCH_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}
   mkdir -m 700 "$backup_dir"
   expected_fingerprint=$(printf expected | sha256sum | awk '{print $1}')
   mutated_fingerprint=$(printf mutated | sha256sum | awk '{print $1}')
   command jq -n '{phase:"recovered",authorizationVolumeFingerprint:null}' > "$journal"
   chmod 0600 "$journal"
   printf '%s\n' "$expected_fingerprint" > "$state_file"
+  printf '0\n' > "$assert_count_file"
   original_digest=$(sha256sum "$journal" | awk '{print $1}')
 
   eval "$(
@@ -33,7 +37,7 @@ test_legacy_recovered_authorization_binding_mutation() (
       /^bind_legacy_recovered_authorization_volume\(\) \{/ { emit = 1 }
       emit { print }
       emit && /^}$/ { exit }
-    ' "$ROOT_DIR/scripts/switch-pgvector-compose.sh"
+    ' "$switch_script"
   )"
 
   die() {
@@ -42,7 +46,9 @@ test_legacy_recovered_authorization_binding_mutation() (
   }
 
   assert_authorization_volume() {
-    local expected=$1 actual
+    local expected=$1 actual count
+    count=$(<"$assert_count_file")
+    printf '%s\n' "$((count + 1))" > "$assert_count_file"
     actual=$(<"$state_file")
     [[ -z "$expected" || "$actual" == "$expected" ]] ||
       die 'candidate-authorization volume fingerprint changed'
@@ -54,13 +60,16 @@ test_legacy_recovered_authorization_binding_mutation() (
   }
 
   jq() {
-    command jq "$@"
+    local status=0
+    command jq "$@" || status=$?
+    (( status == 0 )) || return "$status"
     # Model replacement of the authorization volume after the temporary
     # journal has been rendered but before the durable journal replacement.
     printf '%s\n' "$mutated_fingerprint" > "$state_file"
   }
 
   write_json_atomic() {
+    : > "$write_called_file"
     install -m 600 "$2" "$1"
   }
 
@@ -71,6 +80,18 @@ test_legacy_recovered_authorization_binding_mutation() (
     echo 'Legacy recovered binding accepted a post-render authorization-volume mutation' >&2
     exit 1
   fi
+  [[ $(<"$fixture_log") == 'fixture: candidate-authorization volume fingerprint changed' ]] || {
+    echo 'Legacy recovered binding failed for an unexpected reason' >&2
+    exit 1
+  }
+  [[ $(<"$assert_count_file") == 2 ]] || {
+    echo 'Legacy recovered binding did not reject at the second authorization-volume assertion' >&2
+    exit 1
+  }
+  [[ ! -e "$write_called_file" ]] || {
+    echo 'Legacy recovered binding reached journal replacement after authorization-volume mutation' >&2
+    exit 1
+  }
   [[ $(<"$state_file") == "$mutated_fingerprint" ]]
   [[ $(sha256sum "$journal" | awk '{print $1}') == "$original_digest" ]] || {
     echo 'Legacy recovered binding replaced the journal after authorization-volume mutation' >&2
