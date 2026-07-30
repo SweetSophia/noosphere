@@ -334,6 +334,7 @@ bind_legacy_recovered_authorization_volume() {
   temp=$(mktemp "$backup_dir/.legacy-recovered-journal.XXXXXX")
   jq --arg authorizationVolumeFingerprint "$expected_fingerprint" \
     '.authorizationVolumeFingerprint = $authorizationVolumeFingerprint' "$journal" > "$temp"
+  assert_authorization_volume "$expected_fingerprint" false "$target_platform" >/dev/null
   assert_legacy_authorization_state "$expected_image" "$writer_policy" "$target_platform"
   write_json_atomic "$journal" "$temp"
   rm -f "$temp"

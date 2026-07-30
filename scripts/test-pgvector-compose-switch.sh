@@ -11,6 +11,76 @@ PLATFORM=${1:-linux/amd64}
   exit 2
 }
 
+test_legacy_recovered_authorization_binding_mutation() (
+  local fixture_dir backup_dir journal state_file fixture_log
+  local expected_fingerprint mutated_fingerprint original_digest
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf "$fixture_dir"' EXIT
+  backup_dir="$fixture_dir/backups"
+  journal="$fixture_dir/journal.json"
+  state_file="$fixture_dir/authorization-volume-fingerprint"
+  fixture_log="$fixture_dir/binding.log"
+  mkdir -m 700 "$backup_dir"
+  expected_fingerprint=$(printf expected | sha256sum | awk '{print $1}')
+  mutated_fingerprint=$(printf mutated | sha256sum | awk '{print $1}')
+  command jq -n '{phase:"recovered",authorizationVolumeFingerprint:null}' > "$journal"
+  chmod 0600 "$journal"
+  printf '%s\n' "$expected_fingerprint" > "$state_file"
+  original_digest=$(sha256sum "$journal" | awk '{print $1}')
+
+  eval "$(
+    awk '
+      /^bind_legacy_recovered_authorization_volume\(\) \{/ { emit = 1 }
+      emit { print }
+      emit && /^}$/ { exit }
+    ' "$ROOT_DIR/scripts/switch-pgvector-compose.sh"
+  )"
+
+  die() {
+    printf 'fixture: %s\n' "$*" >&2
+    exit 1
+  }
+
+  assert_authorization_volume() {
+    local expected=$1 actual
+    actual=$(<"$state_file")
+    [[ -z "$expected" || "$actual" == "$expected" ]] ||
+      die 'candidate-authorization volume fingerprint changed'
+    printf '%s\n' "$actual"
+  }
+
+  assert_legacy_authorization_state() {
+    :
+  }
+
+  jq() {
+    command jq "$@"
+    # Model replacement of the authorization volume after the temporary
+    # journal has been rendered but before the durable journal replacement.
+    printf '%s\n' "$mutated_fingerprint" > "$state_file"
+  }
+
+  write_json_atomic() {
+    install -m 600 "$2" "$1"
+  }
+
+  if (
+    bind_legacy_recovered_authorization_volume \
+      "$expected_fingerprint" source-image required "$PLATFORM"
+  ) > "$fixture_log" 2>&1; then
+    echo 'Legacy recovered binding accepted a post-render authorization-volume mutation' >&2
+    exit 1
+  fi
+  [[ $(<"$state_file") == "$mutated_fingerprint" ]]
+  [[ $(sha256sum "$journal" | awk '{print $1}') == "$original_digest" ]] || {
+    echo 'Legacy recovered binding replaced the journal after authorization-volume mutation' >&2
+    exit 1
+  }
+)
+
+test_legacy_recovered_authorization_binding_mutation
+[[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == legacy-recovered-authorization-binding ]] && exit 0
+
 slug=${PLATFORM#linux/}
 run_id=${PGVECTOR_SWITCH_TEST_RUN_ID:-local-$$-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')}
 safe_id=${run_id//[^A-Za-z0-9]/-}

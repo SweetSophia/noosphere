@@ -786,13 +786,11 @@ const legacyBindingVolumeRevalidation = switchScript.indexOf(
   'current_fingerprint=$(assert_authorization_volume "$expected_fingerprint" false "$target_platform")',
   legacyBinding,
 );
-const legacyBindingMarkerRevalidation = switchScript.indexOf(
-  'assert_legacy_authorization_state "$expected_image" "$writer_policy" "$target_platform"',
+const legacyBindingFinalValidation = switchScript.indexOf(
+  '  assert_authorization_volume "$expected_fingerprint" false "$target_platform" >/dev/null\n' +
+    '  assert_legacy_authorization_state "$expected_image" "$writer_policy" "$target_platform"\n' +
+    '  write_json_atomic "$journal" "$temp"',
   legacyBindingVolumeRevalidation,
-);
-const legacyBindingRename = switchScript.indexOf(
-  'write_json_atomic "$journal" "$temp"',
-  legacyBindingMarkerRevalidation,
 );
 expect(
   freshStaleState >= 0 &&
@@ -807,8 +805,7 @@ expect(
     switchScript.includes("true) recovered_writer_policy=required") &&
     switchScript.includes("false) recovered_writer_policy=absent") &&
     legacyBindingVolumeRevalidation > legacyBinding &&
-    legacyBindingMarkerRevalidation > legacyBindingVolumeRevalidation &&
-    legacyBindingRename > legacyBindingMarkerRevalidation &&
+    legacyBindingFinalValidation > legacyBindingVolumeRevalidation &&
     switchScript.includes('[.[0].Mounts[] | select(.Name == $volume)]') &&
     switchScript.includes('.[0].Destination == "/run/noosphere-pgvector"') &&
     switchScript.includes(".[0].RW == false"),
