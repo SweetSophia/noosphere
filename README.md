@@ -102,11 +102,11 @@ OpenClaw users can install Noosphere and the OpenClaw plugin with the repository
 installer:
 
 ```bash
-# Installer commit: 11d82474f4aed633a7498a07989a7a3cb4c0484d
-# Expected SHA-256: 6f0fcf3bfeb3ac2c2da346f82697dc589ef200f76a9e04aa05f8dd9b794ddac1
+# Installer commit: d0e90c4188fef77e5f1670e5eda5e849e04c6830
+# Expected SHA-256: 716e9eb1e5f2e2f241e50ba971e2bb33269a7fbd698c5d4f9b7a55a4bf5df640
 installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/11d82474f4aed633a7498a07989a7a3cb4c0484d/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '6f0fcf3bfeb3ac2c2da346f82697dc589ef200f76a9e04aa05f8dd9b794ddac1' "$installer" | sha256sum -c -
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/d0e90c4188fef77e5f1670e5eda5e849e04c6830/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' '716e9eb1e5f2e2f241e50ba971e2bb33269a7fbd698c5d4f9b7a55a4bf5df640' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 openclaw noosphere doctor
 openclaw noosphere status
