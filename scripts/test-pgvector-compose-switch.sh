@@ -798,28 +798,10 @@ recovered_journal_saved="$tmp_dir/journal.recovered.saved.json"
 install -m 600 "$journal" "$recovered_journal_saved"
 recovered_failure_log="$tmp_dir/recovered-marker-failure.log"
 
-# The legacy journal's app state is part of the authorization claim. Reject
-# both contradictory combinations before binding the fingerprint or stopping
-# the running app.
-docker run --rm --network none --platform "$PLATFORM" \
-  --mount "type=volume,source=$authorization_volume,target=/authorization" \
-  --mount type=tmpfs,destination=/var/lib/postgresql/data \
-  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-  'rm -f /authorization/writer-authorized; sync'
-jq '.recoveredFromPhase = "baseline-recorded" | del(.authorizationVolumeFingerprint) | .appWasRunning = true' \
-  "$recovered_journal_saved" > "$journal"
-chmod 0600 "$journal"
-contradictory_journal_digest=$(sha256sum "$journal" | awk '{print $1}')
-: > "$recovered_failure_log"
-if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$recovered_failure_log" 2>&1; then
-  echo 'Legacy recovered evidence accepted appWasRunning=true without writer authorization' >&2
-  exit 1
-fi
-grep -F 'legacy authorization marker must be a root-owned regular file: writer-authorized' "$recovered_failure_log" >/dev/null
-[[ $(sha256sum "$journal" | awk '{print $1}') == "$contradictory_journal_digest" ]]
-[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
-! authorization_volume_marker_digest writer-authorized >/dev/null 2>&1
-
+# Historical recovered journals did not persist the recovery restart policy.
+# Accept an originally stopped app with exact source writer authorization,
+# bind the fingerprint, and archive the verified recovery evidence.
+docker stop --time 60 "$app_container" >/dev/null
 docker run --rm --network none --platform "$PLATFORM" \
   --mount "type=volume,source=$authorization_volume,target=/authorization" \
   --mount type=tmpfs,destination=/var/lib/postgresql/data \
@@ -829,16 +811,24 @@ docker run --rm --network none --platform "$PLATFORM" \
 jq '.recoveredFromPhase = "baseline-recorded" | del(.authorizationVolumeFingerprint) | .appWasRunning = false' \
   "$recovered_journal_saved" > "$journal"
 chmod 0600 "$journal"
-contradictory_journal_digest=$(sha256sum "$journal" | awk '{print $1}')
+direct_recovered_journal="$journal.recovered-$(jq -r '.runId' "$journal")"
 : > "$recovered_failure_log"
 if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$recovered_failure_log" 2>&1; then
-  echo 'Legacy recovered evidence accepted appWasRunning=false with writer authorization' >&2
+  echo 'Direct legacy recovered evidence unexpectedly reported switch success' >&2
   exit 1
 fi
-grep -F 'deferred source recovery unexpectedly published writer authorization' "$recovered_failure_log" >/dev/null
-[[ $(sha256sum "$journal" | awk '{print $1}') == "$contradictory_journal_digest" ]]
-[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+[[ ! -f "$journal" && -f "$direct_recovered_journal" ]] || {
+  echo 'Historical recovered evidence with appWasRunning=false and writer authorization was not archived' >&2
+  exit 1
+}
+[[ $(jq -r '.authorizationVolumeFingerprint' "$direct_recovered_journal") == "$(authorization_volume_fingerprint)" ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$source_marker_digest" ]]
 [[ $(authorization_volume_marker_digest writer-authorized) == "$source_marker_digest" ]]
+rm -f "$direct_recovered_journal"
+install -m 600 "$recovered_journal_saved" "$journal"
+docker compose -f "$compose_file" up -d app
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 
 # A container with the expected managed name is not trusted unless its exact
 # authorization mount is read-only.
@@ -867,17 +857,16 @@ docker run --rm --network none --platform "$PLATFORM" \
 docker compose -f "$compose_file" up -d app
 [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 
-# The matching deferred state remains valid when the old journal omitted the
-# fingerprint entirely. Bind it under the inherited installer lock, archive
-# the verified recovery evidence, and keep both app and writer authorization
-# stopped.
+# An originally running app can also carry a writer-absent recovered state
+# when the prior recovery was deferred. Bind it under the inherited installer
+# lock, archive the verified evidence, and keep the writer stopped.
 docker stop --time 60 "$app_container" >/dev/null
 docker run --rm --network none --platform "$PLATFORM" \
   --mount "type=volume,source=$authorization_volume,target=/authorization" \
   --mount type=tmpfs,destination=/var/lib/postgresql/data \
   --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
   'rm -f /authorization/writer-authorized; sync'
-jq '.recoveredFromPhase = "baseline-recorded" | del(.authorizationVolumeFingerprint) | .appWasRunning = false' \
+jq '.recoveredFromPhase = "baseline-recorded" | del(.authorizationVolumeFingerprint) | .appWasRunning = true' \
   "$recovered_journal_saved" > "$journal"
 chmod 0600 "$journal"
 deferred_recovered_journal="$journal.recovered-$(jq -r '.runId' "$journal")"
@@ -885,7 +874,7 @@ exec 8>"$installer_lock_path"
 flock -w 5 8
 if NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$installer_lock_path" \
   "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" --defer-app-restart > "$recovered_failure_log" 2>&1; then
-  echo 'Deferred legacy recovered evidence unexpectedly reported switch success' >&2
+  echo 'Deferred legacy recovered evidence with appWasRunning=true unexpectedly reported switch success' >&2
   exit 1
 fi
 exec 8>&-

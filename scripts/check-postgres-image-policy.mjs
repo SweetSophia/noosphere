@@ -729,12 +729,9 @@ expect(
 const recoveredEvidenceValidation = switchScript.indexOf(
   'stored_authorization_fingerprint=$(jq -er \'.authorizationVolumeFingerprint\' "$journal")',
 );
-const recoveredWriterPolicy = switchScript.indexOf(
-  'case "$(jq -r \'.appWasRunning\' "$journal")" in',
-);
 const recoveredSourceStateValidation = switchScript.indexOf(
-  'assert_legacy_authorization_state "$SOURCE_IMAGE" "$recovered_writer_policy" "$stored_platform"',
-  recoveredWriterPolicy,
+  'assert_legacy_authorization_state "$SOURCE_IMAGE" optional "$stored_platform"',
+  recoveredEvidenceValidation,
 );
 const recoveredMutation = switchScript.indexOf(
   'if [[ "$journal_phase" == recovered ]]; then\n' +
@@ -742,10 +739,11 @@ const recoveredMutation = switchScript.indexOf(
 );
 expect(
   recoveredEvidenceValidation >= 0 &&
-    recoveredWriterPolicy >= 0 &&
-    recoveredSourceStateValidation > recoveredWriterPolicy &&
-    recoveredMutation > recoveredSourceStateValidation,
-  "switch-pgvector-compose.sh must bind recovered writer-marker requirements to the journal app state before managed recovery mutation",
+    recoveredSourceStateValidation > recoveredEvidenceValidation &&
+    recoveredMutation > recoveredSourceStateValidation &&
+    !switchScript.includes("true) recovered_writer_policy=required") &&
+    !switchScript.includes("false) recovered_writer_policy=absent"),
+  "switch-pgvector-compose.sh must accept either exact source writer-marker state when historical recovered evidence did not persist the recovery restart policy",
 );
 expect(
   switchScript.includes("empty_authorization_marker_digest()") &&
@@ -802,8 +800,9 @@ expect(
     switchScript.includes("transition authorization volume appeared after its journal claim") &&
     switchScript.includes("bind_legacy_recovered_authorization_volume") &&
     switchScript.includes('assert_authorization_volume \'\' false "$stored_platform"') &&
-    switchScript.includes("true) recovered_writer_policy=required") &&
-    switchScript.includes("false) recovered_writer_policy=absent") &&
+    switchScript.includes(
+      '"$legacy_recovered_authorization_fingerprint" "$SOURCE_IMAGE" optional "$stored_platform"',
+    ) &&
     legacyBindingVolumeRevalidation > legacyBinding &&
     legacyBindingFinalValidation > legacyBindingVolumeRevalidation &&
     switchScript.includes('[.[0].Mounts[] | select(.Name == $volume)]') &&
@@ -822,8 +821,14 @@ expect(
       "[[ $(<\"$fixture_log\") == 'fixture: candidate-authorization volume fingerprint changed' ]]",
     ) &&
     switchTestScript.includes('[[ $(<"$assert_count_file") == 2 ]]') &&
-    switchTestScript.includes('[[ ! -e "$write_called_file" ]]'),
-  "test-pgvector-compose-switch.sh must prove the post-render mutation is rejected by the second volume assertion before journal replacement",
+    switchTestScript.includes('[[ ! -e "$write_called_file" ]]') &&
+    switchTestScript.includes(
+      "Historical recovered evidence with appWasRunning=false and writer authorization was not archived",
+    ) &&
+    switchTestScript.includes(
+      "Deferred legacy recovered evidence with appWasRunning=true unexpectedly reported switch success",
+    ),
+  "test-pgvector-compose-switch.sh must prove both historical recovered writer-marker states are accepted and post-render mutation is rejected before journal replacement",
 );
 
 const verifyScript = read("scripts/verify-deploy.sh");
