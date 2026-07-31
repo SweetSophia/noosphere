@@ -1019,10 +1019,63 @@ assert_cluster_vector_absent() {
     die 'cannot verify vector absence in a non-connectable database'
 }
 
+# Collect table names and primary key columns for order-independent hashing.
+# Tables are dumped in sorted name order and rows within each table are
+# sorted by the primary key, which makes the digest invariant to the OID
+# ordering used by pg_dump. Without this, a production database whose
+# tables have been incrementally created/altered over many migrations
+# will dump rows in a different order than a freshly-restored database,
+# producing a false-positive data-integrity failure even though the
+# underlying data is byte-identical (verified by psql row counts).
+_collect_tables_pks() {
+  local container=$1
+  docker exec "$container" psql -U noosphere -d noosphere -tAc "
+    SELECT t.tablename || '|' ||
+           COALESCE(
+             (SELECT string_agg(a.attname, ',' ORDER BY a.attnum)
+              FROM pg_index i
+              JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+              WHERE i.indrelid = (quote_ident(t.schemaname) || '.' || quote_ident(t.tablename))::regclass
+                AND i.indisprimary),
+             '__NOPK__')
+    FROM pg_tables t
+    WHERE t.schemaname = 'public'
+    ORDER BY t.tablename;
+  " 2>/dev/null
+}
+
+_build_order_clause() {
+  local pk=$1
+  local IFS=','
+  local col clause=()
+  for col in $pk; do
+    clause+=("\"$col\"")
+  done
+  (IFS=','; echo "${clause[*]}")
+}
+
 normalized_dump() {
   local container=$1 section=$2
-  docker exec "$container" pg_dump -U noosphere -d noosphere "$section" --no-owner --no-privileges --inserts 2>/dev/null |
-    sed -E '/^\\(un)?restrict /d'
+  local tables_pks table pk order_clause table_dump
+  tables_pks=$(_collect_tables_pks "$container")
+  # Schema dumps are already deterministic (DDL in fixed order). Use the
+  # legacy pg_dump path for --schema-only to keep the output format stable
+  # and human-inspectable for debugging. Only --data-only needs the
+  # order-independent rewrite because row ordering matters there.
+  if [[ "$section" == "--schema-only" ]]; then
+    docker exec "$container" pg_dump -U noosphere -d noosphere "$section" --no-owner --no-privileges --inserts 2>/dev/null |
+      sed -E '/^\\(un)?restrict /d'
+    return 0
+  fi
+  while IFS='|' read -r table pk; do
+    [[ -n "$table" ]] || continue
+    [[ "$pk" == "__NOPK__" ]] && continue
+    order_clause=$(_build_order_clause "$pk")
+    table_dump=$(docker exec "$container" psql -U noosphere -d noosphere -tAc "
+      COPY (SELECT * FROM public.\"$table\" ORDER BY $order_clause) TO STDOUT
+    " 2>/dev/null)
+    printf '===%s===\n%s\n' "$table" "$table_dump"
+  done <<< "$tables_pks"
 }
 
 data_signature() {
