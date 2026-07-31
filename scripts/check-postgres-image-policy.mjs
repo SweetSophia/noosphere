@@ -9,9 +9,9 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
-const immutableHelperRef = "70b388f0df5f3295cc135916f556e2b8de47aed9";
-const verifiedInstallerRef = "7f0dee77b68d5dcf1797d33b3fbf0240ad9445c9";
-const verifiedInstallerSha256 = "82d956342c04bd64d8f77a84f03685308139d2aee09d1e9a09b850af1850000e";
+const immutableHelperRef = "8cb3e135ad19ee228ab0ff740ca06a8c74e91247";
+const verifiedInstallerRef = "d0e90c4188fef77e5f1670e5eda5e849e04c6830";
+const verifiedInstallerSha256 = "716e9eb1e5f2e2f241e50ba971e2bb33269a7fbd698c5d4f9b7a55a4bf5df640";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
@@ -730,8 +730,7 @@ const recoveredEvidenceValidation = switchScript.indexOf(
   'stored_authorization_fingerprint=$(jq -er \'.authorizationVolumeFingerprint\' "$journal")',
 );
 const recoveredSourceStateValidation = switchScript.indexOf(
-  'if [[ "$journal_phase" == recovered ]]; then\n' +
-    '            assert_legacy_authorization_state "$SOURCE_IMAGE" optional "$stored_platform"',
+  'assert_legacy_authorization_state "$SOURCE_IMAGE" optional "$stored_platform"',
   recoveredEvidenceValidation,
 );
 const recoveredMutation = switchScript.indexOf(
@@ -741,8 +740,10 @@ const recoveredMutation = switchScript.indexOf(
 expect(
   recoveredEvidenceValidation >= 0 &&
     recoveredSourceStateValidation > recoveredEvidenceValidation &&
-    recoveredMutation > recoveredSourceStateValidation,
-  "switch-pgvector-compose.sh must authenticate recovered candidate-derived authorization evidence before managed recovery mutation",
+    recoveredMutation > recoveredSourceStateValidation &&
+    !switchScript.includes("true) recovered_writer_policy=required") &&
+    !switchScript.includes("false) recovered_writer_policy=absent"),
+  "switch-pgvector-compose.sh must accept either exact source writer-marker state when historical recovered evidence did not persist the recovery restart policy",
 );
 expect(
   switchScript.includes("empty_authorization_marker_digest()") &&
@@ -776,6 +777,19 @@ const freshStaleFailClosed = switchScript.indexOf(
   "fail_closed_on_die=true",
   freshStalePreflight,
 );
+const legacyBinding = switchScript.indexOf(
+  "bind_legacy_recovered_authorization_volume()",
+);
+const legacyBindingVolumeRevalidation = switchScript.indexOf(
+  'current_fingerprint=$(assert_authorization_volume "$expected_fingerprint" false "$target_platform")',
+  legacyBinding,
+);
+const legacyBindingFinalValidation = switchScript.indexOf(
+  '  assert_authorization_volume "$expected_fingerprint" false "$target_platform" >/dev/null\n' +
+    '  assert_legacy_authorization_state "$expected_image" "$writer_policy" "$target_platform"\n' +
+    '  write_json_atomic "$journal" "$temp"',
+  legacyBindingVolumeRevalidation,
+);
 expect(
   freshStaleState >= 0 &&
     freshStalePreflight > freshStaleState &&
@@ -784,8 +798,37 @@ expect(
       'authorizationVolumeFingerprint:(if $authorizationVolumeFingerprint == "" then null else $authorizationVolumeFingerprint end)',
     ) &&
     switchScript.includes("transition authorization volume appeared after its journal claim") &&
-    switchScript.includes("recovered transition evidence lacks an authorization volume fingerprint"),
-  "switch-pgvector-compose.sh must bind early authorization state and validate it before fail-closed mutation",
+    switchScript.includes("bind_legacy_recovered_authorization_volume") &&
+    switchScript.includes('assert_authorization_volume \'\' false "$stored_platform"') &&
+    switchScript.includes(
+      '"$legacy_recovered_authorization_fingerprint" "$SOURCE_IMAGE" optional "$stored_platform"',
+    ) &&
+    legacyBindingVolumeRevalidation > legacyBinding &&
+    legacyBindingFinalValidation > legacyBindingVolumeRevalidation &&
+    switchScript.includes('[.[0].Mounts[] | select(.Name == $volume)]') &&
+    switchScript.includes('.[0].Destination == "/run/noosphere-pgvector"') &&
+    switchScript.includes(".[0].RW == false"),
+  "switch-pgvector-compose.sh must validate journal-bound marker state and read-only consumers immediately before binding early authorization evidence",
+);
+
+const switchTestScript = read("scripts/test-pgvector-compose-switch.sh");
+expect(
+  switchTestScript.includes(
+    'switch_script=${PGVECTOR_SWITCH_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}',
+  ) &&
+    switchTestScript.includes("command jq \"$@\" || status=$?") &&
+    switchTestScript.includes(
+      "[[ $(<\"$fixture_log\") == 'fixture: candidate-authorization volume fingerprint changed' ]]",
+    ) &&
+    switchTestScript.includes('[[ $(<"$assert_count_file") == 2 ]]') &&
+    switchTestScript.includes('[[ ! -e "$write_called_file" ]]') &&
+    switchTestScript.includes(
+      "Historical recovered evidence with appWasRunning=false and writer authorization was not archived",
+    ) &&
+    switchTestScript.includes(
+      "Deferred legacy recovered evidence with appWasRunning=true unexpectedly reported switch success",
+    ),
+  "test-pgvector-compose-switch.sh must prove both historical recovered writer-marker states are accepted and post-render mutation is rejected before journal replacement",
 );
 
 const verifyScript = read("scripts/verify-deploy.sh");
