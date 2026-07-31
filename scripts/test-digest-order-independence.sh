@@ -10,15 +10,14 @@
 # counts).
 #
 # Fix: normalized_dump now dumps each table via COPY (SELECT ... ORDER BY
-# pk_cols) TO STROUD, iterating tables in sorted name order. This makes
+# pk_cols) TO STDOUT, iterating tables in sorted name order. This makes
 # the digest invariant to OID ordering.
 #
 # This test reproduces the OID-scrambling scenario and proves the fix:
-#   1. Create a source DB with tables populated
-#   2. Take a logical backup (pg_dump -Fc)
-#   3. Restore into the candidate image
-#   4. Compute data_signature for both via normalized_dump
-#   5. Assert hashes match despite OID differences
+#   1. Take a logical backup from the production source DB (pg_dump -Fc)
+#   2. Restore into the candidate image (offline, no network)
+#   3. Compute data_signature for both via normalized_dump
+#   4. Assert hashes match despite OID ordering differences
 
 set -euo pipefail
 
@@ -30,11 +29,12 @@ RUN_ID=${RUN_ID:-test-digest-$(date +%s)}
 TEST_VOLUME="noosphere_digest_test_${RUN_ID//-/_}"
 TEST_CONTAINER="noosphere-digest-test-${RUN_ID}"
 LABEL_KEY="io.noosphere.digest-test"
+BACKUP_FILE=""
 
 cleanup() {
   docker rm -f "$TEST_CONTAINER" >/dev/null 2>&1 || true
   docker volume rm "$TEST_VOLUME" >/dev/null 2>&1 || true
-  rm -f "$BACKUP_FILE"
+  [[ -n "$BACKUP_FILE" ]] && rm -f "$BACKUP_FILE"
 }
 trap cleanup EXIT INT TERM
 

@@ -1069,7 +1069,16 @@ normalized_dump() {
   fi
   while IFS='|' read -r table pk; do
     [[ -n "$table" ]] || continue
-    [[ "$pk" == "__NOPK__" ]] && continue
+    if [[ "$pk" == "__NOPK__" ]]; then
+      # No-PK tables cannot be hashed deterministically with a stable COPY
+      # ORDER BY clause. To avoid silent data corruption coverage gaps, we
+      # fail loudly and require an explicit opt-in (e.g., add a synthetic
+      # serial PK or use a backend-specific column ordering). The schema
+      # here is owned by Prisma and every table has a primary key, so this
+      # branch is defensive; if it ever fires, the transition must be
+      # paused rather than silently skipping a table.
+      die "normalized_dump: no primary key on public.${table}; digest coverage requires a PK for ORDER BY"
+    fi
     order_clause=$(_build_order_clause "$pk")
     table_dump=$(docker exec "$container" psql -U noosphere -d noosphere -tAc "
       COPY (SELECT * FROM public.\"$table\" ORDER BY $order_clause) TO STDOUT
