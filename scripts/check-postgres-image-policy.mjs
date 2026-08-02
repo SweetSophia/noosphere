@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
-const immutableHelperRef = "680b348ea9d22e962f3c35a1c16ce1e006bf93eb";
+const immutableHelperRef = "abf1346184ebd149db97205d5c5a836112590dd8";
 const verifiedInstallerRef = "37235ab42d6fbc288db0afe946692eb2a84b5bd4";
 const verifiedInstallerSha256 = "abcb92bd1dbf8fdfc4be1dea5bb27487898bb63c50a059ad5c985e1a0b21645a";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
