@@ -16,14 +16,22 @@ SOURCE_IMAGE=${SOURCE_IMAGE:-postgres@sha256:16bc17c64a573ef34162af9298258d1aec5
 CANDIDATE_IMAGE=${CANDIDATE_IMAGE:-ghcr.io/sweetsophia/noosphere-postgres-pgvector@sha256:12bc9b34226803a04811a3ddd06feac14121c2c7ce369aaddbd778d242751292}
 RUN_ID=${RUN_ID:-digest-$(date -u +%Y%m%dT%H%M%SZ)-$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')}
 LABEL_KEY=io.noosphere.digest-test
+OWNER_LABEL_KEY=io.noosphere.digest-test-owner
+OWNER_TOKEN="$RUN_ID-$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
 SOURCE_CONTAINER="noosphere-digest-source-$RUN_ID"
 CANDIDATE_CONTAINER="noosphere-digest-candidate-$RUN_ID"
 SOURCE_VOLUME="noosphere_digest_source_${RUN_ID//-/_}"
 CANDIDATE_VOLUME="noosphere_digest_candidate_${RUN_ID//-/_}"
 MALICIOUS_TABLE='x") TO PROGRAM '\''touch /tmp/noosphere-digest-pwned'\'';--'
 MALICIOUS_COLUMN='id") TO PROGRAM '\''touch /tmp/noosphere-digest-pk-pwned'\'';--'
+MALICIOUS_SCHEMA='s") TO PROGRAM '\''touch /tmp/noo-digest-schema-pwned'\'';--'
+MALICIOUS_SEQUENCE='q") TO PROGRAM '\''touch /tmp/noo-digest-seq-pwned'\'';--'
 DATA_SIGNATURE_VERSION=2
 failures=0
+source_container_created=false
+candidate_container_created=false
+source_volume_created=false
+candidate_volume_created=false
 
 record_failure() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -36,13 +44,27 @@ die() {
 }
 
 extract_function() {
-  local name=$1
-  awk -v signature="${name}() {" '
-    $0 == signature { capture = 1 }
-    capture { print }
-    capture && $0 == "}" { exit }
-  ' "$DIGEST_HELPER_SCRIPT"
+  local name=$1 source=${2:-"$DIGEST_HELPER_SCRIPT"} definition
+  if ! definition=$(awk -v signature="${name}() {" '
+    $0 == signature {
+      matches++
+      if (matches == 1) capture = 1
+    }
+    capture { body[++lines] = $0 }
+    capture && $0 == "}" { capture = 0 }
+    END {
+      if (matches != 1) exit 1
+      for (line = 1; line <= lines; line++) print body[line]
+    }
+  ' "$source"); then
+    die "expected exactly one digest helper definition: $name"
+  fi
+  printf '%s\n' "$definition"
 }
+
+if (extract_function probe <(printf 'probe() {\n  printf safe\n}\nprobe() {\n  printf unsafe\n}\n')) >/dev/null 2>&1; then
+  record_failure 'duplicate digest helper definitions were accepted'
+fi
 
 for helper in _digest_psql _digest_object_signature _assert_supported_data_objects _collect_data_inventory _decode_base64 \
   normalized_dump legacy_normalized_dump data_signature legacy_data_signature data_signature_for_version; do
@@ -78,8 +100,9 @@ resource_label() {
 remove_container() {
   local container=$1
   docker inspect "$container" >/dev/null 2>&1 || return 0
-  [[ $(resource_label "$container") == "$RUN_ID" ]] || {
-    printf 'Refusing to remove colliding container without the exact test label: %s\n' "$container" >&2
+  [[ $(resource_label "$container") == "$RUN_ID" &&
+    $(docker inspect "$container" --format "{{index .Config.Labels \"$OWNER_LABEL_KEY\"}}") == "$OWNER_TOKEN" ]] || {
+    printf 'Refusing to remove container not created by this test invocation: %s\n' "$container" >&2
     return 1
   }
   docker rm -fv "$container" >/dev/null
@@ -88,8 +111,9 @@ remove_container() {
 remove_volume() {
   local test_volume=$1
   docker volume inspect "$test_volume" >/dev/null 2>&1 || return 0
-  [[ $(docker volume inspect "$test_volume" --format "{{index .Labels \"$LABEL_KEY\"}}") == "$RUN_ID" ]] || {
-    printf 'Refusing to remove colliding volume without the exact test label: %s\n' "$test_volume" >&2
+  [[ $(docker volume inspect "$test_volume" --format "{{index .Labels \"$LABEL_KEY\"}}") == "$RUN_ID" &&
+    $(docker volume inspect "$test_volume" --format "{{index .Labels \"$OWNER_LABEL_KEY\"}}") == "$OWNER_TOKEN" ]] || {
+    printf 'Refusing to remove volume not created by this test invocation: %s\n' "$test_volume" >&2
     return 1
   }
   [[ -z $(docker ps -aq --no-trunc --filter "volume=$test_volume") ]] || {
@@ -109,13 +133,12 @@ database_ready() {
 cleanup() {
   local status=$?
   trap - EXIT INT TERM
-  remove_container "$SOURCE_CONTAINER" || status=1
-  remove_container "$CANDIDATE_CONTAINER" || status=1
-  remove_volume "$SOURCE_VOLUME" || status=1
-  remove_volume "$CANDIDATE_VOLUME" || status=1
+  [[ "$source_container_created" == false ]] || remove_container "$SOURCE_CONTAINER" || status=1
+  [[ "$candidate_container_created" == false ]] || remove_container "$CANDIDATE_CONTAINER" || status=1
+  [[ "$source_volume_created" == false ]] || remove_volume "$SOURCE_VOLUME" || status=1
+  [[ "$candidate_volume_created" == false ]] || remove_volume "$CANDIDATE_VOLUME" || status=1
   exit "$status"
 }
-trap cleanup EXIT INT TERM
 
 for container in "$SOURCE_CONTAINER" "$CANDIDATE_CONTAINER"; do
   docker inspect "$container" >/dev/null 2>&1 && {
@@ -128,15 +151,29 @@ for test_volume in "$SOURCE_VOLUME" "$CANDIDATE_VOLUME"; do
     printf 'Digest test volume already exists: %s\n' "$test_volume" >&2
     exit 1
   }
-  docker volume create --driver local --label "$LABEL_KEY=$RUN_ID" "$test_volume" >/dev/null
 done
 
-docker run -d --name "$SOURCE_CONTAINER" --label "$LABEL_KEY=$RUN_ID" --platform "$PLATFORM" --network none \
+trap cleanup EXIT INT TERM
+
+docker volume create --driver local --label "$LABEL_KEY=$RUN_ID" --label "$OWNER_LABEL_KEY=$OWNER_TOKEN" "$SOURCE_VOLUME" >/dev/null
+[[ $(docker volume inspect "$SOURCE_VOLUME" --format "{{index .Labels \"$OWNER_LABEL_KEY\"}}") == "$OWNER_TOKEN" ]] ||
+  die "source volume creation collided with another invocation: $SOURCE_VOLUME"
+source_volume_created=true
+docker volume create --driver local --label "$LABEL_KEY=$RUN_ID" --label "$OWNER_LABEL_KEY=$OWNER_TOKEN" "$CANDIDATE_VOLUME" >/dev/null
+[[ $(docker volume inspect "$CANDIDATE_VOLUME" --format "{{index .Labels \"$OWNER_LABEL_KEY\"}}") == "$OWNER_TOKEN" ]] ||
+  die "candidate volume creation collided with another invocation: $CANDIDATE_VOLUME"
+candidate_volume_created=true
+
+docker create --name "$SOURCE_CONTAINER" --label "$LABEL_KEY=$RUN_ID" --label "$OWNER_LABEL_KEY=$OWNER_TOKEN" --platform "$PLATFORM" --network none \
   -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_USER=noosphere -e POSTGRES_DB=noosphere \
   -v "$SOURCE_VOLUME:/var/lib/postgresql/data" "$SOURCE_IMAGE" >/dev/null
-docker run -d --name "$CANDIDATE_CONTAINER" --label "$LABEL_KEY=$RUN_ID" --platform "$PLATFORM" --network none \
+source_container_created=true
+docker start "$SOURCE_CONTAINER" >/dev/null
+docker create --name "$CANDIDATE_CONTAINER" --label "$LABEL_KEY=$RUN_ID" --label "$OWNER_LABEL_KEY=$OWNER_TOKEN" --platform "$PLATFORM" --network none \
   -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_USER=noosphere -e POSTGRES_DB=noosphere \
   -v "$CANDIDATE_VOLUME:/var/lib/postgresql/data" "$CANDIDATE_IMAGE" >/dev/null
+candidate_container_created=true
+docker start "$CANDIDATE_CONTAINER" >/dev/null
 
 for container in "$SOURCE_CONTAINER" "$CANDIDATE_CONTAINER"; do
   for _ in $(seq 1 120); do
@@ -155,12 +192,14 @@ for container in "$SOURCE_CONTAINER" "$CANDIDATE_CONTAINER"; do
 done
 
 docker exec -i "$SOURCE_CONTAINER" psql -Xq -v ON_ERROR_STOP=1 -U noosphere -d noosphere \
-  -v malicious_name="$MALICIOUS_TABLE" -v malicious_column="$MALICIOUS_COLUMN" <<'SQL'
+  -v malicious_name="$MALICIOUS_TABLE" -v malicious_column="$MALICIOUS_COLUMN" \
+  -v malicious_schema="$MALICIOUS_SCHEMA" -v malicious_sequence="$MALICIOUS_SEQUENCE" <<'SQL'
 CREATE ROLE noosphere_migrator LOGIN NOSUPERUSER;
 ALTER DATABASE noosphere OWNER TO noosphere_migrator;
 ALTER SCHEMA public OWNER TO noosphere_migrator;
 SET ROLE noosphere_migrator;
 CREATE SCHEMA extra AUTHORIZATION noosphere_migrator;
+SELECT pg_catalog.format('CREATE SCHEMA %I AUTHORIZATION noosphere_migrator', :'malicious_schema') \gexec
 CREATE TABLE public.x (id text PRIMARY KEY);
 CREATE TABLE public."Alpha" (id integer PRIMARY KEY, value text NOT NULL);
 CREATE TABLE public."Beta" (id integer PRIMARY KEY, value text NOT NULL);
@@ -168,6 +207,8 @@ CREATE TABLE public."Blank" (id text PRIMARY KEY);
 CREATE TABLE extra."Secret" (id integer PRIMARY KEY, value text NOT NULL);
 CREATE TABLE extra."CompositeOrder" (second integer, first integer, value text NOT NULL, PRIMARY KEY (first, second));
 CREATE SEQUENCE extra."Counter";
+SELECT pg_catalog.format('CREATE SEQUENCE extra.%I', :'malicious_sequence') \gexec
+SELECT pg_catalog.format('CREATE TABLE %I."SchemaPayload" (id text PRIMARY KEY)', :'malicious_schema') \gexec
 SELECT pg_catalog.format('CREATE TABLE public.%I (id text PRIMARY KEY)', :'malicious_name') \gexec
 SELECT pg_catalog.format('CREATE TABLE public."PkIdentifier" (%I text PRIMARY KEY)', :'malicious_column') \gexec
 INSERT INTO public.x VALUES ('safe-source');
@@ -177,21 +218,26 @@ INSERT INTO public."Blank" VALUES ('');
 INSERT INTO extra."Secret" VALUES (1, 'classified');
 INSERT INTO extra."CompositeOrder" VALUES (2, 1, 'two'), (1, 1, 'one');
 SELECT pg_catalog.setval('extra."Counter"', 7, true) \gset
+SELECT pg_catalog.format('INSERT INTO %I."SchemaPayload" VALUES (%L)', :'malicious_schema', 'schema-payload') \gexec
 SELECT pg_catalog.format('INSERT INTO public.%I VALUES (%L)', :'malicious_name', 'payload') \gexec
 SELECT pg_catalog.format('INSERT INTO public."PkIdentifier" VALUES (%L)', 'pk-payload') \gexec
 RESET ROLE;
 SQL
 
 docker exec -i "$CANDIDATE_CONTAINER" psql -Xq -v ON_ERROR_STOP=1 -U noosphere -d noosphere \
-  -v malicious_name="$MALICIOUS_TABLE" -v malicious_column="$MALICIOUS_COLUMN" <<'SQL'
+  -v malicious_name="$MALICIOUS_TABLE" -v malicious_column="$MALICIOUS_COLUMN" \
+  -v malicious_schema="$MALICIOUS_SCHEMA" -v malicious_sequence="$MALICIOUS_SEQUENCE" <<'SQL'
 CREATE ROLE noosphere_migrator LOGIN NOSUPERUSER;
 ALTER DATABASE noosphere OWNER TO noosphere_migrator;
 ALTER SCHEMA public OWNER TO noosphere_migrator;
 SET ROLE noosphere_migrator;
 CREATE SCHEMA extra AUTHORIZATION noosphere_migrator;
+SELECT pg_catalog.format('CREATE SCHEMA %I AUTHORIZATION noosphere_migrator', :'malicious_schema') \gexec
 CREATE TABLE extra."Secret" (id integer PRIMARY KEY, value text NOT NULL);
 CREATE TABLE extra."CompositeOrder" (second integer, first integer, value text NOT NULL, PRIMARY KEY (first, second));
 CREATE SEQUENCE extra."Counter";
+SELECT pg_catalog.format('CREATE SEQUENCE extra.%I', :'malicious_sequence') \gexec
+SELECT pg_catalog.format('CREATE TABLE %I."SchemaPayload" (id text PRIMARY KEY)', :'malicious_schema') \gexec
 CREATE TABLE public."Blank" (id text PRIMARY KEY);
 CREATE TABLE public."Beta" (id integer PRIMARY KEY, value text NOT NULL);
 CREATE TABLE public."Alpha" (id integer PRIMARY KEY, value text NOT NULL);
@@ -201,6 +247,7 @@ SELECT pg_catalog.format('CREATE TABLE public."PkIdentifier" (%I text PRIMARY KE
 INSERT INTO extra."Secret" VALUES (1, 'classified');
 INSERT INTO extra."CompositeOrder" VALUES (1, 1, 'one'), (2, 1, 'two');
 SELECT pg_catalog.setval('extra."Counter"', 7, true) \gset
+SELECT pg_catalog.format('INSERT INTO %I."SchemaPayload" VALUES (%L)', :'malicious_schema', 'schema-payload') \gexec
 INSERT INTO public."Blank" VALUES ('');
 INSERT INTO public."Beta" VALUES (10, 'ten');
 INSERT INTO public."Alpha" VALUES (2, 'two'), (1, 'one');
@@ -233,6 +280,14 @@ for container in "$SOURCE_CONTAINER" "$CANDIDATE_CONTAINER"; do
   if docker exec "$container" test -e /tmp/noosphere-digest-pk-pwned; then
     record_failure "primary-key identifier escaped ORDER BY and executed a program in $container"
     docker exec "$container" rm -f /tmp/noosphere-digest-pk-pwned
+  fi
+  if docker exec "$container" test -e /tmp/noo-digest-schema-pwned; then
+    record_failure "schema identifier escaped qualification and executed a program in $container"
+    docker exec "$container" rm -f /tmp/noo-digest-schema-pwned
+  fi
+  if docker exec "$container" test -e /tmp/noo-digest-seq-pwned; then
+    record_failure "sequence identifier escaped qualification and executed a program in $container"
+    docker exec "$container" rm -f /tmp/noo-digest-seq-pwned
   fi
 done
 

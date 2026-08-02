@@ -843,10 +843,20 @@ const postgresRehearsalWorkflow = read(
   ".github/workflows/postgres-pgvector-rehearsal.yml",
 );
 const shellFunction = (source, name) => {
-  const start = source.indexOf(`${name}() {`);
+  const signature = `${name}() {`;
+  const definitionCount =
+    countLiteral(source, `\n${signature}\n`) +
+    (source.startsWith(`${signature}\n`) ? 1 : 0);
+  if (definitionCount !== 1) return "";
+  const start = source.indexOf(signature);
   const end = source.indexOf("\n}\n", start);
   return start >= 0 && end > start ? source.slice(start, end + 3) : "";
 };
+const duplicateFunctionProbe = "probe() {\n  printf safe\n}\nprobe() {\n  printf unsafe\n}\n";
+expect(
+  shellFunction(duplicateFunctionProbe, "probe") === "",
+  "shell policy extraction must reject duplicate function definitions",
+);
 const digestPsqlFunction = shellFunction(switchScript, "_digest_psql");
 const digestObjectSignatureFunction = shellFunction(
   switchScript,
@@ -871,9 +881,15 @@ const logicalBackupFunction = shellFunction(
   switchScript,
   "create_logical_backup",
 );
+const expectedDigestPsqlFunction = [
+  "_digest_psql() {",
+  "  local container=$1 query=$2",
+  '  docker exec "$container" psql -XAtq -v ON_ERROR_STOP=1 -U noosphere_migrator -d noosphere -c "$query"',
+  "}",
+  "",
+].join("\n");
 expect(
-  digestPsqlFunction.includes("-U noosphere_migrator ") &&
-    !digestPsqlFunction.includes("-U noosphere ") &&
+  digestPsqlFunction === expectedDigestPsqlFunction &&
     !normalizedDumpFunction.includes("SET ROLE pg_read_all_data") &&
     normalizedDumpFunction.includes("pg_dump -U noosphere_migrator ") &&
     legacyDumpFunction.includes("pg_dump -U noosphere_migrator ") &&
@@ -899,24 +915,62 @@ expect(
     ),
   "migration signing and logical backup must use the non-superuser migrator role with direct behavioral coverage",
 );
+
+const digestRuntimeStart = digestTestScript.indexOf("trap cleanup EXIT INT TERM");
+const digestRuntimeBody =
+  digestRuntimeStart >= 0 ? digestTestScript.slice(digestRuntimeStart) : "";
+const executableDigestRuntime = digestRuntimeBody
+  .split(/\r?\n/)
+  .filter((line) => !line.trimStart().startsWith("#"))
+  .join("\n");
+const executableDigestTest = digestTestScript
+  .split(/\r?\n/)
+  .filter((line) => !line.trimStart().startsWith("#"))
+  .join("\n");
+const requiredDigestFailureMessages = [
+  "catalog identifier escaped COPY",
+  "primary-key identifier escaped ORDER BY",
+  "schema identifier escaped qualification",
+  "sequence identifier escaped qualification",
+  "producer failure returned a successful digest",
+  "included primary-key payload was treated as an ORDER BY key",
+  "composite primary-key order did not normalize opposite insertion order",
+  "composite primary-key inventory omitted or reordered key attributes",
+  "large-object data was silently excluded",
+  "non-public table mutation was not detected",
+  "sequence-state mutation was not detected",
+  "empty table collided with a one-row empty-string table",
+  "cross-table row placement collided with an unframed table header",
+  "unsupported partitioned-table data was silently excluded",
+  "unsupported materialized-view data was silently excluded",
+  "unsupported foreign-table data was silently excluded",
+];
+const exactRehearsalMatrix = postgresRehearsalWorkflow.match(
+  /    strategy:\n[\s\S]*?    env:/,
+)?.[0] ?? "";
+const rehearsalPlatforms = Array.from(
+  exactRehearsalMatrix.matchAll(
+    /^          - platform: ([^\n]+)\n            slug: ([^\n]+)$/gm,
+  ),
+  ([, platform, slug]) => [platform, slug],
+);
 expect(
   digestTestScript.includes(
     'DIGEST_HELPER_SCRIPT=${PGVECTOR_DIGEST_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}',
   ) &&
-  digestTestScript.includes("catalog identifier escaped COPY") &&
-    digestTestScript.includes("primary-key identifier escaped ORDER BY") &&
-    digestTestScript.includes("producer failure returned a successful digest") &&
-    digestTestScript.includes("included primary-key payload was treated as an ORDER BY key") &&
-    digestTestScript.includes("composite primary-key order did not normalize opposite insertion order") &&
-    digestTestScript.includes("composite primary-key inventory omitted or reordered key attributes") &&
-    digestTestScript.includes("large-object data was silently excluded") &&
-    digestTestScript.includes("non-public table mutation was not detected") &&
-    digestTestScript.includes("sequence-state mutation was not detected") &&
-    digestTestScript.includes("empty table collided with a one-row empty-string table") &&
-    digestTestScript.includes("cross-table row placement collided with an unframed table header") &&
-    digestTestScript.includes("unsupported partitioned-table data was silently excluded") &&
-    digestTestScript.includes("unsupported materialized-view data was silently excluded") &&
-    digestTestScript.includes("unsupported foreign-table data was silently excluded") &&
+  digestTestScript.includes("OWNER_LABEL_KEY=io.noosphere.digest-test-owner") &&
+    digestTestScript.includes('source_container_created=false') &&
+    digestTestScript.includes('[[ "$source_container_created" == false ]] || remove_container') &&
+    digestTestScript.includes("expected exactly one digest helper definition") &&
+    countLiteral(
+      executableDigestTest,
+      "record_failure 'duplicate digest helper definitions were accepted'",
+    ) === 1 &&
+    requiredDigestFailureMessages.every(
+      (message) => countLiteral(executableDigestRuntime, message) === 1,
+    ) &&
+    !/^[A-Za-z_][A-Za-z0-9_]*\(\) \{/m.test(digestRuntimeBody) &&
+    countLiteral(executableDigestRuntime, "((failures == 0))") === 1 &&
     supportedDataObjectsFunction.includes("c.relkind IN ('m', 'f', 'p')") &&
     supportedDataObjectsFunction.includes("pg_catalog.pg_largeobject_metadata") &&
     dataInventoryFunction.includes("key.ordinality <= i.indnkeyatts") &&
@@ -926,6 +980,11 @@ expect(
     postgresRehearsalWorkflow.includes(
       'run: scripts/test-digest-order-independence.sh ${{ matrix.platform }}',
     ) &&
+    JSON.stringify(rehearsalPlatforms) ===
+      JSON.stringify([
+        ["linux/amd64", "amd64"],
+        ["linux/arm64", "arm64"],
+      ]) &&
     postgresRehearsalWorkflow.match(
       /- "scripts\/test-digest-order-independence\.sh"/g,
     )?.length === 2,
