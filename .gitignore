@@ -48,6 +48,7 @@ next-env.d.ts
 .lean-ctx/
 .pi/
 .planning/
+.slim/deepwork/
 
 # nested dependencies and local package artifacts
 node_modules/

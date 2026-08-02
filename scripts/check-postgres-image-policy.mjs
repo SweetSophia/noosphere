@@ -827,8 +827,85 @@ expect(
     ) &&
     switchTestScript.includes(
       "Deferred legacy recovered evidence with appWasRunning=true unexpectedly reported switch success",
-    ),
-  "test-pgvector-compose-switch.sh must prove both historical recovered writer-marker states are accepted and post-render mutation is rejected before journal replacement",
+    ) &&
+    switchTestScript.includes(
+      "Unversioned legacy journal did not select signature version 1",
+    ) &&
+    switchTestScript.includes(
+      "Versioned journal did not select signature version 2",
+    ) &&
+    switchTestScript.includes("Unsupported data signature version was accepted"),
+  "test-pgvector-compose-switch.sh must prove historical recovery compatibility, signature-version dispatch, and post-render mutation rejection",
+);
+
+const digestTestScript = read("scripts/test-digest-order-independence.sh");
+const postgresRehearsalWorkflow = read(
+  ".github/workflows/postgres-pgvector-rehearsal.yml",
+);
+const shellFunction = (source, name) => {
+  const start = source.indexOf(`${name}() {`);
+  const end = source.indexOf("\n}\n", start);
+  return start >= 0 && end > start ? source.slice(start, end + 3) : "";
+};
+const digestPsqlFunction = shellFunction(switchScript, "_digest_psql");
+const digestObjectSignatureFunction = shellFunction(
+  switchScript,
+  "_digest_object_signature",
+);
+const supportedDataObjectsFunction = shellFunction(
+  switchScript,
+  "_assert_supported_data_objects",
+);
+const dataInventoryFunction = shellFunction(
+  switchScript,
+  "_collect_data_inventory",
+);
+const normalizedDumpFunction = shellFunction(switchScript, "normalized_dump");
+const legacyDumpFunction = shellFunction(switchScript, "legacy_normalized_dump");
+expect(
+  digestPsqlFunction.includes("-U noosphere_migrator ") &&
+    !digestPsqlFunction.includes("-U noosphere ") &&
+    !normalizedDumpFunction.includes("SET ROLE pg_read_all_data") &&
+    normalizedDumpFunction.includes("pg_dump -U noosphere_migrator ") &&
+    legacyDumpFunction.includes("pg_dump -U noosphere_migrator ") &&
+    digestObjectSignatureFunction.includes(
+      '_digest_psql "$container" "$query" | sha256sum | awk',
+    ) &&
+    normalizedDumpFunction.includes("_digest_object_signature") &&
+    !normalizedDumpFunction.includes("=$(_digest_psql"),
+  "digest generation must stream object data through a non-superuser production role without bootstrap SET ROLE authority",
+);
+expect(
+  digestTestScript.includes(
+    'DIGEST_HELPER_SCRIPT=${PGVECTOR_DIGEST_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}',
+  ) &&
+  digestTestScript.includes("catalog identifier escaped COPY") &&
+    digestTestScript.includes("primary-key identifier escaped ORDER BY") &&
+    digestTestScript.includes("producer failure returned a successful digest") &&
+    digestTestScript.includes("included primary-key payload was treated as an ORDER BY key") &&
+    digestTestScript.includes("composite primary-key order did not normalize opposite insertion order") &&
+    digestTestScript.includes("composite primary-key inventory omitted or reordered key attributes") &&
+    digestTestScript.includes("large-object data was silently excluded") &&
+    digestTestScript.includes("non-public table mutation was not detected") &&
+    digestTestScript.includes("sequence-state mutation was not detected") &&
+    digestTestScript.includes("empty table collided with a one-row empty-string table") &&
+    digestTestScript.includes("cross-table row placement collided with an unframed table header") &&
+    digestTestScript.includes("unsupported partitioned-table data was silently excluded") &&
+    digestTestScript.includes("unsupported materialized-view data was silently excluded") &&
+    digestTestScript.includes("unsupported foreign-table data was silently excluded") &&
+    supportedDataObjectsFunction.includes("c.relkind IN ('m', 'f', 'p')") &&
+    supportedDataObjectsFunction.includes("pg_catalog.pg_largeobject_metadata") &&
+    dataInventoryFunction.includes("key.ordinality <= i.indnkeyatts") &&
+    switchTestScript.includes("Explicit $invalid_version data signature version downgraded to legacy v1") &&
+    switchTestScript.includes("for invalid_version in false null 0 3 1.5 '\"1\"'; do") &&
+    switchTestScript.includes("del(.authorizationVolumeFingerprint, .dataSignatureVersion)") &&
+    postgresRehearsalWorkflow.includes(
+      'run: scripts/test-digest-order-independence.sh ${{ matrix.platform }}',
+    ) &&
+    postgresRehearsalWorkflow.match(
+      /- "scripts\/test-digest-order-independence\.sh"/g,
+    )?.length === 2,
+  "the PostgreSQL rehearsal must run deterministic digest security, coverage, streaming, and failure regressions on both architectures",
 );
 
 const verifyScript = read("scripts/verify-deploy.sh");
