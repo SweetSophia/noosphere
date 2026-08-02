@@ -993,6 +993,11 @@ sql() {
   docker exec "$container" psql -XAtq -v ON_ERROR_STOP=1 -U noosphere -d "$database" -c "$query"
 }
 
+migrator_sql() {
+  local container=$1 database=$2 query=$3
+  docker exec "$container" psql -XAtq -v ON_ERROR_STOP=1 -U noosphere_migrator -d "$database" -c "$query"
+}
+
 assert_cluster_vector_absent() {
   local container=$1 db installed databases probe=$probe_database
   [[ -n "$probe" ]] && path_present "$journal" ||
@@ -1201,10 +1206,17 @@ schema_signature() {
 }
 
 migration_signature() {
-  sql "$1" noosphere "
+  migrator_sql "$1" noosphere "
     SELECT migration_name || '|' || checksum || '|' || applied_steps_count || '|' ||
            coalesce(finished_at::text, '<null>') || '|' || coalesce(rolled_back_at::text, '<null>')
     FROM \"_prisma_migrations\" ORDER BY migration_name;" | sha256sum | awk '{print $1}'
+}
+
+create_logical_backup() {
+  local container=$1 output=$2
+  if ! docker exec "$container" pg_dump -U noosphere_migrator -d noosphere -Fc --no-owner --no-privileges > "$output"; then
+    die "logical backup producer failed for $container"
+  fi
 }
 
 database_identity() {
@@ -1790,7 +1802,7 @@ expected_migrations=$(migration_signature "$source_maintenance")
 expected_database=$(database_identity "$source_maintenance")
 
 backup_temp="$run_dir/.noosphere.dump.tmp"
-docker exec "$source_maintenance" pg_dump -U noosphere -d noosphere -Fc --no-owner --no-privileges > "$backup_temp"
+create_logical_backup "$source_maintenance" "$backup_temp"
 [[ -s "$backup_temp" ]] || die 'logical backup is empty'
 docker exec -i "$source_maintenance" pg_restore --list < "$backup_temp" >/dev/null
 fsync_path "$backup_temp"

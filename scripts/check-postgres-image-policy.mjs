@@ -862,6 +862,15 @@ const dataInventoryFunction = shellFunction(
 );
 const normalizedDumpFunction = shellFunction(switchScript, "normalized_dump");
 const legacyDumpFunction = shellFunction(switchScript, "legacy_normalized_dump");
+const migratorSqlFunction = shellFunction(switchScript, "migrator_sql");
+const migrationSignatureFunction = shellFunction(
+  switchScript,
+  "migration_signature",
+);
+const logicalBackupFunction = shellFunction(
+  switchScript,
+  "create_logical_backup",
+);
 expect(
   digestPsqlFunction.includes("-U noosphere_migrator ") &&
     !digestPsqlFunction.includes("-U noosphere ") &&
@@ -874,6 +883,21 @@ expect(
     normalizedDumpFunction.includes("_digest_object_signature") &&
     !normalizedDumpFunction.includes("=$(_digest_psql"),
   "digest generation must stream object data through a non-superuser production role without bootstrap SET ROLE authority",
+);
+expect(
+  migratorSqlFunction.includes("-U noosphere_migrator ") &&
+    !migratorSqlFunction.includes("-U noosphere ") &&
+    migrationSignatureFunction.includes('migrator_sql "$1" noosphere') &&
+    logicalBackupFunction.includes("pg_dump -U noosphere_migrator ") &&
+    !logicalBackupFunction.includes("pg_dump -U noosphere ") &&
+    switchScript.includes(
+      'create_logical_backup "$source_maintenance" "$backup_temp"',
+    ) &&
+    switchTestScript.includes("test_migrator_producer_authority") &&
+    switchTestScript.includes(
+      "Digest or backup producer used bootstrap authority",
+    ),
+  "migration signing and logical backup must use the non-superuser migrator role with direct behavioral coverage",
 );
 expect(
   digestTestScript.includes(

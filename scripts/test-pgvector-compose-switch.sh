@@ -176,6 +176,48 @@ test_data_signature_version_dispatch() (
 test_data_signature_version_dispatch
 [[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == data-signature-version ]] && exit 0
 
+test_migrator_producer_authority() (
+  local switch_script definition helper
+  switch_script=${PGVECTOR_SWITCH_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}
+
+  for helper in migrator_sql migration_signature create_logical_backup; do
+    definition=$(awk -v signature="${helper}() {" '
+      $0 == signature { emit = 1 }
+      emit { print }
+      emit && $0 == "}" { exit }
+    ' "$switch_script")
+    [[ -n "$definition" ]] || {
+      echo "Missing migrator-authority helper: $helper" >&2
+      exit 1
+    }
+    eval "$definition"
+  done
+
+  die() {
+    printf 'fixture: %s\n' "$*" >&2
+    exit 1
+  }
+
+  docker() {
+    local invocation=" $* "
+    [[ "$invocation" == *" -U noosphere_migrator "* ]] || {
+      echo "Digest or backup producer used bootstrap authority: $*" >&2
+      return 97
+    }
+    if [[ "$invocation" == *" psql "* ]]; then
+      printf 'migration|checksum|1|<null>|<null>\n'
+    else
+      printf 'logical-backup-fixture\n'
+    fi
+  }
+
+  migration_signature fixture-container >/dev/null
+  create_logical_backup fixture-container /dev/null
+)
+
+test_migrator_producer_authority
+[[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == migrator-producer-authority ]] && exit 0
+
 slug=${PLATFORM#linux/}
 run_id=${PGVECTOR_SWITCH_TEST_RUN_ID:-local-$$-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')}
 safe_id=${run_id//[^A-Za-z0-9]/-}
