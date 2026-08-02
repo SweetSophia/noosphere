@@ -412,11 +412,11 @@ For the full setup, operations, troubleshooting, upgrade, and uninstall guide, s
 On the machine running OpenClaw Gateway:
 
 ```bash
-# Installer commit: 491f6189607f77ef69f6077933d13df82fef5bcc
-# Expected SHA-256: f1b6ef136947ebbd9423d155a9bdf8252cf521161881cef3245da6c7c6d15cb0
+# Installer commit: 9d4d63467025363685333698fa588fc93d12fdc2
+# Expected SHA-256: 04ffe6e4a665d544d29035428f1d97cd7b6468180a661efd73867292dfb50d9a
 installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/491f6189607f77ef69f6077933d13df82fef5bcc/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' 'f1b6ef136947ebbd9423d155a9bdf8252cf521161881cef3245da6c7c6d15cb0' "$installer" | sha256sum -c -
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/9d4d63467025363685333698fa588fc93d12fdc2/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' '04ffe6e4a665d544d29035428f1d97cd7b6468180a661efd73867292dfb50d9a' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 openclaw noosphere doctor
 openclaw noosphere status
