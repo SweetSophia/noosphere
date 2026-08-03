@@ -842,19 +842,32 @@ const digestTestScript = read("scripts/test-digest-order-independence.sh");
 const postgresRehearsalWorkflow = read(
   ".github/workflows/postgres-pgvector-rehearsal.yml",
 );
+const shellFunctionDeclarationPattern = (name) => {
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `^[ \\t]*(?:${escapedName}[ \\t]*\\([ \\t]*\\)|function[ \\t]+${escapedName}(?:[ \\t]*\\([ \\t]*\\))?)[ \\t]*(?:\\{|(?:#.*)?$)`,
+    "gm",
+  );
+};
+const anyShellFunctionDeclarationPattern =
+  /^[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*[ \t]*\([ \t]*\)|function[ \t]+[A-Za-z_][A-Za-z0-9_]*(?:[ \t]*\([ \t]*\))?)[ \t]*(?:\{|(?:#.*)?$)/m;
 const shellFunction = (source, name) => {
   const signature = `${name}() {`;
-  const definitionCount =
-    countLiteral(source, `\n${signature}\n`) +
-    (source.startsWith(`${signature}\n`) ? 1 : 0);
+  const definitionCount = source.match(shellFunctionDeclarationPattern(name))?.length ?? 0;
   if (definitionCount !== 1) return "";
   const start = source.indexOf(signature);
   const end = source.indexOf("\n}\n", start);
   return start >= 0 && end > start ? source.slice(start, end + 3) : "";
 };
-const duplicateFunctionProbe = "probe() {\n  printf safe\n}\nprobe() {\n  printf unsafe\n}\n";
+const duplicateFunctionProbes = [
+  "probe() {\n  printf safe\n}\nprobe() {\n  printf unsafe\n}\n",
+  "probe() {\n  printf safe\n}\nfunction probe() {\n  printf unsafe\n}\n",
+  "probe() {\n  printf safe\n}\nfunction probe {\n  printf unsafe\n}\n",
+  "probe() {\n  printf safe\n}\nprobe () {\n  printf unsafe\n}\n",
+  "probe() {\n  printf safe\n}\nfunction probe()\n{\n  printf unsafe\n}\n",
+];
 expect(
-  shellFunction(duplicateFunctionProbe, "probe") === "",
+  duplicateFunctionProbes.every((source) => shellFunction(source, "probe") === ""),
   "shell policy extraction must reject duplicate function definitions",
 );
 const digestPsqlFunction = shellFunction(switchScript, "_digest_psql");
@@ -969,7 +982,7 @@ expect(
     requiredDigestFailureMessages.every(
       (message) => countLiteral(executableDigestRuntime, message) === 1,
     ) &&
-    !/^[A-Za-z_][A-Za-z0-9_]*\(\) \{/m.test(digestRuntimeBody) &&
+    !anyShellFunctionDeclarationPattern.test(digestRuntimeBody) &&
     countLiteral(executableDigestRuntime, "((failures == 0))") === 1 &&
     supportedDataObjectsFunction.includes("c.relkind IN ('m', 'f', 'p')") &&
     supportedDataObjectsFunction.includes("pg_catalog.pg_largeobject_metadata") &&

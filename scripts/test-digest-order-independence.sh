@@ -44,11 +44,13 @@ die() {
 }
 
 extract_function() {
-  local name=$1 source=${2:-"$DIGEST_HELPER_SCRIPT"} definition
-  if ! definition=$(awk -v signature="${name}() {" '
+  local name=$1 source=${2:-"$DIGEST_HELPER_SCRIPT"} definition declaration_pattern
+  [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid digest helper name: $name"
+  declaration_pattern="^[[:space:]]*(${name}[[:space:]]*\\([[:space:]]*\\)|function[[:space:]]+${name}([[:space:]]*\\([[:space:]]*\\))?)[[:space:]]*([{]|(#.*)?$)"
+  if ! definition=$(awk -v signature="${name}() {" -v declaration_pattern="$declaration_pattern" '
+    $0 ~ declaration_pattern { matches++ }
     $0 == signature {
-      matches++
-      if (matches == 1) capture = 1
+      capture = 1
     }
     capture { body[++lines] = $0 }
     capture && $0 == "}" { capture = 0 }
@@ -62,9 +64,21 @@ extract_function() {
   printf '%s\n' "$definition"
 }
 
-if (extract_function probe <(printf 'probe() {\n  printf safe\n}\nprobe() {\n  printf unsafe\n}\n')) >/dev/null 2>&1; then
-  record_failure 'duplicate digest helper definitions were accepted'
-fi
+duplicate_definition_probes=(
+  $'probe() {\n  printf safe\n}\nprobe() {\n  printf unsafe\n}\n'
+  $'probe() {\n  printf safe\n}\nfunction probe() {\n  printf unsafe\n}\n'
+  $'probe() {\n  printf safe\n}\nfunction probe {\n  printf unsafe\n}\n'
+  $'probe() {\n  printf safe\n}\nprobe () {\n  printf unsafe\n}\n'
+  $'probe() {\n  printf safe\n}\nfunction probe()\n{\n  printf unsafe\n}\n'
+)
+for probe_source in "${duplicate_definition_probes[@]}"; do
+  bash -n <(printf '%s' "$probe_source") || die 'invalid duplicate-definition regression fixture'
+  if (extract_function probe <(printf '%s' "$probe_source")) >/dev/null 2>&1; then
+    record_failure 'duplicate digest helper definitions were accepted'
+  fi
+done
+
+bash -n "$DIGEST_HELPER_SCRIPT" || die 'digest helper script is not valid Bash'
 
 for helper in _digest_psql _digest_object_signature _assert_supported_data_objects _collect_data_inventory _decode_base64 \
   normalized_dump legacy_normalized_dump data_signature legacy_data_signature data_signature_for_version; do
