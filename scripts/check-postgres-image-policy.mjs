@@ -845,12 +845,12 @@ const postgresRehearsalWorkflow = read(
 const shellFunctionDeclarationPattern = (name) => {
   const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(
-    `^[ \\t]*(?:${escapedName}[ \\t]*\\([ \\t]*\\)|function[ \\t]+${escapedName}(?:[ \\t]*\\([ \\t]*\\))?)[ \\t]*(?:\\{|(?:#.*)?$)`,
+    `(?:^|[^A-Za-z0-9_])(?:${escapedName}[ \\t]*\\([ \\t]*\\)|function[ \\t]+${escapedName}(?:[ \\t]*\\([ \\t]*\\))?)[ \\t]*(?:\\{|(?:#.*)?$)`,
     "gm",
   );
 };
 const anyShellFunctionDeclarationPattern =
-  /^[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*[ \t]*\([ \t]*\)|function[ \t]+[A-Za-z_][A-Za-z0-9_]*(?:[ \t]*\([ \t]*\))?)[ \t]*(?:\{|(?:#.*)?$)/m;
+  /(?:^|[^A-Za-z0-9_])(?:[A-Za-z_][A-Za-z0-9_]*[ \t]*\([ \t]*\)|function[ \t]+[A-Za-z_][A-Za-z0-9_]*(?:[ \t]*\([ \t]*\))?)[ \t]*(?:\{|(?:#.*)?$)/m;
 const shellFunction = (source, name) => {
   const signature = `${name}() {`;
   const definitionCount = source.match(shellFunctionDeclarationPattern(name))?.length ?? 0;
@@ -865,6 +865,8 @@ const duplicateFunctionProbes = [
   "probe() {\n  printf safe\n}\nfunction probe {\n  printf unsafe\n}\n",
   "probe() {\n  printf safe\n}\nprobe () {\n  printf unsafe\n}\n",
   "probe() {\n  printf safe\n}\nfunction probe()\n{\n  printf unsafe\n}\n",
+  "probe() {\n  printf safe\n}\ntrue; probe() { printf unsafe; }\n",
+  "probe() {\n  printf safe\n}\nif true; then function probe { printf unsafe; }; fi\n",
 ];
 expect(
   duplicateFunctionProbes.every((source) => shellFunction(source, "probe") === ""),

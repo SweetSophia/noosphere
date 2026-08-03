@@ -46,7 +46,7 @@ die() {
 extract_function() {
   local name=$1 source=${2:-"$DIGEST_HELPER_SCRIPT"} definition declaration_pattern
   [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid digest helper name: $name"
-  declaration_pattern="^[[:space:]]*(${name}[[:space:]]*\\([[:space:]]*\\)|function[[:space:]]+${name}([[:space:]]*\\([[:space:]]*\\))?)[[:space:]]*([{]|(#.*)?$)"
+  declaration_pattern="(^|[^[:alnum:]_])(${name}[[:space:]]*\\([[:space:]]*\\)|function[[:space:]]+${name}([[:space:]]*\\([[:space:]]*\\))?)[[:space:]]*([{]|(#.*)?$)"
   if ! definition=$(awk -v signature="${name}() {" -v declaration_pattern="$declaration_pattern" '
     $0 ~ declaration_pattern { matches++ }
     $0 == signature {
@@ -70,6 +70,8 @@ duplicate_definition_probes=(
   $'probe() {\n  printf safe\n}\nfunction probe {\n  printf unsafe\n}\n'
   $'probe() {\n  printf safe\n}\nprobe () {\n  printf unsafe\n}\n'
   $'probe() {\n  printf safe\n}\nfunction probe()\n{\n  printf unsafe\n}\n'
+  $'probe() {\n  printf safe\n}\ntrue; probe() { printf unsafe; }\n'
+  $'probe() {\n  printf safe\n}\nif true; then function probe { printf unsafe; }; fi\n'
 )
 for probe_source in "${duplicate_definition_probes[@]}"; do
   bash -n <(printf '%s' "$probe_source") || die 'invalid duplicate-definition regression fixture'
