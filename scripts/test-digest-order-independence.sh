@@ -44,10 +44,12 @@ die() {
 }
 
 extract_function() {
-  local name=$1 source=${2:-"$DIGEST_HELPER_SCRIPT"} definition declaration_pattern
+  local name=$1 source=${2:-"$DIGEST_HELPER_SCRIPT"} definition declaration_pattern dynamic_definition_pattern
   [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid digest helper name: $name"
   declaration_pattern="(^|[^[:alnum:]_])(${name}[[:space:]]*\\([[:space:]]*\\)|function[[:space:]]+${name}([[:space:]]*\\([[:space:]]*\\))?)[[:space:]]*([{]|(#.*)?$)"
-  if ! definition=$(awk -v signature="${name}() {" -v declaration_pattern="$declaration_pattern" '
+  dynamic_definition_pattern='(^|[[:space:];&|(){}])(alias([[:space:]]|$)|shopt[[:space:]]+-s[[:space:]]+expand_aliases([[:space:];&|]|$))'
+  if ! definition=$(awk -v signature="${name}() {" -v declaration_pattern="$declaration_pattern" \
+    -v dynamic_definition_pattern="$dynamic_definition_pattern" '
     { source = source $0 "\n" }
     $0 == signature {
       capture = 1
@@ -57,6 +59,7 @@ extract_function() {
     END {
       normalized = source
       gsub(/\\\n/, "", normalized)
+      if (normalized ~ dynamic_definition_pattern) exit 1
       logical_line_count = split(normalized, logical_lines, "\n")
       for (line = 1; line <= logical_line_count; line++) {
         if (logical_lines[line] ~ declaration_pattern) matches++
@@ -81,6 +84,7 @@ duplicate_definition_probes=(
   $'probe() {\n  printf safe\n}\npro\\\nbe() { printf unsafe; }\n'
   $'probe() {\n  printf safe\n}\nprobe\\\n() { printf unsafe; }\n'
   $'probe() {\n  printf safe\n}\nprobe() \\\n{ printf unsafe; }\n'
+  $'probe() {\n  printf safe\n}\nshopt -s expand_aliases\nalias redefine=\'pro\'\'be() { printf unsafe; }\'\nredefine\n'
 )
 for probe_source in "${duplicate_definition_probes[@]}"; do
   bash -n <(printf '%s' "$probe_source") || die 'invalid duplicate-definition regression fixture'

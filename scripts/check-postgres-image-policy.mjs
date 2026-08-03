@@ -851,10 +851,13 @@ const shellFunctionDeclarationPattern = (name) => {
 };
 const anyShellFunctionDeclarationPattern =
   /(?:^|[^A-Za-z0-9_])(?:[A-Za-z_][A-Za-z0-9_]*[ \t]*\([ \t]*\)|function[ \t]+[A-Za-z_][A-Za-z0-9_]*(?:[ \t]*\([ \t]*\))?)[ \t]*(?:\{|(?:#.*)?$)/m;
+const dynamicShellDefinitionPattern =
+  /(?:^|[\s;&|(){}])(?:alias(?:\s|$)|shopt[ \t]+-s[ \t]+expand_aliases(?:[\s;&|]|$))/m;
 const normalizeShellLineContinuations = (source) => source.replace(/\\\n/g, "");
 const shellFunction = (source, name) => {
   const signature = `${name}() {`;
   const declarationSource = normalizeShellLineContinuations(source);
+  if (dynamicShellDefinitionPattern.test(declarationSource)) return "";
   const definitionCount = declarationSource.match(shellFunctionDeclarationPattern(name))?.length ?? 0;
   if (definitionCount !== 1) return "";
   const start = source.indexOf(signature);
@@ -872,6 +875,7 @@ const duplicateFunctionProbes = [
   "probe() {\n  printf safe\n}\npro\\\nbe() { printf unsafe; }\n",
   "probe() {\n  printf safe\n}\nprobe\\\n() { printf unsafe; }\n",
   "probe() {\n  printf safe\n}\nprobe() \\\n{ printf unsafe; }\n",
+  "probe() {\n  printf safe\n}\nshopt -s expand_aliases\nalias redefine='pro''be() { printf unsafe; }'\nredefine\n",
 ];
 expect(
   duplicateFunctionProbes.every((source) => shellFunction(source, "probe") === ""),
