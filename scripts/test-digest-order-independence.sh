@@ -46,7 +46,12 @@ die() {
 extract_function() {
   local name=$1 source=${2:-"$DIGEST_HELPER_SCRIPT"} definition declaration_pattern dynamic_definition_pattern
   [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid digest helper name: $name"
-  declaration_pattern="(^|[^[:alnum:]_])(${name}[[:space:]]*\\([[:space:]]*\\)|function[[:space:]]+${name}([[:space:]]*\\([[:space:]]*\\))?)[[:space:]]*([{]|(#.*)?$)"
+  # Bracket expressions [(] and [)] match literal parentheses in every awk
+  # implementation (gawk, mawk, busybox). Backslash escapes like \( are
+  # interpreted inconsistently across awk variants and awk -v escape
+  # processing, which made the declaration count diverge between local and
+  # CI awk builds.
+  declaration_pattern="(^|[^[:alnum:]_])(${name}[[:space:]]*[(][[:space:]]*[)]|function[[:space:]]+${name}([[:space:]]*[(][[:space:]]*[)])?)[[:space:]]*([{]|(#.*)?$)"
   dynamic_definition_pattern='(^|[[:space:];&|(){}])(alias([[:space:]]|$)|shopt[[:space:]]+-s[[:space:]]+expand_aliases([[:space:];&|]|$))'
   if ! definition=$(awk -v signature="${name}() {" -v declaration_pattern="$declaration_pattern" \
     -v dynamic_definition_pattern="$dynamic_definition_pattern" '
