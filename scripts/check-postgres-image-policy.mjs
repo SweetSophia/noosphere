@@ -851,9 +851,11 @@ const shellFunctionDeclarationPattern = (name) => {
 };
 const anyShellFunctionDeclarationPattern =
   /(?:^|[^A-Za-z0-9_])(?:[A-Za-z_][A-Za-z0-9_]*[ \t]*\([ \t]*\)|function[ \t]+[A-Za-z_][A-Za-z0-9_]*(?:[ \t]*\([ \t]*\))?)[ \t]*(?:\{|(?:#.*)?$)/m;
+const normalizeShellLineContinuations = (source) => source.replace(/\\\n/g, "");
 const shellFunction = (source, name) => {
   const signature = `${name}() {`;
-  const definitionCount = source.match(shellFunctionDeclarationPattern(name))?.length ?? 0;
+  const declarationSource = normalizeShellLineContinuations(source);
+  const definitionCount = declarationSource.match(shellFunctionDeclarationPattern(name))?.length ?? 0;
   if (definitionCount !== 1) return "";
   const start = source.indexOf(signature);
   const end = source.indexOf("\n}\n", start);
@@ -867,6 +869,9 @@ const duplicateFunctionProbes = [
   "probe() {\n  printf safe\n}\nfunction probe()\n{\n  printf unsafe\n}\n",
   "probe() {\n  printf safe\n}\ntrue; probe() { printf unsafe; }\n",
   "probe() {\n  printf safe\n}\nif true; then function probe { printf unsafe; }; fi\n",
+  "probe() {\n  printf safe\n}\npro\\\nbe() { printf unsafe; }\n",
+  "probe() {\n  printf safe\n}\nprobe\\\n() { printf unsafe; }\n",
+  "probe() {\n  printf safe\n}\nprobe() \\\n{ printf unsafe; }\n",
 ];
 expect(
   duplicateFunctionProbes.every((source) => shellFunction(source, "probe") === ""),
@@ -984,7 +989,9 @@ expect(
     requiredDigestFailureMessages.every(
       (message) => countLiteral(executableDigestRuntime, message) === 1,
     ) &&
-    !anyShellFunctionDeclarationPattern.test(digestRuntimeBody) &&
+    !anyShellFunctionDeclarationPattern.test(
+      normalizeShellLineContinuations(digestRuntimeBody),
+    ) &&
     countLiteral(executableDigestRuntime, "((failures == 0))") === 1 &&
     supportedDataObjectsFunction.includes("c.relkind IN ('m', 'f', 'p')") &&
     supportedDataObjectsFunction.includes("pg_catalog.pg_largeobject_metadata") &&
