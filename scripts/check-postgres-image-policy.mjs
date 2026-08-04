@@ -9,9 +9,9 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
-const immutableHelperRef = "8cb3e135ad19ee228ab0ff740ca06a8c74e91247";
-const verifiedInstallerRef = "d0e90c4188fef77e5f1670e5eda5e849e04c6830";
-const verifiedInstallerSha256 = "716e9eb1e5f2e2f241e50ba971e2bb33269a7fbd698c5d4f9b7a55a4bf5df640";
+const immutableHelperRef = "17e386ddd25882f4847e9e91c4b4dfecd5c78f04";
+const verifiedInstallerRef = "05f234056af2a5e75c457a5f8371a2fc47566276";
+const verifiedInstallerSha256 = "4bc73d369678defec08c2ce1912379cb4705f1a5ef5f8d2f9f6716ea4a117807";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
@@ -827,8 +827,194 @@ expect(
     ) &&
     switchTestScript.includes(
       "Deferred legacy recovered evidence with appWasRunning=true unexpectedly reported switch success",
+    ) &&
+    switchTestScript.includes(
+      "Unversioned legacy journal did not select signature version 1",
+    ) &&
+    switchTestScript.includes(
+      "Versioned journal did not select signature version 2",
+    ) &&
+    switchTestScript.includes("Unsupported data signature version was accepted"),
+  "test-pgvector-compose-switch.sh must prove historical recovery compatibility, signature-version dispatch, and post-render mutation rejection",
+);
+
+const digestTestScript = read("scripts/test-digest-order-independence.sh");
+const postgresRehearsalWorkflow = read(
+  ".github/workflows/postgres-pgvector-rehearsal.yml",
+);
+const shellFunctionDeclarationPattern = (name) => {
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `(?:^|[^A-Za-z0-9_])(?:${escapedName}[ \\t]*\\([ \\t]*\\)|function[ \\t]+${escapedName}(?:[ \\t]*\\([ \\t]*\\))?)[ \\t]*(?:\\{|(?:#.*)?$)`,
+    "gm",
+  );
+};
+const anyShellFunctionDeclarationPattern =
+  /(?:^|[^A-Za-z0-9_])(?:[A-Za-z_][A-Za-z0-9_]*[ \t]*\([ \t]*\)|function[ \t]+[A-Za-z_][A-Za-z0-9_]*(?:[ \t]*\([ \t]*\))?)[ \t]*(?:\{|(?:#.*)?$)/m;
+const dynamicShellDefinitionPattern =
+  /(?:^|[\s;&|(){}])(?:alias(?:\s|$)|shopt[ \t]+-s[ \t]+expand_aliases(?:[\s;&|]|$))/m;
+const normalizeShellLineContinuations = (source) => source.replace(/\\\n/g, "");
+const shellFunction = (source, name) => {
+  const signature = `${name}() {`;
+  const declarationSource = normalizeShellLineContinuations(source);
+  if (dynamicShellDefinitionPattern.test(declarationSource)) return "";
+  const definitionCount = declarationSource.match(shellFunctionDeclarationPattern(name))?.length ?? 0;
+  if (definitionCount !== 1) return "";
+  const start = source.indexOf(signature);
+  const end = source.indexOf("\n}\n", start);
+  return start >= 0 && end > start ? source.slice(start, end + 3) : "";
+};
+const duplicateFunctionProbes = [
+  "probe() {\n  printf safe\n}\nprobe() {\n  printf unsafe\n}\n",
+  "probe() {\n  printf safe\n}\nfunction probe() {\n  printf unsafe\n}\n",
+  "probe() {\n  printf safe\n}\nfunction probe {\n  printf unsafe\n}\n",
+  "probe() {\n  printf safe\n}\nprobe () {\n  printf unsafe\n}\n",
+  "probe() {\n  printf safe\n}\nfunction probe()\n{\n  printf unsafe\n}\n",
+  "probe() {\n  printf safe\n}\ntrue; probe() { printf unsafe; }\n",
+  "probe() {\n  printf safe\n}\nif true; then function probe { printf unsafe; }; fi\n",
+  "probe() {\n  printf safe\n}\npro\\\nbe() { printf unsafe; }\n",
+  "probe() {\n  printf safe\n}\nprobe\\\n() { printf unsafe; }\n",
+  "probe() {\n  printf safe\n}\nprobe() \\\n{ printf unsafe; }\n",
+  "probe() {\n  printf safe\n}\nshopt -s expand_aliases\nalias redefine='pro''be() { printf unsafe; }'\nredefine\n",
+];
+expect(
+  duplicateFunctionProbes.every((source) => shellFunction(source, "probe") === ""),
+  "shell policy extraction must reject duplicate function definitions",
+);
+const digestPsqlFunction = shellFunction(switchScript, "_digest_psql");
+const digestObjectSignatureFunction = shellFunction(
+  switchScript,
+  "_digest_object_signature",
+);
+const supportedDataObjectsFunction = shellFunction(
+  switchScript,
+  "_assert_supported_data_objects",
+);
+const dataInventoryFunction = shellFunction(
+  switchScript,
+  "_collect_data_inventory",
+);
+const normalizedDumpFunction = shellFunction(switchScript, "normalized_dump");
+const legacyDumpFunction = shellFunction(switchScript, "legacy_normalized_dump");
+const migratorSqlFunction = shellFunction(switchScript, "migrator_sql");
+const migrationSignatureFunction = shellFunction(
+  switchScript,
+  "migration_signature",
+);
+const logicalBackupFunction = shellFunction(
+  switchScript,
+  "create_logical_backup",
+);
+const expectedDigestPsqlFunction = [
+  "_digest_psql() {",
+  "  local container=$1 query=$2",
+  '  docker exec "$container" psql -XAtq -v ON_ERROR_STOP=1 -U noosphere_migrator -d noosphere -c "$query"',
+  "}",
+  "",
+].join("\n");
+expect(
+  digestPsqlFunction === expectedDigestPsqlFunction &&
+    !normalizedDumpFunction.includes("SET ROLE pg_read_all_data") &&
+    normalizedDumpFunction.includes("pg_dump -U noosphere_migrator ") &&
+    legacyDumpFunction.includes("pg_dump -U noosphere_migrator ") &&
+    digestObjectSignatureFunction.includes(
+      '_digest_psql "$container" "$query" | sha256sum | awk',
+    ) &&
+    normalizedDumpFunction.includes("_digest_object_signature") &&
+    !normalizedDumpFunction.includes("=$(_digest_psql"),
+  "digest generation must stream object data through a non-superuser production role without bootstrap SET ROLE authority",
+);
+expect(
+  migratorSqlFunction.includes("-U noosphere_migrator ") &&
+    !migratorSqlFunction.includes("-U noosphere ") &&
+    migrationSignatureFunction.includes('migrator_sql "$1" noosphere') &&
+    logicalBackupFunction.includes("pg_dump -U noosphere_migrator ") &&
+    !logicalBackupFunction.includes("pg_dump -U noosphere ") &&
+    switchScript.includes(
+      'create_logical_backup "$source_maintenance" "$backup_temp"',
+    ) &&
+    switchTestScript.includes("test_migrator_producer_authority") &&
+    switchTestScript.includes(
+      "Digest or backup producer used bootstrap authority",
     ),
-  "test-pgvector-compose-switch.sh must prove both historical recovered writer-marker states are accepted and post-render mutation is rejected before journal replacement",
+  "migration signing and logical backup must use the non-superuser migrator role with direct behavioral coverage",
+);
+
+const digestRuntimeStart = digestTestScript.indexOf("trap cleanup EXIT INT TERM");
+const digestRuntimeBody =
+  digestRuntimeStart >= 0 ? digestTestScript.slice(digestRuntimeStart) : "";
+const executableDigestRuntime = digestRuntimeBody
+  .split(/\r?\n/)
+  .filter((line) => !line.trimStart().startsWith("#"))
+  .join("\n");
+const executableDigestTest = digestTestScript
+  .split(/\r?\n/)
+  .filter((line) => !line.trimStart().startsWith("#"))
+  .join("\n");
+const requiredDigestFailureMessages = [
+  "catalog identifier escaped COPY",
+  "primary-key identifier escaped ORDER BY",
+  "schema identifier escaped qualification",
+  "sequence identifier escaped qualification",
+  "producer failure returned a successful digest",
+  "included primary-key payload was treated as an ORDER BY key",
+  "composite primary-key order did not normalize opposite insertion order",
+  "composite primary-key inventory omitted or reordered key attributes",
+  "large-object data was silently excluded",
+  "non-public table mutation was not detected",
+  "sequence-state mutation was not detected",
+  "empty table collided with a one-row empty-string table",
+  "cross-table row placement collided with an unframed table header",
+  "unsupported partitioned-table data was silently excluded",
+  "unsupported materialized-view data was silently excluded",
+  "unsupported foreign-table data was silently excluded",
+];
+const exactRehearsalMatrix = postgresRehearsalWorkflow.match(
+  /    strategy:\n[\s\S]*?    env:/,
+)?.[0] ?? "";
+const rehearsalPlatforms = Array.from(
+  exactRehearsalMatrix.matchAll(
+    /^          - platform: ([^\n]+)\n            slug: ([^\n]+)$/gm,
+  ),
+  ([, platform, slug]) => [platform, slug],
+);
+expect(
+  digestTestScript.includes(
+    'DIGEST_HELPER_SCRIPT=${PGVECTOR_DIGEST_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}',
+  ) &&
+  digestTestScript.includes("OWNER_LABEL_KEY=io.noosphere.digest-test-owner") &&
+    digestTestScript.includes('source_container_created=false') &&
+    digestTestScript.includes('[[ "$source_container_created" == false ]] || remove_container') &&
+    digestTestScript.includes("expected exactly one digest helper definition") &&
+    countLiteral(
+      executableDigestTest,
+      "record_failure 'duplicate digest helper definitions were accepted'",
+    ) === 1 &&
+    requiredDigestFailureMessages.every(
+      (message) => countLiteral(executableDigestRuntime, message) === 1,
+    ) &&
+    !anyShellFunctionDeclarationPattern.test(
+      normalizeShellLineContinuations(digestRuntimeBody),
+    ) &&
+    countLiteral(executableDigestRuntime, "((failures == 0))") === 1 &&
+    supportedDataObjectsFunction.includes("c.relkind IN ('m', 'f', 'p')") &&
+    supportedDataObjectsFunction.includes("pg_catalog.pg_largeobject_metadata") &&
+    dataInventoryFunction.includes("key.ordinality <= i.indnkeyatts") &&
+    switchTestScript.includes("Explicit $invalid_version data signature version downgraded to legacy v1") &&
+    switchTestScript.includes("for invalid_version in false null 0 3 1.5 '\"1\"'; do") &&
+    switchTestScript.includes("del(.authorizationVolumeFingerprint, .dataSignatureVersion)") &&
+    postgresRehearsalWorkflow.includes(
+      'run: scripts/test-digest-order-independence.sh ${{ matrix.platform }}',
+    ) &&
+    JSON.stringify(rehearsalPlatforms) ===
+      JSON.stringify([
+        ["linux/amd64", "amd64"],
+        ["linux/arm64", "arm64"],
+      ]) &&
+    postgresRehearsalWorkflow.match(
+      /- "scripts\/test-digest-order-independence\.sh"/g,
+    )?.length === 2,
+  "the PostgreSQL rehearsal must run deterministic digest security, coverage, streaming, and failure regressions on both architectures",
 );
 
 const verifyScript = read("scripts/verify-deploy.sh");

@@ -102,6 +102,122 @@ test_legacy_recovered_authorization_binding_mutation() (
 test_legacy_recovered_authorization_binding_mutation
 [[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == legacy-recovered-authorization-binding ]] && exit 0
 
+test_data_signature_version_dispatch() (
+  local fixture_dir switch_script journal
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf "$fixture_dir"' EXIT
+  switch_script=${PGVECTOR_SWITCH_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}
+  journal="$fixture_dir/journal.json"
+  DATA_SIGNATURE_VERSION=2
+
+  for helper in data_signature_for_version load_journal_baseline; do
+    definition=$(awk -v signature="${helper}() {" '
+      $0 == signature { emit = 1 }
+      emit { print }
+      emit && $0 == "}" { exit }
+    ' "$switch_script")
+    [[ -n "$definition" ]] || {
+      echo "Missing signature-version helper: $helper" >&2
+      exit 1
+    }
+    eval "$definition"
+  done
+
+  die() {
+    printf 'fixture: %s\n' "$*" >&2
+    exit 1
+  }
+  legacy_data_signature() {
+    printf 'legacy:%s\n' "$1"
+  }
+  data_signature() {
+    printf 'v2:%s\n' "$1"
+  }
+
+  [[ $(data_signature_for_version fixture-container 1) == 'legacy:fixture-container' ]]
+  [[ $(data_signature_for_version fixture-container 2) == 'v2:fixture-container' ]]
+  if (data_signature_for_version fixture-container 3 >/dev/null 2>&1); then
+    echo 'Unsupported data signature version was accepted' >&2
+    exit 1
+  fi
+
+  jq -n '{
+    volumeFingerprint:("a" * 64), dataSignature:("b" * 64),
+    schemaSignature:("c" * 64), migrationSignature:("d" * 64),
+    databaseIdentity:"identity", originalCompose:"original",
+    candidateCompose:"candidate", sourceOverride:"source-override",
+    runId:"legacy-run", probeDatabase:"legacy-probe", appWasRunning:false
+  }' > "$journal"
+  load_journal_baseline
+  [[ "$expected_data_version" == 1 ]] || {
+    echo 'Unversioned legacy journal did not select signature version 1' >&2
+    exit 1
+  }
+
+  jq '.dataSignatureVersion = 2' "$journal" > "$fixture_dir/versioned.json"
+  install -m 600 "$fixture_dir/versioned.json" "$journal"
+  load_journal_baseline
+  [[ "$expected_data_version" == 2 ]] || {
+    echo 'Versioned journal did not select signature version 2' >&2
+    exit 1
+  }
+
+  for invalid_version in false null 0 3 1.5 '"1"'; do
+    jq --argjson invalid_version "$invalid_version" \
+      '.dataSignatureVersion = $invalid_version' "$journal" > "$fixture_dir/invalid.json"
+    install -m 600 "$fixture_dir/invalid.json" "$journal"
+    if (load_journal_baseline >/dev/null 2>&1); then
+      echo "Explicit $invalid_version data signature version downgraded to legacy v1" >&2
+      exit 1
+    fi
+  done
+)
+
+test_data_signature_version_dispatch
+[[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == data-signature-version ]] && exit 0
+
+test_migrator_producer_authority() (
+  local switch_script definition helper
+  switch_script=${PGVECTOR_SWITCH_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}
+
+  for helper in migrator_sql migration_signature create_logical_backup; do
+    definition=$(awk -v signature="${helper}() {" '
+      $0 == signature { emit = 1 }
+      emit { print }
+      emit && $0 == "}" { exit }
+    ' "$switch_script")
+    [[ -n "$definition" ]] || {
+      echo "Missing migrator-authority helper: $helper" >&2
+      exit 1
+    }
+    eval "$definition"
+  done
+
+  die() {
+    printf 'fixture: %s\n' "$*" >&2
+    exit 1
+  }
+
+  docker() {
+    local invocation=" $* "
+    [[ "$invocation" == *" -U noosphere_migrator "* ]] || {
+      echo "Digest or backup producer used bootstrap authority: $*" >&2
+      return 97
+    }
+    if [[ "$invocation" == *" psql "* ]]; then
+      printf 'migration|checksum|1|<null>|<null>\n'
+    else
+      printf 'logical-backup-fixture\n'
+    fi
+  }
+
+  migration_signature fixture-container >/dev/null
+  create_logical_backup fixture-container /dev/null
+)
+
+test_migrator_producer_authority
+[[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == migrator-producer-authority ]] && exit 0
+
 slug=${PLATFORM#linux/}
 run_id=${PGVECTOR_SWITCH_TEST_RUN_ID:-local-$$-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')}
 safe_id=${run_id//[^A-Za-z0-9]/-}
@@ -251,6 +367,10 @@ done
 [[ $(docker exec "$db_container" psql -XAtq -v ON_ERROR_STOP=1 -U noosphere -d noosphere -c 'SELECT 1;') == 1 ]]
 
 docker exec -i "$db_container" psql -X -v ON_ERROR_STOP=1 -U noosphere -d noosphere <<'SQL'
+CREATE ROLE noosphere_migrator LOGIN NOSUPERUSER;
+ALTER DATABASE noosphere OWNER TO noosphere_migrator;
+ALTER SCHEMA public OWNER TO noosphere_migrator;
+SET ROLE noosphere_migrator;
 CREATE TABLE "_prisma_migrations" (
   migration_name text PRIMARY KEY,
   checksum text NOT NULL,
@@ -267,6 +387,7 @@ CREATE TABLE "ApiKey" (id text PRIMARY KEY, name text NOT NULL);
 INSERT INTO "Topic" VALUES ('topic-1', 'Phase A2b');
 INSERT INTO "Article" VALUES ('article-1', 'Guarded switch', NULL);
 INSERT INTO "ApiKey" VALUES ('key-1', 'Fixture key');
+RESET ROLE;
 SQL
 
 switch_args=(
@@ -808,7 +929,12 @@ docker run --rm --network none --platform "$PLATFORM" \
   --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
   'printf "%s\n" "$1" > /authorization/writer-authorized; chmod 0600 /authorization/writer-authorized; sync' \
   -- "$SOURCE_IMAGE"
-jq '.recoveredFromPhase = "baseline-recorded" | del(.authorizationVolumeFingerprint) | .appWasRunning = false' \
+legacy_recovered_data=$(docker exec "$db_container" pg_dump -U noosphere -d noosphere \
+  --data-only --no-owner --no-privileges --inserts 2>/dev/null | sed -E '/^\\(un)?restrict /d' | sha256sum | awk '{print $1}')
+jq --arg legacy_data "$legacy_recovered_data" \
+  '.recoveredFromPhase = "baseline-recorded" |
+   del(.authorizationVolumeFingerprint, .dataSignatureVersion) |
+   .dataSignature = $legacy_data | .appWasRunning = false' \
   "$recovered_journal_saved" > "$journal"
 chmod 0600 "$journal"
 direct_recovered_journal="$journal.recovered-$(jq -r '.runId' "$journal")"
@@ -1396,6 +1522,10 @@ done
 [[ $(docker exec "$new_db_container" psql -XAtq -v ON_ERROR_STOP=1 -U noosphere -d noosphere -c 'SELECT 1;') == 1 ]]
 
 docker exec -i "$new_db_container" psql -X -v ON_ERROR_STOP=1 -U noosphere -d noosphere <<'SQL'
+CREATE ROLE noosphere_migrator LOGIN NOSUPERUSER;
+ALTER DATABASE noosphere OWNER TO noosphere_migrator;
+ALTER SCHEMA public OWNER TO noosphere_migrator;
+SET ROLE noosphere_migrator;
 CREATE TABLE "_prisma_migrations" (
   migration_name text PRIMARY KEY,
   checksum text NOT NULL,
@@ -1408,6 +1538,7 @@ INSERT INTO "_prisma_migrations"
 VALUES ('20260717_phase_a2b_new_install', 'new-install-checksum', 1, '2026-07-17 00:00:00+00', NULL);
 CREATE TABLE "Topic" (id text PRIMARY KEY, name text NOT NULL);
 INSERT INTO "Topic" VALUES ('new-topic-1', 'Fresh candidate');
+RESET ROLE;
 SQL
 
 # Direct Compose may create the app container, but the missing completion marker

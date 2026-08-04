@@ -42,11 +42,11 @@ Docker administrator access is an explicit trust boundary. The lock serializes t
 Install and upgrade through the same command:
 
 ```bash
-# Installer commit: d0e90c4188fef77e5f1670e5eda5e849e04c6830
-# Expected SHA-256: 716e9eb1e5f2e2f241e50ba971e2bb33269a7fbd698c5d4f9b7a55a4bf5df640
+# Installer commit: 05f234056af2a5e75c457a5f8371a2fc47566276
+# Expected SHA-256: 4bc73d369678defec08c2ce1912379cb4705f1a5ef5f8d2f9f6716ea4a117807
 installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/d0e90c4188fef77e5f1670e5eda5e849e04c6830/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '716e9eb1e5f2e2f241e50ba971e2bb33269a7fbd698c5d4f9b7a55a4bf5df640' "$installer" | sha256sum -c -
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/05f234056af2a5e75c457a5f8371a2fc47566276/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' '4bc73d369678defec08c2ce1912379cb4705f1a5ef5f8d2f9f6716ea4a117807' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 ```
 
@@ -133,6 +133,19 @@ checksums, volume fingerprint, platform, source/candidate identities, logical
 backup checksum, and database integrity signatures. If that evidence is
 inconsistent or unsafe, the guard stops the named app writer and refuses to
 guess at recovery; preserve the files and investigate manually.
+
+Current journals record `dataSignatureVersion: 2`. Version 2 streams every
+primary-keyed ordinary table in every user schema plus sequence state into a
+fixed per-object SHA-256 frame, uses server-quoted catalog identifiers, and
+executes reads as the non-superuser `noosphere_migrator` production owner. It
+rejects materialized-view data, foreign-table data, partitioned-table data,
+large objects, and ordinary tables without primary keys instead of silently
+narrowing backup coverage.
+Incomplete historical journals without the field are treated as version 1 and
+verified with the legacy `pg_dump --inserts` algorithm; an explicit null,
+boolean, or unsupported numeric version is rejected instead of being treated as
+absence. This keeps installer updates from stranding otherwise recoverable runs
+without allowing malformed evidence to downgrade its verification algorithm.
 
 The authorization volume contains two independent markers. The database marker
 permits candidate PostgreSQL provisioning only after the guard owns and binds

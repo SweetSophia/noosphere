@@ -19,6 +19,7 @@ on:
       - "scripts/rehearse-pgvector-volume-upgrade.sh"
       - "scripts/check-postgres-image-policy.mjs"
       - "scripts/switch-pgvector-compose.sh"
+      - "scripts/test-digest-order-independence.sh"
       - "scripts/test-pgvector-compose-switch.sh"
       - "scripts/verify-deploy.sh"
   push:
@@ -39,6 +40,7 @@ on:
       - "scripts/rehearse-pgvector-volume-upgrade.sh"
       - "scripts/check-postgres-image-policy.mjs"
       - "scripts/switch-pgvector-compose.sh"
+      - "scripts/test-digest-order-independence.sh"
       - "scripts/test-pgvector-compose-switch.sh"
       - "scripts/verify-deploy.sh"
 
@@ -57,7 +59,10 @@ env:
 jobs:
   rehearse-volume-upgrade:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Step budgets (30 + 10 + 35) plus checkout/tooling setup overhead exceed
+    # a 60-minute ceiling on slow arm64/QEMU runs; keep the job ceiling above
+    # the worst-case sequential total so it never kills a step mid-work.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -103,6 +108,12 @@ jobs:
       - name: Rehearse volume upgrade and rollback
         timeout-minutes: 30
         run: scripts/rehearse-pgvector-volume-upgrade.sh ${{ matrix.platform }}
+
+      - name: Test order-independent digest boundaries
+        timeout-minutes: 10
+        env:
+          RUN_ID: gha-digest-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.slug }}
+        run: scripts/test-digest-order-independence.sh ${{ matrix.platform }}
 
       - name: Test guarded Compose switch and interrupted-run recovery
         timeout-minutes: 35
