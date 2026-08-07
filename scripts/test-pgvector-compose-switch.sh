@@ -387,6 +387,22 @@ CREATE TABLE "ApiKey" (id text PRIMARY KEY, name text NOT NULL);
 INSERT INTO "Topic" VALUES ('topic-1', 'Phase A2b');
 INSERT INTO "Article" VALUES ('article-1', 'Guarded switch', NULL);
 INSERT INTO "ApiKey" VALUES ('key-1', 'Fixture key');
+-- Regression fixture for issue #298: BETWEEN-written compound CHECK
+-- constraints canonically re-group their deparse parens across a dump/restore
+-- round-trip, so the restore rehearsal must compare against the
+-- re-parse-normalized live schema baseline.
+CREATE TABLE "MemoryCapture" (
+  id text PRIMARY KEY,
+  "userText" text NOT NULL,
+  "assistantText" text NOT NULL,
+  CONSTRAINT "MemoryCapture_bounded_content"
+    CHECK (
+      octet_length("userText") BETWEEN 1 AND 12000
+      AND octet_length("assistantText") BETWEEN 1 AND 12000
+      AND octet_length("userText") + octet_length("assistantText") <= 20000
+    )
+);
+INSERT INTO "MemoryCapture" VALUES ('capture-1', 'fixture user text', 'fixture assistant text');
 RESET ROLE;
 SQL
 

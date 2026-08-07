@@ -168,4 +168,4 @@ For a failed rollback:
 - inspect the exact database container, volume consumers, and guard diagnostics; and
 - recover only from the recorded source image and backup evidence.
 
-The logical backup is restore-tested during the transaction, but it is not a substitute for the normal independent backup-retention policy.
+The logical backup is restore-tested during the transaction, but it is not a substitute for the normal independent backup-retention policy. The restore test compares schema bytes against the live baseline normalized through the same dump/re-parse path: a dump/restore round-trip canonically re-groups nested boolean CHECK-constraint parens (for example BETWEEN-written compound CHECKs), so a raw live-to-restored byte comparison can never match (issue #298).

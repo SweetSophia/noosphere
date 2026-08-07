@@ -1348,7 +1348,7 @@ attempt_source_recovery() (
   trap - ERR
   set -Eeuo pipefail
   load_journal_baseline
-  local maintenance="noosphere-a2b-source-${run_id}" current staged recovery_restore_volume labels
+  local maintenance="noosphere-a2b-source-${run_id}" current staged recovery_restore_volume recovery_schema_reparse_volume labels
 
   # `recovered` is the durable rollback commit boundary. The source database,
   # marker, and desired state were already authenticated before this phase was
@@ -1408,6 +1408,15 @@ attempt_source_recovery() (
     [[ -z $(docker ps -aq --no-trunc --filter "volume=$recovery_restore_volume") ]] ||
       die 'restore-test volume still has a recovery consumer'
     docker volume rm "$recovery_restore_volume" >/dev/null
+  fi
+  recovery_schema_reparse_volume="noosphere_a2b_schema_reparse_${run_id//-/_}"
+  if docker volume inspect "$recovery_schema_reparse_volume" >/dev/null 2>&1; then
+    labels=$(docker volume inspect "$recovery_schema_reparse_volume" --format '{{json .Labels}}')
+    jq -e --arg key "$LABEL_KEY" --arg run "$run_id" '.[$key] == $run' >/dev/null <<< "$labels" ||
+      die 'schema-reparse volume has invalid recovery ownership'
+    [[ -z $(docker ps -aq --no-trunc --filter "volume=$recovery_schema_reparse_volume") ]] ||
+      die 'schema-reparse volume still has a recovery consumer'
+    docker volume rm "$recovery_schema_reparse_volume" >/dev/null
   fi
   start_maintenance "$maintenance" "$SOURCE_IMAGE"
   assert_image_identity "$maintenance" "$SOURCE_IMAGE" source
@@ -1793,6 +1802,9 @@ rollback_maintenance="noosphere-a2b-rollback-$run_id"
 final_maintenance="noosphere-a2b-final-$run_id"
 restore_container="noosphere-a2b-restore-$run_id"
 restore_volume="noosphere_a2b_restore_${run_id//-/_}"
+schema_reparse_container="noosphere-a2b-schema-reparse-$run_id"
+schema_reparse_volume="noosphere_a2b_schema_reparse_${run_id//-/_}"
+live_schema_dump="$run_dir/live-schema-dump.sql"
 
 start_maintenance "$source_maintenance" "$SOURCE_IMAGE"
 assert_image_identity "$source_maintenance" "$SOURCE_IMAGE" source
@@ -1800,6 +1812,15 @@ expected_data=$(data_signature "$source_maintenance")
 expected_schema=$(schema_signature "$source_maintenance")
 expected_migrations=$(migration_signature "$source_maintenance")
 expected_database=$(database_identity "$source_maintenance")
+
+# The restore rehearsal below cannot compare raw schema bytes against the live
+# baseline: a dump/restore round-trip canonically re-groups nested boolean
+# CHECK-constraint parens (issue #298), so a restored digest can never equal
+# the live one. Capture the live schema text now so the rehearsal can normalize
+# it through the same re-parse path instead.
+normalized_dump "$source_maintenance" --schema-only > "$live_schema_dump"
+[[ -s "$live_schema_dump" ]] || die 'live schema dump is empty'
+fsync_path "$live_schema_dump"
 
 backup_temp="$run_dir/.noosphere.dump.tmp"
 create_logical_backup "$source_maintenance" "$backup_temp"
@@ -1834,12 +1855,32 @@ docker exec "$restore_container" psql -Xq -v ON_ERROR_STOP=1 -U noosphere -d noo
 docker exec -i "$restore_container" pg_restore -U noosphere -d noosphere --role=noosphere_migrator \
   --clean --if-exists --no-owner --no-privileges < "$backup_file"
 [[ $(data_signature "$restore_container") == "$expected_data" ]] || die 'restored backup data digest mismatch'
-[[ $(schema_signature "$restore_container") == "$expected_schema" ]] || die 'restored backup schema digest mismatch'
+
+# Re-parse-normalize the live schema baseline for the restore rehearsal. The
+# restored catalog re-parsed the dumped DDL once, so its canonical deparse
+# differs from the live baseline whenever constraints carry nested boolean
+# parens (issue #298); pushing the same live dump text through the identical
+# re-parse path yields the byte-stable comparison form. The backup restore runs
+# as the migrator role, so this load does too.
+docker volume create --driver local --label "$LABEL_KEY=$run_id" "$schema_reparse_volume" >/dev/null
+docker run -d --name "$schema_reparse_container" --label "$LABEL_KEY=$run_id" --platform "$platform" --network none \
+  -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_USER=noosphere -e POSTGRES_DB=noosphere \
+  -v "$schema_reparse_volume:/var/lib/postgresql/data" "$SOURCE_IMAGE" >/dev/null
+wait_postgres "$schema_reparse_container"
+assert_image_identity "$schema_reparse_container" "$SOURCE_IMAGE" source
+docker exec "$schema_reparse_container" psql -Xq -v ON_ERROR_STOP=1 -U noosphere -d noosphere -c \
+  'CREATE ROLE noosphere_migrator LOGIN NOSUPERUSER; ALTER DATABASE noosphere OWNER TO noosphere_migrator; ALTER SCHEMA public OWNER TO noosphere_migrator;'
+docker exec -i "$schema_reparse_container" psql -Xq -v ON_ERROR_STOP=1 -U noosphere_migrator -d noosphere < "$live_schema_dump"
+expected_schema_restore=$(schema_signature "$schema_reparse_container")
+[[ $(schema_signature "$restore_container") == "$expected_schema_restore" ]] || die 'restored backup schema digest mismatch'
 [[ $(migration_signature "$restore_container") == "$expected_migrations" ]] || die 'restored backup migration mismatch'
 [[ $(database_identity "$restore_container") == "$expected_database" ]] || die 'restored backup database identity mismatch'
 docker stop --time 60 "$restore_container" >/dev/null
 docker rm "$restore_container" >/dev/null
 docker volume rm "$restore_volume" >/dev/null
+docker stop --time 60 "$schema_reparse_container" >/dev/null
+docker rm "$schema_reparse_container" >/dev/null
+docker volume rm "$schema_reparse_volume" >/dev/null
 update_journal backup-restored
 
 start_maintenance "$candidate_maintenance" "$CANDIDATE_IMAGE"
