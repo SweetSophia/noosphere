@@ -26,11 +26,11 @@ openclaw noosphere setup
 or:
 
 ```bash
-# Installer commit: 05f234056af2a5e75c457a5f8371a2fc47566276
-# Expected SHA-256: 4bc73d369678defec08c2ce1912379cb4705f1a5ef5f8d2f9f6716ea4a117807
+# Installer commit: 53153b3837e293c1ccc6d1a1a2c858f7ce346477
+# Expected SHA-256: abed43f34bb73b15fdc9bb560a0002c6bec6d5ec4b24107523174d9a456f90cd
 installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/05f234056af2a5e75c457a5f8371a2fc47566276/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '4bc73d369678defec08c2ce1912379cb4705f1a5ef5f8d2f9f6716ea4a117807' "$installer" | sha256sum -c -
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/53153b3837e293c1ccc6d1a1a2c858f7ce346477/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' 'abed43f34bb73b15fdc9bb560a0002c6bec6d5ec4b24107523174d9a456f90cd' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 ```
 
