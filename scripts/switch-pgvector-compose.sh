@@ -1321,6 +1321,7 @@ cleanup_rehearsal_resources() {
   for current in "$restore_container" "$schema_reparse_container"; do
     if ! labels=$(docker inspect "$current" --format '{{json .Config.Labels}}' 2>/dev/null); then
       if ! existing=$(docker ps -aq --no-trunc --filter "name=^/${current}$"); then
+        printf '[pgvector-switch] ERROR: could not determine whether rehearsal container exists: %s\n' "$current" >&2
         cleanup_failed=true
       elif [[ -n "$existing" ]]; then
         printf '[pgvector-switch] ERROR: could not inspect rehearsal container: %s\n' "$current" >&2
@@ -1334,13 +1335,16 @@ cleanup_rehearsal_resources() {
       continue
     fi
     if ! state=$(docker inspect "$current" --format '{{.State.Running}}' 2>/dev/null); then
+      printf '[pgvector-switch] ERROR: could not inspect rehearsal container state: %s\n' "$current" >&2
       cleanup_failed=true
       continue
     fi
     if [[ "$state" == true ]] && ! docker stop --time 60 "$current" >/dev/null; then
+      printf '[pgvector-switch] ERROR: could not stop rehearsal container: %s\n' "$current" >&2
       cleanup_failed=true
     fi
     if ! docker rm "$current" >/dev/null; then
+      printf '[pgvector-switch] ERROR: could not remove rehearsal container: %s\n' "$current" >&2
       cleanup_failed=true
     fi
   done
@@ -1348,6 +1352,7 @@ cleanup_rehearsal_resources() {
   for current in "$restore_volume" "$schema_reparse_volume"; do
     if ! labels=$(docker volume inspect "$current" --format '{{json .Labels}}' 2>/dev/null); then
       if ! names=$(docker volume ls -q --filter "name=$current"); then
+        printf '[pgvector-switch] ERROR: could not determine whether rehearsal volume exists: %s\n' "$current" >&2
         cleanup_failed=true
       else
         for existing in $names; do
@@ -1365,14 +1370,17 @@ cleanup_rehearsal_resources() {
       continue
     fi
     if ! consumers=$(docker ps -aq --no-trunc --filter "volume=$current"); then
+      printf '[pgvector-switch] ERROR: could not inspect rehearsal volume consumers: %s\n' "$current" >&2
       cleanup_failed=true
     elif [[ -n "$consumers" ]]; then
+      printf '[pgvector-switch] ERROR: refusing removal of in-use rehearsal volume: %s\n' "$current" >&2
       cleanup_failed=true
     fi
     # Docker's non-force removal remains the final consumer safety gate. Try it
     # even when the diagnostic consumer query failed so later safe teardown is
     # never skipped because of an earlier daemon/API error.
     if ! docker volume rm "$current" >/dev/null; then
+      printf '[pgvector-switch] ERROR: could not remove rehearsal volume: %s\n' "$current" >&2
       cleanup_failed=true
     fi
   done

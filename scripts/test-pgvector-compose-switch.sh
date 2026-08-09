@@ -177,11 +177,12 @@ test_data_signature_version_dispatch
 [[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == data-signature-version ]] && exit 0
 
 test_rehearsal_cleanup_continues_after_failure() (
-  local fixture_dir switch_script command_log restore_failure_line reparse_cleanup_line
+  local fixture_dir switch_script command_log error_log restore_failure_line reparse_cleanup_line
   fixture_dir=$(mktemp -d)
   trap 'rm -rf "$fixture_dir"' EXIT
   switch_script=${PGVECTOR_SWITCH_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}
   command_log="$fixture_dir/docker.log"
+  error_log="$fixture_dir/errors.log"
   run_id=fixture-run
   LABEL_KEY=io.noosphere.pgvector-switch-run
 
@@ -215,6 +216,12 @@ test_rehearsal_cleanup_continues_after_failure() (
       fi
       return 0
     fi
+    if [[ $1 == stop && ${FIXTURE_STOP_FAILURE:-} == "${4:-}" ]]; then
+      return 76
+    fi
+    if [[ $1 == rm && ${FIXTURE_CONTAINER_RM_FAILURE:-} == "${2:-}" ]]; then
+      return 77
+    fi
     if [[ $1 == volume && $2 == inspect ]]; then
       if [[ ${FIXTURE_INSPECT_FAILURE:-} == "$3" ]]; then
         return 74
@@ -246,59 +253,96 @@ test_rehearsal_cleanup_continues_after_failure() (
     return 0
   }
 
+  : > "$error_log"
   FIXTURE_VOLUME_RM_FAILURE=restore-volume
   if cleanup_rehearsal_resources \
-    restore-container schema-reparse-container restore-volume schema-reparse-volume; then
+    restore-container schema-reparse-container restore-volume schema-reparse-volume 2>> "$error_log"; then
     echo 'Rehearsal cleanup hid a restore-volume removal failure' >&2
     exit 1
   fi
   unset FIXTURE_VOLUME_RM_FAILURE
 
-  rg -Fx 'stop --time 60 schema-reparse-container' "$command_log" >/dev/null
-  rg -Fx 'rm schema-reparse-container' "$command_log" >/dev/null
-  restore_failure_line=$(rg -n -F 'volume rm restore-volume' "$command_log" | cut -d: -f1)
-  reparse_cleanup_line=$(rg -n -F 'volume rm schema-reparse-volume' "$command_log" | cut -d: -f1)
+  grep -Fx '[pgvector-switch] ERROR: could not remove rehearsal volume: restore-volume' "$error_log" >/dev/null
+  grep -Fx 'stop --time 60 schema-reparse-container' "$command_log" >/dev/null
+  grep -Fx 'rm schema-reparse-container' "$command_log" >/dev/null
+  restore_failure_line=$(grep -n -F 'volume rm restore-volume' "$command_log" | cut -d: -f1)
+  reparse_cleanup_line=$(grep -n -F 'volume rm schema-reparse-volume' "$command_log" | cut -d: -f1)
   (( reparse_cleanup_line > restore_failure_line )) || {
     echo 'Rehearsal cleanup skipped the reparse volume after an earlier failure' >&2
     exit 1
   }
 
   : > "$command_log"
+  : > "$error_log"
   FIXTURE_INSPECT_FAILURE=restore-container
   if cleanup_rehearsal_resources \
-    restore-container schema-reparse-container restore-volume schema-reparse-volume; then
+    restore-container schema-reparse-container restore-volume schema-reparse-volume 2>> "$error_log"; then
     echo 'Rehearsal cleanup hid an existing-container inspect failure' >&2
     exit 1
   fi
   unset FIXTURE_INSPECT_FAILURE
-  ! rg -Fx 'rm restore-container' "$command_log" >/dev/null
-  rg -Fx 'rm schema-reparse-container' "$command_log" >/dev/null
-  rg -Fx 'volume rm restore-volume' "$command_log" >/dev/null
-  rg -Fx 'volume rm schema-reparse-volume' "$command_log" >/dev/null
+  grep -Fx '[pgvector-switch] ERROR: could not inspect rehearsal container: restore-container' "$error_log" >/dev/null
+  ! grep -Fx 'rm restore-container' "$command_log" >/dev/null
+  grep -Fx 'rm schema-reparse-container' "$command_log" >/dev/null
+  grep -Fx 'volume rm restore-volume' "$command_log" >/dev/null
+  grep -Fx 'volume rm schema-reparse-volume' "$command_log" >/dev/null
 
   : > "$command_log"
+  : > "$error_log"
   FIXTURE_BAD_LABEL=restore-container
   if cleanup_rehearsal_resources \
-    restore-container schema-reparse-container restore-volume schema-reparse-volume; then
+    restore-container schema-reparse-container restore-volume schema-reparse-volume 2>> "$error_log"; then
     echo 'Rehearsal cleanup accepted an invalid container label' >&2
     exit 1
   fi
   unset FIXTURE_BAD_LABEL
-  ! rg -Fx 'rm restore-container' "$command_log" >/dev/null
-  rg -Fx 'rm schema-reparse-container' "$command_log" >/dev/null
-  rg -Fx 'volume rm restore-volume' "$command_log" >/dev/null
-  rg -Fx 'volume rm schema-reparse-volume' "$command_log" >/dev/null
+  grep -Fx '[pgvector-switch] ERROR: refusing unlabelled container removal: restore-container' "$error_log" >/dev/null
+  ! grep -Fx 'rm restore-container' "$command_log" >/dev/null
+  grep -Fx 'rm schema-reparse-container' "$command_log" >/dev/null
+  grep -Fx 'volume rm restore-volume' "$command_log" >/dev/null
+  grep -Fx 'volume rm schema-reparse-volume' "$command_log" >/dev/null
 
   : > "$command_log"
+  : > "$error_log"
   FIXTURE_CONSUMER_QUERY_FAILURE=restore-volume
   if cleanup_rehearsal_resources \
-    restore-container schema-reparse-container restore-volume schema-reparse-volume; then
+    restore-container schema-reparse-container restore-volume schema-reparse-volume 2>> "$error_log"; then
     echo 'Rehearsal cleanup hid a volume-consumer query failure' >&2
     exit 1
   fi
   unset FIXTURE_CONSUMER_QUERY_FAILURE
-  rg -Fx 'volume rm restore-volume' "$command_log" >/dev/null
-  rg -Fx 'volume rm schema-reparse-volume' "$command_log" >/dev/null
+  grep -Fx '[pgvector-switch] ERROR: could not inspect rehearsal volume consumers: restore-volume' "$error_log" >/dev/null
+  grep -Fx 'volume rm restore-volume' "$command_log" >/dev/null
+  grep -Fx 'volume rm schema-reparse-volume' "$command_log" >/dev/null
+
+  : > "$command_log"
+  : > "$error_log"
+  FIXTURE_STOP_FAILURE=restore-container
+  if cleanup_rehearsal_resources \
+    restore-container schema-reparse-container restore-volume schema-reparse-volume 2>> "$error_log"; then
+    echo 'Rehearsal cleanup hid a container stop failure' >&2
+    exit 1
+  fi
+  unset FIXTURE_STOP_FAILURE
+  grep -Fx '[pgvector-switch] ERROR: could not stop rehearsal container: restore-container' "$error_log" >/dev/null
+  grep -Fx 'rm restore-container' "$command_log" >/dev/null
+  grep -Fx 'rm schema-reparse-container' "$command_log" >/dev/null
+  grep -Fx 'volume rm restore-volume' "$command_log" >/dev/null
+  grep -Fx 'volume rm schema-reparse-volume' "$command_log" >/dev/null
+
+  : > "$command_log"
+  : > "$error_log"
+  FIXTURE_CONTAINER_RM_FAILURE=restore-container
+  if cleanup_rehearsal_resources \
+    restore-container schema-reparse-container restore-volume schema-reparse-volume 2>> "$error_log"; then
+    echo 'Rehearsal cleanup hid a container removal failure' >&2
+    exit 1
+  fi
+  unset FIXTURE_CONTAINER_RM_FAILURE
+  grep -Fx '[pgvector-switch] ERROR: could not remove rehearsal container: restore-container' "$error_log" >/dev/null
+  grep -Fx 'rm schema-reparse-container' "$command_log" >/dev/null
+  grep -Fx 'volume rm restore-volume' "$command_log" >/dev/null
+  grep -Fx 'volume rm schema-reparse-volume' "$command_log" >/dev/null
 )
 
 test_rehearsal_cleanup_continues_after_failure
