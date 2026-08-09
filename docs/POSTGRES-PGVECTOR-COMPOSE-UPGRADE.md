@@ -42,11 +42,11 @@ Docker administrator access is an explicit trust boundary. The lock serializes t
 Install and upgrade through the same command:
 
 ```bash
-# Installer commit: 42391486d420942de04f3382cfbcac2735962246
-# Expected SHA-256: 11de60e7d7bed285282efaa1c41a1f2b1ad7a8463d288438c18460191ffb7e4c
+# Installer commit: 5a94ef3530cd232265c53699ee15f37d9ec89e04
+# Expected SHA-256: 46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b
 installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/42391486d420942de04f3382cfbcac2735962246/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '11de60e7d7bed285282efaa1c41a1f2b1ad7a8463d288438c18460191ffb7e4c' "$installer" | sha256sum -c -
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5a94ef3530cd232265c53699ee15f37d9ec89e04/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' '46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 ```
 
