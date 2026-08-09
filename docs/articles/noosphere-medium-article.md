@@ -353,11 +353,11 @@ It also supports automatic prompt-time recall through OpenClaw's before_prompt_b
 
 Quick install on the machine running OpenClaw Gateway:
 
-    # Installer commit: 53153b3837e293c1ccc6d1a1a2c858f7ce346477
-    # Expected SHA-256: abed43f34bb73b15fdc9bb560a0002c6bec6d5ec4b24107523174d9a456f90cd
+    # Installer commit: 055cce5b1d45f2760c0e4d25d505da9ff83b68da
+    # Expected SHA-256: 865b174bb758ff0d4dddfcdf50fec51588407ec96539e481d18d12d64dcc425c
     installer="$(mktemp)"
-    curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/53153b3837e293c1ccc6d1a1a2c858f7ce346477/install-openclaw.sh -o "$installer"
-    printf '%s  %s\n' 'abed43f34bb73b15fdc9bb560a0002c6bec6d5ec4b24107523174d9a456f90cd' "$installer" | sha256sum -c -
+    curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/055cce5b1d45f2760c0e4d25d505da9ff83b68da/install-openclaw.sh -o "$installer"
+    printf '%s  %s\n' '865b174bb758ff0d4dddfcdf50fec51588407ec96539e481d18d12d64dcc425c' "$installer" | sha256sum -c -
     bash "$installer" && rm -f "$installer"
     openclaw noosphere doctor
     openclaw noosphere status
