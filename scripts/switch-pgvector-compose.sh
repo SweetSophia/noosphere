@@ -85,9 +85,18 @@ log() {
 }
 
 die() {
+  local caller_line=${BASH_LINENO[0]:-$LINENO}
   printf '[pgvector-switch] ERROR: %s\n' "$*" >&2
   if [[ "$fail_closed_on_die" == true && -n "$app_container" ]]; then
     docker stop --time 60 "$app_container" >/dev/null 2>&1 || true
+  fi
+  # An explicit `exit` does not trigger Bash's ERR trap. Once a durable switch
+  # journal has entered fail-closed mode, route fatal paths through the same
+  # state-aware handler as ordinary command failures so incomplete validated
+  # transitions recover source in this invocation. Early argument/preflight
+  # failures occur before `on_error` exists and keep the original direct exit.
+  if [[ "$fail_closed_on_die" == true ]] && declare -F on_error >/dev/null; then
+    on_error "$caller_line" 1
   fi
   exit 1
 }
@@ -1302,6 +1311,75 @@ stop_remove() {
   assert_volume_consumers
 }
 
+cleanup_rehearsal_resources() {
+  local restore_container=$1 schema_reparse_container=$2 restore_volume=$3 schema_reparse_volume=$4
+  local current labels consumers existing names state cleanup_failed=false
+
+  # Authenticate every resource before teardown, then attempt every cleanup
+  # step even if an earlier Docker operation fails. The aggregate failure still
+  # reaches the ERR trap, but the second container/volume is not skipped.
+  for current in "$restore_container" "$schema_reparse_container"; do
+    if ! labels=$(docker inspect "$current" --format '{{json .Config.Labels}}' 2>/dev/null); then
+      if ! existing=$(docker ps -aq --no-trunc --filter "name=^/${current}$"); then
+        cleanup_failed=true
+      elif [[ -n "$existing" ]]; then
+        printf '[pgvector-switch] ERROR: could not inspect rehearsal container: %s\n' "$current" >&2
+        cleanup_failed=true
+      fi
+      continue
+    fi
+    if ! jq -e --arg key "$LABEL_KEY" --arg run "$run_id" '.[$key] == $run' >/dev/null <<< "$labels"; then
+      printf '[pgvector-switch] ERROR: refusing unlabelled container removal: %s\n' "$current" >&2
+      cleanup_failed=true
+      continue
+    fi
+    if ! state=$(docker inspect "$current" --format '{{.State.Running}}' 2>/dev/null); then
+      cleanup_failed=true
+      continue
+    fi
+    if [[ "$state" == true ]] && ! docker stop --time 60 "$current" >/dev/null; then
+      cleanup_failed=true
+    fi
+    if ! docker rm "$current" >/dev/null; then
+      cleanup_failed=true
+    fi
+  done
+
+  for current in "$restore_volume" "$schema_reparse_volume"; do
+    if ! labels=$(docker volume inspect "$current" --format '{{json .Labels}}' 2>/dev/null); then
+      if ! names=$(docker volume ls -q --filter "name=$current"); then
+        cleanup_failed=true
+      else
+        for existing in $names; do
+          if [[ "$existing" == "$current" ]]; then
+            printf '[pgvector-switch] ERROR: could not inspect rehearsal volume: %s\n' "$current" >&2
+            cleanup_failed=true
+          fi
+        done
+      fi
+      continue
+    fi
+    if ! jq -e --arg key "$LABEL_KEY" --arg run "$run_id" '.[$key] == $run' >/dev/null <<< "$labels"; then
+      printf '[pgvector-switch] ERROR: refusing unlabelled volume removal: %s\n' "$current" >&2
+      cleanup_failed=true
+      continue
+    fi
+    if ! consumers=$(docker ps -aq --no-trunc --filter "volume=$current"); then
+      cleanup_failed=true
+    elif [[ -n "$consumers" ]]; then
+      cleanup_failed=true
+    fi
+    # Docker's non-force removal remains the final consumer safety gate. Try it
+    # even when the diagnostic consumer query failed so later safe teardown is
+    # never skipped because of an earlier daemon/API error.
+    if ! docker volume rm "$current" >/dev/null; then
+      cleanup_failed=true
+    fi
+  done
+
+  [[ "$cleanup_failed" == false ]]
+}
+
 compose_up_db() {
   local base=$1 override=${2:-}
   compose_args "$base"
@@ -1348,7 +1426,7 @@ attempt_source_recovery() (
   trap - ERR
   set -Eeuo pipefail
   load_journal_baseline
-  local maintenance="noosphere-a2b-source-${run_id}" current staged recovery_restore_volume recovery_schema_reparse_volume labels
+  local maintenance="noosphere-a2b-source-${run_id}" current staged recovery_restore_volume recovery_schema_reparse_volume
 
   # `recovered` is the durable rollback commit boundary. The source database,
   # marker, and desired state were already authenticated before this phase was
@@ -1396,28 +1474,18 @@ attempt_source_recovery() (
     docker stop --time 60 "$db_container" >/dev/null
     docker rm "$db_container" >/dev/null
   fi
+  recovery_restore_volume="noosphere_a2b_restore_${run_id//-/_}"
+  recovery_schema_reparse_volume="noosphere_a2b_schema_reparse_${run_id//-/_}"
+  cleanup_rehearsal_resources \
+    "noosphere-a2b-restore-$run_id" \
+    "noosphere-a2b-schema-reparse-$run_id" \
+    "$recovery_restore_volume" \
+    "$recovery_schema_reparse_volume" ||
+    die 'restore-rehearsal cleanup failed during source recovery'
   for current in $(docker ps -aq --filter "label=$LABEL_KEY=$run_id"); do
     docker stop --time 60 "$current" >/dev/null 2>&1
     docker rm "$current" >/dev/null 2>&1
   done
-  recovery_restore_volume="noosphere_a2b_restore_${run_id//-/_}"
-  if docker volume inspect "$recovery_restore_volume" >/dev/null 2>&1; then
-    labels=$(docker volume inspect "$recovery_restore_volume" --format '{{json .Labels}}')
-    jq -e --arg key "$LABEL_KEY" --arg run "$run_id" '.[$key] == $run' >/dev/null <<< "$labels" ||
-      die 'restore-test volume has invalid recovery ownership'
-    [[ -z $(docker ps -aq --no-trunc --filter "volume=$recovery_restore_volume") ]] ||
-      die 'restore-test volume still has a recovery consumer'
-    docker volume rm "$recovery_restore_volume" >/dev/null
-  fi
-  recovery_schema_reparse_volume="noosphere_a2b_schema_reparse_${run_id//-/_}"
-  if docker volume inspect "$recovery_schema_reparse_volume" >/dev/null 2>&1; then
-    labels=$(docker volume inspect "$recovery_schema_reparse_volume" --format '{{json .Labels}}')
-    jq -e --arg key "$LABEL_KEY" --arg run "$run_id" '.[$key] == $run' >/dev/null <<< "$labels" ||
-      die 'schema-reparse volume has invalid recovery ownership'
-    [[ -z $(docker ps -aq --no-trunc --filter "volume=$recovery_schema_reparse_volume") ]] ||
-      die 'schema-reparse volume still has a recovery consumer'
-    docker volume rm "$recovery_schema_reparse_volume" >/dev/null
-  fi
   start_maintenance "$maintenance" "$SOURCE_IMAGE"
   assert_image_identity "$maintenance" "$SOURCE_IMAGE" source
   if [[ -n "${expected_data:-}" ]]; then
@@ -1872,15 +1940,15 @@ docker exec "$schema_reparse_container" psql -Xq -v ON_ERROR_STOP=1 -U noosphere
   'CREATE ROLE noosphere_migrator LOGIN NOSUPERUSER; ALTER DATABASE noosphere OWNER TO noosphere_migrator; ALTER SCHEMA public OWNER TO noosphere_migrator;'
 docker exec -i "$schema_reparse_container" psql -Xq -v ON_ERROR_STOP=1 -U noosphere_migrator -d noosphere < "$live_schema_dump"
 expected_schema_restore=$(schema_signature "$schema_reparse_container")
+if [[ ${NOOSPHERE_A2B_TEST_FORCE_RESTORE_SCHEMA_MISMATCH:-} == true ]]; then
+  expected_schema_restore=0000000000000000000000000000000000000000000000000000000000000000
+fi
 [[ $(schema_signature "$restore_container") == "$expected_schema_restore" ]] || die 'restored backup schema digest mismatch'
 [[ $(migration_signature "$restore_container") == "$expected_migrations" ]] || die 'restored backup migration mismatch'
 [[ $(database_identity "$restore_container") == "$expected_database" ]] || die 'restored backup database identity mismatch'
-docker stop --time 60 "$restore_container" >/dev/null
-docker rm "$restore_container" >/dev/null
-docker volume rm "$restore_volume" >/dev/null
-docker stop --time 60 "$schema_reparse_container" >/dev/null
-docker rm "$schema_reparse_container" >/dev/null
-docker volume rm "$schema_reparse_volume" >/dev/null
+cleanup_rehearsal_resources \
+  "$restore_container" "$schema_reparse_container" \
+  "$restore_volume" "$schema_reparse_volume"
 update_journal backup-restored
 
 start_maintenance "$candidate_maintenance" "$CANDIDATE_IMAGE"

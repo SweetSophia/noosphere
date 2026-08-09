@@ -176,6 +176,134 @@ test_data_signature_version_dispatch() (
 test_data_signature_version_dispatch
 [[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == data-signature-version ]] && exit 0
 
+test_rehearsal_cleanup_continues_after_failure() (
+  local fixture_dir switch_script command_log restore_failure_line reparse_cleanup_line
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf "$fixture_dir"' EXIT
+  switch_script=${PGVECTOR_SWITCH_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}
+  command_log="$fixture_dir/docker.log"
+  run_id=fixture-run
+  LABEL_KEY=io.noosphere.pgvector-switch-run
+
+  eval "$(
+    awk '
+      /^cleanup_rehearsal_resources\(\) \{/ { emit = 1 }
+      emit { print }
+      emit && /^}$/ { exit }
+    ' "$switch_script"
+  )"
+
+  die() {
+    printf 'fixture: %s\n' "$*" >&2
+    exit 1
+  }
+
+  docker() {
+    printf '%s\n' "$*" >> "$command_log"
+    if [[ $1 == inspect ]]; then
+      if [[ ${FIXTURE_INSPECT_FAILURE:-} == "$2" ]]; then
+        return 74
+      fi
+      if [[ ${3:-} == --format ]]; then
+        if [[ $4 == '{{.State.Running}}' ]]; then
+          printf true
+        elif [[ ${FIXTURE_BAD_LABEL:-} == "$2" ]]; then
+          printf '{"%s":"other-run"}' "$LABEL_KEY"
+        else
+          printf '{"%s":"%s"}' "$LABEL_KEY" "$run_id"
+        fi
+      fi
+      return 0
+    fi
+    if [[ $1 == volume && $2 == inspect ]]; then
+      if [[ ${FIXTURE_INSPECT_FAILURE:-} == "$3" ]]; then
+        return 74
+      fi
+      if [[ ${4:-} == --format ]]; then
+        if [[ ${FIXTURE_BAD_LABEL:-} == "$3" ]]; then
+          printf '{"%s":"other-run"}' "$LABEL_KEY"
+        else
+          printf '{"%s":"%s"}' "$LABEL_KEY" "$run_id"
+        fi
+      fi
+      return 0
+    fi
+    if [[ $1 == volume && $2 == ls ]]; then
+      [[ ${FIXTURE_INSPECT_FAILURE:-} == restore-volume ]] && printf '%s\n' restore-volume
+      return 0
+    fi
+    if [[ $1 == ps ]]; then
+      if [[ ${FIXTURE_CONSUMER_QUERY_FAILURE:-} == restore-volume && "$*" == *'volume=restore-volume'* ]]; then
+        return 75
+      fi
+      [[ ${FIXTURE_INSPECT_FAILURE:-} == restore-container && "$*" == *'name=^/restore-container$'* ]] &&
+        printf '%s\n' fixture-container-id
+      return 0
+    fi
+    if [[ $1 == volume && $2 == rm && ${FIXTURE_VOLUME_RM_FAILURE:-} == "$3" ]]; then
+      return 73
+    fi
+    return 0
+  }
+
+  FIXTURE_VOLUME_RM_FAILURE=restore-volume
+  if cleanup_rehearsal_resources \
+    restore-container schema-reparse-container restore-volume schema-reparse-volume; then
+    echo 'Rehearsal cleanup hid a restore-volume removal failure' >&2
+    exit 1
+  fi
+  unset FIXTURE_VOLUME_RM_FAILURE
+
+  rg -Fx 'stop --time 60 schema-reparse-container' "$command_log" >/dev/null
+  rg -Fx 'rm schema-reparse-container' "$command_log" >/dev/null
+  restore_failure_line=$(rg -n -F 'volume rm restore-volume' "$command_log" | cut -d: -f1)
+  reparse_cleanup_line=$(rg -n -F 'volume rm schema-reparse-volume' "$command_log" | cut -d: -f1)
+  (( reparse_cleanup_line > restore_failure_line )) || {
+    echo 'Rehearsal cleanup skipped the reparse volume after an earlier failure' >&2
+    exit 1
+  }
+
+  : > "$command_log"
+  FIXTURE_INSPECT_FAILURE=restore-container
+  if cleanup_rehearsal_resources \
+    restore-container schema-reparse-container restore-volume schema-reparse-volume; then
+    echo 'Rehearsal cleanup hid an existing-container inspect failure' >&2
+    exit 1
+  fi
+  unset FIXTURE_INSPECT_FAILURE
+  ! rg -Fx 'rm restore-container' "$command_log" >/dev/null
+  rg -Fx 'rm schema-reparse-container' "$command_log" >/dev/null
+  rg -Fx 'volume rm restore-volume' "$command_log" >/dev/null
+  rg -Fx 'volume rm schema-reparse-volume' "$command_log" >/dev/null
+
+  : > "$command_log"
+  FIXTURE_BAD_LABEL=restore-container
+  if cleanup_rehearsal_resources \
+    restore-container schema-reparse-container restore-volume schema-reparse-volume; then
+    echo 'Rehearsal cleanup accepted an invalid container label' >&2
+    exit 1
+  fi
+  unset FIXTURE_BAD_LABEL
+  ! rg -Fx 'rm restore-container' "$command_log" >/dev/null
+  rg -Fx 'rm schema-reparse-container' "$command_log" >/dev/null
+  rg -Fx 'volume rm restore-volume' "$command_log" >/dev/null
+  rg -Fx 'volume rm schema-reparse-volume' "$command_log" >/dev/null
+
+  : > "$command_log"
+  FIXTURE_CONSUMER_QUERY_FAILURE=restore-volume
+  if cleanup_rehearsal_resources \
+    restore-container schema-reparse-container restore-volume schema-reparse-volume; then
+    echo 'Rehearsal cleanup hid a volume-consumer query failure' >&2
+    exit 1
+  fi
+  unset FIXTURE_CONSUMER_QUERY_FAILURE
+  rg -Fx 'volume rm restore-volume' "$command_log" >/dev/null
+  rg -Fx 'volume rm schema-reparse-volume' "$command_log" >/dev/null
+)
+
+test_rehearsal_cleanup_continues_after_failure
+[[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == rehearsal-cleanup ]] && exit 0
+
 test_migrator_producer_authority() (
   local switch_script definition helper
   switch_script=${PGVECTOR_SWITCH_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}
@@ -299,6 +427,9 @@ cleanup() {
   done
   if [[ -n ${interrupted_restore_volume:-} ]]; then
     docker volume rm "$interrupted_restore_volume" >/dev/null 2>&1 || true
+  fi
+  if [[ -n ${interrupted_schema_reparse_volume:-} ]]; then
+    docker volume rm "$interrupted_schema_reparse_volume" >/dev/null 2>&1 || true
   fi
   docker volume rm "$volume" "$probe_volume" "$authorization_volume" "$new_volume" "$new_authorization_volume" >/dev/null 2>&1 || true
   docker network rm "${project}_default" >/dev/null 2>&1 || true
@@ -656,14 +787,20 @@ docker exec "$db_container" psql -Xq -v ON_ERROR_STOP=1 -U noosphere -d postgres
 [[ $(docker exec "$db_container" psql -XAtq -v ON_ERROR_STOP=1 -U noosphere -d postgres \
   -c "SELECT count(*) FROM pg_database WHERE datname = '$probe';") == 1 ]]
 
-# Simulate a kill during restore testing: recovery must remove the exact
-# run-labeled volume containing a private logical-backup copy.
+# Simulate a kill during restore testing: recovery must remove both exact
+# run-labeled scratch volumes, including their private logical-backup copies.
 interrupted_restore_volume="noosphere_a2b_restore_${active_run//-/_}"
+interrupted_schema_reparse_volume="noosphere_a2b_schema_reparse_${active_run//-/_}"
 docker volume create --driver local --label "io.noosphere.pgvector-switch-run=$active_run" \
   "$interrupted_restore_volume" >/dev/null
+docker volume create --driver local --label "io.noosphere.pgvector-switch-run=$active_run" \
+  "$interrupted_schema_reparse_volume" >/dev/null
 docker run --rm --network none --platform "$PLATFORM" \
   --mount "type=volume,source=$interrupted_restore_volume,target=/private-copy" \
   --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'printf private-data > /private-copy/sentinel'
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$interrupted_schema_reparse_volume,target=/private-copy" \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'printf private-schema > /private-copy/sentinel'
 
 if NOOSPHERE_A2B_FAIL_AFTER_PHASE=recovery-writer-stopped \
   "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" >> "$log_file" 2>&1; then
@@ -911,6 +1048,7 @@ if NOOSPHERE_A2B_FAIL_AFTER_PHASE=recovered \
 fi
 [[ $(jq -r '.phase' "$journal") == recovered ]]
 ! docker volume inspect "$interrupted_restore_volume" >/dev/null 2>&1
+! docker volume inspect "$interrupted_schema_reparse_volume" >/dev/null 2>&1
 if docker inspect "$app_container" >/dev/null 2>&1; then
   [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
 fi
@@ -1180,6 +1318,28 @@ docker compose -f "$compose_file" up -d app
 [[ ! -f "$journal" ]]
 compgen -G "$journal.recovered-*" >/dev/null
 
+install -m "$(stat -c '%a' "$compose_file")" "$target_compose" "$compose_file"
+schema_mismatch_log="$tmp_dir/schema-mismatch-recovery.log"
+if NOOSPHERE_A2B_TEST_FORCE_RESTORE_SCHEMA_MISMATCH=true \
+  "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$schema_mismatch_log" 2>&1; then
+  echo 'Forced restore-schema mismatch unexpectedly reported switch success' >&2
+  exit 1
+fi
+grep -F 'restored backup schema digest mismatch' "$schema_mismatch_log" >/dev/null
+grep -F 'source rollback verified; rerun the guarded switch from a fresh journal' "$schema_mismatch_log" >/dev/null
+[[ ! -f "$journal" ]]
+mismatch_recovered_journal=$(compgen -G "$journal.recovered-*" | sort | tail -1)
+mismatch_run=$(jq -er '.runId' "$mismatch_recovered_journal")
+! docker inspect "noosphere-a2b-restore-$mismatch_run" >/dev/null 2>&1
+! docker inspect "noosphere-a2b-schema-reparse-$mismatch_run" >/dev/null 2>&1
+! docker volume inspect "noosphere_a2b_restore_${mismatch_run//-/_}" >/dev/null 2>&1
+! docker volume inspect "noosphere_a2b_schema_reparse_${mismatch_run//-/_}" >/dev/null 2>&1
+[[ $(docker inspect "$db_container" --format '{{.State.Running}}|{{.Config.Image}}') == "true|$SOURCE_IMAGE" ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+[[ $(docker compose -f "$compose_file" config --format json | jq -r '.services.db.image') == "$SOURCE_IMAGE" ]]
+
+# Recovery restores the exact source desired state. Republish the already
+# verified target gate before the ordinary successful transition.
 install -m "$(stat -c '%a' "$compose_file")" "$target_compose" "$compose_file"
 "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" >> "$log_file" 2>&1
 [[ $(jq -r '.phase' "$journal") == complete ]]
