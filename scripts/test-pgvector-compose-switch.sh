@@ -1328,7 +1328,15 @@ fi
 grep -F 'restored backup schema digest mismatch' "$schema_mismatch_log" >/dev/null
 grep -F 'source rollback verified; rerun the guarded switch from a fresh journal' "$schema_mismatch_log" >/dev/null
 [[ ! -f "$journal" ]]
-mismatch_recovered_journal=$(compgen -G "$journal.recovered-*" | sort | tail -1)
+mapfile -t mismatch_recovery_evidence < <(
+  sed -n 's/^\[pgvector-switch\] recovery evidence: //p' "$schema_mismatch_log"
+)
+((${#mismatch_recovery_evidence[@]} == 1)) || {
+  echo 'Forced restore-schema mismatch did not emit exactly one recovery evidence path' >&2
+  exit 1
+}
+mismatch_recovered_journal=${mismatch_recovery_evidence[0]}
+[[ -f "$mismatch_recovered_journal" ]]
 mismatch_run=$(jq -er '.runId' "$mismatch_recovered_journal")
 ! docker inspect "noosphere-a2b-restore-$mismatch_run" >/dev/null 2>&1
 ! docker inspect "noosphere-a2b-schema-reparse-$mismatch_run" >/dev/null 2>&1
