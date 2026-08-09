@@ -42,11 +42,11 @@ Docker administrator access is an explicit trust boundary. The lock serializes t
 Install and upgrade through the same command:
 
 ```bash
-# Installer commit: 05f234056af2a5e75c457a5f8371a2fc47566276
-# Expected SHA-256: 4bc73d369678defec08c2ce1912379cb4705f1a5ef5f8d2f9f6716ea4a117807
+# Installer commit: 5a94ef3530cd232265c53699ee15f37d9ec89e04
+# Expected SHA-256: 46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b
 installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/05f234056af2a5e75c457a5f8371a2fc47566276/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '4bc73d369678defec08c2ce1912379cb4705f1a5ef5f8d2f9f6716ea4a117807' "$installer" | sha256sum -c -
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5a94ef3530cd232265c53699ee15f37d9ec89e04/install-openclaw.sh -o "$installer"
+printf '%s  %s\n' '46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b' "$installer" | sha256sum -c -
 bash "$installer" && rm -f "$installer"
 ```
 
@@ -168,4 +168,4 @@ For a failed rollback:
 - inspect the exact database container, volume consumers, and guard diagnostics; and
 - recover only from the recorded source image and backup evidence.
 
-The logical backup is restore-tested during the transaction, but it is not a substitute for the normal independent backup-retention policy.
+The logical backup is restore-tested during the transaction, but it is not a substitute for the normal independent backup-retention policy. The restore test compares schema bytes against the live baseline normalized through the same dump/re-parse path: a dump/restore round-trip canonically re-groups nested boolean CHECK-constraint parens (for example BETWEEN-written compound CHECKs), so a raw live-to-restored byte comparison can never match (issue #298).

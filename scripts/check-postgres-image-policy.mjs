@@ -9,9 +9,9 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
-const immutableHelperRef = "17e386ddd25882f4847e9e91c4b4dfecd5c78f04";
-const verifiedInstallerRef = "05f234056af2a5e75c457a5f8371a2fc47566276";
-const verifiedInstallerSha256 = "4bc73d369678defec08c2ce1912379cb4705f1a5ef5f8d2f9f6716ea4a117807";
+const immutableHelperRef = "4a7033214d8509419ff1d50ddcfa4e92fdfd9adc";
+const verifiedInstallerRef = "5a94ef3530cd232265c53699ee15f37d9ec89e04";
+const verifiedInstallerSha256 = "46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
@@ -691,7 +691,9 @@ expect(
     switchScript.includes("assert_candidate_authorization_gate") &&
     switchScript.includes("probeDatabase") &&
     switchScript.includes("recovery-writer-stopped") &&
-    switchScript.includes("restore-test volume has invalid recovery ownership") &&
+    switchScript.includes("cleanup_rehearsal_resources") &&
+    switchScript.includes('docker volume inspect "$current" --format \'{{json .Labels}}\'') &&
+    switchScript.includes("refusing unlabelled volume removal") &&
     switchScript.includes("authorize_source_marker") &&
     switchScript.includes("authorize_writer_marker") &&
     switchScript.includes("revoke_writer_marker") &&
