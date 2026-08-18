@@ -100,7 +100,7 @@ sha256_file() {
 }
 
 validate_controller_state() {
-  local state=$1
+  local state=$1 proof_phase proof_class
   assert_owned_regular_file "$state"
   [[ $(stat -c '%a' "$state") == 600 ]] || die 'controller state mode must be 0600'
   jq -e '
@@ -122,6 +122,8 @@ validate_controller_state() {
     (.volume | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9_.-]*$")) and
     ((.volumeFingerprint == null) or
      (.volumeFingerprint | type == "string" and test("^[a-f0-9]{64}$"))) and
+    ((.authorityRoot == null) or
+     (.authorityRoot | type == "string" and startswith("/"))) and
     (.liveCompose | type == "string" and startswith("/")) and
     (.sourceSnapshot | type == "string" and startswith("/")) and
     (.sourceSnapshotSha256 | type == "string" and test("^[a-f0-9]{64}$")) and
@@ -146,8 +148,100 @@ validate_controller_state() {
       true
     end
   ' "$state" >/dev/null || die 'controller state is malformed'
+  # Phase-owned proofs: every non-trivial phase carries evidence that its own
+  # mechanism actually ran. Each requirement rejects with a key-specific
+  # diagnostic so a mutation that strips one owned proof cannot pass silently.
+  # (Kept inline so extraction-based reuse of this function stays self-contained.)
+  proof_phase=$(jq -er '.phase' "$state")
+  case "$proof_phase" in
+    authorization-running|activation-running|closure-running)
+      jq -e '(.guardEvidence.path | type == "string" and startswith("/")) and
+             (.guardEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))' \
+        "$state" >/dev/null ||
+        die "guardEvidence is required for phase $proof_phase but missing or malformed"
+      validate_evidence_binding "$state" guardEvidence process
+      ;;
+  esac
+  case "$proof_phase" in
+    closure-stop-pending)
+      jq -e '(.authorizationEvidence.path | type == "string" and startswith("/")) and
+             (.authorizationEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))' \
+        "$state" >/dev/null ||
+        die "authorizationEvidence is required for phase $proof_phase but missing or malformed"
+      validate_evidence_binding "$state" authorizationEvidence process
+      ;;
+    closure-evidence-pending)
+      jq -e '(.writerStopEvidence.path | type == "string" and startswith("/")) and
+             (.writerStopEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))' \
+        "$state" >/dev/null ||
+        die "writerStopEvidence is required for phase $proof_phase but missing or malformed"
+      validate_evidence_binding "$state" writerStopEvidence process
+      ;;
+    incident)
+      proof_class=$(jq -er '.incidentClass // ""' "$state")
+      case "$proof_class" in
+        pre-journal-source-verification)
+          jq -e '(.sourceRecoveryEvidence.path | type == "string" and startswith("/")) and
+                 (.sourceRecoveryEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))' \
+            "$state" >/dev/null ||
+            die "sourceRecoveryEvidence is required for incident class $proof_class but missing or malformed"
+          validate_evidence_binding "$state" sourceRecoveryEvidence process
+          ;;
+        closure-*)
+          jq -e '(.writerStopEvidence.path | type == "string" and startswith("/")) and
+                 (.writerStopEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))' \
+            "$state" >/dev/null ||
+            die "writerStopEvidence is required for incident class $proof_class but missing or malformed"
+          validate_evidence_binding "$state" writerStopEvidence process
+          ;;
+      esac
+      ;;
+  esac
+  case "$proof_phase" in
+    activation-running|closure-running)
+      validate_evidence_binding "$state" authorizationEvidence process
+      ;;
+  esac
+  if [[ "$proof_phase" == complete ]]; then
+    validate_evidence_binding "$state" guardEvidence process
+    validate_evidence_binding "$state" authorizationEvidence process
+    validate_evidence_binding "$state" closureEvidence process
+    validate_evidence_binding "$state" guardJournalEvidence file
+  fi
   if [[ $(jq -er '.phase' "$state") == complete ]]; then
     validate_complete_state_evidence "$state"
+  fi
+}
+
+# Phase-owned proofs must reference the real evidence bytes on disk, not just
+# a well-shaped binding: the file must exist, be an owned regular non-symlink
+# 0600 file, match its recorded digest, and (for process evidence) carry the
+# controller evidence schema. The writer-stop proof must additionally name
+# this state's application container and prove an inspect-verified stop, so a
+# forged or foreign stop record cannot satisfy a closure proof.
+validate_evidence_binding() {
+  local state=$1 key=$2 kind=${3:-process} path recorded actual
+  path=$(jq -er --arg k "$key" '.[$k].path // empty' "$state" 2>/dev/null) || path=''
+  [[ -n "$path" && "$path" == /* ]] ||
+    die "$key binding is missing an absolute evidence path"
+  assert_owned_regular_file "$path"
+  [[ $(stat -c '%a' "$path") == 600 ]] || die "$key evidence file mode must be 0600: $path"
+  recorded=$(jq -er --arg k "$key" '.[$k].sha256 // empty' "$state" 2>/dev/null)
+  [[ "$recorded" =~ ^[a-f0-9]{64}$ ]] || die "$key binding has no valid sha256"
+  actual=$(sha256_file "$path")
+  [[ "$actual" == "$recorded" ]] ||
+    die "$key evidence file no longer matches its recorded digest: $path"
+  if [[ "$kind" == process ]]; then
+    jq -e 'type == "object" and .version == 1 and (.phase | type == "string" and length > 0)' \
+      "$path" >/dev/null ||
+      die "$key evidence file is not a controller process-evidence object: $path"
+  fi
+  if [[ "$key" == writerStopEvidence ]]; then
+    jq -e --arg app "$(jq -er '.appContainer // ""' "$state")" \
+      'type == "object" and .container == $app and .container != "" and
+       .inspectRunning == false and .stopExitCode == 0' \
+      "$path" >/dev/null ||
+      die "writerStopEvidence file does not prove this state's application container was inspect-verified stopped: $path"
   fi
 }
 
@@ -235,7 +329,7 @@ resume_controller_state() {
   case "$phase" in
     closure-stop-pending)
       complete_closure_stop_pending "$state"
-      die "controller incident requires operator resolution: $(jq -r '.incidentClass // \"unknown\"' "$state")"
+      die "controller incident requires operator resolution: $(jq -r '.incidentClass // "unknown"' "$state")"
       ;;
     closure-evidence-pending)
       validate_bound_process_evidence "$state" authorizationEvidence authorization-running
@@ -267,12 +361,16 @@ resume_controller_state() {
       return
       ;;
     activation-running)
+      jq -e 'has("writerStopEvidence")' "$state" >/dev/null &&
+        die 'state records a verified writer stop without a terminal incident; reactivation is forbidden and requires operator resolution'
       validate_bound_process_evidence "$state" authorizationEvidence authorization-running
       assert_bound_guard_journal_unchanged "$state"
       resume_action=run-activation
       return
       ;;
     closure-running)
+      jq -e 'has("writerStopEvidence")' "$state" >/dev/null &&
+        die 'state records a verified writer stop without a terminal incident; reactivation is forbidden and requires operator resolution'
       validate_bound_process_evidence "$state" authorizationEvidence authorization-running
       assert_bound_guard_journal_unchanged "$state"
       resume_action=run-closure
@@ -446,7 +544,11 @@ acquire_operation_lock() {
 }
 
 claim_authoritative_state_path() {
-  local state=$1 engine_id=$2 volume=$3 lock_root=$4 lock_key claim state_path temp
+  # mode: prepare (default) claims or reclaims; revalidate requires an existing
+  # record under the CURRENT durable authority root (execution path).
+  local state=$1 engine_id=$2 volume=$3 lock_root=$4 mode=${5:-prepare}
+  local lock_key claim state_path temp recorded_lock_root
+  local durable_home state_base root entry recorded_path recorded_phase
   assert_operation_lock_held "$engine_id" "$volume" "$lock_root"
   lock_key=$(printf '%s\0%s' "$engine_id" "$volume" | sha256sum | awk '{print $1}')
   claim="$lock_root/noosphere-pgvector-state-$lock_key.json"
@@ -483,6 +585,109 @@ claim_authoritative_state_path() {
       .statePath == $statePath
     ' "$claim" >/dev/null ||
     die 'authoritative state for this Docker engine and PostgreSQL volume is already claimed by another path'
+  # The runtime claim above lives in lock_root, which is reboot-volatile by
+  # contract. A durable mirror under the invoking user's state directory keeps
+  # the engine-plus-volume identity bound to exactly one state path even after
+  # the runtime directory is replaced, so a duplicate prepare cannot silently
+  # start a second state history while a prior one is still alive. Stale
+  # records whose state file is gone or terminal (complete) are reclaimed under
+  # the same lock. (Kept inline so extraction-based reuse stays self-contained.)
+  durable_home=${controller_durable_home:-${HOME:-}}
+  [[ -n "$durable_home" && "$durable_home" == /* ]] ||
+    die 'durable state-authority home is unavailable for this controller identity'
+  # XDG Base Directory conformance: an explicit XDG_STATE_HOME (absolute)
+  # relocates the durable authority root. Disposable rehearsals use it to
+  # isolate records from the invoking user's real state namespace.
+  state_base=${controller_durable_state_base:-${XDG_STATE_HOME:-}}
+  [[ -z "$state_base" || "$state_base" == /* ]] ||
+    die 'XDG_STATE_HOME must be an absolute path'
+  [[ -n "$state_base" ]] || state_base=$durable_home/.local/state
+  root=$state_base/noosphere-pgvector-controller/authority
+  if ! path_present "$root"; then
+    install -d -m 700 "$root" || die 'could not create the durable state-authority root'
+    # Make the new authority directory entry durable: the root itself, its
+    # parent, and the state base must all reach stable storage so a power
+    # loss cannot silently drop the authority namespace and admit a
+    # duplicate claim after restart.
+    fsync_path "$root"
+    fsync_path "$(dirname "$root")"
+    [[ "$state_base" == "/" ]] || fsync_path "$state_base"
+  fi
+  [[ -d "$root" && ! -L "$root" ]] || die 'durable state-authority root must be a real directory'
+  [[ $(stat -c '%u' "$root") == "$(id -u)" ]] ||
+    die 'durable state-authority root must be owned by the controller user'
+  [[ $(stat -c '%a' "$root") == 700 ]] || die 'durable state-authority root mode must be 0700'
+  entry="$root/state-$lock_key.json"
+  # Execution may only continue a state whose durable authority record lives
+  # under the *current* durable authority root: a record prepared under
+  # another root must never be executed or duplicated from this one.
+  if [[ "$mode" == revalidate ]]; then
+    path_present "$entry" ||
+      die 'no durable state-authority record exists under the current durable authority root for this engine and volume'
+  fi
+  if path_present "$entry"; then
+    assert_owned_regular_file "$entry"
+    [[ $(stat -c '%a' "$entry") == 600 ]] || die 'durable state-authority record mode must be 0600'
+    jq -e --arg engineId "$engine_id" --arg volume "$volume" '
+      .version == 1 and .engineId == $engineId and .volume == $volume and
+      (.statePath | type == "string" and startswith("/"))
+    ' "$entry" >/dev/null ||
+      die 'durable state-authority record is malformed for this engine and volume'
+    recorded_path=$(jq -er '.statePath' "$entry")
+    if [[ "$recorded_path" != "$(realpath -m "$state")" ]]; then
+      recorded_phase=''
+      recorded_state_unreadable=false
+      if path_present "$recorded_path"; then
+        assert_owned_regular_file "$recorded_path"
+        if ! recorded_phase=$(jq -er '.phase // empty' "$recorded_path" 2>/dev/null); then
+          recorded_phase=''
+          recorded_state_unreadable=true
+        fi
+      fi
+      if [[ "$recorded_state_unreadable" == true ]]; then
+        die 'durable state-authority record references an unreadable or phase-less state file; operator resolution required'
+      fi
+      case "$recorded_phase" in
+        prepared|candidate-published|source-recovery-running|guard-exited|authorization-running|activation-running|closure-running|closure-stop-pending|closure-evidence-pending|incident)
+          die 'authoritative state for this Docker engine and PostgreSQL volume is already claimed by another path'
+          ;;
+      esac
+    else
+      # Same state path re-claimed (idempotent prepare or execute
+      # revalidation). The durable authority root is part of the record's
+      # identity: a record claimed under another durable root means this
+      # state was prepared in a different authority namespace.
+      [[ "$(jq -er '.authorityRoot // empty' "$entry")" == "$root" ]] ||
+        die 'durable state-authority record was claimed under a different durable authority root'
+      # A different runtime lock root is only tolerated when the recorded
+      # runtime claim is gone (reboot or runtime-directory loss). While the
+      # previous runtime claim is still live, replacing it would leave two
+      # potentially concurrent authorities for one engine and volume.
+      recorded_lock_root=$(jq -er '.lockRoot // empty' "$entry")
+      if [[ -n "$recorded_lock_root" && "$recorded_lock_root" != "$lock_root" ]] &&
+         path_present "$recorded_lock_root/noosphere-pgvector-state-$lock_key.json"; then
+        die 'durable state-authority record was claimed under a different runtime lock root; refusing to replace a live claim'
+      fi
+    fi
+  fi
+  temp=$(mktemp "$root/.state-authority.XXXXXX")
+  trap 'rm -f "$temp"' RETURN
+  jq -n \
+    --arg engineId "$engine_id" \
+    --arg volume "$volume" \
+    --arg statePath "$(realpath -m "$state")" \
+    --arg lockRoot "$lock_root" \
+    --arg authorityRoot "$root" \
+    --arg bootId "$(</proc/sys/kernel/random/boot_id)" \
+    '{version:1,engineId:$engineId,volume:$volume,statePath:$statePath,
+      lockRoot:$lockRoot,authorityRoot:$authorityRoot,bootId:$bootId,
+      updatedAt:(now|todateiso8601)}' > "$temp"
+  chmod 0600 "$temp"
+  fsync_path "$temp"
+  mv -f "$temp" "$entry"
+  fsync_path "$root"
+  trap - RETURN
+  printf '%s\n' "$root"
 }
 
 assert_operation_lock_held() {
@@ -691,10 +896,16 @@ run_source_recovery_verifier_with_evidence() {
   local state=$1 verifier artifact_base stdout_file stderr_file evidence
   local start_cursor end_cursor started_at ended_at verify_exit=0
   verifier=${execution_verifier:-$(jq -er '.verifier' "$state")}
-  artifact_base="${state%.json}.source-recovery"
-  stdout_file="$artifact_base.stdout.log"
-  stderr_file="$artifact_base.stderr.log"
-  evidence="$artifact_base.evidence.json"
+  # Source-recovery artifacts reuse the per-invocation scheme of the guard and
+  # verifier roles: the first run owns the canonical paths, and any later
+  # invocation that finds prior artifacts allocates InvocationID-suffixed
+  # paths so truthful prior evidence and logs are never overwritten.
+  artifact_base=$(select_process_artifact_base "${state%.json}" source-recovery)
+  [[ -n "$artifact_base" && "$artifact_base" == /* ]] ||
+    die 'could not allocate distinct source-recovery artifact paths'
+  stdout_file="$artifact_base.source-recovery.stdout.log"
+  stderr_file="$artifact_base.source-recovery.stderr.log"
+  evidence="$artifact_base.source-recovery.evidence.json"
   install -m 600 /dev/null "$stdout_file"
   install -m 600 /dev/null "$stderr_file"
   start_cursor=$(capture_journal_cursor)
@@ -1088,7 +1299,33 @@ assert_controller_artifact_paths_separate() {
     "$base.verify.stdout.log"
     "$base.verify.stderr.log"
     "$base.verify.evidence.json"
+    "$base.source-recovery.stdout.log"
+    "$base.source-recovery.stderr.log"
+    "$base.source-recovery.evidence.json"
+    "$base.writer-stop.evidence.json"
   )
+  # Invocation-suffixed variants are the paths a later invocation actually
+  # uses once canonical artifacts exist (select_process_artifact_base), so
+  # they join the same separation contract whenever an InvocationID is set.
+  if [[ -n ${INVOCATION_ID:-} ]]; then
+    [[ "$INVOCATION_ID" =~ ^[A-Za-z0-9_.-]+$ ]] ||
+      die 'systemd InvocationID is unsafe for evidence paths'
+    controlled+=(
+      "$base.$INVOCATION_ID.guard.stdout.log"
+      "$base.$INVOCATION_ID.guard.stderr.log"
+      "$base.$INVOCATION_ID.guard.evidence.json"
+      "$base.$INVOCATION_ID.authorization.stdout.log"
+      "$base.$INVOCATION_ID.authorization.stderr.log"
+      "$base.$INVOCATION_ID.authorization.evidence.json"
+      "$base.$INVOCATION_ID.verify.stdout.log"
+      "$base.$INVOCATION_ID.verify.stderr.log"
+      "$base.$INVOCATION_ID.verify.evidence.json"
+      "$base.$INVOCATION_ID.source-recovery.stdout.log"
+      "$base.$INVOCATION_ID.source-recovery.stderr.log"
+      "$base.$INVOCATION_ID.source-recovery.evidence.json"
+      "$base.$INVOCATION_ID.writer-stop.evidence.json"
+    )
+  fi
   [[ -z "$preparation_manifest" ]] || bound+=("$preparation_manifest")
   for field in liveCompose sourceSnapshot candidateCompose envFile controllerPath guard verifier \
     dockerPath composePluginPath guardJournal; do
@@ -1135,6 +1372,7 @@ select_process_artifact_base() {
       ! path_present "$candidate.$role.evidence.json" ||
       die 'process evidence path for this systemd invocation already exists'
   fi
+  [[ "$candidate" == /* ]] || die 'process artifact base must be absolute'
   printf '%s\n' "$candidate"
 }
 
@@ -1391,7 +1629,7 @@ create_execution_bundle() {
 
 prepare_execution_state() {
   local manifest=$1 state=$2 guard_journal docker_host fixed_path controller_home
-  local engine_id volume lock_root volume_fingerprint prepared
+  local engine_id volume lock_root volume_fingerprint prepared authority_root
   assert_owned_regular_file "$manifest"
   [[ $(stat -c '%a' "$manifest") == 600 ]] || die 'preparation manifest mode must be 0600'
   assert_owned_private_directory "$(dirname "$state")"
@@ -1412,14 +1650,15 @@ prepare_execution_state() {
   volume=$(jq -er '.volume' "$manifest")
   lock_root=$(jq -er '.lockRoot' "$manifest")
   acquire_operation_lock "$engine_id" "$volume" "$lock_root"
-  claim_authoritative_state_path "$state" "$engine_id" "$volume" "$lock_root"
+  authority_root=$(claim_authoritative_state_path "$state" "$engine_id" "$volume" "$lock_root" prepare)
   assert_live_engine_binding "$manifest" "$(jq -er '.dockerPath' "$manifest")"
   verify_execution_inputs "$manifest"
   volume_fingerprint=$(query_postgres_volume_fingerprint "$(jq -er '.dockerPath' "$manifest")" "$volume")
   prepared=$(mktemp "$(dirname "$state")/.controller-prepared.XXXXXX")
   trap 'rm -f "$prepared"' RETURN
   jq --arg volumeFingerprint "$volume_fingerprint" \
-    '.volumeFingerprint = $volumeFingerprint' "$manifest" > "$prepared"
+     --arg authorityRoot "$authority_root" \
+    '.volumeFingerprint = $volumeFingerprint | .authorityRoot = $authorityRoot' "$manifest" > "$prepared"
   validate_execution_manifest "$prepared"
   guard_journal=$(jq -er '.guardJournal' "$manifest")
   [[ $(realpath -m "$state") != "$(realpath -m "$guard_journal")" ]] ||
@@ -1470,7 +1709,7 @@ assert_source_state_unchanged() {
 }
 
 stop_application_fail_closed() {
-  local docker_path app_container running
+  local docker_path app_container running stop_evidence stop_temp stopped_at
   docker_path=${execution_docker_path:-$(jq -er '.dockerPath' "$controller_state")}
   app_container=$(jq -er '.appContainer' "$controller_state")
   "$docker_path" stop --time 60 "$app_container" >/dev/null 2>&1 ||
@@ -1479,6 +1718,40 @@ stop_application_fail_closed() {
     die "could not verify stopped application container $app_container"
   [[ "$running" == false ]] ||
     die "application container remains running after stop: $app_container"
+  # Every inspect-verified stop is durably evidenced and bound to the state so
+  # closure-evidence-pending and closure-incident phases carry their owned
+  # writer-stop proof. A failure to persist the proof is fatal: the stop itself
+  # succeeded, but the state must not advance without its owned evidence.
+  stopped_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # Retry-distinct allocation: the first stop owns the canonical evidence
+  # path; a later invocation that finds it allocates InvocationID-suffixed
+  # paths so a prior truthful stop record is never overwritten.
+  stop_evidence="$(select_process_artifact_base "${controller_state%.json}" writer-stop).writer-stop.evidence.json"
+  stop_temp=$(mktemp "$(dirname "$controller_state")/.writer-stop-evidence.XXXXXX")
+  trap 'rm -f "$stop_temp"' RETURN
+  jq -n \
+    --arg phase "$(jq -er '.phase // ""' "$controller_state")" \
+    --arg container "$app_container" \
+    --arg stoppedAt "$stopped_at" \
+    --arg invocationId "${INVOCATION_ID:-}" \
+    --arg bootId "$(</proc/sys/kernel/random/boot_id)" \
+    --argjson controllerMainPid "${systemd_controller_main_pid:-0}" '
+      {version:1,phase:$phase,container:$container,stopExitCode:0,
+       inspectRunning:false,stoppedAt:$stoppedAt,invocationId:$invocationId,
+       bootId:$bootId,controllerMainPid:$controllerMainPid}
+    ' > "$stop_temp"
+  chmod 0600 "$stop_temp"
+  fsync_path "$stop_temp"
+  mv -f "$stop_temp" "$stop_evidence"
+  fsync_path "$(dirname "$stop_evidence")"
+  trap - RETURN
+  stop_temp=$(mktemp "$(dirname "$controller_state")/.controller-evidence.XXXXXX")
+  trap 'rm -f "$stop_temp"' RETURN
+  jq --arg path "$stop_evidence" --arg sha256 "$(sha256_file "$stop_evidence")" '
+    .writerStopEvidence = {path:$path, sha256:$sha256}
+  ' "$controller_state" > "$stop_temp"
+  write_controller_state_atomic "$controller_state" "$stop_temp"
+  trap - RETURN
 }
 
 activate_application_for_verification() {
@@ -1565,7 +1838,7 @@ require_systemd_execution_context() {
 }
 
 execute_prepared_state() {
-  local state=$1 engine_id volume lock_root docker_host fixed_path controller_home
+  local state=$1 engine_id volume lock_root docker_host fixed_path controller_home authority_root
   local candidate guard verifier guard_journal guard_stdout guard_stderr guard_evidence
   local authorization_stdout authorization_stderr authorization_evidence authorization_artifact_base
   local verify_stdout verify_stderr verify_evidence start_cursor end_cursor started_at ended_at
@@ -1573,7 +1846,23 @@ execute_prepared_state() {
   local run_initial_guard=true run_authorization=true run_activation=true
   local resume_closure_evidence=false
   local -a guard_args authorization_args
+  local ambient_test_hook
   controller_state=$state
+  # Production execution fails closed before any state mutation when ambient
+  # test hooks are present: hooks are honored only when the fixture marker is
+  # explicitly enabled (set by the systemd identity shim in fixture mode), so
+  # an inherited hook can never steer production evidence or the transition.
+  if [[ ${controller_test_hooks_enabled:-false} != true ]]; then
+    for ambient_test_hook in NOOSPHERE_CONTROLLER_TEST_INTERRUPT_AFTER_INTENT \
+                             NOOSPHERE_CONTROLLER_TEST_SIGNAL_AFTER_GUARD_SPAWN \
+                             NOOSPHERE_CONTROLLER_TEST_FAIL_EVIDENCE \
+                             NOOSPHERE_CONTROLLER_TEST_SIGNAL_AFTER_AUTHORIZATION \
+                             NOOSPHERE_CONTROLLER_TEST_SIGNAL_BEFORE_COMPLETE \
+                             NOOSPHERE_CONTROLLER_TEST_SIGNAL_BEFORE_GUARD; do
+      [[ -z ${!ambient_test_hook:-} ]] ||
+        die "production execution rejected ambient test hook contamination: $ambient_test_hook is set; unset NOOSPHERE_CONTROLLER_TEST_* outside fixture mode"
+    done
+  fi
   validate_execution_manifest "$state"
   docker_host=$(jq -er '.dockerEndpoint' "$state")
   fixed_path=$(jq -er '.fixedPath' "$state")
@@ -1588,6 +1877,12 @@ execute_prepared_state() {
   volume=$(jq -er '.volume' "$state")
   lock_root=$(jq -er '.lockRoot' "$state")
   acquire_operation_lock "$engine_id" "$volume" "$lock_root"
+  # Execution revalidates the engine-volume state authority: only the single
+  # authoritative state path may execute, so a byte-identical copy at another
+  # path is rejected before any state mutation or child process runs.
+  authority_root=$(claim_authoritative_state_path "$state" "$engine_id" "$volume" "$lock_root" revalidate)
+  [[ $(jq -er '.authorityRoot // empty' "$state") == "$authority_root" ]] ||
+    die 'controller state was prepared under a different durable authority root; refusing execution'
   assert_live_engine_binding "$state" "$(jq -er '.dockerPath' "$state")"
   verify_execution_inputs "$state"
   assert_postgres_volume_binding "$state" "$(jq -er '.dockerPath' "$state")"
@@ -1634,6 +1929,8 @@ execute_prepared_state() {
 
   if [[ "$run_initial_guard" == true ]]; then
   guard_artifact_base=$(select_process_artifact_base "$state" guard)
+  [[ -n "$guard_artifact_base" && "$guard_artifact_base" == /* ]] ||
+    die 'could not allocate distinct guard artifact paths'
   guard_stdout="$guard_artifact_base.guard.stdout.log"
   guard_stderr="$guard_artifact_base.guard.stderr.log"
   guard_evidence="$guard_artifact_base.guard.evidence.json"
@@ -1674,6 +1971,12 @@ execute_prepared_state() {
 
   if [[ "$run_authorization" == true ]]; then
     authorization_artifact_base=$(select_process_artifact_base "$state" authorization)
+    if [[ -z "$authorization_artifact_base" || "$authorization_artifact_base" != /* ]]; then
+      # The guard has already mutated the transition: a selector failure is a
+      # storage failure that must stop the writer and fail closed.
+      begin_closure_incident "$state" artifact-storage
+      return 1
+    fi
     authorization_stdout="$authorization_artifact_base.authorization.stdout.log"
     authorization_stderr="$authorization_artifact_base.authorization.stderr.log"
     authorization_evidence="$authorization_artifact_base.authorization.evidence.json"
@@ -1693,7 +1996,13 @@ execute_prepared_state() {
     bind_process_evidence_to_state "$state" authorizationEvidence "$authorization_evidence" \
       "$INVOCATION_ID" "$boot_id" "$systemd_controller_main_pid" "$last_guard_pid"
     if [[ -n ${controller_signal:-} ]]; then
-      abort_if_interrupted || return $?
+      if ! abort_if_interrupted; then
+        # A latched signal after successful writer authorization must not
+        # return while the authorized writer could be running: stop it and
+        # commit a classified closure incident first.
+        begin_closure_incident "$state" interruption
+        return "$(signal_exit_code "$controller_signal")"
+      fi
     fi
     if ((authorization_exit != 0)); then
       begin_closure_incident "$state" writer-authorization
@@ -1704,7 +2013,12 @@ execute_prepared_state() {
     if [[ -n ${NOOSPHERE_CONTROLLER_TEST_SIGNAL_AFTER_AUTHORIZATION:-} ]]; then
       handle_controller_signal "$NOOSPHERE_CONTROLLER_TEST_SIGNAL_AFTER_AUTHORIZATION"
     fi
-    abort_if_interrupted || return $?
+    if ! abort_if_interrupted; then
+      # The pre-activation boundary has an authorized writer: a latched signal
+      # must durably stop it and classify the incident before returning.
+      begin_closure_incident "$state" interruption
+      return "$(signal_exit_code "$controller_signal")"
+    fi
   else
     validate_bound_process_evidence "$state" authorizationEvidence authorization-running
   fi
@@ -1712,12 +2026,29 @@ execute_prepared_state() {
   # Allocate and durably create every verifier artifact before activation. A
   # collision or storage failure therefore rejects while the writer is still
   # stopped, rather than creating an unverified active writer.
-  verify_artifact_base=$(select_process_artifact_base "$state" verify)
+  if ! verify_artifact_base=$(select_process_artifact_base "$state" verify) ||
+     [[ -z "$verify_artifact_base" || "$verify_artifact_base" != /* ]]; then
+    # A selector failure (per-invocation collision) is an artifact-storage
+    # failure while the authorized writer is stopped: stop it freshly and
+    # classify the closure incident instead of proceeding with a relative or
+    # empty artifact base that would scatter evidence into the worktree.
+    begin_closure_incident "$state" artifact-storage
+    return 1
+  fi
   verify_stdout="$verify_artifact_base.verify.stdout.log"
   verify_stderr="$verify_artifact_base.verify.stderr.log"
   verify_evidence="$verify_artifact_base.verify.evidence.json"
-  install -m 600 /dev/null "$verify_stdout"
-  install -m 600 /dev/null "$verify_stderr"
+  verify_alloc_exit=0
+  install -m 600 /dev/null "$verify_stdout" || verify_alloc_exit=$?
+  if (( verify_alloc_exit == 0 )); then
+    install -m 600 /dev/null "$verify_stderr" || verify_alloc_exit=$?
+  fi
+  if (( verify_alloc_exit != 0 )); then
+    # Verifier artifact storage failed while the authorized writer is still
+    # stopped: stop it freshly, verify the stop, and classify the incident.
+    begin_closure_incident "$state" artifact-storage
+    return "$verify_alloc_exit"
+  fi
   start_cursor=$(capture_journal_cursor)
   started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
@@ -1824,6 +2155,14 @@ classify_closure_failure() {
 controller_signal_active=false
 controller_test_hooks_enabled=false
 controller_fixture_root=''
+# Durable per-user authority records must survive XDG_RUNTIME_DIR replacement
+# and reboots, so the root is captured from the invoking user's real home
+# before sanitize_execution_environment installs the hermetic controller HOME.
+controller_durable_home=${HOME:-}
+# XDG Base Directory: capture the explicit state base before the hermetic
+# execution environment is installed (sanitize never unsets XDG vars, but the
+# captured value keeps prepare and execute agreement explicit and stable).
+controller_durable_state_base=${XDG_STATE_HOME:-}
 controller_signal=''
 controller_signal_forwarded=false
 controller_state_write_active=false

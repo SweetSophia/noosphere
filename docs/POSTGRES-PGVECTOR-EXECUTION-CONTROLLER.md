@@ -367,3 +367,65 @@ engine-plus-volume lock, runs the real verifier against a unique loopback health
 port, and commits complete evidence. Cleanup proves that no fixture unit,
 container, volume, network, or switch-labeled resource remains. Production
 containers, volumes, Compose, and health endpoint are never targets.
+
+## Six-owner Review 1 implementation (Aug 17)
+
+The six RED owners accepted by the corrected native review are implemented;
+controller and fixtures are green across the focused, real-systemd, and
+disposable-Docker suites.
+
+- **Execution entry rejects ambient test hooks**: `execute_prepared_state`
+  fails closed before any state mutation when a `NOOSPHERE_CONTROLLER_TEST_*`
+  variable is set outside explicitly enabled fixture mode. Inherited hooks can
+  no longer steer production evidence or transitions.
+- **Durable engine-volume state authority**: preparation keeps the runtime
+  claim in `lockRoot` and additionally mirrors the engine-plus-volume binding
+  to `<user state>/noosphere-pgvector-controller/authority/state-<key>.json`
+  (key: SHA-256 of engine and volume). A duplicate prepare for the same
+  identity is rejected while the recorded state path exists in a non-terminal
+  phase, even after the entire runtime directory is replaced. Records whose
+  state file is gone or `complete` are reclaimed under the same lock.
+  Execution revalidates the claim before any mutation, so a byte-identical
+  state copy at another path cannot execute. The durable root is captured from
+  the invoking user's home before the hermetic execution environment replaces
+  `HOME`.
+- **Pre-activation failures are fail-closed**: a latched signal after writer
+  authorization (real trap or fixture hook) and a verifier-artifact storage
+  failure at the allocation boundary both commit durable
+  `closure-stop-pending`, freshly stop and inspect-verify the writer, then
+  publish `incident/closure-interruption` or `incident/closure-artifact-storage`
+  before returning. The incident is never published before the verified stop.
+- **Source-recovery artifacts are controlled paths**: the derived
+  `source-recovery.stdout.log`, `stderr.log`, and `evidence.json` paths join
+  the controller's collision matrix; a derived path overlapping any bound
+  transition input is rejected at preparation.
+- **Unbound source-recovery evidence cannot be trusted**: retry binding is
+  keyed to the complete new evidence/log/provenance set; a retry that
+  republishes new evidence but fails to rebind is rejected rather than
+  silently accepted, so a crash between publication and binding cannot leak an
+  unbound path into a trusted state.
+- **Phase-owned state proofs**: `validate_controller_state` requires each
+  non-trivial phase to carry its own mechanism's proof with key-specific
+  diagnostics: `guardEvidence` for `authorization-running`,
+  `activation-running`, and `closure-running`; `authorizationEvidence` for
+  `closure-stop-pending`; `writerStopEvidence` for `closure-evidence-pending`
+  and every `closure-*` incident; `sourceRecoveryEvidence` for
+  `incident/pre-journal-source-verification`. Every inspect-verified
+  `stop_application_fail_closed` writes and binds
+  `writer-stop.evidence.json` before those phases are reachable, and the
+  writer-stop evidence path joins the controlled artifact namespace.
+- **Fixture corrections required by the corrected contracts**: the crafted
+  `closure-running` baseline in `test_closure_outcome_never_false_completes`
+  now carries `guardEvidence` and `writerStopEvidence` (as every real
+  closure-running state does), and
+  `test_authorization_evidence_is_durable_before_activation` asserts the
+  fail-closed incident contract for a pre-activation latched TERM instead of
+  the superseded resumable `activation-running` outcome.
+
+
+## 2026-08-18 — Re-review round 2 corrections
+
+- **Incident-class diagnostic (resume die)**: the `closure-stop-pending` resume die now compiles its jq program correctly (`.incidentClass // "unknown"`), so the operator always sees the real incident class instead of an empty jq error.
+- **Writer-stop evidence is retry-distinct**: `stop_application_fail_closed` allocates its evidence path through `select_process_artifact_base` (writer-stop role). The first stop owns the canonical `.writer-stop.evidence.json`; a later invocation that finds it allocates an InvocationID-suffixed path, so a crash between evidence publication and phase advance can never overwrite a prior truthful stop record — the same contract the source-recovery role already enforces.
+- **Invocation-suffixed paths join the collision matrix**: whenever an InvocationID is present (always at execute), `assert_controller_artifact_paths_separate` also checks the `.<InvocationID>` suffixed guard/authorization/verify/source-recovery/writer-stop paths against every bound input, matching what a retrying invocation actually writes.
+- **New regression fixtures**: `test_writer_stop_evidence_is_retry_distinct` (canonical-first, InvocationID-distinct retry, prior bytes survive, unsafe InvocationID rejected) and `test_invocation_suffixed_artifacts_cannot_collide_with_bound_inputs` (suffixed writer-stop path rejected as bound input with collision diagnostic; clean control passes).

@@ -63,6 +63,12 @@ volume="noosphere_a2b_${safe_id//-/_}"
 probe_volume="${volume}_mount_probe"
 authorization_volume="${volume}_authorization"
 tmp_dir=$(mktemp -d)
+# Isolate durable state-authority records from the invoking user's real XDG
+# state namespace; the controller honors XDG_STATE_HOME, so the rehearsal's
+# durable claims live inside the disposable tmp_dir and are removed with it.
+XDG_STATE_HOME="$tmp_dir/xdg-state-home"
+install -d -m 700 "$XDG_STATE_HOME"
+export XDG_STATE_HOME
 live_compose="$tmp_dir/docker-compose.yml"
 source_snapshot="$tmp_dir/source-compose.yml"
 candidate_compose="$tmp_dir/candidate-compose.yml"
@@ -203,7 +209,15 @@ cleanup() {
   }
   if ((status == 0)); then
     case "$tmp_dir" in
-      /tmp/tmp.*) rm -rf -- "$tmp_dir" ;;
+      /tmp/tmp.*)
+        rm -rf -- "$tmp_dir"
+        # The isolated durable-authority root lives inside tmp_dir, so its
+        # removal must actually land before the rehearsal counts as clean.
+        [[ ! -e "$tmp_dir" ]] || {
+          echo "Controller rehearsal state root remains after cleanup: $tmp_dir" >&2
+          return 1
+        }
+        ;;
       *) echo "Refusing unexpected fixture cleanup path: $tmp_dir" >&2; return 1 ;;
     esac
   else
@@ -490,6 +504,7 @@ systemd_args=(
   --collect
   --quiet
   --setenv="CONTROLLER_UNIT=$unit"
+  --setenv="XDG_STATE_HOME=$XDG_STATE_HOME"
 )
 while IFS= read -r property; do
   systemd_args+=(--property="$property")

@@ -11,6 +11,13 @@ DOCKER_FIXTURE="$ROOT_DIR/scripts/test-pgvector-transition-controller-docker.sh"
   exit 1
 }
 
+# Isolate durable state-authority records from the invoking user's real XDG
+# state namespace: the controller honors XDG_STATE_HOME, so every fixture in
+# this suite claims and reclaims authority inside this disposable root.
+XDG_STATE_HOME=$(mktemp -d)
+export XDG_STATE_HOME
+trap 'rm -rf -- "$XDG_STATE_HOME"' EXIT
+
 extract_function() {
   local name=$1 definition
   definition=$(
@@ -183,6 +190,7 @@ write_fixture_controller_state() {
       engineId: "fixture-engine",
       dockerEndpoint: "unix:///fixture/docker.sock",
       volume: "fixture-volume",
+      appContainer: "fixture-app",
       liveCompose: $liveCompose,
       sourceSnapshot: $sourceSnapshot,
       sourceSnapshotSha256: $sourceSnapshotSha256,
@@ -207,7 +215,7 @@ test_reboot_recovers_prejournal_candidate_publication() (
   write_fixture_controller_state "$state" candidate-published "$live" "$source" "$source_sha" "$guard_journal"
 
   for helper in path_present assert_owned_regular_file sha256_file \
-    write_controller_state_atomic validate_controller_state update_controller_phase \
+    write_controller_state_atomic validate_controller_state validate_evidence_binding update_controller_phase \
     restore_source_without_guard_journal restore_source_compose_snapshot resume_controller_state; do
     eval "$(extract_function "$helper")"
   done
@@ -248,7 +256,7 @@ test_valid_guard_journal_suppresses_outer_restore() (
   write_fixture_controller_state "$state" candidate-published "$live" "$source" "$source_sha" "$guard_journal"
 
   for helper in path_present assert_owned_regular_file sha256_file \
-    write_controller_state_atomic validate_controller_state update_controller_phase \
+    write_controller_state_atomic validate_controller_state validate_evidence_binding update_controller_phase \
     restore_source_without_guard_journal restore_source_compose_snapshot resume_controller_state; do
     eval "$(extract_function "$helper")"
   done
@@ -330,7 +338,7 @@ test_candidate_publication_intent_is_recoverable() (
   chmod 0600 "$state"
 
   for helper in path_present assert_owned_regular_file sha256_file \
-    write_controller_state_atomic validate_controller_state update_controller_phase \
+    write_controller_state_atomic validate_controller_state validate_evidence_binding update_controller_phase \
     ensure_regular_lock_file acquire_operation_lock assert_operation_lock_held publish_compose_atomic \
     publish_candidate_under_lock; do
     eval "$(extract_function "$helper")"
@@ -417,14 +425,42 @@ test_closure_outcome_never_false_completes() (
   chmod 0600 "$stdout_file" "$stderr_file"
   source_sha=$(sha256sum "$source" | awk '{print $1}')
   write_fixture_controller_state "$state" closure-running "$live" "$source" "$source_sha" "$guard_journal"
-  jq '.authorizationEvidence = {
-    path: "/fixture/authorization-evidence.json",
-    sha256: ("a" * 64)
-  }' "$state" > "$state.next"
+  # A real closure-running state carries the proofs of every phase its
+  # mechanism has passed: the guard ran (guardEvidence), authorization
+  # succeeded (authorizationEvidence), and the writer was stopped with a
+  # verified stop before closure could be retried (writerStopEvidence).
+  # Real evidence bytes: every bound proof must exist on disk as an owned
+  # 0600 evidence object whose digest matches the binding, mirroring what the
+  # controller itself persists for guard, authorization, and writer stop.
+  make_fixture_evidence() {
+    local target=$1 phase=$2 container=${3:-}
+    if [[ -n "$container" ]]; then
+      jq -n --arg phase "$phase" --arg container "$container" \
+        '{version:1,phase:$phase,container:$container,stopExitCode:0,
+          inspectRunning:false}' > "$target"
+    else
+      jq -n --arg phase "$phase" '{version:1,phase:$phase}' > "$target"
+    fi
+    chmod 0600 "$target"
+  }
+  make_fixture_evidence "$fixture_dir/authorization-evidence.json" authorization-running
+  make_fixture_evidence "$fixture_dir/guard-evidence.json" guard-exited
+  make_fixture_evidence "$fixture_dir/writer-stop-evidence.json" closure-stop-pending \
+    "$(jq -er '.appContainer // "fixture-app"' "$state")"
+  jq --arg apath "$fixture_dir/authorization-evidence.json" \
+     --arg asha "$(sha256sum "$fixture_dir/authorization-evidence.json" | awk '{print $1}')" \
+     --arg gpath "$fixture_dir/guard-evidence.json" \
+     --arg gsha "$(sha256sum "$fixture_dir/guard-evidence.json" | awk '{print $1}')" \
+     --arg wpath "$fixture_dir/writer-stop-evidence.json" \
+     --arg wsha "$(sha256sum "$fixture_dir/writer-stop-evidence.json" | awk '{print $1}')" \
+    '.authorizationEvidence = {path:$apath,sha256:$asha} |
+     .guardEvidence = {path:$gpath,sha256:$gsha} |
+     .writerStopEvidence = {path:$wpath,sha256:$wsha}' \
+    "$state" > "$state.next"
   install -m 600 "$state.next" "$state"
 
   for helper in path_present assert_owned_regular_file sha256_file \
-    write_controller_state_atomic validate_controller_state update_controller_phase \
+    write_controller_state_atomic validate_controller_state validate_evidence_binding update_controller_phase \
     write_process_evidence_atomic validate_process_evidence classify_closure_failure \
     bind_process_evidence_to_state begin_closure_incident begin_closure_evidence_pending \
     complete_closure_evidence_pending complete_closure_stop_pending \
@@ -1288,7 +1324,7 @@ test_terminal_states_never_delegate_to_a_stale_guard_journal() (
   source_sha=$(sha256sum "$source" | awk '{print $1}')
 
   for helper in path_present assert_owned_regular_file sha256_file \
-    write_controller_state_atomic validate_controller_state update_controller_phase \
+    write_controller_state_atomic validate_controller_state validate_evidence_binding update_controller_phase \
     restore_source_without_guard_journal restore_source_compose_snapshot resume_controller_state; do
     eval "$(extract_function "$helper")"
   done
@@ -2266,7 +2302,7 @@ test_terminal_state_requires_phase_specific_invariants() (
   state="$fixture_dir/controller.json"
   write_execution_fixture "$fixture_dir" "$manifest"
 
-  for helper in assert_owned_regular_file validate_controller_state; do
+  for helper in assert_owned_regular_file sha256_file validate_controller_state validate_evidence_binding; do
     eval "$(extract_function "$helper")"
   done
   die() { printf 'fixture: %s\n' "$*" >&2; exit 1; }
@@ -3004,7 +3040,15 @@ test_authorization_evidence_is_durable_before_activation() (
     echo 'authorization boundary did not return the latched signal exit' >&2
     exit 1
   }
-  [[ $(jq -er '.phase' "$state") == activation-running && ! -e "$fixture_dir/app-started" ]] || {
+  # A latched signal at the pre-activation boundary fails closed: the authorized
+  # writer is freshly stopped and the state carries a classified closure
+  # interruption incident instead of a silently resumable activation phase.
+  jq -e '.phase == "incident" and .incidentClass == "closure-interruption"' \
+    "$state" >/dev/null || {
+    echo 'pre-activation signal did not commit a classified closure interruption' >&2
+    exit 1
+  }
+  [[ ! -e "$fixture_dir/app-started" ]] || {
     echo 'writer activation began before authorization evidence was durable' >&2
     exit 1
   }
@@ -3012,11 +3056,17 @@ test_authorization_evidence_is_durable_before_activation() (
   jq -e '.phase == "authorization-running" and .exitCode == 0' \
     "$authorization_evidence" >/dev/null
 
+  # The classified incident is terminal for this transition identity: a fresh
+  # execution must refuse instead of activating the writer.
   NOOSPHERE_CONTROLLER_FIXTURE_INVOCATION_ID=fedcba9876543210fedcba9876543210 \
-    run_fixture_controller "$state" "$shim" env >/dev/null 2>&1 || resume_rc=$?
-  ((resume_rc == 0))
-  [[ $(jq -er '.phase' "$state") == complete ]]
-  [[ $(paste -sd, "$fixture_dir/lifecycle.log") == transition,authorize,activate,verify ]]
+    run_fixture_controller "$state" "$shim" env >/dev/null 2>&1 && {
+      echo 'classified closure interruption was resumable as a fresh execution' >&2
+      exit 1
+    }
+  [[ $(paste -sd, "$fixture_dir/lifecycle.log") == transition,authorize ]] || {
+    echo 'writer activated despite the classified closure interruption' >&2
+    exit 1
+  }
 )
 
 test_app_activation_failure_is_fail_closed_before_final_verification() (
@@ -3126,7 +3176,7 @@ test_missing_live_compose_commits_prejournal_restoration_incident() (
   write_fixture_controller_state "$state" candidate-published "$live" "$source" "$source_sha" "$guard_journal"
 
   for helper in path_present assert_owned_regular_file sha256_file \
-    write_controller_state_atomic validate_controller_state update_controller_phase \
+    write_controller_state_atomic validate_controller_state validate_evidence_binding update_controller_phase \
     restore_source_compose_snapshot resume_controller_state; do
     eval "$(extract_function "$helper")"
   done
@@ -4237,10 +4287,15 @@ test_source_recovery_retry_preserves_prior_unbound_evidence() (
   stderr_inode=$(stat -c '%i' "$prior_stderr")
   expected_stdout_sha=$(sha256sum /dev/null | awk '{print $1}')
   expected_stderr_sha=$(printf 'source verification failed\n' | sha256sum | awk '{print $1}')
-  jq -e --arg stdoutSha "$expected_stdout_sha" --arg stderrSha "$expected_stderr_sha" '
+  # Boot provenance is the REAL host boot id: ambient NOOSPHERE_CONTROLLER_BOOT_ID
+  # is untrusted noise (see test_ambient_test_overrides_cannot_falsify_production_evidence
+  # and test_source_recovery_signal_persists_process_evidence), so the evidence
+  # must carry the kernel boot id, never the ambient override.
+  jq -e --arg boot "$(</proc/sys/kernel/random/boot_id)" \
+    --arg stdoutSha "$expected_stdout_sha" --arg stderrSha "$expected_stderr_sha" '
     .phase == "source-recovery-running" and .exitCode == 42 and
     .invocationId == "0123456789abcdef0123456789abcdef" and
-    .bootId == "fixture-boot" and
+    .bootId == $boot and
     (.controllerMainPid | type == "number" and . > 0) and
     (.childPid | type == "number" and . > 0) and
     .controllerMainPid != .childPid and
@@ -4288,10 +4343,11 @@ test_source_recovery_retry_preserves_prior_unbound_evidence() (
     .phase == "incident" and .incidentClass == "pre-journal-source-verification" and
     .sourceRecoveryEvidence.sha256 == $evidenceSha
   ' "$state" >/dev/null &&
-  jq -e --arg stdoutSha "$expected_stdout_sha" --arg stderrSha "$expected_stderr_sha" '
+  jq -e --arg boot "$(</proc/sys/kernel/random/boot_id)" \
+    --arg stdoutSha "$expected_stdout_sha" --arg stderrSha "$expected_stderr_sha" '
     .phase == "source-recovery-running" and .exitCode == 42 and
     .invocationId == "fedcba9876543210fedcba9876543210" and
-    .bootId == "fixture-boot" and
+    .bootId == $boot and
     (.controllerMainPid | type == "number" and . > 0) and
     (.childPid | type == "number" and . > 0) and
     .controllerMainPid != .childPid and
@@ -4472,6 +4528,115 @@ test_transient_systemd_fixture_independently_proves_identity_and_cursors() (
   timeout 180s "$SYSTEMD_FIXTURE"
 )
 
+test_writer_stop_evidence_is_retry_distinct() (
+  # Re-review round 2, finding 1: the writer-stop proof must reuse the
+  # retry-distinct allocation scheme so a crash between evidence publication
+  # and phase advance can never overwrite the prior truthful stop record.
+  # Probes run in child bash so the controller's real die() exits only the
+  # probe, keeping the test's own assertions in control.
+  local fixture_dir base first second rc=0
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf "$fixture_dir"' EXIT
+  base="$fixture_dir/controller"
+  {
+    extract_function path_present
+    extract_function select_process_artifact_base
+    extract_function die
+  } > "$fixture_dir/functions.sh"
+  cat > "$fixture_dir/probe.sh" <<'PROBE'
+source "$1"
+select_process_artifact_base "$2" writer-stop
+PROBE
+
+  # First stop owns the canonical path when no prior artifacts exist.
+  first=$(bash "$fixture_dir/probe.sh" "$fixture_dir/functions.sh" "$base")
+  [[ "$first" == "$base" ]] || {
+    echo "first writer-stop allocation was not canonical: $first" >&2
+    exit 1
+  }
+
+  # After the canonical evidence exists, a later invocation with a distinct
+  # InvocationID must allocate a distinct base instead of reusing canonical.
+  printf '{"version":1,"stopExitCode":0}\n' > "$base.writer-stop.evidence.json"
+  second=$(INVOCATION_ID=0123456789abcdef0123456789abcdef \
+    bash "$fixture_dir/probe.sh" "$fixture_dir/functions.sh" "$base")
+  [[ "$second" == "$base.0123456789abcdef0123456789abcdef" ]] || {
+    echo "retry writer-stop allocation was not InvocationID-distinct: $second" >&2
+    exit 1
+  }
+  [[ "$(cat "$base.writer-stop.evidence.json")" == '{"version":1,"stopExitCode":0}' ]] || {
+    echo "prior canonical writer-stop evidence did not survive the retry allocation" >&2
+    exit 1
+  }
+
+  # An unsafe InvocationID must be rejected, never used inside a path.
+  INVOCATION_ID=../escape \
+    bash "$fixture_dir/probe.sh" "$fixture_dir/functions.sh" "$base" \
+    >/dev/null 2>"$fixture_dir/unsafe.err" || rc=$?
+  ((rc != 0)) || { echo "unsafe InvocationID was accepted" >&2; exit 1; }
+  rg -q 'unsafe for evidence paths' "$fixture_dir/unsafe.err" || {
+    echo "unsafe InvocationID lacked its diagnostic" >&2
+    exit 1
+  }
+)
+
+test_invocation_suffixed_artifacts_cannot_collide_with_bound_inputs() (
+  # Re-review round 2, findings 1-2: the collision matrix must also cover the
+  # InvocationID-suffixed artifact paths a retrying invocation will use.
+  local fixture_dir manifest state rc=0
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+
+  # Point the bound live Compose input at the invocation-suffixed writer-stop
+  # evidence path so the separation check must reject it at execute time.
+  local original_path suffixed
+  original_path=$(jq -er '.liveCompose' "$manifest")
+  suffixed="${state%.json}.0123456789abcdef0123456789abcdef.writer-stop.evidence.json"
+  cp "$original_path" "$suffixed"
+  jq --arg p "$suffixed" --arg old "$original_path" \
+    '.liveCompose = $p |
+     .guardArgs = [.guardArgs[] | if . == $old then $p else . end]' \
+    "$manifest" > "$manifest.tmp" && mv "$manifest.tmp" "$manifest"
+  chmod 0600 "$manifest"
+
+  {
+    extract_function die
+    extract_function assert_controller_artifact_paths_separate
+  } > "$fixture_dir/functions.sh"
+  cat > "$fixture_dir/probe.sh" <<'PROBE'
+source "$1"
+assert_controller_artifact_paths_separate "$2" "$3" "$2"
+PROBE
+  INVOCATION_ID=0123456789abcdef0123456789abcdef \
+    bash "$fixture_dir/probe.sh" "$fixture_dir/functions.sh" "$manifest" "$state" \
+    >"$fixture_dir/check.out" 2>"$fixture_dir/check.err" || rc=$?
+  ((rc != 0)) || {
+    echo "invocation-suffixed writer-stop path was accepted as bound live-compose input" >&2
+    exit 1
+  }
+  rg -qi 'collid' "$fixture_dir/check.err" || {
+    echo "invocation-suffixed collision lacked a specific diagnostic" >&2
+    exit 1
+  }
+
+  # Control: the same state passes when the bound input is moved off every
+  # controlled path, proving the rejection came from the suffix entry.
+  jq --arg p "$original_path" --arg old "$suffixed" \
+    '.liveCompose = $p |
+     .guardArgs = [.guardArgs[] | if . == $old then $p else . end]' \
+    "$manifest" > "$manifest.tmp" && mv "$manifest.tmp" "$manifest"
+  chmod 0600 "$manifest"
+  INVOCATION_ID=0123456789abcdef0123456789abcdef \
+    bash "$fixture_dir/probe.sh" "$fixture_dir/functions.sh" "$manifest" "$state" \
+    >"$fixture_dir/control.out" 2>"$fixture_dir/control.err" || {
+    echo "control run with no collision was rejected: $(cat "$fixture_dir/control.err")" >&2
+    exit 1
+  }
+)
+
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   test_atomic_controller_state
   test_source_restore_without_guard_journal
@@ -4573,6 +4738,8 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   test_phase_owned_invariants_reject_unproved_states
   test_disposable_rehearsals_clean_and_assert_state_authority
   test_transient_systemd_fixture_independently_proves_identity_and_cursors
+  test_writer_stop_evidence_is_retry_distinct
+  test_invocation_suffixed_artifacts_cannot_collide_with_bound_inputs
 
   echo 'PostgreSQL transition controller focused fixtures passed.'
 fi

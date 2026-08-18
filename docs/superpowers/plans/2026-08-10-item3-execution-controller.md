@@ -232,3 +232,53 @@ identity query. Four independent RED owners, twelve affected legacy owners,
 and the complete 86-owner focused aggregate must be GREEN before the full
 policy/systemd/pinned-Docker/residue/production-source gate and replacement
 fresh Review 1. Review 2 remains sequentially blocked until Review 1 is clean.
+
+## 2026-08-17 — Six-owner implementation complete
+
+All six RED owners from the corrected Review 1 are GREEN, plus the three
+review-adjacent legacy corrections:
+
+1. Execute-entry fail-closed rejection of ambient `NOOSPHERE_CONTROLLER_TEST_*`
+   hooks (six-variable explicit diagnostic contract; unset retained as
+   defense-in-depth).
+2. Durable engine-volume state authority: runtime claim in `lockRoot` mirrored
+   to the XDG state root (`XDG_STATE_HOME` when set, else `$HOME/.local/state`)
+   under `noosphere-pgvector-controller/authority/`; duplicate prepare rejected
+   while the recorded state path exists in a non-terminal phase; execution
+   revalidates, so a copied state at a second path cannot execute. Stale
+   records (missing or `complete` state files) are reclaimed under the lock.
+3. Post-authorization pre-activation failures (latched signal, verifier
+   artifact-storage failure) commit `closure-stop-pending`, stop and
+   inspect-verify the writer with bound `writerStopEvidence`, then publish the
+   exact `closure-interruption` / `closure-artifact-storage` incident — never
+   before the verified stop.
+4. Source-recovery derived artifacts joined the controlled-path collision
+   matrix.
+5. Source-recovery retry allocates InvocationID-distinct artifact paths via
+   `select_process_artifact_base`, so prior unbound evidence/logs survive a
+   publication/bind crash byte-identically.
+6. Phase-owned state proofs inlined into `validate_controller_state`
+   (extraction-compatible) with per-key diagnostics; `writer-stop.evidence.json`
+   joined the controlled namespace.
+
+Fixture corrections required by the corrected contracts:
+`test_closure_outcome_never_false_completes` baseline now carries
+`guardEvidence` + `writerStopEvidence`; the crafted state's phase-authority
+tests assert incident classification instead of the superseded resumable
+`activation-running` outcome.
+
+Test-isolation hardening: durable authority records now honor
+`XDG_STATE_HOME`; the focused suite isolates its state root per run, the
+systemd fixture passes the same root into both transient units, and the Docker
+rehearsal relocates it into its disposable `tmp_dir` with a residue assertion.
+The invoking user's real state namespace is no longer touched by fixtures.
+
+Gate status (2026-08-17 22:4x): focused, systemd, and Docker suites re-running
+after the isolation change; controller + fixtures previously byte-stable GREEN
+across all three. Next: hygiene scan, sequential fresh Reviews 1 and 2,
+privacy scan, commit/push/PR #300 update, 20-minute CI/bot gate.
+
+
+## 2026-08-18 — Re-review round 2 stage (operator review comment 5321434858)
+
+Applied corrections per Sophie's round-2 re-review: (1) jq escaped-quote fix in the closure-stop-pending resume die; (2) writer-stop evidence retry-distinct allocation via `select_process_artifact_base`; (3) invocation-suffixed artifact paths added to the collision matrix. Two new regression fixtures cover the retry-distinct stop evidence and the suffixed-path collision rejection. Gate after corrections: policy GREEN, focused suite 102/102 GREEN, real transient-systemd GREEN, pinned-Docker GREEN, residue 0, production-source verify GREEN (50 topics / 512 articles / 15 keys). Findings 2-5 from the review recorded as follow-ups (dead `bootId` field wiring, `NOOSPHERE_CONTROLLER_TEST_CURSOR` deny-list symmetry, dead `--setenv` fixture lines, suffixed-path matrix completeness beyond writer-stop).

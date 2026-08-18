@@ -68,6 +68,11 @@ cleanup() {
   cleanup_state_authority_record "$runtime_root" "$state_authority_path" || cleanup_rc=$?
   [[ -z "$signal_state_authority_path" ]] ||
     cleanup_state_authority_record "$runtime_root" "$signal_state_authority_path" || cleanup_rc=$?
+  # Remove the isolated durable-authority state root created by sourcing the
+  # focused suite (its own EXIT trap is replaced by this one).
+  case "${XDG_STATE_HOME:-}" in
+    /tmp/tmp.*) rm -rf -- "$XDG_STATE_HOME" ;;
+  esac
   rm -rf -- "$fixture_dir"
   return "$cleanup_rc"
 }
@@ -122,6 +127,7 @@ systemd_args=(
   --collect
   --quiet
   --setenv="CONTROLLER_UNIT=$unit"
+  --setenv="XDG_STATE_HOME=$XDG_STATE_HOME"
   --setenv=NOOSPHERE_CONTROLLER_BOOT_ID=fixture-boot
   --setenv=NOOSPHERE_CONTROLLER_TEST_CURSOR=fixture-cursor
 )
@@ -232,6 +238,7 @@ rm -f -- "$signal_manifest.next"
 signal_args=(
   systemd-run --user --unit="$signal_base" --quiet
   --setenv="CONTROLLER_UNIT=$signal_unit"
+  --setenv="XDG_STATE_HOME=$XDG_STATE_HOME"
   --setenv=NOOSPHERE_CONTROLLER_BOOT_ID=fixture-boot
   --setenv='NOOSPHERE_CONTROLLER_TEST_CURSOR=s=fixture;i=1'
 )
