@@ -36,7 +36,14 @@ const policy = {
 
 function readText(relativePath) {
   try {
-    return readFileSync(resolve(root, relativePath), "utf8");
+    const base = path.resolve(root);
+    const target = path.resolve(base, relativePath);
+    const rel = path.relative(base, target);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      failures.push(`Failed to read ${relativePath}: Invalid path`);
+      return "";
+    }
+    return readFileSync(target, "utf8");
   } catch (error) {
     failures.push(`Failed to read ${relativePath}: ${error.message}`);
     return "";

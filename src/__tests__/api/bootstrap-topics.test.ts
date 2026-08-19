@@ -568,3 +568,87 @@ test("bootstrap process output keeps safe permission validation context", () => 
     rmSync(dir, { force: true, recursive: true });
   }
 });
+
+
+// Security tests for path traversal vulnerability mitigation
+test("bootstrap rejects path traversal attempts in secrets file path with double dots", async () => {
+  const { writeGeneratedSecretsFile } = await importBootstrapHelpers();
+  const originalSecretsFile = process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+  const dir = makeAllowedSecretsDir("path-traversal-dots-");
+
+  try {
+    // Attempt path traversal using .. in the secrets file path
+    // This should be caught by the allowlist validation before reaching fsyncPath
+    const traversalPath = join(dir, "..", "..", "etc", "passwd");
+    process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = traversalPath;
+    
+    assert.throws(
+      () => writeGeneratedSecretsFile({ apiKey: "noo_traversal_attempt" }),
+      /must point inside a dedicated private directory/,
+      "Path traversal with .. should be rejected",
+    );
+  } finally {
+    if (originalSecretsFile === undefined) {
+      delete process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+    } else {
+      process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = originalSecretsFile;
+    }
+    rmSync(dir, { force: true, recursive: true });
+  }
+});
+
+test("bootstrap rejects absolute path attempts outside allowed directories", async () => {
+  const { writeGeneratedSecretsFile } = await importBootstrapHelpers();
+  const originalSecretsFile = process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+
+  try {
+    // Attempt to write to absolute paths outside allowed directories
+    const maliciousPaths = [
+      "/etc/passwd",
+      "/root/.ssh/authorized_keys",
+      "/var/log/malicious.log",
+    ];
+
+    for (const maliciousPath of maliciousPaths) {
+      process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = maliciousPath;
+      
+      assert.throws(
+        () => writeGeneratedSecretsFile({ apiKey: "noo_absolute_path_attempt" }),
+        /must point inside a dedicated private directory/,
+        `Absolute path ${maliciousPath} should be rejected`,
+      );
+    }
+  } finally {
+    if (originalSecretsFile === undefined) {
+      delete process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+    } else {
+      process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = originalSecretsFile;
+    }
+  }
+});
+
+test("bootstrap path validation prevents directory escape via normalized paths", async () => {
+  const { writeGeneratedSecretsFile } = await importBootstrapHelpers();
+  const originalSecretsFile = process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+  const dir = makeAllowedSecretsDir("normalized-escape-");
+
+  try {
+    // Create a path that looks safe but resolves outside the allowed directory
+    // e.g., /tmp/noosphere-bootstrap-secrets/prefix-xxx/subdir/../../../../../../etc/passwd
+    const escapePath = join(dir, "subdir", "..", "..", "..", "..", "..", "..", "etc", "passwd");
+    process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = escapePath;
+    
+    assert.throws(
+      () => writeGeneratedSecretsFile({ apiKey: "noo_escape_attempt" }),
+      /must point inside a dedicated private directory/,
+      "Normalized path escape should be rejected",
+    );
+  } finally {
+    if (originalSecretsFile === undefined) {
+      delete process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE;
+    } else {
+      process.env.NOOSPHERE_BOOTSTRAP_SECRETS_FILE = originalSecretsFile;
+    }
+    rmSync(dir, { force: true, recursive: true });
+  }
+});

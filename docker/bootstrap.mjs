@@ -131,6 +131,7 @@ function ensurePrivateSecretsParent(parentDir) {
 }
 
 function fsyncPath(path) {
+  if (path.includes('..') || require('path').isAbsolute(path)) throw new Error('Invalid path');
   const fd = openSync(path, "r");
   try {
     fsyncSync(fd);

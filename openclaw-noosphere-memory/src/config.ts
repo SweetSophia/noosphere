@@ -246,6 +246,7 @@ function readFileSecretRef(
   const rawPath = readString(provider.path);
   if (!rawPath) return undefined;
   const filePath = expandHome(rawPath);
+  if (filePath.includes("..") || path.isAbsolute(filePath)) return undefined;
   const fileContent = readFileSync(filePath, "utf8");
 
   if (provider.mode === "json") {
