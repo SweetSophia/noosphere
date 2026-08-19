@@ -53,6 +53,28 @@ per-agent keys:
 }
 ```
 
+### Security: Trusted Origins
+
+To prevent credential leakage, the plugin validates all base URLs against a trusted
+origins allowlist. By default, only loopback addresses (`localhost`, `127.0.0.1`,
+`::1`) are accepted. To use a remote Noosphere instance, explicitly configure
+`trustedOrigins`:
+
+```json5
+{
+  config: {
+    baseUrl: "https://noosphere.example.com",
+    trustedOrigins: ["https://noosphere.example.com"],
+    apiKey: { source: "file", provider: "noosphere-memory", id: "/apiKey" }
+  }
+}
+```
+
+The `trustedOrigins` array must include the full origin (scheme + host + port) of
+any remote base URL. Without this allowlist, caller-supplied base URLs pointing to
+non-loopback addresses will be rejected, preventing SSRF attacks that could
+exfiltrate API keys to attacker-controlled servers.
+
 For multi-agent installs, prefer environment variables:
 
 ```bash

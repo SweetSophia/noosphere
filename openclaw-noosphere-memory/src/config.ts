@@ -17,6 +17,13 @@ export interface NoosphereMemoryConfig {
    */
   allowDefaultCorpusSupplement?: boolean;
   timeoutMs?: number;
+  /**
+   * Allowlist of trusted base URL origins that can receive authenticated requests.
+   * When set, only URLs matching these origins (scheme + host + port) are accepted.
+   * If not set, defaults to localhost/loopback only for security.
+   * Example: ["https://noosphere.example.com", "https://api.noosphere.io"]
+   */
+  trustedOrigins?: string[];
 }
 
 interface SecretRefInput {
@@ -32,6 +39,8 @@ export interface ResolvedNoosphereMemoryConfig {
   /** Per-agent API key map (from config.apiKeys, not resolved from secrets). */
   apiKeys?: Record<string, string>;
   timeoutMs: number;
+  /** Normalized trusted origins for base URL validation. */
+  trustedOrigins?: string[];
 }
 
 export const DEFAULT_NOOSPHERE_BASE_URL = "http://localhost:3000";
@@ -46,11 +55,16 @@ export function resolveNoosphereMemoryConfig(
   rootConfig?: unknown,
 ): ResolvedNoosphereMemoryConfig {
   const config = isRecord(rawConfig) ? rawConfig as Partial<NoosphereMemoryConfig> : {};
+  
+  // Parse and normalize trusted origins from config
+  const trustedOrigins = parseTrustedOrigins(config.trustedOrigins);
+  
   const baseUrl = normalizeBaseUrl(
     readString(config.baseUrl) ||
       readString(env.OPENCLAW_NOOSPHERE_BASE_URL) ||
       readString(env.NOOSPHERE_BASE_URL) ||
       DEFAULT_NOOSPHERE_BASE_URL,
+    trustedOrigins,
   );
   const defaultApiKey =
     readSecret(config.apiKey, rootConfig) ||
@@ -68,6 +82,7 @@ export function resolveNoosphereMemoryConfig(
     apiKey: defaultApiKey,
     apiKeys: isRecord(config.apiKeys) ? config.apiKeys : undefined,
     timeoutMs,
+    trustedOrigins,
   };
 }
 
@@ -116,7 +131,43 @@ export function redactSecret(value: string | undefined): string | undefined {
   return `${value.slice(0, 4)}…${value.slice(-4)}`;
 }
 
-function normalizeBaseUrl(value: string): string {
+/**
+ * Parse and normalize trusted origins from configuration.
+ * Returns undefined if no origins are specified (defaults to loopback-only).
+ */
+function parseTrustedOrigins(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  
+  const origins: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || !item.trim()) continue;
+    
+    try {
+      const url = new URL(item.trim());
+      // Store normalized origin (scheme + host + port)
+      origins.push(url.origin);
+    } catch {
+      // Skip invalid URLs
+      continue;
+    }
+  }
+  
+  return origins.length > 0 ? origins : undefined;
+}
+
+/**
+ * Normalize and validate a base URL against trusted origins.
+ * 
+ * Security: This function prevents credential leakage by ensuring that
+ * caller-supplied URLs can only target trusted destinations. Without an
+ * explicit allowlist, only loopback addresses are accepted to prevent
+ * SSRF attacks that could exfiltrate API keys to attacker-controlled servers.
+ * 
+ * @param value - The base URL to normalize
+ * @param trustedOrigins - Optional allowlist of trusted origins (scheme + host + port)
+ * @returns Normalized base URL, or DEFAULT_NOOSPHERE_BASE_URL if validation fails
+ */
+function normalizeBaseUrl(value: string, trustedOrigins?: string[]): string {
   const trimmed = value.trim();
   if (!trimmed) return DEFAULT_NOOSPHERE_BASE_URL;
 
@@ -136,8 +187,27 @@ function normalizeBaseUrl(value: string): string {
   if (isBlockedInternalHost(url.hostname)) {
     return DEFAULT_NOOSPHERE_BASE_URL;
   }
-  if (url.protocol === "http:" && !isLoopbackHost(url.hostname)) {
-    return DEFAULT_NOOSPHERE_BASE_URL;
+  
+  // Security check: Validate against trusted origins allowlist
+  const isLoopback = isLoopbackHost(url.hostname);
+  
+  if (!isLoopback) {
+    // Non-loopback URLs require HTTPS
+    if (url.protocol !== "https:") {
+      return DEFAULT_NOOSPHERE_BASE_URL;
+    }
+    
+    // Non-loopback URLs must be in the trusted origins allowlist
+    if (!trustedOrigins || trustedOrigins.length === 0) {
+      // No allowlist configured: reject all non-loopback URLs to prevent SSRF
+      return DEFAULT_NOOSPHERE_BASE_URL;
+    }
+    
+    const urlOrigin = url.origin;
+    if (!trustedOrigins.includes(urlOrigin)) {
+      // URL origin not in allowlist: reject to prevent credential leakage
+      return DEFAULT_NOOSPHERE_BASE_URL;
+    }
   }
 
   while (url.pathname.length > 1 && url.pathname.endsWith("/")) {
