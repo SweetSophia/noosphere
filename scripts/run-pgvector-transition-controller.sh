@@ -180,7 +180,7 @@ validate_controller_state() {
     incident)
       proof_class=$(jq -er '.incidentClass // ""' "$state")
       case "$proof_class" in
-        pre-journal-source-verification)
+        pre-journal-source-verification|pre-journal-source-restoration|pre-journal-source-restored|pre-journal-live-compose-divergence)
           jq -e '(.sourceRecoveryEvidence.path | type == "string" and startswith("/")) and
                  (.sourceRecoveryEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))' \
             "$state" >/dev/null ||
@@ -598,11 +598,23 @@ claim_authoritative_state_path() {
   # XDG Base Directory conformance: an explicit XDG_STATE_HOME (absolute)
   # relocates the durable authority root. Disposable rehearsals use it to
   # isolate records from the invoking user's real state namespace.
-  state_base=${controller_durable_state_base:-${XDG_STATE_HOME:-}}
+  state_base=${XDG_STATE_HOME:-}
   [[ -z "$state_base" || "$state_base" == /* ]] ||
     die 'XDG_STATE_HOME must be an absolute path'
   [[ -n "$state_base" ]] || state_base=$durable_home/.local/state
   root=$state_base/noosphere-pgvector-controller/authority
+  entry="$root/state-$lock_key.json"
+  # Execution may only continue a state whose durable authority record lives
+  # under the *current* durable authority root: a record prepared under
+  # another root must never be executed or duplicated from this one. In
+  # revalidate mode the record must already be present; otherwise die
+  # *before* creating the authority directory structure so cross-root
+  # execute cannot silently populate the wrong namespace with an empty
+  # root.
+  if [[ "$mode" == revalidate ]]; then
+    path_present "$entry" ||
+      die 'no durable state-authority record exists under the current durable authority root for this engine and volume'
+  fi
   if ! path_present "$root"; then
     install -d -m 700 "$root" || die 'could not create the durable state-authority root'
     # Make the new authority directory entry durable: the root itself, its
@@ -617,14 +629,6 @@ claim_authoritative_state_path() {
   [[ $(stat -c '%u' "$root") == "$(id -u)" ]] ||
     die 'durable state-authority root must be owned by the controller user'
   [[ $(stat -c '%a' "$root") == 700 ]] || die 'durable state-authority root mode must be 0700'
-  entry="$root/state-$lock_key.json"
-  # Execution may only continue a state whose durable authority record lives
-  # under the *current* durable authority root: a record prepared under
-  # another root must never be executed or duplicated from this one.
-  if [[ "$mode" == revalidate ]]; then
-    path_present "$entry" ||
-      die 'no durable state-authority record exists under the current durable authority root for this engine and volume'
-  fi
   if path_present "$entry"; then
     assert_owned_regular_file "$entry"
     [[ $(stat -c '%a' "$entry") == 600 ]] || die 'durable state-authority record mode must be 0600'
@@ -2159,10 +2163,9 @@ controller_fixture_root=''
 # and reboots, so the root is captured from the invoking user's real home
 # before sanitize_execution_environment installs the hermetic controller HOME.
 controller_durable_home=${HOME:-}
-# XDG Base Directory: capture the explicit state base before the hermetic
-# execution environment is installed (sanitize never unsets XDG vars, but the
-# captured value keeps prepare and execute agreement explicit and stable).
-controller_durable_state_base=${XDG_STATE_HOME:-}
+# XDG_STATE_HOME is read inline at claim time: sanitize never unsets XDG
+# vars and process-locale env cannot change mid-run, so a module-level
+# capture would add a second source of truth without adding a guarantee.
 controller_signal=''
 controller_signal_forwarded=false
 controller_state_write_active=false

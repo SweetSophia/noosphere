@@ -3057,12 +3057,38 @@ test_authorization_evidence_is_durable_before_activation() (
     "$authorization_evidence" >/dev/null
 
   # The classified incident is terminal for this transition identity: a fresh
-  # execution must refuse instead of activating the writer.
+  # execution must refuse instead of activating the writer — and the refusal
+  # must come from terminal-incident handling, not from some unrelated fault
+  # (e.g. a regression in authorization that just happens to fail).
   NOOSPHERE_CONTROLLER_FIXTURE_INVOCATION_ID=fedcba9876543210fedcba9876543210 \
-    run_fixture_controller "$state" "$shim" env >/dev/null 2>&1 && {
+    run_fixture_controller "$state" "$shim" env \
+      >/dev/null 2>"$fixture_dir/refresh.err" && {
       echo 'classified closure interruption was resumable as a fresh execution' >&2
       exit 1
     }
+  # The diagnostic is intentionally shared with the closure-stop-pending resume
+  # path (controller L332) so any controller branch that requires operator
+  # resolution for a classified closure-interruption emits the same string.
+  # Combined with the .incidentClass jq assertion below, this confirms the
+  # refusal came from terminal-incident handling for the right class.
+  grep -q "controller incident requires operator resolution: closure-interruption" \
+    "$fixture_dir/refresh.err" || {
+      echo 'fresh execution refused for a reason other than terminal-incident classification' >&2
+      sed 's/^/  refresh.err: /' "$fixture_dir/refresh.err" >&2
+      exit 1
+    }
+  jq -e '.phase == "incident" and .incidentClass == "closure-interruption"' \
+    "$state" >/dev/null || {
+      echo 'fresh execution mutated the terminal incident classification' >&2
+      exit 1
+    }
+  jq -e '.writerStopEvidence
+         | (.path | type == "string" and startswith("/"))
+           and (.sha256 | type == "string" and test("^[a-f0-9]{64}$"))' \
+    "$state" >/dev/null || {
+      echo 'fresh execution corrupted the durable writer-stop evidence' >&2
+      exit 1
+  }
   [[ $(paste -sd, "$fixture_dir/lifecycle.log") == transition,authorize ]] || {
     echo 'writer activated despite the classified closure interruption' >&2
     exit 1
@@ -4102,6 +4128,78 @@ test_post_authorization_pre_activation_failures_commit_fresh_stop_evidence() (
   }
 )
 
+# RED owner: the controller's select_process_artifact_base for the verify
+# role must surface per-invocation collisions through the caller's
+# if-! wrapper so the verifier-allocation path routes through
+# begin_closure_incident artifact-storage. Today the function uses die()
+# which exits the whole controller and bypasses the wrapper, leaving the
+# phase at activation-running with no stop/incident so a later execution
+# can reactivate. The fix is to convert die to return 1 so the caller can
+# route the failure through begin_closure_incident artifact-storage.
+test_verifier_artifact_selector_collision_routes_through_closure_artifact_storage() (
+  local fixture_dir='' manifest state shim rc invocation control_tail lifecycle
+  local phase incident_class
+  local -a failures=()
+  trap '[[ -z ${fixture_dir:-} ]] || rm -rf "$fixture_dir"' EXIT
+
+  fixture_dir=$(mktemp -d)
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_systemd_identity_shim "$fixture_dir")
+  invocation=${NOOSPHERE_CONTROLLER_FIXTURE_INVOCATION_ID:-0123456789abcdef0123456789abcdef}
+
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+  # The selector uses ${state%.json} as the artifact base, so pre-create
+  # canonical and suffixed verifier artifacts at the *stripped* path.
+  local state_base=${state%.json}
+  printf 'existing\n' > "$state_base.verify.stdout.log"
+  printf 'existing\n' > "$state_base.verify.stderr.log"
+  printf '{"existing":true}\n' > "$state_base.verify.evidence.json"
+  # Pre-create suffixed verifier artifacts for the test INVOCATION_ID so
+  # the selector dies with 'process evidence path for this systemd
+  # invocation already exists'.
+  printf 'existing\n' > "$state_base.$invocation.verify.stdout.log"
+  printf 'existing\n' > "$state_base.$invocation.verify.stderr.log"
+  printf '{"existing":true}\n' > "$state_base.$invocation.verify.evidence.json"
+
+  rc=0
+  run_fixture_controller "$state" "$shim" env \
+    >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || rc=$?
+  ((rc != 0)) ||
+    failures+=('verifier selector collision unexpectedly reported success')
+
+  phase=$(jq -er '.phase // empty' "$state" 2>/dev/null || true)
+  incident_class=$(jq -er '.incidentClass // empty' "$state" 2>/dev/null || true)
+  if [[ "$phase" != incident ]]; then
+    failures+=("verifier selector collision left phase=$phase (expected incident)")
+  fi
+  if [[ "$incident_class" != closure-artifact-storage ]]; then
+    failures+=("verifier selector collision produced incidentClass=$incident_class (expected closure-artifact-storage)")
+  fi
+
+  # The writer was authorized before the selector ran; the controller must
+  # ALSO have stopped and inspect-verified it before publishing the
+  # terminal incident. A die() that bypasses the wrapper would leave the
+  # writer running and no stop evidence.
+  if [[ -f "$fixture_dir/app-control.log" ]]; then
+    control_tail=$(tail -n 2 "$fixture_dir/app-control.log" | paste -sd, -)
+  else
+    control_tail=''
+  fi
+  [[ "$control_tail" == stop,inspect:false ]] ||
+    failures+=("verifier selector collision lacked a fresh inspect-verified stop (control_tail=$control_tail)")
+  [[ ! -e "$fixture_dir/incident-persisted-before-stop" ]] ||
+    failures+=('verifier selector collision published terminal incident before stopping the writer')
+
+  ((${#failures[@]} == 0)) || {
+    printf '%s\n' "${failures[@]}" >&2
+    exit 1
+  }
+)
+
 # RED owner: the controller's assert_controller_artifact_paths_separate must
 # include source-recovery artifact paths (stdout.log, stderr.log, evidence.json)
 # in its controlled-path array so that a derived source-recovery path that
@@ -4637,6 +4735,51 @@ PROBE
   }
 )
 
+test_xdg_state_home_cross_root_execute_rejected() (
+  local fixture_dir='' manifest state shim rc auth_a auth_b
+  local -a failures=()
+  trap '[[ -z ${fixture_dir:-} ]] || rm -rf "$fixture_dir" "$auth_a" "$auth_b"' EXIT
+
+  auth_a=$(mktemp -d)
+  auth_b=$(mktemp -d)
+  chmod 700 "$auth_a" "$auth_b"
+  fixture_dir=$(mktemp -d)
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_systemd_identity_shim "$fixture_dir")
+
+  # Prepare under XDG_STATE_HOME=A: durable authority record must live under A.
+  XDG_STATE_HOME="$auth_a" "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+  if [[ ! -d "$auth_a/noosphere-pgvector-controller/authority" ]]; then
+    failures+=('prepare under XDG_STATE_HOME=A did not create a durable authority root')
+  fi
+
+  # Execute under XDG_STATE_HOME=B: cross-root reclaim must die with an
+  # authority-root diagnostic and must not create a record under B.
+  rc=0
+  XDG_STATE_HOME="$auth_b" run_fixture_controller "$state" "$shim" env \
+    >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || rc=$?
+  if ((rc == 0)); then
+    failures+=('execute under a different XDG_STATE_HOME succeeded; expected authority-root rejection')
+  else
+    rg -qi 'authoritative.*state|state.*authorit|durable.*authority.*root|engine.*volume.*state.*(claim|own)|authority root' \
+      "$fixture_dir/controller.err" ||
+      failures+=('cross-root execute rejection lacked an authority-root diagnostic')
+  fi
+
+  # Controller must die before writing the record under the new root.
+  if [[ -d "$auth_b/noosphere-pgvector-controller/authority" ]]; then
+    failures+=('cross-root execute created a durable authority record under the wrong root')
+  fi
+
+  ((${#failures[@]} == 0)) || {
+    printf '%s\n' "${failures[@]}" >&2
+    exit 1
+  }
+)
+
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   test_atomic_controller_state
   test_source_restore_without_guard_journal
@@ -4687,6 +4830,50 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   test_real_systemd_fixture_exercises_signal_delivery
   test_production_execution_succeeds_without_ambient_fault_hooks
   test_production_execution_succeeds_without_ambient_signal_hooks
+test_corrupt_phase_durable_state_rejected() (
+  local fixture_dir='' manifest state_a state_b rc auth
+  local engine_id=fixture-engine volume=fixture-volume
+  local -a failures=()
+  trap '[[ -z ${fixture_dir:-} ]] || rm -rf "$fixture_dir" "$auth"' EXIT
+
+  auth=$(mktemp -d)
+  chmod 700 "$auth"
+  fixture_dir=$(mktemp -d)
+  manifest="$fixture_dir/manifest.json"
+  state_a="$fixture_dir/controller.json"
+  state_b="$fixture_dir/controller-alt.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+
+  # Prepare once at state_a to seed the durable authority record.
+  XDG_STATE_HOME="$auth" "$CONTROLLER" --prepare --manifest "$manifest" --state "$state_a"
+
+  # Corrupt the state file's phase to a value outside the enum.
+  jq '.phase = "garbage"' "$state_a" > "$state_a.next"
+  install -m 600 "$state_a.next" "$state_a"
+
+  # Run --prepare at a DIFFERENT state path so claim_authoritative_state_path
+  # reads the durable record, sees recorded_path=state_a != current=state_b,
+  # and reaches the case statement at the active-phase enum. The current
+  # case statement only matches the 10 enum values, so .phase=garbage falls
+  # through to a reclaim that silently overwrites the durable record.
+  rc=0
+  XDG_STATE_HOME="$auth" "$CONTROLLER" --prepare --manifest "$manifest" --state "$state_b" \
+    >"$fixture_dir/alt.out" 2>"$fixture_dir/alt.err" || rc=$?
+  if ((rc == 0)); then
+    failures+=('controller reclaimed a durable state with .phase=garbage; expected unrecognized-phase rejection')
+  else
+    rg -qi 'phase|unrecognized|authoritative.*state|durable.*authority' \
+      "$fixture_dir/alt.err" ||
+      failures+=('corrupt-phase rejection lacked a phase or authority diagnostic')
+  fi
+
+  ((${#failures[@]} == 0)) || {
+    printf '%s\n' "${failures[@]}" >&2
+    exit 1
+  }
+)
+
   test_derived_evidence_paths_cannot_collide_with_bound_inputs
   test_guard_signal_persists_child_evidence_before_return
   test_verifier_signal_persists_child_evidence_before_return
@@ -4733,6 +4920,7 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   test_production_rejects_ambient_test_hook_contamination
   test_state_authority_survives_runtime_loss_and_is_revalidated_at_execute
   test_post_authorization_pre_activation_failures_commit_fresh_stop_evidence
+  test_verifier_artifact_selector_collision_routes_through_closure_artifact_storage
   test_source_recovery_artifacts_cannot_collide_with_bound_inputs
   test_source_recovery_retry_preserves_prior_unbound_evidence
   test_phase_owned_invariants_reject_unproved_states
@@ -4740,6 +4928,8 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   test_transient_systemd_fixture_independently_proves_identity_and_cursors
   test_writer_stop_evidence_is_retry_distinct
   test_invocation_suffixed_artifacts_cannot_collide_with_bound_inputs
+  test_xdg_state_home_cross_root_execute_rejected
+  test_corrupt_phase_durable_state_rejected
 
   echo 'PostgreSQL transition controller focused fixtures passed.'
 fi
