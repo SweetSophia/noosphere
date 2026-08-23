@@ -247,7 +247,7 @@ while IFS= read -r property; do
 done < <(systemd_properties "$signal_dir")
 signal_args+=("$CONTROLLER" --execute --state "$signal_state")
 "${signal_args[@]}"
-for _ in $(seq 1 100); do
+for _ in $(seq 1 600); do
   [[ -e "$signal_dir/guard-running" ]] && break
   sleep 0.05
 done

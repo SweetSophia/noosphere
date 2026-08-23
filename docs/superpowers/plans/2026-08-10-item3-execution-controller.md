@@ -245,8 +245,11 @@ review-adjacent legacy corrections:
    to the XDG state root (`XDG_STATE_HOME` when set, else `$HOME/.local/state`)
    under `noosphere-pgvector-controller/authority/`; duplicate prepare rejected
    while the recorded state path exists in a non-terminal phase; execution
-   revalidates, so a copied state at a second path cannot execute. Stale
-   records (missing or `complete` state files) are reclaimed under the lock.
+   revalidates, so a copied state at a second path cannot execute. Missing
+   state files are reclaimed under the lock; `complete` states relinquish
+   authority only after all bound completion evidence validates. A retained
+   runtime claim for either proven stale predecessor is atomically replaced
+   under that same lock.
 3. Post-authorization pre-activation failures (latched signal, verifier
    artifact-storage failure) commit `closure-stop-pending`, stop and
    inspect-verify the writer with bound `writerStopEvidence`, then publish the
