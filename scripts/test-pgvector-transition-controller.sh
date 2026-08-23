@@ -5207,9 +5207,11 @@ test_bound_inputs_and_publication_reject_unsafe_write_modes() (
 )
 
 test_incident_classes_and_stop_proofs_are_closed_world() (
-  local fixture_dir manifest state mutated shim rc=0
+  local fixture_dir='' manifest state mutated shim rc=0 proof_phase verifier_mode
+  local -a run_env=()
+  local -a failures=()
   fixture_dir=$(mktemp -d)
-  trap 'rm -rf -- "$fixture_dir"' EXIT
+  trap '[[ -z ${fixture_dir:-} ]] || rm -rf -- "$fixture_dir"' EXIT
   manifest="$fixture_dir/manifest.json"
   state="$fixture_dir/controller.json"
   mutated="$fixture_dir/unclassified-incident.json"
@@ -5234,6 +5236,62 @@ test_incident_classes_and_stop_proofs_are_closed_world() (
   fi
   rg -qi 'incident.*class|writer.*stop.*evidence' "$fixture_dir/validate.err" || {
     echo "unclassified incident rejection lacked a class/stop-proof diagnostic: $(tr '\n' ' ' < "$fixture_dir/validate.err")" >&2
+    exit 1
+  }
+
+  rm -rf -- "$fixture_dir"
+  fixture_dir=''
+  for proof_phase in closure-stop-pending closure-evidence-pending; do
+    _clear_authority_root_for_isolation
+    fixture_dir=$(mktemp -d)
+    manifest="$fixture_dir/manifest.json"
+    state="$fixture_dir/controller.json"
+    mutated="$fixture_dir/unclassified-$proof_phase.json"
+    verifier_mode=fail
+    run_env=()
+    if [[ "$proof_phase" == closure-evidence-pending ]]; then
+      run_env=(NOOSPHERE_CONTROLLER_TEST_FAIL_EVIDENCE=closure-running)
+    fi
+    write_execution_fixture "$fixture_dir" "$manifest" complete "$verifier_mode"
+    export XDG_RUNTIME_DIR="$fixture_dir/locks"
+    shim=$(write_phase_snapshot_shim "$fixture_dir")
+    "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+    rc=0
+    run_fixture_controller "$state" "$shim" env \
+      "${run_env[@]}" \
+      "NOOSPHERE_CONTROLLER_TEST_CAPTURE_PHASE=$proof_phase" \
+      >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || rc=$?
+    if [[ "$rc" != 86 || ! -e "$fixture_dir/controller-phase-snapshot-captured" ]]; then
+      failures+=("controller did not produce the $proof_phase baseline")
+      rm -rf -- "$fixture_dir"
+      fixture_dir=''
+      continue
+    fi
+    if ! /bin/bash -c 'source "$1"; validate_controller_state "$2"' \
+      _ "$CONTROLLER" "$state" >"$fixture_dir/baseline.out" 2>"$fixture_dir/baseline.err"; then
+      failures+=("controller rejected its own valid $proof_phase baseline")
+      rm -rf -- "$fixture_dir"
+      fixture_dir=''
+      continue
+    fi
+
+    jq '.incidentClass = "unclassified-post-authorization"' "$state" > "$mutated"
+    chmod 0600 "$mutated"
+    if /bin/bash -c 'source "$1"; validate_controller_state "$2"' \
+      _ "$CONTROLLER" "$mutated" >"$fixture_dir/validate.out" 2>"$fixture_dir/validate.err"; then
+      failures+=("controller accepted an unsupported incident class in phase $proof_phase")
+    elif ! rg -q 'incident class is unsupported or unrecognized: unclassified-post-authorization' \
+      "$fixture_dir/validate.err"; then
+      failures+=("unsupported incident class in phase $proof_phase lacked the class diagnostic")
+    fi
+
+    rm -rf -- "$fixture_dir"
+    fixture_dir=''
+  done
+
+  ((${#failures[@]} == 0)) || {
+    printf '%s\n' "${failures[@]}" >&2
     exit 1
   }
 )

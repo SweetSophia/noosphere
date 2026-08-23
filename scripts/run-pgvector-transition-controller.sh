@@ -179,6 +179,8 @@ validate_controller_state() {
         die "writerStopEvidence is required for phase $proof_phase but missing or malformed"
       validate_evidence_binding "$state" writerStopEvidence process
       ;;
+  esac
+  case "$proof_phase" in
     closure-stop-pending|closure-evidence-pending|incident)
       proof_class=$(jq -er '.incidentClass // ""' "$state")
       case "$proof_class" in
