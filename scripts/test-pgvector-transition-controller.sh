@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# Keep synthetic fixture inputs deterministic across interactive shells and
+# user-manager supervisors. Security-negative owners set unsafe modes explicitly.
+umask 0022
+# A failed unguarded command under `set -e` aborts the whole suite silently;
+# surface the exact offending command instead (R3-6 reconciliation).
+trap 'printf "fixture: unguarded command failed: %s (rc=%d)\n" "$BASH_COMMAND" "$?" >&2' ERR
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 CONTROLLER=${PGVECTOR_CONTROLLER_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/run-pgvector-transition-controller.sh"}
@@ -1160,6 +1166,25 @@ run_fixture_controller() {
     "$@" "$controller_exec" --execute --state "$state"
 }
 
+# Background variant for signal-delivery tests: the backgrounded subshell
+# execs the controller, so the recorded $! is the controller process itself.
+# Backgrounding run_fixture_controller (a function) instead leaves $! as a
+# wrapper subshell; kill -TERM then reaps the wrapper and orphans the live
+# controller, which later writes durable state after its test completed —
+# observed as whole-suite nondeterminism. Bash cannot exec with leading
+# environment assignments, so they are exported inside the subshell first;
+# the export side effects never reach the parent shell. `env` (passed via
+# "$@") execs the target without forking, preserving the PID.
+background_fixture_controller() {
+  local state=$1 controller_exec=$2
+  shift 2
+  export INVOCATION_ID=${NOOSPHERE_CONTROLLER_FIXTURE_INVOCATION_ID:-0123456789abcdef0123456789abcdef}
+  export CONTROLLER_UNIT=noosphere-pgvector-transition.service
+  export NOOSPHERE_CONTROLLER_BOOT_ID=fixture-boot
+  export NOOSPHERE_CONTROLLER_TEST_CURSOR=fixture-cursor
+  exec "$@" "$controller_exec" --execute --state "$state"
+}
+
 terminate_fixture_process() {
   local pid=${1:-} i
   [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 0
@@ -1280,19 +1305,40 @@ test_term_during_guard_records_and_recovers() (
   export XDG_RUNTIME_DIR="$fixture_dir/locks"
   shim=$(write_systemd_identity_shim "$fixture_dir")
   "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
-  run_fixture_controller "$state" "$shim" env >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" &
+  background_fixture_controller "$state" "$shim" env >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" &
   controller_pid=$!
-  for i in $(seq 1 100); do
+  for i in $(seq 1 600); do
     [[ -e "$fixture_dir/guard-running" ]] && break
     kill -0 "$controller_pid" 2>/dev/null || break
-    sleep 0.05
+    sleep 0.1
   done
-  [[ -e "$fixture_dir/guard-running" ]]
+  # Load-tolerant bounded wait (60s): under heavy host load the controller's
+  # pre-guard verification chain can exceed the old 5s window, and TERMing a
+  # controller that has not reached the guard phase corrupts the assertion.
+  [[ -e "$fixture_dir/guard-running" ]] || {
+    echo 'guard never reported running before the signal was sent' >&2
+    exit 1
+  }
   kill -TERM "$controller_pid"
   wait "$controller_pid" || rc=$?
   controller_pid=''
-  [[ "$rc" == 143 ]]
-  [[ $(jq -er '.phase' "$state") == guard-exited ]]
+  [[ "$rc" == 143 ]] || { echo "controller did not exit with signal-derived status after TERM (rc=$rc)" >&2; exit 1; }
+  # The backgrounded fixture wrapper can return 143 before the controller
+  # process has completed its final durable write, so an immediate single
+  # read races the state file. The controller contract guarantees
+  # phase=guard-exited after TERM-during-guard; poll the durable state with a
+  # bounded settle window instead of asserting one instantaneous read.
+  settled=''
+  phase_now=''
+  for i in $(seq 1 600); do
+    phase_now=$(jq -er '.phase // empty' "$state" 2>/dev/null || true)
+    if [[ "$phase_now" == guard-exited ]]; then settled=true; break; fi
+    sleep 0.1
+  done
+  [[ "$settled" == true ]] || {
+    echo "controller state never settled on guard-exited after TERM (last=${phase_now:-unreadable})" >&2
+    exit 1
+  }
   jq -e '
     .guardEvidence.path | type == "string" and startswith("/")
   ' "$state" >/dev/null
@@ -2232,9 +2278,9 @@ test_guard_signal_persists_child_evidence_before_return() (
   shim=$(write_systemd_identity_shim "$fixture_dir")
   "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
 
-  run_fixture_controller "$state" "$shim" env >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" &
+  background_fixture_controller "$state" "$shim" env >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" &
   controller_pid=$!
-  for i in $(seq 1 200); do
+  for i in $(seq 1 600); do
     [[ -e "$fixture_dir/guard-running" ]] && break
     kill -0 "$controller_pid" 2>/dev/null || break
     sleep 0.05
@@ -2253,6 +2299,14 @@ test_guard_signal_persists_child_evidence_before_return() (
     .guardEvidence.path == $path and .lastInterruption.signal == "TERM"
   ' "$state" >/dev/null || {
     echo 'TERM during guard returned before durable child evidence was bound' >&2
+    echo "---signal-flake-diagnostics begin (guard)---" >&2
+    echo "evidence_exists=$([[ -f "$evidence" ]] && echo yes || echo no) path=$evidence" >&2
+    [[ -f "$evidence" ]] && { echo 'evidence_content:' >&2; cat "$evidence" >&2; } || true
+    echo "state_exists=$([[ -f "$state" ]] && echo yes || echo no)" >&2
+    [[ -f "$state" ]] && { echo "state_phase=$(jq -r '.phase // "<none>"' "$state" 2>&1)" >&2; echo "state_interruption=$(jq -c '.lastInterruption // "<none>"' "$state" 2>&1)" >&2; echo "state_guard=$(jq -c '.guardEvidence // "<none>"' "$state" 2>&1)" >&2; } || true
+    echo "controller_err_tail:" >&2; tail -5 "$fixture_dir/controller.err" >&2 || true
+    echo 'fixture_listing:' >&2; ls -la "$fixture_dir" >&2
+    echo '---signal-flake-diagnostics end---' >&2
     exit 1
   }
 )
@@ -2269,9 +2323,9 @@ test_verifier_signal_persists_child_evidence_before_return() (
   shim=$(write_systemd_identity_shim "$fixture_dir")
   "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
 
-  run_fixture_controller "$state" "$shim" env >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" &
+  background_fixture_controller "$state" "$shim" env >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" &
   controller_pid=$!
-  for i in $(seq 1 200); do
+  for i in $(seq 1 600); do
     [[ -e "$fixture_dir/verifier-running" ]] && break
     kill -0 "$controller_pid" 2>/dev/null || break
     sleep 0.05
@@ -2290,6 +2344,14 @@ test_verifier_signal_persists_child_evidence_before_return() (
     .closureEvidence.path == $path and .lastInterruption.signal == "TERM"
   ' "$state" >/dev/null || {
     echo 'TERM during verifier returned before durable child evidence was bound' >&2
+    echo "---signal-flake-diagnostics begin (verifier)---" >&2
+    echo "evidence_exists=$([[ -f "$evidence" ]] && echo yes || echo no) path=$evidence" >&2
+    [[ -f "$evidence" ]] && { echo 'evidence_content:' >&2; cat "$evidence" >&2; } || true
+    echo "state_exists=$([[ -f "$state" ]] && echo yes || echo no)" >&2
+    [[ -f "$state" ]] && { echo "state_phase=$(jq -r '.phase // "<none>"' "$state" 2>&1)" >&2; echo "state_interruption=$(jq -c '.lastInterruption // "<none>"' "$state" 2>&1)" >&2; echo "state_closure=$(jq -c '.closureEvidence // "<none>"' "$state" 2>&1)" >&2; } || true
+    echo "controller_err_tail:" >&2; tail -5 "$fixture_dir/controller.err" >&2 || true
+    echo 'fixture_listing:' >&2; ls -la "$fixture_dir" >&2
+    echo '---signal-flake-diagnostics end---' >&2
     exit 1
   }
 )
@@ -2443,9 +2505,9 @@ assert_signal_wait_reaps_delayed_child() {
   export XDG_RUNTIME_DIR="$fixture_dir/locks"
   shim=$(write_systemd_identity_shim "$fixture_dir")
   "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
-  run_fixture_controller "$state" "$shim" env >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" &
+  background_fixture_controller "$state" "$shim" env >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" &
   controller_pid=$!
-  for i in $(seq 1 200); do
+  for i in $(seq 1 600); do
     [[ -e "$fixture_dir/$running_marker" ]] && break
     kill -0 "$controller_pid" 2>/dev/null || break
     sleep 0.05
@@ -2690,12 +2752,12 @@ test_signal_waits_for_guard_descendant_group() (
   shim=$(write_systemd_identity_shim "$fixture_dir")
   "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
 
-  run_fixture_controller "$state" "$shim" env >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" &
+  background_fixture_controller "$state" "$shim" env >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" &
   controller_pid=$!
-  for i in $(seq 1 200); do
+  for i in $(seq 1 600); do
     [[ -e "$fixture_dir/guard-descendant-running" ]] && break
     kill -0 "$controller_pid" 2>/dev/null || break
-    sleep 0.02
+    sleep 0.05
   done
   [[ -e "$fixture_dir/guard-descendant-running" ]]
   descendant_pid=$(<"$fixture_dir/guard-descendant-pid")
@@ -2706,9 +2768,9 @@ test_signal_waits_for_guard_descendant_group() (
   if [[ ! -e "$fixture_dir/guard-descendant-complete" ]] || kill -0 "$descendant_pid" 2>/dev/null; then
     returned_early=true
   fi
-  for i in $(seq 1 200); do
+  for i in $(seq 1 600); do
     [[ -e "$fixture_dir/guard-descendant-complete" ]] && ! kill -0 "$descendant_pid" 2>/dev/null && break
-    sleep 0.02
+    sleep 0.05
   done
   if kill -0 "$descendant_pid" 2>/dev/null; then
     kill "$descendant_pid" 2>/dev/null || true
@@ -2738,12 +2800,12 @@ test_concurrent_reprepare_cannot_replace_live_prepared_state() (
   chmod 0600 "$alternate"
   : > "$fixture_dir/pause-next-docker"
 
-  run_fixture_controller "$state" "$shim" env >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" &
+  background_fixture_controller "$state" "$shim" env >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" &
   controller_pid=$!
-  for i in $(seq 1 200); do
+  for i in $(seq 1 600); do
     [[ -e "$fixture_dir/docker-paused" ]] && break
     kill -0 "$controller_pid" 2>/dev/null || break
-    sleep 0.02
+    sleep 0.05
   done
   [[ -e "$fixture_dir/docker-paused" ]]
   "$CONTROLLER" --prepare --manifest "$alternate" --state "$state" >/dev/null 2>&1 || reprepare_rc=$?
@@ -2790,12 +2852,12 @@ test_verified_guard_bytes_cannot_be_replaced_before_use() (
   "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
   : > "$fixture_dir/pause-engine-info"
 
-  run_fixture_controller "$state" "$shim" env >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" &
+  background_fixture_controller "$state" "$shim" env >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" &
   controller_pid=$!
-  for i in $(seq 1 200); do
+  for i in $(seq 1 600); do
     [[ -e "$fixture_dir/engine-info-paused" ]] && break
     kill -0 "$controller_pid" 2>/dev/null || break
-    sleep 0.02
+    sleep 0.05
   done
   [[ -e "$fixture_dir/engine-info-paused" ]]
   cat > "$guard.next" <<'GUARD'
@@ -3320,6 +3382,7 @@ test_same_name_volume_replacement_is_rejected_after_preparation() (
   trap '[[ -z ${fixture_dir:-} ]] || rm -rf "$fixture_dir"' EXIT
 
   for field in Driver Mountpoint CreatedAt Scope Labels Options; do
+    _clear_authority_root_for_isolation
     fixture_dir=$(mktemp -d)
     manifest="$fixture_dir/manifest.json"
     state="$fixture_dir/controller.json"
@@ -3429,6 +3492,11 @@ test_successful_verifier_postprocessing_failure_stops_writer() (
   trap '[[ -z ${fixture_dir:-} ]] || rm -rf "$fixture_dir"' EXIT
 
   for failure in evidence cursor state; do
+    # Each iteration runs a real controller that claims the durable authority
+    # record for the shared fake engine+volume identity; the previous
+    # iteration's fixture is deleted, leaving a stale record that fail-closed
+    # --prepare correctly refuses. Isolate per iteration.
+    _clear_authority_root_for_isolation
     fixture_dir=$(mktemp -d)
     manifest="$fixture_dir/manifest.json"
     state="$fixture_dir/controller.json"
@@ -3495,6 +3563,10 @@ test_post_activation_signal_with_zero_exit_verifier_stops_writer() (
   trap 'terminate_fixture_process "${controller_pid:-}"; terminate_fixture_process "${child_pid:-}"; [[ -z ${fixture_dir:-} ]] || rm -rf "$fixture_dir"' EXIT
 
   for signal_spec in TERM:143 INT:130 HUP:129; do
+    # Per-iteration authority isolation (same rationale as the verifier
+    # postprocessing loop: stale records from deleted fixtures must not
+    # poison the next iteration's --prepare).
+    _clear_authority_root_for_isolation
     signal=${signal_spec%%:*}
     expected_rc=${signal_spec##*:}
     fixture_dir=$(mktemp -d)
@@ -3506,10 +3578,10 @@ test_post_activation_signal_with_zero_exit_verifier_stops_writer() (
     "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
 
     rc=0
-    run_fixture_controller "$state" "$shim" env --default-signal="$signal" \
+    background_fixture_controller "$state" "$shim" env --default-signal="$signal" \
       >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" &
     controller_pid=$!
-    for i in $(seq 1 200); do
+    for i in $(seq 1 600); do
       [[ -e "$fixture_dir/candidate-verifier-running" ]] && break
       kill -0 "$controller_pid" 2>/dev/null || break
       sleep 0.05
@@ -3569,6 +3641,11 @@ test_source_recovery_signal_persists_process_evidence() (
   trap 'terminate_fixture_process "${controller_pid:-}"; terminate_fixture_process "${child_pid:-}"; [[ -z ${fixture_dir:-} ]] || rm -rf "$fixture_dir"' EXIT
 
   for case_name in ordinary interrupted; do
+    # Both cases claim the same fake engine+volume authority, but the first
+    # fixture directory is deleted before the second prepare. Clear only the
+    # suite-owned authority namespace so the interrupted case cannot inherit
+    # a stale record whose state path no longer exists.
+    _clear_authority_root_for_isolation
     if [[ "$case_name" == ordinary ]]; then
       verifier_mode=source-fail
       expected_rc=42
@@ -3589,12 +3666,12 @@ test_source_recovery_signal_persists_process_evidence() (
     expected_boot_cursor="b=${expected_boot//-/}"
 
     rc=0
-    run_fixture_controller "$state" "$shim" env \
+    background_fixture_controller "$state" "$shim" env \
       >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" &
     controller_pid=$!
     observed_controller_pid=$controller_pid
     if [[ -n "$expected_signal" ]]; then
-      for i in $(seq 1 200); do
+      for i in $(seq 1 600); do
         [[ -e "$fixture_dir/source-verifier-running" ]] && break
         kill -0 "$controller_pid" 2>/dev/null || break
         sleep 0.05
@@ -3893,10 +3970,15 @@ test_engine_volume_identity_has_one_authoritative_state_path() (
 )
 
 test_production_rejects_ambient_test_hook_contamination() (
-  local hook_spec hook value fixture_dir='' manifest state live shim rc
+  local hook_spec hook value fixture_dir='' manifest state live shim rc auth_root
   local -a failures=()
-  trap '[[ -z ${fixture_dir:-} ]] || rm -rf "$fixture_dir"' EXIT
+  trap '[[ -z ${fixture_dir:-} ]] || rm -rf "$fixture_dir" "${auth_root:-}"' EXIT
 
+  # Each iteration uses a fresh XDG_STATE_HOME so the durable authority
+  # record left by the previous hook cannot be silently reclaimed under
+  # the same engine+volume with a different state path. Without this, the
+  # R3-1 explicit `*)` arm fires before this test reaches the
+  # production-hook rejection path it means to exercise.
   for hook_spec in \
     NOOSPHERE_CONTROLLER_TEST_INTERRUPT_AFTER_INTENT=1 \
     NOOSPHERE_CONTROLLER_TEST_SIGNAL_AFTER_GUARD_SPAWN=TERM \
@@ -3907,11 +3989,14 @@ test_production_rejects_ambient_test_hook_contamination() (
     hook=${hook_spec%%=*}
     value=${hook_spec#*=}
     fixture_dir=$(mktemp -d)
+    auth_root=$(mktemp -d)
+    chmod 700 "$auth_root"
     manifest="$fixture_dir/manifest.json"
     state="$fixture_dir/controller.json"
     live="$fixture_dir/docker-compose.yml"
     write_execution_fixture "$fixture_dir" "$manifest"
     export XDG_RUNTIME_DIR="$fixture_dir/locks"
+    export XDG_STATE_HOME="$auth_root"
     shim=$(write_systemd_identity_shim "$fixture_dir" disabled)
     "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
 
@@ -3931,6 +4016,7 @@ test_production_rejects_ambient_test_hook_contamination() (
     fi
 
     rm -rf "$fixture_dir"
+    rm -rf "$auth_root"
     fixture_dir=''
   done
 
@@ -3980,6 +4066,13 @@ test_state_authority_survives_runtime_loss_and_is_revalidated_at_execute() (
   fi
   rm -rf "$fixture_dir"
   fixture_dir=''
+
+  # The copied-state scenario above intentionally leaves a durable authority
+  # record for its fake engine+volume, then deletes the state path it names.
+  # The runtime-loss scenario below is independent but reuses that fake tuple;
+  # isolate the suite-owned namespace before starting it so the controller's
+  # fail-closed stale-record check cannot mask the behavior under test.
+  _clear_authority_root_for_isolation
 
   # Replace the entire disposable runtime root to model reboot/runtime loss.
   # The duplicate tuple must remain rejected, while both tuple dimensions have
@@ -4059,6 +4152,8 @@ test_post_authorization_pre_activation_failures_commit_fresh_stop_evidence() (
   trap '[[ -z ${fixture_dir:-} ]] || rm -rf "$fixture_dir"' EXIT
 
   for case_name in signal artifact-storage; do
+    # Per-iteration authority isolation (stale-record poisoning guard).
+    _clear_authority_root_for_isolation
     fixture_dir=$(mktemp -d)
     manifest="$fixture_dir/manifest.json"
     state="$fixture_dir/controller.json"
@@ -4164,6 +4259,13 @@ test_verifier_artifact_selector_collision_routes_through_closure_artifact_storag
   printf 'existing\n' > "$state_base.$invocation.verify.stdout.log"
   printf 'existing\n' > "$state_base.$invocation.verify.stderr.log"
   printf '{"existing":true}\n' > "$state_base.$invocation.verify.evidence.json"
+
+  # The docker shim (controller script L577-581) only writes the
+  # `incident-persisted-before-stop` sentinel when this hook file exists.
+  # Without it, the assertion below is a permanent no-op — a regression
+  # that publishes the terminal incident before stopping the writer
+  # would still pass. Mirror the sibling pattern at L4075.
+  : > "$fixture_dir/kill-controller-if-incident-before-stop"
 
   rc=0
   run_fixture_controller "$state" "$shim" env \
@@ -4473,6 +4575,7 @@ test_phase_owned_invariants_reject_unproved_states() (
     evidence-pending-without-stop-proof \
     source-incident-without-source-evidence \
     closure-incident-without-stop-proof; do
+    _clear_authority_root_for_isolation
     guard_mode=complete
     verifier_mode=success
     target_incident_class=''
@@ -4779,60 +4882,16 @@ test_xdg_state_home_cross_root_execute_rejected() (
     exit 1
   }
 )
-
-if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
-  test_atomic_controller_state
-  test_source_restore_without_guard_journal
-  test_execution_environment_is_hermetic
-  test_closure_failure_classification
-  test_signal_handler_is_idempotent
-  test_reboot_recovers_prejournal_candidate_publication
-  test_valid_guard_journal_suppresses_outer_restore
-  test_shared_lock_is_inherited
-  test_candidate_publication_intent_is_recoverable
-  test_systemd_contract_has_no_automatic_kill
-  test_process_evidence_is_bounded_and_hashed
-  test_closure_outcome_never_false_completes
-  test_complete_entrypoint_with_disposable_commands
-  test_manifest_mutation_fails_before_publication
-  test_execution_requires_systemd_identity
-  test_guard_failure_before_journal_restores_source
-  test_guard_journal_prevents_outer_restore
-  test_verifier_failure_commits_incident_and_stops_app
-  test_evidence_failure_cannot_complete
-  test_term_during_guard_records_and_recovers
-  test_terminal_states_never_delegate_to_a_stale_guard_journal
-  test_systemd_identity_is_queried_not_asserted
-  test_prepare_refuses_to_overwrite_active_or_terminal_state
-  test_engine_identity_is_rebound_to_the_live_daemon
-  test_lock_root_must_match_the_guard_lock_contract
-  test_child_process_environment_and_docker_resolution_are_hermetic
-  test_latched_signal_before_guard_cannot_be_ignored
-  test_verifier_evidence_failure_stops_writer_before_storage
-  test_process_logs_are_fsynced_before_evidence_binding
-  test_complete_state_binds_guard_and_closure_evidence
-  test_systemd_safety_properties_and_linger_are_queried
-  test_signals_cannot_cross_spawn_or_complete_boundaries
-  test_source_recovery_verifier_is_hermetic_and_target_bound
-  test_complete_state_binds_immutable_guard_journal
-  test_process_evidence_separates_controller_and_child_identity
-  test_guard_arguments_are_semantically_bound_to_manifest
-  test_compose_plugin_and_docker_config_identity_are_bound
-  test_failed_prejournal_recovery_commits_durable_incident
-  test_process_evidence_rejects_impossible_chronology
-  test_source_snapshot_is_revalidated_before_publication
-  test_guard_journal_path_is_canonically_bound
-  test_fixed_path_toolchain_is_immutable_and_bound
-  test_controller_state_cannot_collide_with_guard_journal
-  test_ambient_test_overrides_cannot_falsify_production_evidence
-  test_docker_rehearsal_proves_cleanup_before_success
-  test_process_evidence_rejects_fractional_numbers
-  test_real_systemd_fixture_exercises_signal_delivery
-  test_production_execution_succeeds_without_ambient_fault_hooks
-  test_production_execution_succeeds_without_ambient_signal_hooks
 test_corrupt_phase_durable_state_rejected() (
-  local fixture_dir='' manifest state_a state_b rc auth
-  local engine_id=fixture-engine volume=fixture-volume
+  local fixture_dir="" manifest state_a state_b rc auth runtime_dir lock_key claim authority
+  # Test-unique engine+volume keeps this test from claiming the same
+  # durable authority namespace as earlier tests in the suite-level
+  # XDG_STATE_HOME root. Without isolation, the controller would read a
+  # record pointing at a path the earlier test has already rm-rf'd; the
+  # resulting empty `.phase` would fire the R3-1 `*)` arm with the wrong
+  # diagnostic for the wrong reason and mask the real failure this test
+  # means to exercise.
+  local engine_id=corrupt-phase-engine volume=corrupt-phase-volume
   local -a failures=()
   trap '[[ -z ${fixture_dir:-} ]] || rm -rf "$fixture_dir" "$auth"' EXIT
 
@@ -4842,31 +4901,185 @@ test_corrupt_phase_durable_state_rejected() (
   manifest="$fixture_dir/manifest.json"
   state_a="$fixture_dir/controller.json"
   state_b="$fixture_dir/controller-alt.json"
-  write_execution_fixture "$fixture_dir" "$manifest"
-  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  write_execution_fixture "$fixture_dir" "$manifest" complete success "$engine_id" "$volume"
+  # lockRoot in the manifest is $fixture_dir/locks; assert_live_engine_binding
+  # compares it against XDG_RUNTIME_DIR. Using a separate directory here would
+  # die with "recorded lock root does not match the guard engine-volume lock
+  # contract" before reaching the case arm we mean to exercise.
+  runtime_dir="$fixture_dir/locks"
+  install -d -m 700 "$runtime_dir"
+  export XDG_RUNTIME_DIR="$runtime_dir"
+  lock_key=$(printf '%s\0%s' "$engine_id" "$volume" | sha256sum | awk '{print $1}')
+  claim="$runtime_dir/noosphere-pgvector-state-$lock_key.json"
+  authority="$auth/noosphere-pgvector-controller/authority/state-$lock_key.json"
 
-  # Prepare once at state_a to seed the durable authority record.
+  # Prepare once at state_a to seed the durable authority record AND the
+  # runtime claim.
   XDG_STATE_HOME="$auth" "$CONTROLLER" --prepare --manifest "$manifest" --state "$state_a"
 
-  # Corrupt the state file's phase to a value outside the enum.
-  jq '.phase = "garbage"' "$state_a" > "$state_a.next"
+  # Reboot-shaped recovery: the runtime claim is wiped, the durable record
+  # remains. Without this step, the next prepare would die at the runtime
+  # claim check (controller L587) with "authoritative state ... already
+  # claimed by another path" — masking the L654 enum case the test means
+  # to exercise. Recreate the runtime dir before the second prepare so
+  # acquire_operation_lock sees a real directory.
+  rm -rf "$runtime_dir"
+  install -d -m 700 "$runtime_dir"
+
+  # Corrupt the state file phase to a value outside the enum.
+  jq ".phase = \"garbage\"" "$state_a" > "$state_a.next"
   install -m 600 "$state_a.next" "$state_a"
 
   # Run --prepare at a DIFFERENT state path so claim_authoritative_state_path
   # reads the durable record, sees recorded_path=state_a != current=state_b,
-  # and reaches the case statement at the active-phase enum. The current
-  # case statement only matches the 10 enum values, so .phase=garbage falls
-  # through to a reclaim that silently overwrites the durable record.
+  # and reaches the case statement at the active-phase enum. With the
+  # R3-1 fix the `*)` default arm fires; without it, the case silently
+  # falls through to a reclaim that overwrites the durable record.
   rc=0
   XDG_STATE_HOME="$auth" "$CONTROLLER" --prepare --manifest "$manifest" --state "$state_b" \
     >"$fixture_dir/alt.out" 2>"$fixture_dir/alt.err" || rc=$?
   if ((rc == 0)); then
-    failures+=('controller reclaimed a durable state with .phase=garbage; expected unrecognized-phase rejection')
+    failures+=("controller reclaimed a durable state with .phase=garbage; expected unrecognized-phase rejection")
   else
-    rg -qi 'phase|unrecognized|authoritative.*state|durable.*authority' \
-      "$fixture_dir/alt.err" ||
-      failures+=('corrupt-phase rejection lacked a phase or authority diagnostic')
+    grep -qiE "unrecognized phase" "$fixture_dir/alt.err" ||
+      failures+=("corrupt-phase rejection lacked the "unrecognized phase" diagnostic; stderr=$(tr "\n" " " < "$fixture_dir/alt.err")")
   fi
+
+  # A rejected alternate prepare must not publish a reboot-volatile claim for
+  # the rejected path or disturb the durable record for the authoritative
+  # state. Otherwise repairing and resuming state_a is poisoned until an
+  # operator manually deletes the stale runtime claim.
+  [[ ! -e "$claim" ]] ||
+    failures+=("corrupt-phase rejection left a runtime claim for the rejected alternate state")
+  [[ $(jq -er '.statePath' "$authority") == "$(realpath -m "$state_a")" ]] ||
+    failures+=("corrupt-phase rejection changed the durable authoritative state path")
+
+  jq '.phase = "prepared"' "$state_a" > "$state_a.next"
+  install -m 600 "$state_a.next" "$state_a"
+  rc=0
+  XDG_STATE_HOME="$auth" "$CONTROLLER" --prepare --manifest "$manifest" --state "$state_a" \
+    >"$fixture_dir/retry.out" 2>"$fixture_dir/retry.err" || rc=$?
+  ((rc == 0)) ||
+    failures+=("authoritative state could not resume after alternate rejection; stderr=$(tr "\n" " " < "$fixture_dir/retry.err")")
+
+  ((${#failures[@]} == 0)) || {
+    printf "%s\n" "${failures[@]}" >&2
+    exit 1
+  }
+)
+
+test_bound_transition_inputs_are_pairwise_distinct() (
+  local fixture_dir manifest state live rc=0
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  live="$fixture_dir/docker-compose.yml"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+
+  jq '.sourceSnapshot = .liveCompose' "$manifest" > "$manifest.next"
+  install -m 600 "$manifest.next" "$manifest"
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state" \
+    >"$fixture_dir/prepare.out" 2>"$fixture_dir/prepare.err" || rc=$?
+
+  ((rc != 0)) || {
+    echo 'controller accepted sourceSnapshot aliasing liveCompose' >&2
+    exit 1
+  }
+  rg -qi 'bound transition inputs collide' "$fixture_dir/prepare.err" || {
+    echo "bound-input alias rejection lacked the pairwise-collision diagnostic: $(tr '\n' ' ' < "$fixture_dir/prepare.err")" >&2
+    exit 1
+  }
+  [[ ! -e "$state" && $(<"$live") == 'source model' ]]
+)
+
+test_invalid_complete_state_cannot_relinquish_durable_authority() (
+  local fixture_dir manifest state_a state_b auth runtime_dir engine_id volume lock_key claim authority rc=0
+  fixture_dir=$(mktemp -d)
+  auth=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir" "$auth"' EXIT
+  chmod 700 "$auth"
+  manifest="$fixture_dir/manifest.json"
+  state_a="$fixture_dir/controller.json"
+  state_b="$fixture_dir/controller-next.json"
+  engine_id=invalid-complete-engine
+  volume=invalid-complete-volume
+  write_execution_fixture "$fixture_dir" "$manifest" complete success "$engine_id" "$volume"
+  runtime_dir="$fixture_dir/locks"
+  export XDG_RUNTIME_DIR="$runtime_dir"
+  lock_key=$(printf '%s\0%s' "$engine_id" "$volume" | sha256sum | awk '{print $1}')
+  claim="$runtime_dir/noosphere-pgvector-state-$lock_key.json"
+  authority="$auth/noosphere-pgvector-controller/authority/state-$lock_key.json"
+
+  XDG_STATE_HOME="$auth" "$CONTROLLER" --prepare --manifest "$manifest" --state "$state_a"
+  rm -f -- "$claim"
+  jq '.phase = "complete"' "$state_a" > "$state_a.next"
+  install -m 600 "$state_a.next" "$state_a"
+
+  XDG_STATE_HOME="$auth" "$CONTROLLER" --prepare --manifest "$manifest" --state "$state_b" \
+    >"$fixture_dir/reclaim.out" 2>"$fixture_dir/reclaim.err" || rc=$?
+  ((rc != 0)) || {
+    echo 'controller reclaimed authority from an evidentially invalid complete state' >&2
+    exit 1
+  }
+  rg -qi 'controller state is malformed|complete.*evidence' "$fixture_dir/reclaim.err" || {
+    echo "invalid-complete rejection lacked an evidence-validation diagnostic: $(tr '\n' ' ' < "$fixture_dir/reclaim.err")" >&2
+    exit 1
+  }
+  [[ ! -e "$claim" && ! -e "$state_b" ]]
+  [[ $(jq -er '.statePath' "$authority") == "$(realpath -m "$state_a")" ]]
+)
+
+test_durable_authority_reclaims_complete_or_missing_state() (
+  local case_name case_root auth runtime_dir fixture_a fixture_b fixture_dir manifest manifest_a manifest_b
+  local state_a state_b engine_id volume shim rc
+  local -a failures=() cleanup_roots=()
+  trap 'for cleanup_root in "${cleanup_roots[@]}"; do rm -rf -- "$cleanup_root"; done' EXIT
+
+  for case_name in complete missing; do
+    auth=$(mktemp -d)
+    case_root=$(mktemp -d)
+    cleanup_roots+=("$auth" "$case_root")
+    chmod 700 "$auth"
+    runtime_dir="$case_root/runtime"
+    fixture_a="$case_root/a"
+    fixture_b="$case_root/b"
+    install -d -m 700 "$runtime_dir" "$fixture_a" "$fixture_b"
+    manifest_a="$fixture_a/manifest.json"
+    manifest_b="$fixture_b/manifest.json"
+    state_a="$fixture_a/controller.json"
+    state_b="$fixture_b/controller.json"
+    engine_id="reclaim-$case_name-engine"
+    volume="reclaim-$case_name-volume"
+    write_execution_fixture "$fixture_a" "$manifest_a" complete success "$engine_id" "$volume"
+    write_execution_fixture "$fixture_b" "$manifest_b" complete success "$engine_id" "$volume"
+    for manifest in "$manifest_a" "$manifest_b"; do
+      jq --arg lockRoot "$runtime_dir" '.lockRoot = $lockRoot' "$manifest" > "$manifest.next"
+      install -m 600 "$manifest.next" "$manifest"
+    done
+    export XDG_RUNTIME_DIR="$runtime_dir"
+
+    XDG_STATE_HOME="$auth" "$CONTROLLER" --prepare --manifest "$manifest_a" --state "$state_a"
+    if [[ "$case_name" == complete ]]; then
+      fixture_dir=$fixture_a
+      shim=$(write_systemd_identity_shim "$fixture_a")
+      XDG_STATE_HOME="$auth" run_fixture_controller "$state_a" "$shim" env
+      [[ $(jq -er '.phase' "$state_a") == complete ]]
+    else
+      rm -f -- "$state_a"
+    fi
+
+    rc=0
+    XDG_STATE_HOME="$auth" "$CONTROLLER" --prepare --manifest "$manifest_b" --state "$state_b" \
+      >"$fixture_b/reclaim.out" 2>"$fixture_b/reclaim.err" || rc=$?
+    ((rc == 0)) ||
+      failures+=("$case_name durable state with retained runtime claim was not reclaimable; stderr=$(tr "\n" " " < "$fixture_b/reclaim.err")")
+    if ((rc == 0)); then
+      [[ $(jq -er '.phase' "$state_b") == prepared ]] ||
+        failures+=("$case_name reclaim did not publish a prepared replacement state")
+    fi
+  done
 
   ((${#failures[@]} == 0)) || {
     printf '%s\n' "${failures[@]}" >&2
@@ -4874,62 +5087,415 @@ test_corrupt_phase_durable_state_rejected() (
   }
 )
 
-  test_derived_evidence_paths_cannot_collide_with_bound_inputs
-  test_guard_signal_persists_child_evidence_before_return
-  test_verifier_signal_persists_child_evidence_before_return
-  test_terminal_state_requires_phase_specific_invariants
-  test_preparation_resolves_docker_only_after_hermetic_sanitization
-  test_controller_executable_is_bound_after_preparation
-  test_guard_signal_waits_until_child_is_reaped
-  test_closure_verifier_signal_waits_until_child_is_reaped
-  test_source_verifier_signal_waits_until_child_is_reaped
-  test_bootstrap_ignores_ambient_path
-  test_docker_config_namespace_rejects_descendants
-  test_complete_state_revalidates_durable_evidence
-  test_recovery_preserves_prior_process_evidence
-  test_closure_incident_remains_resumable_until_writer_is_stopped
-  test_bootstrap_blocks_bash_env_and_exported_functions
-  test_fixed_path_is_validated_before_installation
-  test_signal_waits_for_guard_descendant_group
-  test_concurrent_reprepare_cannot_replace_live_prepared_state
-  test_guard_requires_deferred_writer_restart
-  test_verified_guard_bytes_cannot_be_replaced_before_use
-  test_concurrent_first_preparation_is_no_replace
-  test_fixed_path_rejects_mutable_symlink_aliases
-  test_verifier_evidence_failure_remains_resumable
-  test_operation_lock_open_does_not_follow_symlinks
-  test_execution_bundle_accepts_trusted_root_owned_executables
-  test_bootstrap_utility_resolution_is_trusted_before_use
-  test_systemd_context_requires_transient_unit_provenance
-  test_writer_activation_lifecycle_is_ordered_and_evidence_bound
-  test_authorization_evidence_is_durable_before_activation
-  test_app_activation_failure_is_fail_closed_before_final_verification
-  test_term_after_activation_stops_writer_before_return
-  test_closure_evidence_pending_resume_never_reactivates_writer
-  test_missing_live_compose_commits_prejournal_restoration_incident
-  test_post_activation_artifact_setup_failure_stops_writer_durably
-  test_closure_evidence_pending_requires_verified_stop_before_persistence
-  test_same_name_volume_replacement_is_rejected_after_preparation
-  test_live_identity_checks_wait_for_the_shared_operation_lock
-  test_successful_verifier_postprocessing_failure_stops_writer
-  test_post_activation_signal_with_zero_exit_verifier_stops_writer
-  test_source_recovery_signal_persists_process_evidence
-  test_prejournal_recovery_refuses_unexpected_live_compose
-  test_complete_write_cannot_race_final_guard_journal_validation
-  test_engine_volume_identity_has_one_authoritative_state_path
-  test_production_rejects_ambient_test_hook_contamination
-  test_state_authority_survives_runtime_loss_and_is_revalidated_at_execute
-  test_post_authorization_pre_activation_failures_commit_fresh_stop_evidence
-  test_verifier_artifact_selector_collision_routes_through_closure_artifact_storage
-  test_source_recovery_artifacts_cannot_collide_with_bound_inputs
-  test_source_recovery_retry_preserves_prior_unbound_evidence
-  test_phase_owned_invariants_reject_unproved_states
-  test_disposable_rehearsals_clean_and_assert_state_authority
-  test_transient_systemd_fixture_independently_proves_identity_and_cursors
-  test_writer_stop_evidence_is_retry_distinct
-  test_invocation_suffixed_artifacts_cannot_collide_with_bound_inputs
-  test_xdg_state_home_cross_root_execute_rejected
-  test_corrupt_phase_durable_state_rejected
+test_cli_rejects_duplicate_or_mixed_modes() (
+  local fixture_dir case_name rc
+  local -a args failures=()
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
 
+  for case_name in prepare-execute execute-prepare prepare-prepare execute-execute; do
+    case "$case_name" in
+      prepare-execute) args=(--prepare --execute --state "$fixture_dir/state.json") ;;
+      execute-prepare) args=(--execute --prepare --manifest "$fixture_dir/manifest.json" --state "$fixture_dir/state.json") ;;
+      prepare-prepare) args=(--prepare --prepare --manifest "$fixture_dir/manifest.json" --state "$fixture_dir/state.json") ;;
+      execute-execute) args=(--execute --execute --state "$fixture_dir/state.json") ;;
+    esac
+    rc=0
+    "$CONTROLLER" "${args[@]}" >"$fixture_dir/$case_name.out" 2>"$fixture_dir/$case_name.err" || rc=$?
+    ((rc != 0)) || failures+=("$case_name unexpectedly succeeded")
+    rg -qi 'exactly one of --prepare or --execute is required' "$fixture_dir/$case_name.err" ||
+      failures+=("$case_name did not reject duplicate/mixed mode flags at parse time; stderr=$(tr '\n' ' ' < "$fixture_dir/$case_name.err")")
+  done
+
+  ((${#failures[@]} == 0)) || {
+    printf '%s\n' "${failures[@]}" >&2
+    exit 1
+  }
+)
+
+test_execution_environment_removes_all_ambient_docker_compose_behavior() (
+  local name remaining=''
+  eval "$(extract_function sanitize_execution_environment)"
+
+  export DOCKER_DEFAULT_PLATFORM=linux/arm64
+  export DOCKER_API_VERSION=1.41
+  export COMPOSE_REMOVE_ORPHANS=1
+  export COMPOSE_IGNORE_ORPHANS=1
+
+  sanitize_execution_environment \
+    unix:///var/run/docker.sock /opt/noosphere-tools /tmp/controller-home
+
+  while IFS= read -r name; do
+    case "$name" in
+      DOCKER_CONFIG|DOCKER_HOST|COMPOSE_DISABLE_ENV_FILE) ;;
+      DOCKER_*|COMPOSE_*) remaining+="${remaining:+$'\n'}$name" ;;
+    esac
+  done < <(compgen -e)
+  [[ -z "$remaining" ]] || {
+    printf 'ambient Docker/Compose behavior variables survived sanitization:\n%s\n' \
+      "$remaining" >&2
+    exit 1
+  }
+)
+
+test_durable_authority_rejects_runtime_backed_state_home() (
+  local fixture_dir manifest state runtime_state_home rc=0
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest" complete success \
+    runtime-authority-engine runtime-authority-volume
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  runtime_state_home="$XDG_RUNTIME_DIR/xdg-state-home"
+  install -d -m 700 "$runtime_state_home"
+
+  XDG_STATE_HOME="$runtime_state_home" \
+    "$CONTROLLER" --prepare --manifest "$manifest" --state "$state" \
+      >"$fixture_dir/prepare.out" 2>"$fixture_dir/prepare.err" || rc=$?
+
+  ((rc != 0)) || {
+    echo 'controller accepted a reboot-volatile durable authority root under XDG_RUNTIME_DIR' >&2
+    exit 1
+  }
+  rg -qi 'durable.*authority|runtime.*state|reboot.*volatile' "$fixture_dir/prepare.err" || {
+    echo "runtime-backed authority rejection lacked a durability diagnostic: $(tr '\n' ' ' < "$fixture_dir/prepare.err")" >&2
+    exit 1
+  }
+  [[ ! -e "$state" ]]
+)
+
+test_bound_inputs_and_publication_reject_unsafe_write_modes() (
+  local fixture_dir safe_dir unsafe_dir source target
+  local -a failures=()
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  safe_dir="$fixture_dir/safe"
+  unsafe_dir="$fixture_dir/unsafe"
+  install -d -m 700 "$safe_dir"
+  install -d -m 777 "$unsafe_dir"
+  target="$safe_dir/live-compose.yml"
+
+  eval "$(extract_function path_present)"
+  eval "$(extract_function assert_owned_regular_file)"
+  eval "$(extract_function publish_compose_atomic)"
+  eval "$(extract_function die)"
+  fsync_path() { :; }
+
+  source="$safe_dir/world-writable-source.yml"
+  printf 'candidate-file-mode\n' > "$source"
+  printf 'source-model\n' > "$target"
+  chmod 0666 "$source"
+  chmod 0600 "$target"
+  if (publish_compose_atomic "$source" "$target"); then
+    failures+=('publication accepted a group/world-writable bound input')
+  fi
+
+  source="$unsafe_dir/candidate.yml"
+  printf 'candidate-parent-mode\n' > "$source"
+  printf 'source-model\n' > "$target"
+  chmod 0600 "$source" "$target"
+  if (publish_compose_atomic "$source" "$target"); then
+    failures+=('publication accepted a bound input below a group/world-writable caller-owned parent')
+  fi
+
+  ((${#failures[@]} == 0)) || {
+    printf '%s\n' "${failures[@]}" >&2
+    exit 1
+  }
+  [[ $(<"$target") == source-model ]]
+)
+
+test_incident_classes_and_stop_proofs_are_closed_world() (
+  local fixture_dir manifest state mutated shim rc=0
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  mutated="$fixture_dir/unclassified-incident.json"
+  write_execution_fixture "$fixture_dir" "$manifest" complete fail
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_systemd_identity_shim "$fixture_dir")
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+  run_fixture_controller "$state" "$shim" env \
+    >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || rc=$?
+  ((rc != 0))
+  jq -e '.phase == "incident" and .incidentClass == "closure-verification" and has("writerStopEvidence")' \
+    "$state" >/dev/null
+
+  jq '.incidentClass = "unclassified-post-authorization" | del(.writerStopEvidence)' \
+    "$state" > "$mutated"
+  chmod 0600 "$mutated"
+  if /bin/bash -c 'source "$1"; validate_controller_state "$2"' \
+    _ "$CONTROLLER" "$mutated" \
+      >"$fixture_dir/validate.out" 2>"$fixture_dir/validate.err"; then
+    echo 'controller accepted an unknown post-authorization incident class without writer-stop proof' >&2
+    exit 1
+  fi
+  rg -qi 'incident.*class|writer.*stop.*evidence' "$fixture_dir/validate.err" || {
+    echo "unclassified incident rejection lacked a class/stop-proof diagnostic: $(tr '\n' ' ' < "$fixture_dir/validate.err")" >&2
+    exit 1
+  }
+)
+
+test_real_docker_rehearsal_declares_interruption_resume_coverage() (
+  local execute_sites interruption_sites recovery_assertions
+  execute_sites=$(rg -F -c -- '--execute --state "$state"' "$DOCKER_FIXTURE" || printf '0\n')
+  interruption_sites=$(rg -c -i \
+    'systemctl --user kill|kill[[:space:]].*(TERM|KILL)|interrupt.*(controller|unit)' \
+    "$DOCKER_FIXTURE" || printf '0\n')
+  recovery_assertions=$(rg -c -i \
+    'candidate-published|source-recovery-running|pre-journal-source-restored|recovery rehearsal passed' \
+    "$DOCKER_FIXTURE" || printf '0\n')
+
+  [[ "$execute_sites" =~ ^[0-9]+$ && "$execute_sites" -ge 2 &&
+     "$interruption_sites" =~ ^[0-9]+$ && "$interruption_sites" -ge 1 &&
+     "$recovery_assertions" =~ ^[0-9]+$ && "$recovery_assertions" -ge 2 ]] || {
+    printf 'real-Docker rehearsal lacks an interruption/resume owner (execute=%s interrupt=%s recovery-assertions=%s)\n' \
+      "$execute_sites" "$interruption_sites" "$recovery_assertions" >&2
+    exit 1
+  }
+)
+
+# Per-test isolation helper: clear the durable authority namespace so a
+# prior test's stale record (pointing at an already-rm-rf'd fixture_dir)
+# cannot fire the R3-1 unrecognized-phase arm before the current test
+# exercises its own contract.
+_clear_authority_root_for_isolation() {
+  rm -rf -- "$XDG_STATE_HOME/noosphere-pgvector-controller"
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  _clear_authority_root_for_isolation
+  test_atomic_controller_state
+  _clear_authority_root_for_isolation
+  test_source_restore_without_guard_journal
+  _clear_authority_root_for_isolation
+  test_execution_environment_is_hermetic
+  _clear_authority_root_for_isolation
+  test_closure_failure_classification
+  _clear_authority_root_for_isolation
+  test_signal_handler_is_idempotent
+  _clear_authority_root_for_isolation
+  test_reboot_recovers_prejournal_candidate_publication
+  _clear_authority_root_for_isolation
+  test_valid_guard_journal_suppresses_outer_restore
+  _clear_authority_root_for_isolation
+  test_shared_lock_is_inherited
+  _clear_authority_root_for_isolation
+  test_candidate_publication_intent_is_recoverable
+  _clear_authority_root_for_isolation
+  test_systemd_contract_has_no_automatic_kill
+  _clear_authority_root_for_isolation
+  test_process_evidence_is_bounded_and_hashed
+  _clear_authority_root_for_isolation
+  test_closure_outcome_never_false_completes
+  _clear_authority_root_for_isolation
+  test_complete_entrypoint_with_disposable_commands
+  _clear_authority_root_for_isolation
+  test_manifest_mutation_fails_before_publication
+  _clear_authority_root_for_isolation
+  test_execution_requires_systemd_identity
+  _clear_authority_root_for_isolation
+  test_guard_failure_before_journal_restores_source
+  _clear_authority_root_for_isolation
+  test_guard_journal_prevents_outer_restore
+  _clear_authority_root_for_isolation
+  test_verifier_failure_commits_incident_and_stops_app
+  _clear_authority_root_for_isolation
+  test_evidence_failure_cannot_complete
+  _clear_authority_root_for_isolation
+  test_term_during_guard_records_and_recovers
+  _clear_authority_root_for_isolation
+  test_terminal_states_never_delegate_to_a_stale_guard_journal
+  _clear_authority_root_for_isolation
+  test_systemd_identity_is_queried_not_asserted
+  _clear_authority_root_for_isolation
+  test_prepare_refuses_to_overwrite_active_or_terminal_state
+  _clear_authority_root_for_isolation
+  test_engine_identity_is_rebound_to_the_live_daemon
+  _clear_authority_root_for_isolation
+  test_lock_root_must_match_the_guard_lock_contract
+  _clear_authority_root_for_isolation
+  test_child_process_environment_and_docker_resolution_are_hermetic
+  _clear_authority_root_for_isolation
+  test_latched_signal_before_guard_cannot_be_ignored
+  _clear_authority_root_for_isolation
+  test_verifier_evidence_failure_stops_writer_before_storage
+  _clear_authority_root_for_isolation
+  test_process_logs_are_fsynced_before_evidence_binding
+  _clear_authority_root_for_isolation
+  test_complete_state_binds_guard_and_closure_evidence
+  _clear_authority_root_for_isolation
+  test_systemd_safety_properties_and_linger_are_queried
+  _clear_authority_root_for_isolation
+  test_signals_cannot_cross_spawn_or_complete_boundaries
+  _clear_authority_root_for_isolation
+  test_source_recovery_verifier_is_hermetic_and_target_bound
+  _clear_authority_root_for_isolation
+  test_complete_state_binds_immutable_guard_journal
+  _clear_authority_root_for_isolation
+  test_process_evidence_separates_controller_and_child_identity
+  _clear_authority_root_for_isolation
+  test_guard_arguments_are_semantically_bound_to_manifest
+  _clear_authority_root_for_isolation
+  test_compose_plugin_and_docker_config_identity_are_bound
+  _clear_authority_root_for_isolation
+  test_failed_prejournal_recovery_commits_durable_incident
+  _clear_authority_root_for_isolation
+  test_process_evidence_rejects_impossible_chronology
+  _clear_authority_root_for_isolation
+  test_source_snapshot_is_revalidated_before_publication
+  _clear_authority_root_for_isolation
+  test_guard_journal_path_is_canonically_bound
+  _clear_authority_root_for_isolation
+  test_fixed_path_toolchain_is_immutable_and_bound
+  _clear_authority_root_for_isolation
+  test_controller_state_cannot_collide_with_guard_journal
+  _clear_authority_root_for_isolation
+  test_ambient_test_overrides_cannot_falsify_production_evidence
+  _clear_authority_root_for_isolation
+  test_docker_rehearsal_proves_cleanup_before_success
+  _clear_authority_root_for_isolation
+  test_process_evidence_rejects_fractional_numbers
+  _clear_authority_root_for_isolation
+  test_real_systemd_fixture_exercises_signal_delivery
+  _clear_authority_root_for_isolation
+  test_production_execution_succeeds_without_ambient_fault_hooks
+  _clear_authority_root_for_isolation
+  test_production_execution_succeeds_without_ambient_signal_hooks
+
+  _clear_authority_root_for_isolation
+  test_derived_evidence_paths_cannot_collide_with_bound_inputs
+  _clear_authority_root_for_isolation
+  test_guard_signal_persists_child_evidence_before_return
+  _clear_authority_root_for_isolation
+  test_verifier_signal_persists_child_evidence_before_return
+  _clear_authority_root_for_isolation
+  test_terminal_state_requires_phase_specific_invariants
+  _clear_authority_root_for_isolation
+  test_preparation_resolves_docker_only_after_hermetic_sanitization
+  _clear_authority_root_for_isolation
+  test_controller_executable_is_bound_after_preparation
+  _clear_authority_root_for_isolation
+  test_guard_signal_waits_until_child_is_reaped
+  _clear_authority_root_for_isolation
+  test_closure_verifier_signal_waits_until_child_is_reaped
+  _clear_authority_root_for_isolation
+  test_source_verifier_signal_waits_until_child_is_reaped
+  _clear_authority_root_for_isolation
+  test_bootstrap_ignores_ambient_path
+  _clear_authority_root_for_isolation
+  test_docker_config_namespace_rejects_descendants
+  _clear_authority_root_for_isolation
+  test_complete_state_revalidates_durable_evidence
+  _clear_authority_root_for_isolation
+  test_recovery_preserves_prior_process_evidence
+  _clear_authority_root_for_isolation
+  test_closure_incident_remains_resumable_until_writer_is_stopped
+  _clear_authority_root_for_isolation
+  test_bootstrap_blocks_bash_env_and_exported_functions
+  _clear_authority_root_for_isolation
+  test_fixed_path_is_validated_before_installation
+  _clear_authority_root_for_isolation
+  test_signal_waits_for_guard_descendant_group
+  _clear_authority_root_for_isolation
+  test_concurrent_reprepare_cannot_replace_live_prepared_state
+  _clear_authority_root_for_isolation
+  test_guard_requires_deferred_writer_restart
+  _clear_authority_root_for_isolation
+  test_verified_guard_bytes_cannot_be_replaced_before_use
+  _clear_authority_root_for_isolation
+  test_concurrent_first_preparation_is_no_replace
+  _clear_authority_root_for_isolation
+  test_fixed_path_rejects_mutable_symlink_aliases
+  _clear_authority_root_for_isolation
+  test_verifier_evidence_failure_remains_resumable
+  _clear_authority_root_for_isolation
+  test_operation_lock_open_does_not_follow_symlinks
+  _clear_authority_root_for_isolation
+  test_execution_bundle_accepts_trusted_root_owned_executables
+  _clear_authority_root_for_isolation
+  test_bootstrap_utility_resolution_is_trusted_before_use
+  _clear_authority_root_for_isolation
+  test_systemd_context_requires_transient_unit_provenance
+  _clear_authority_root_for_isolation
+  test_writer_activation_lifecycle_is_ordered_and_evidence_bound
+  _clear_authority_root_for_isolation
+  test_authorization_evidence_is_durable_before_activation
+  _clear_authority_root_for_isolation
+  test_app_activation_failure_is_fail_closed_before_final_verification
+  _clear_authority_root_for_isolation
+  test_term_after_activation_stops_writer_before_return
+  _clear_authority_root_for_isolation
+  test_closure_evidence_pending_resume_never_reactivates_writer
+  _clear_authority_root_for_isolation
+  test_missing_live_compose_commits_prejournal_restoration_incident
+  _clear_authority_root_for_isolation
+  test_post_activation_artifact_setup_failure_stops_writer_durably
+  _clear_authority_root_for_isolation
+  test_closure_evidence_pending_requires_verified_stop_before_persistence
+  _clear_authority_root_for_isolation
+  test_same_name_volume_replacement_is_rejected_after_preparation
+  _clear_authority_root_for_isolation
+  test_live_identity_checks_wait_for_the_shared_operation_lock
+  _clear_authority_root_for_isolation
+  test_successful_verifier_postprocessing_failure_stops_writer
+  _clear_authority_root_for_isolation
+  test_post_activation_signal_with_zero_exit_verifier_stops_writer
+  _clear_authority_root_for_isolation
+  test_source_recovery_signal_persists_process_evidence
+  _clear_authority_root_for_isolation
+  test_prejournal_recovery_refuses_unexpected_live_compose
+  _clear_authority_root_for_isolation
+  test_complete_write_cannot_race_final_guard_journal_validation
+  _clear_authority_root_for_isolation
+  test_engine_volume_identity_has_one_authoritative_state_path
+  _clear_authority_root_for_isolation
+  test_production_rejects_ambient_test_hook_contamination
+  _clear_authority_root_for_isolation
+  test_state_authority_survives_runtime_loss_and_is_revalidated_at_execute
+  _clear_authority_root_for_isolation
+  test_post_authorization_pre_activation_failures_commit_fresh_stop_evidence
+  _clear_authority_root_for_isolation
+  test_verifier_artifact_selector_collision_routes_through_closure_artifact_storage
+  _clear_authority_root_for_isolation
+  test_source_recovery_artifacts_cannot_collide_with_bound_inputs
+  _clear_authority_root_for_isolation
+  test_source_recovery_retry_preserves_prior_unbound_evidence
+  _clear_authority_root_for_isolation
+  test_phase_owned_invariants_reject_unproved_states
+  _clear_authority_root_for_isolation
+  test_disposable_rehearsals_clean_and_assert_state_authority
+  _clear_authority_root_for_isolation
+  test_transient_systemd_fixture_independently_proves_identity_and_cursors
+  _clear_authority_root_for_isolation
+  test_writer_stop_evidence_is_retry_distinct
+  _clear_authority_root_for_isolation
+  test_invocation_suffixed_artifacts_cannot_collide_with_bound_inputs
+  _clear_authority_root_for_isolation
+  test_xdg_state_home_cross_root_execute_rejected
+
+  _clear_authority_root_for_isolation
+  test_bound_transition_inputs_are_pairwise_distinct
+  _clear_authority_root_for_isolation
+  test_invalid_complete_state_cannot_relinquish_durable_authority
+  _clear_authority_root_for_isolation
+  test_durable_authority_reclaims_complete_or_missing_state
+  _clear_authority_root_for_isolation
+  test_corrupt_phase_durable_state_rejected
+  _clear_authority_root_for_isolation
+  test_cli_rejects_duplicate_or_mixed_modes
+
+  _clear_authority_root_for_isolation
+  test_execution_environment_removes_all_ambient_docker_compose_behavior
+  _clear_authority_root_for_isolation
+  test_durable_authority_rejects_runtime_backed_state_home
+  _clear_authority_root_for_isolation
+  test_bound_inputs_and_publication_reject_unsafe_write_modes
+  _clear_authority_root_for_isolation
+  test_incident_classes_and_stop_proofs_are_closed_world
+  _clear_authority_root_for_isolation
+  test_real_docker_rehearsal_declares_interruption_resume_coverage
   echo 'PostgreSQL transition controller focused fixtures passed.'
 fi

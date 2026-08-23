@@ -384,7 +384,10 @@ disposable-Docker suites.
   (key: SHA-256 of engine and volume). A duplicate prepare for the same
   identity is rejected while the recorded state path exists in a non-terminal
   phase, even after the entire runtime directory is replaced. Records whose
-  state file is gone or `complete` are reclaimed under the same lock.
+  state file is gone are reclaimed under the same lock; a `complete` state is
+  reclaimable only after its bound guard, authorization, closure, and journal
+  evidence validates. A retained runtime claim for that proven stale record
+  is atomically replaced while the operation lock is held.
   Execution revalidates the claim before any mutation, so a byte-identical
   state copy at another path cannot execute. The durable root is captured from
   the invoking user's home before the hermetic execution environment replaces
@@ -399,6 +402,10 @@ disposable-Docker suites.
   `source-recovery.stdout.log`, `stderr.log`, and `evidence.json` paths join
   the controller's collision matrix; a derived path overlapping any bound
   transition input is rejected at preparation.
+- **Bound transition inputs are pairwise distinct**: preparation rejects any
+  two semantically distinct inputs that canonicalize to the same path, so
+  candidate publication cannot overwrite the sole source snapshot or another
+  recovery dependency.
 - **Unbound source-recovery evidence cannot be trusted**: retry binding is
   keyed to the complete new evidence/log/provenance set; a retry that
   republishes new evidence but fails to rebind is rejected rather than

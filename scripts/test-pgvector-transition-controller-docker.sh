@@ -79,6 +79,8 @@ manifest="$tmp_dir/manifest.json"
 state="$tmp_dir/controller.json"
 unit_base="noosphere-pgvector-controller-docker-$BASHPID-$RANDOM"
 unit="$unit_base.service"
+interruption_runner_pid=''
+recovery_state="$tmp_dir/recovery-incident.json"
 runtime_root=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 docker_path=$(command -v docker)
 compose_plugin_path=$(docker info --format '{{json .ClientInfo.Plugins}}' |
@@ -100,7 +102,8 @@ printf '{}\n' > "$controller_home/docker/config.json"
 chmod 0600 "$env_file" "$controller_home/docker/config.json"
 
 unit_load_state() {
-  systemctl --user show "$unit" -p LoadState --value 2>/dev/null || printf 'not-found\n'
+  local queried_unit=${1:-$unit}
+  systemctl --user show "$queried_unit" -p LoadState --value 2>/dev/null || printf 'not-found\n'
 }
 
 cleanup_successfully() {
@@ -187,6 +190,7 @@ cleanup() {
     guard_run_id=$(jq -r '.runId // empty' "$backup_dir/$volume.phase-a2b.json" 2>/dev/null || true)
   fi
   systemctl --user stop "$unit" >/dev/null 2>&1 || true
+  [[ -z "$interruption_runner_pid" ]] || wait "$interruption_runner_pid" >/dev/null 2>&1 || true
   if [[ -n "$guard_run_id" ]]; then
     for id in $(docker ps -aq --filter "label=io.noosphere.pgvector-switch-run=$guard_run_id"); do
       docker rm -f "$id" >/dev/null 2>&1 || true
@@ -496,6 +500,122 @@ chmod 0600 "$manifest"
 "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
 cmp -s "$live_compose" "$source_snapshot"
 
+# Interrupt a real pinned-guard invocation after candidate publication while
+# its guard process group is stopped. TERM is delivered to the systemd MainPID,
+# forwarded by the controller, and released with CONT so the child is reaped
+# and its truthful interrupted evidence becomes durable.
+interruption_args=(
+  systemd-run
+  --user
+  --unit="$unit_base"
+  --wait
+  --collect
+  --quiet
+  --setenv="CONTROLLER_UNIT=$unit"
+  --setenv="XDG_STATE_HOME=$XDG_STATE_HOME"
+)
+while IFS= read -r property; do
+  interruption_args+=(--property="$property")
+done < <(bash -c 'source "$1"; systemd_properties "$2"' -- "$CONTROLLER" "$tmp_dir")
+interruption_args+=("$CONTROLLER" --execute --state "$state")
+"${interruption_args[@]}" >"$tmp_dir/interruption.out" 2>"$tmp_dir/interruption.err" &
+interruption_runner_pid=$!
+
+controller_main_pid=''
+guard_process_group=''
+for _ in $(seq 1 1200); do
+  controller_main_pid=$(systemctl --user show "$unit" -p MainPID --value 2>/dev/null || true)
+  if [[ "$controller_main_pid" =~ ^[1-9][0-9]*$ &&
+        $(jq -r '.phase // empty' "$state" 2>/dev/null || true) == candidate-published ]]; then
+    children_path="/proc/$controller_main_pid/task/$controller_main_pid/children"
+    if [[ -r "$children_path" ]]; then
+      for child_pid in $(<"$children_path"); do
+        child_pgid=$(ps -o pgid= -p "$child_pid" 2>/dev/null | tr -d ' ' || true)
+        if [[ "$child_pgid" == "$child_pid" ]]; then
+          guard_process_group=$child_pgid
+          break 2
+        fi
+      done
+    fi
+  fi
+  sleep 0.01
+done
+[[ "$guard_process_group" =~ ^[1-9][0-9]*$ ]] || {
+  echo 'Real-Docker interruption rehearsal did not capture the pinned guard process group.' >&2
+  exit 1
+}
+kill -STOP -- "-$guard_process_group"
+systemctl --user kill --kill-whom=main --signal=TERM "$unit"
+kill -CONT -- "-$guard_process_group"
+interruption_rc=0
+wait "$interruption_runner_pid" || interruption_rc=$?
+interruption_runner_pid=''
+[[ "$interruption_rc" == 143 ]] || {
+  echo "Interrupted real-Docker controller exited $interruption_rc instead of 143." >&2
+  exit 1
+}
+jq -e '
+  .phase == "guard-exited" and
+  .lastInterruption.signal == "TERM" and
+  (.guardEvidence.sha256 | test("^[a-f0-9]{64}$"))
+' "$state" >/dev/null
+for _ in $(seq 1 100); do
+  [[ $(unit_load_state) == not-found ]] && break
+  sleep 0.05
+done
+[[ $(unit_load_state) == not-found ]] || {
+  echo "Interrupted transient rehearsal unit still exists after --collect: $unit" >&2
+  exit 1
+}
+
+# A second real transient invocation owns recovery. With no completed guard
+# journal, guard-exited recovery verifies the source database, restores the
+# prepared source Compose bytes, and commits a terminal recovery incident.
+unit_base="noosphere-pgvector-controller-docker-recovery-$BASHPID-$RANDOM"
+unit="$unit_base.service"
+recovery_args=(
+  systemd-run
+  --user
+  --unit="$unit_base"
+  --wait
+  --collect
+  --quiet
+  --setenv="CONTROLLER_UNIT=$unit"
+  --setenv="XDG_STATE_HOME=$XDG_STATE_HOME"
+)
+while IFS= read -r property; do
+  recovery_args+=(--property="$property")
+done < <(bash -c 'source "$1"; systemd_properties "$2"' -- "$CONTROLLER" "$tmp_dir")
+recovery_args+=("$CONTROLLER" --execute --state "$state")
+recovery_rc=0
+"${recovery_args[@]}" >"$tmp_dir/recovery.out" 2>"$tmp_dir/recovery.err" || recovery_rc=$?
+[[ "$recovery_rc" != 0 ]] || {
+  echo 'Interrupted real-Docker controller unexpectedly reported recovery as transition success.' >&2
+  exit 1
+}
+jq -e '
+  .phase == "incident" and
+  .incidentClass == "pre-journal-source-restored" and
+  (.sourceRecoveryEvidence.sha256 | test("^[a-f0-9]{64}$"))
+' "$state" >/dev/null
+cmp -s "$live_compose" "$source_snapshot"
+[[ $(docker inspect "$db_container" --format '{{.Config.Image}}') == "$SOURCE_IMAGE" ]]
+mv "$state" "$recovery_state"
+for _ in $(seq 1 100); do
+  [[ $(unit_load_state) == not-found ]] && break
+  sleep 0.05
+done
+[[ $(unit_load_state) == not-found ]] || {
+  echo "Recovery transient rehearsal unit still exists after --collect: $unit" >&2
+  exit 1
+}
+echo 'Real-Docker interruption recovery rehearsal passed.'
+
+# Re-prepare the now-restored source model and prove the ordinary transition
+# still completes under a third, identity-distinct transient invocation.
+"$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+unit_base="noosphere-pgvector-controller-docker-success-$BASHPID-$RANDOM"
+unit="$unit_base.service"
 systemd_args=(
   systemd-run
   --user
@@ -518,8 +638,8 @@ jq -e '
   (.closureEvidence.sha256 | test("^[a-f0-9]{64}$"))
 ' "$state" >/dev/null
 jq -e '.phase == "complete" and .mode == "switch"' "$guard_journal" >/dev/null
-[[ $(jq -er '.exitCode' "${state%.json}.guard.evidence.json") == 0 ]]
-[[ $(jq -er '.exitCode' "${state%.json}.verify.evidence.json") == 0 ]]
+[[ $(jq -er '.exitCode' "$(jq -er '.guardEvidence.path' "$state")") == 0 ]]
+[[ $(jq -er '.exitCode' "$(jq -er '.closureEvidence.path' "$state")") == 0 ]]
 cmp -s "$live_compose" "$candidate_compose"
 [[ $(docker inspect "$db_container" --format '{{.Config.Image}}') == "$CANDIDATE_IMAGE" ]]
 [[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]]

@@ -26,9 +26,11 @@ path_present() {
 }
 
 assert_owned_regular_file() {
-  local path=$1
+  local path=$1 mode
   [[ -f "$path" && ! -L "$path" ]] || die "required file is missing or unsafe: $path"
   [[ $(stat -c '%u' "$path") == "$(id -u)" ]] || die "required file is not owned by the current user: $path"
+  mode=$(stat -c '%a' "$path")
+  (( (8#$mode & 8#022) == 0 )) || die "required file permits group/world writes: $path"
 }
 
 assert_owned_private_directory() {
@@ -177,8 +179,16 @@ validate_controller_state() {
         die "writerStopEvidence is required for phase $proof_phase but missing or malformed"
       validate_evidence_binding "$state" writerStopEvidence process
       ;;
-    incident)
+    closure-stop-pending|closure-evidence-pending|incident)
       proof_class=$(jq -er '.incidentClass // ""' "$state")
+      case "$proof_class" in
+        pre-journal-source-verification|pre-journal-source-restoration|pre-journal-source-restored|pre-journal-live-compose-divergence|closure-artifact-storage|closure-interruption|closure-writer-authorization|closure-app-activation|closure-postprocessing|closure-verification|closure-identity|closure-extension|closure-counts|closure-infrastructure|closure-app-health|isolated-app-health-requires-guard-revalidation) ;;
+        *) die "incident class is unsupported or unrecognized: ${proof_class:-empty}" ;;
+      esac
+      ;;
+  esac
+  case "$proof_phase" in
+    incident)
       case "$proof_class" in
         pre-journal-source-verification|pre-journal-source-restoration|pre-journal-source-restored|pre-journal-live-compose-divergence)
           jq -e '(.sourceRecoveryEvidence.path | type == "string" and startswith("/")) and
@@ -187,7 +197,7 @@ validate_controller_state() {
             die "sourceRecoveryEvidence is required for incident class $proof_class but missing or malformed"
           validate_evidence_binding "$state" sourceRecoveryEvidence process
           ;;
-        closure-*)
+        closure-*|isolated-app-health-requires-guard-revalidation)
           jq -e '(.writerStopEvidence.path | type == "string" and startswith("/")) and
                  (.writerStopEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))' \
             "$state" >/dev/null ||
@@ -547,45 +557,15 @@ claim_authoritative_state_path() {
   # mode: prepare (default) claims or reclaims; revalidate requires an existing
   # record under the CURRENT durable authority root (execution path).
   local state=$1 engine_id=$2 volume=$3 lock_root=$4 mode=${5:-prepare}
-  local lock_key claim state_path temp recorded_lock_root
-  local durable_home state_base root entry recorded_path recorded_phase
+  local lock_key claim state_path temp recorded_lock_root existing_claim_path
+  local durable_home state_base runtime_base root entry recorded_path recorded_phase
+  local recorded_state_unreadable=false reclaim_previous=false
   assert_operation_lock_held "$engine_id" "$volume" "$lock_root"
   lock_key=$(printf '%s\0%s' "$engine_id" "$volume" | sha256sum | awk '{print $1}')
   claim="$lock_root/noosphere-pgvector-state-$lock_key.json"
   state_path=$(realpath -m "$state")
 
-  if ! path_present "$claim"; then
-    temp=$(mktemp "$lock_root/.state-authority.XXXXXX")
-    trap 'rm -f "$temp"' RETURN
-    jq -n \
-      --arg engineId "$engine_id" \
-      --arg volume "$volume" \
-      --arg statePath "$state_path" \
-      '{version:1,engineId:$engineId,volume:$volume,statePath:$statePath}' > "$temp"
-    chmod 0600 "$temp"
-    fsync_path "$temp"
-    if ln "$temp" "$claim" 2>/dev/null; then
-      fsync_path "$claim"
-      fsync_path "$lock_root"
-    elif ! path_present "$claim"; then
-      die 'could not create the authoritative state-path claim'
-    fi
-    trap - RETURN
-    rm -f "$temp"
-  fi
-
-  assert_owned_regular_file "$claim"
-  [[ $(stat -c '%a' "$claim") == 600 ]] || die 'authoritative state-path claim mode must be 0600'
-  jq -e \
-    --arg engineId "$engine_id" \
-    --arg volume "$volume" \
-    --arg statePath "$state_path" '
-      .version == 1 and .engineId == $engineId and .volume == $volume and
-      (.statePath | type == "string" and startswith("/")) and
-      .statePath == $statePath
-    ' "$claim" >/dev/null ||
-    die 'authoritative state for this Docker engine and PostgreSQL volume is already claimed by another path'
-  # The runtime claim above lives in lock_root, which is reboot-volatile by
+  # The runtime claim in lock_root is reboot-volatile by
   # contract. A durable mirror under the invoking user's state directory keeps
   # the engine-plus-volume identity bound to exactly one state path even after
   # the runtime directory is replaced, so a duplicate prepare cannot silently
@@ -602,6 +582,10 @@ claim_authoritative_state_path() {
   [[ -z "$state_base" || "$state_base" == /* ]] ||
     die 'XDG_STATE_HOME must be an absolute path'
   [[ -n "$state_base" ]] || state_base=$durable_home/.local/state
+  state_base=$(realpath -m "$state_base")
+  runtime_base=$(realpath -m "$lock_root")
+  [[ "$state_base" != "$runtime_base" && "$state_base" != "$runtime_base"/* ]] ||
+    die 'durable state-authority root cannot live below the reboot-volatile runtime lock root'
   root=$state_base/noosphere-pgvector-controller/authority
   entry="$root/state-$lock_key.json"
   # Execution may only continue a state whose durable authority record lives
@@ -639,6 +623,8 @@ claim_authoritative_state_path() {
       die 'durable state-authority record is malformed for this engine and volume'
     recorded_path=$(jq -er '.statePath' "$entry")
     if [[ "$recorded_path" != "$(realpath -m "$state")" ]]; then
+      [[ "$mode" != revalidate ]] ||
+        die 'durable state-authority record points to another state path'
       recorded_phase=''
       recorded_state_unreadable=false
       if path_present "$recorded_path"; then
@@ -654,6 +640,38 @@ claim_authoritative_state_path() {
       case "$recorded_phase" in
         prepared|candidate-published|source-recovery-running|guard-exited|authorization-running|activation-running|closure-running|closure-stop-pending|closure-evidence-pending|incident)
           die 'authoritative state for this Docker engine and PostgreSQL volume is already claimed by another path'
+          ;;
+        '')
+          # A missing state is reclaimable under the operation lock. Its
+          # reboot-volatile claim, when retained, is replaced below only after
+          # proving that it still names this exact durable predecessor.
+          reclaim_previous=true
+          ;;
+        complete)
+          # A phase string alone is not terminal evidence. Validate the full
+          # state and its bound guard, authorization, closure, and completed
+          # journal bytes before it may relinquish unique engine-volume
+          # authority.
+          validate_controller_state "$recorded_path"
+          jq -e \
+            --arg engineId "$engine_id" \
+            --arg volume "$volume" \
+            --arg authorityRoot "$root" '
+              .engineId == $engineId and .volume == $volume and
+              .authorityRoot == $authorityRoot
+            ' "$recorded_path" >/dev/null ||
+            die 'complete state identity does not match its durable authority record'
+          reclaim_previous=true
+          ;;
+        *)
+          # Present durable state whose `.phase` is outside the recognizable
+          # set (on-disk corruption, partial write, or a future schema whose
+          # active phases have not been enumerated here) MUST NOT silently
+          # fall through to a reclaim: that would let one engine and volume
+          # pair end up with two competing authority records. The contract
+          # elsewhere in this function is fail-closed; the case arm
+          # deserves the same.
+          die "durable state-authority record references unrecognized phase '$recorded_phase'; operator resolution required"
           ;;
       esac
     else
@@ -674,6 +692,70 @@ claim_authoritative_state_path() {
       fi
     fi
   fi
+
+  # Validate the durable authority before publishing a reboot-volatile claim
+  # for this path. A rejected alternate prepare must not poison a later retry
+  # of the still-authoritative state with a stale runtime claim.
+  if path_present "$claim"; then
+    assert_owned_regular_file "$claim"
+    [[ $(stat -c '%a' "$claim") == 600 ]] || die 'authoritative state-path claim mode must be 0600'
+    jq -e \
+      --arg engineId "$engine_id" \
+      --arg volume "$volume" '
+        .version == 1 and .engineId == $engineId and .volume == $volume and
+        (.statePath | type == "string" and startswith("/"))
+      ' "$claim" >/dev/null ||
+      die 'authoritative state-path claim is malformed for this engine and volume'
+    existing_claim_path=$(jq -er '.statePath' "$claim")
+    if [[ "$existing_claim_path" != "$state_path" && "$reclaim_previous" == true ]]; then
+      [[ "$existing_claim_path" == "$recorded_path" ]] ||
+        die 'authoritative state for this Docker engine and PostgreSQL volume is already claimed by another path'
+      temp=$(mktemp "$lock_root/.state-authority.XXXXXX")
+      trap 'rm -f "$temp"' RETURN
+      jq -n \
+        --arg engineId "$engine_id" \
+        --arg volume "$volume" \
+        --arg statePath "$state_path" \
+        '{version:1,engineId:$engineId,volume:$volume,statePath:$statePath}' > "$temp"
+      chmod 0600 "$temp"
+      fsync_path "$temp"
+      mv -f "$temp" "$claim"
+      fsync_path "$claim"
+      fsync_path "$lock_root"
+      trap - RETURN
+    fi
+  else
+    temp=$(mktemp "$lock_root/.state-authority.XXXXXX")
+    trap 'rm -f "$temp"' RETURN
+    jq -n \
+      --arg engineId "$engine_id" \
+      --arg volume "$volume" \
+      --arg statePath "$state_path" \
+      '{version:1,engineId:$engineId,volume:$volume,statePath:$statePath}' > "$temp"
+    chmod 0600 "$temp"
+    fsync_path "$temp"
+    if ln "$temp" "$claim" 2>/dev/null; then
+      fsync_path "$claim"
+      fsync_path "$lock_root"
+    elif ! path_present "$claim"; then
+      die 'could not create the authoritative state-path claim'
+    fi
+    trap - RETURN
+    rm -f "$temp"
+  fi
+
+  assert_owned_regular_file "$claim"
+  [[ $(stat -c '%a' "$claim") == 600 ]] || die 'authoritative state-path claim mode must be 0600'
+  jq -e \
+    --arg engineId "$engine_id" \
+    --arg volume "$volume" \
+    --arg statePath "$state_path" '
+      .version == 1 and .engineId == $engineId and .volume == $volume and
+      (.statePath | type == "string" and startswith("/")) and
+      .statePath == $statePath
+    ' "$claim" >/dev/null ||
+    die 'authoritative state for this Docker engine and PostgreSQL volume is already claimed by another path'
+
   temp=$(mktemp "$root/.state-authority.XXXXXX")
   trap 'rm -f "$temp"' RETURN
   jq -n \
@@ -708,12 +790,21 @@ assert_operation_lock_held() {
 }
 
 publish_compose_atomic() {
-  local source=$1 target=$2 staged
+  local source=$1 target=$2 staged parent parent_mode
   assert_owned_regular_file "$source"
   assert_owned_regular_file "$target"
+  for parent in "$(dirname "$source")" "$(dirname "$target")"; do
+    [[ -d "$parent" && ! -L "$parent" ]] ||
+      die "Compose publication parent is missing or unsafe: $parent"
+    if [[ $(stat -c '%u' "$parent") == "$(id -u)" ]]; then
+      parent_mode=$(stat -c '%a' "$parent")
+      (( (8#$parent_mode & 8#022) == 0 )) ||
+        die "Compose publication parent permits group/world writes: $parent"
+    fi
+  done
   staged=$(mktemp "${target}.item3-publish.XXXXXX")
   trap 'rm -f "$staged"' RETURN
-  install -m "$(stat -c '%a' "$source")" "$source" "$staged"
+  install -m 600 "$source" "$staged"
   fsync_path "$staged"
   mv -f "$staged" "$target"
   fsync_path "$(dirname "$target")"
@@ -1259,11 +1350,13 @@ commit_closure_outcome() {
 }
 
 sanitize_execution_environment() {
-  local docker_host=$1 fixed_path=$2 controller_home=$3
+  local docker_host=$1 fixed_path=$2 controller_home=$3 ambient_name
 
-  unset DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH
-  unset COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES
-  unset COMPOSE_ENV_FILES COMPOSE_PROJECT_DIR COMPOSE_PATH_SEPARATOR
+  while IFS= read -r ambient_name; do
+    case "$ambient_name" in
+      DOCKER_*|COMPOSE_*) unset "$ambient_name" ;;
+    esac
+  done < <(compgen -v)
   unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy
   unset BASH_ENV ENV CDPATH GLOBIGNORE
   unset NOOSPHERE_A2B_LOCK_FD NOOSPHERE_A2B_LOCK_PATH
@@ -1290,6 +1383,7 @@ sanitize_execution_environment() {
 assert_controller_artifact_paths_separate() {
   local state_document=$1 state_path=$2 preparation_manifest=${3:-}
   local base field controlled_path bound_path docker_config_dir namespace_path
+  local bound_index other_bound_index
   local -a controlled=() bound=()
   base=${state_path%.json}
   controlled=(
@@ -1342,6 +1436,12 @@ assert_controller_artifact_paths_separate() {
     for bound_path in "${bound[@]}"; do
       [[ "$(realpath -m "$controlled_path")" != "$(realpath -m "$bound_path")" ]] ||
         die 'controller state/log/evidence path collides with a bound transition input'
+    done
+  done
+  for ((bound_index = 0; bound_index < ${#bound[@]}; bound_index += 1)); do
+    for ((other_bound_index = bound_index + 1; other_bound_index < ${#bound[@]}; other_bound_index += 1)); do
+      [[ "$(realpath -m "${bound[$bound_index]}")" != "$(realpath -m "${bound[$other_bound_index]}")" ]] ||
+        die 'bound transition inputs collide with each other'
     done
   done
   for namespace_path in "${controlled[@]}" \
@@ -1676,6 +1776,8 @@ prepare_execution_state() {
       die "refusing to overwrite controller state in phase $(jq -er '.phase' "$state")"
     cmp -s "$state" "$prepared" ||
       die 'refusing to replace an existing prepared controller state with different bytes'
+    trap - RETURN
+    rm -f "$prepared"
     return 0
   fi
   write_controller_state_atomic "$state" "$prepared"
@@ -2258,8 +2360,16 @@ main() {
   local mode='' manifest='' state=''
   while (($# > 0)); do
     case "$1" in
-      --prepare) mode=prepare; shift ;;
-      --execute) mode=execute; shift ;;
+      --prepare)
+        [[ -z "$mode" ]] || die 'exactly one of --prepare or --execute is required'
+        mode=prepare
+        shift
+        ;;
+      --execute)
+        [[ -z "$mode" ]] || die 'exactly one of --prepare or --execute is required'
+        mode=execute
+        shift
+        ;;
       --manifest) manifest=${2:?missing value}; shift 2 ;;
       --state) state=${2:?missing value}; shift 2 ;;
       --help|-h)
