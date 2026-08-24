@@ -180,7 +180,7 @@ sync workflow through a versioned frontmatter codec. The sync design lives in
 | **Auto-Capture** | ⚠️ Disabled-by-default private capture API, principal/lineage storage, and cleanup foundation; OpenClaw turn hook/extraction planned | ✅ Every turn | ❌ Manual indexing | ✅ Continuous learning | ✅ `memory.add()` | ✅ Smart extraction |
 | **Auto-Recall** | ✅ Capture guidance on clean misses + recall results when available; provider errors fail open | ✅ Before each turn | ✅ Keyword search only | ✅ Proactive context loading | ✅ `memory.search()` | ✅ Before prompt build |
 | **Manual Recall** | ✅ REST API + tools | ✅ MCP tools | ✅ CLI / tool query | ✅ REST API | ✅ SDK + REST | ✅ CLI + MCP tools |
-| **Semantic Search** | ✅ PostgreSQL FTS (live) + vector (planned) | ✅ Vector + biomimetic | ⚠️ Keyword + pending vector | ✅ pgvector | ✅ Semantic + BM25 + entity fusion | ✅ Vector + BM25 hybrid |
+| **Semantic Search** | ✅ PostgreSQL FTS (default) + implemented opt-in pgvector/RRF; rollout pending | ✅ Vector + biomimetic | ⚠️ Keyword + pending vector | ✅ pgvector | ✅ Semantic + BM25 + entity fusion | ✅ Vector + BM25 hybrid |
 | **Keyword Search** | ✅ PostgreSQL full-text | ✅ | ✅ Primary mode | ✅ | ✅ BM25 | ✅ BM25 |
 | **Cross-Encoder Rerank** | ❌ (planned) | ❌ | ❌ | ❌ | ❌ | ✅ Cross-encoder |
 | **Memory Types** | Articles (wiki) | world / experience / observation | Markdown files | Categories / Items / Resources | Facts (ADD-only v3) | 6-category classification |
@@ -346,6 +346,7 @@ Keep detailed recovery work in deployment/runbook docs rather than this README.
 | Document | Use it for |
 | --- | --- |
 | [README-legacy.md](README-legacy.md) | Previous full README content kept for reference during the docs split |
+| [docs/MEMORY-REVAMP-STATUS.md](docs/MEMORY-REVAMP-STATUS.md) | Authoritative implementation and rollout matrix for automatic capture and hybrid retrieval |
 | [docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md](docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md) | OpenClaw install, operations, upgrade, troubleshooting, and uninstall |
 | [docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md](docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md) | Guarded PostgreSQL image transition, proof, rollback, and recovery |
 | [docs/NOOSPHERE-MEMORY-ARCHITECTURE.md](docs/NOOSPHERE-MEMORY-ARCHITECTURE.md) | Provider abstraction, recall orchestration, ranking, budgeting, and scheduler |

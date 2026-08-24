@@ -22,16 +22,18 @@
 
 ## Core Memory Features
 
-Noosphere rows marked as planned or partial below are staged in the
+Noosphere rows marked as planned or partial below are tracked in the
+[memory revamp status matrix](MEMORY-REVAMP-STATUS.md). The related
 [Automatic Memory Capture and Recall Enrichment ADR](AUTOMATIC-MEMORY-CAPTURE-AND-ENRICHMENT-ADR.md)
-(status: **Proposed**; Phases A–E are pending).
+is accepted: Phase 0 and Phase A are implemented, while Phases B–E remain
+pending.
 
 | Feature | **Noosphere** | **Hindsight** | **QMD** | **memU** | **mem0** | **LanceDB Pro** |
 |---|---|---|---|---|---|---|
-| **Auto-Capture** | ⚠️ Explicit draft save + advisory capture guidance; deterministic turn capture planned | ✅ Every turn | ❌ Manual indexing | ✅ Continuous learning | ✅ `memory.add()` | ✅ Smart extraction |
+| **Auto-Capture** | ⚠️ Explicit draft save + optional advisory guidance + default-off Phase A persistence/privacy foundation; `agent_end` capture and extraction pending | ✅ Every turn | ❌ Manual indexing | ✅ Continuous learning | ✅ `memory.add()` | ✅ Smart extraction |
 | **Auto-Recall** | ✅ Capture guidance on clean misses + recall results when available; provider errors fail open | ✅ Before each turn | ✅ Keyword search only | ✅ Proactive context loading | ✅ `memory.search()` | ✅ Before prompt build |
 | **Manual Recall** | ✅ REST API + tools | ✅ MCP tools | ✅ CLI / tool query | ✅ REST API | ✅ SDK + REST | ✅ CLI + MCP tools |
-| **Semantic Search** | ✅ PostgreSQL FTS (live) + vector (planned) | ✅ Vector + biomimetic | ⚠️ Keyword + pending vector | ✅ pgvector | ✅ Semantic + BM25 + entity fusion | ✅ Vector + BM25 hybrid |
+| **Semantic Search** | ✅ PostgreSQL FTS (default) + implemented opt-in pgvector/RRF; rollout pending | ✅ Vector + biomimetic | ⚠️ Keyword + pending vector | ✅ pgvector | ✅ Semantic + BM25 + entity fusion | ✅ Vector + BM25 hybrid |
 | **Keyword Search** | ✅ PostgreSQL full-text | ✅ | ✅ Primary mode | ✅ | ✅ BM25 | ✅ BM25 |
 | **Cross-Encoder Rerank** | ❌ (planned) | ❌ | ❌ | ❌ | ❌ | ✅ Cross-encoder |
 | **Memory Types** | Articles (wiki) | world / experience / observation | Markdown files | Categories / Items / Resources | Facts (ADD-only v3) | 6-category classification |
@@ -52,7 +54,7 @@ Noosphere rows marked as planned or partial below are staged in the
 | **Token Budget Manager** | ✅ Prompt-safe recall blocks | ✅ `recallMaxTokens` | ❌ | ❌ | ❌ | ❌ |
 | **Promotion (ephemeral → curated)** | ⚠️ Pure threshold/review scaffolding; durable statistics and worker wiring planned | ❌ | ❌ | ❌ | ❌ | ⚠️ Decay model (Weibull) |
 | **Backfill / Synthesis** | ⚠️ Pure job/content helpers; durable execution wiring planned | ✅ Historical backfill CLI | ❌ | ❌ | ❌ | ❌ |
-| **Local Scheduler** | ⚠️ Scheduler framework; only the health job is currently wired | ❌ | ❌ | ✅ Continuous sync loop | ❌ | ❌ |
+| **Local Scheduler** | ⚠️ Health plus durable Phase A expiry/privacy cleanup; extraction and promotion workers pending | ❌ | ❌ | ✅ Continuous sync loop | ❌ | ❌ |
 | **Revision History** | ✅ Per-article | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Topic Hierarchy** | ✅ Unlimited depth | ❌ | ❌ | ✅ Category hierarchy | ❌ | ❌ |
 | **Tags / Relations** | ✅ Tags + article edges | ❌ | ❌ | ✅ Cross-references | ✅ Entity linking (v3) | ❌ |
@@ -108,8 +110,8 @@ Noosphere rows marked as planned or partial below are staged in the
 
 | Feature | **Noosphere** | **Hindsight** | **QMD** | **memU** | **mem0** | **LanceDB Pro** |
 |---|---|---|---|---|---|---|
-| **Embedding Provider** | TBD (PostgreSQL) | Configurable | Built-in / optional | OpenAI / custom | OpenAI / custom | OpenAI / Jina / Ollama / custom |
-| **Vector Store** | PostgreSQL (planned) | Embedded (Rust) | SQLite / QMD sidecar | pgvector | Qdrant / pgvector / Chroma | LanceDB (local) |
+| **Embedding Provider** | OpenAI-compatible local/remote contract; provider configuration required, with explicit operator consent for remote content or query egress | Configurable | Built-in / optional | OpenAI / custom | OpenAI / custom | OpenAI / Jina / Ollama / custom |
+| **Vector Store** | PostgreSQL + pgvector capability; explicit storage activation required | Embedded (Rust) | SQLite / QMD sidecar | pgvector | Qdrant / pgvector / Chroma | LanceDB (local) |
 | **External Dependencies** | PostgreSQL | Rust daemon | None | PostgreSQL + pgvector | Varies by backend | None (local) |
 | **CPU Requirement** | Standard | Standard | Standard | Standard | Standard | ⚠️ AVX/AVX2 required |
 | **Benchmarked** | ❌ | ❌ | ❌ | ❌ | ✅ LoCoMo 91.6, LongMemEval 93.4 | ❌ |
