@@ -110,7 +110,7 @@ pending.
 
 | Feature | **Noosphere** | **Hindsight** | **QMD** | **memU** | **mem0** | **LanceDB Pro** |
 |---|---|---|---|---|---|---|
-| **Embedding Provider** | OpenAI-compatible local/remote contract; explicit consent and operator configuration required | Configurable | Built-in / optional | OpenAI / custom | OpenAI / custom | OpenAI / Jina / Ollama / custom |
+| **Embedding Provider** | OpenAI-compatible local/remote contract; provider configuration required, with explicit operator consent for remote content or query egress | Configurable | Built-in / optional | OpenAI / custom | OpenAI / custom | OpenAI / Jina / Ollama / custom |
 | **Vector Store** | PostgreSQL + pgvector capability; explicit storage activation required | Embedded (Rust) | SQLite / QMD sidecar | pgvector | Qdrant / pgvector / Chroma | LanceDB (local) |
 | **External Dependencies** | PostgreSQL | Rust daemon | None | PostgreSQL + pgvector | Varies by backend | None (local) |
 | **CPU Requirement** | Standard | Standard | Standard | Standard | Standard | ⚠️ AVX/AVX2 required |

@@ -41,7 +41,7 @@ backfill, shadow evaluation, or hybrid serving.
 | Capability | Merged capability | Default runtime | Remaining work |
 | --- | --- | --- | --- |
 | Explicit draft save (`noosphere_save`) | Implemented | Available when the plugin is configured; the agent deliberately invokes it | Continue normal curation and review |
-| Capture guidance on recall hits and misses (Phase 0) | Implemented in PR #281 | Available only after `autoRecall: true`, prompt injection, and session eligibility; the nested guidance switch then defaults on | None for the Phase 0 contract |
+| Capture guidance on successful recall results and clean misses (Phase 0) | Implemented in PR #281 | Available only after `autoRecall: true`, prompt injection, and session eligibility; successful results and clean misses can inject guidance, while unexpected modes, malformed provider metadata, total provider failure, and empty responses carrying any provider error fail open without guidance | None for the Phase 0 contract |
 | Capture schema, authenticated endpoint, private scopes, lineage, revocation, TTL jobs, and inspection APIs (Phase A) | Implemented in PR #282 | New ingestion is disabled unless `NOOSPHERE_AUTO_MEMORY_CAPTURE_ENABLED=true`; maintenance is a separate scheduler responsibility | Operate only after keys, private scopes, HMAC rotation, and cleanup are configured |
 | Article recall enrichment (Phase B) | Not implemented | Lexical article documents have no generated recall-summary/search-term layer | Provider contract, consent, backfill, search integration, and measured quality gate |
 | OpenClaw `agent_end` capture and extraction (Phase C) | Not implemented | No automatic turn submission or candidate extraction | Agent/chat allowlists, bounded hook, extraction worker, metrics, and operations runbook |
@@ -69,11 +69,9 @@ complete. Merged code alone does not satisfy that epic's serving outcome.
 
 ## Reference deployment state
 
-The local reference deployment was checked read-only on 2026-08-24. It still
-uses the source PostgreSQL 16 image digest, retains the populated
-`noosphere_postgres_data` volume, and runs with
-`NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false`. It has not performed the guarded
-existing-volume transition and is not hybrid-serving.
+| Environment | Last verified | Database state | Hybrid flag | Rollout state |
+| --- | --- | --- | --- | --- |
+| Local reference deployment | 2026-08-24 (read-only) | Source PostgreSQL 16 image with populated `noosphere_postgres_data` volume | `NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false` | Guarded existing-volume transition not performed; not hybrid-serving |
 
 This is a point-in-time environment observation, not an installation default or
 authorization to change that environment. Other deployments must publish their
@@ -102,6 +100,7 @@ Update this matrix when any of these events occur:
 
 - a listed phase merges or is materially redesigned;
 - a default flag changes;
+- the reference deployment changes or its observation is re-verified;
 - an operator rollout gate completes;
 - issue #303 changes the transition boundary; or
 - automatic capture begins generating or promoting candidates.

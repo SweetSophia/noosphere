@@ -19,7 +19,7 @@ Current boundary:
   capture, extraction, enrichment, and promotion remain pending;
 - hybrid Phases A1 through C and the transition controller are merged; current
   Compose templates select the guarded pgvector image, while storage activation,
-  provider/worker operation, backfill, and retrieval remain opt-in;
+  provider/worker operation, backfill, and hybrid retrieval remain opt-in;
 - issue #303's production-safety subset precedes any existing-volume
   transition; and
 - transition, backfill, shadow evaluation, quality acceptance, and serving all
