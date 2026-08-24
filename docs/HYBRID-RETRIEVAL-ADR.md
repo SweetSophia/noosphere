@@ -1,9 +1,16 @@
 # ADR: Authorization-safe hybrid retrieval
 
-- Status: Proposed
+- Status: Accepted — Phases A1 through C implemented; Phase D rollout pending
 - Issue: [#261](https://github.com/SweetSophia/noosphere/issues/261)
 - Date: 2026-07-12
+- Last status review: 2026-08-24
 - Decision owners: Noosphere maintainers
+
+Implementation and rollout status is tracked in the
+[memory revamp status matrix](MEMORY-REVAMP-STATUS.md). The decision sections
+retain their prospective wording where it explains sequencing; accepting this
+ADR and merging its implementation do not activate storage, provider egress,
+backfill, shadow evaluation, or hybrid serving.
 
 Related decision: [Automatic Memory Capture and Recall Enrichment](AUTOMATIC-MEMORY-CAPTURE-AND-ENRICHMENT-ADR.md), which treats enrichment as a
 complementary lexical/document layer and defines how enrichment participates in
@@ -13,9 +20,9 @@ embedding-profile versioning.
 
 Noosphere currently retrieves its own articles with PostgreSQL full-text search. The Noosphere memory provider builds one weighted document from the title, excerpt, content, and tags, applies article and restricted-scope filters, and ranks matches with `ts_rank`. This is precise for shared terms but cannot recover semantically related articles that use different language.
 
-Issue #261 proposes pgvector embeddings and Reciprocal Rank Fusion (RRF). That change crosses database distribution, article persistence, remote data egress, background work, authorization, pagination, caching, and failure handling. It must therefore be delivered as a staged epic rather than as one application patch.
+Issue #261 tracks pgvector embeddings and Reciprocal Rank Fusion (RRF). That change crosses database distribution, article persistence, remote data egress, background work, authorization, pagination, caching, and failure handling. It must therefore be delivered as a staged epic rather than as one application patch.
 
-This ADR fixes the contracts that later implementation PRs must preserve. It does not enable embeddings, install pgvector, or change retrieval behavior.
+This ADR fixes the contracts that implementation and rollout work must preserve. The ADR itself does not enable embeddings, install pgvector, or change retrieval behavior.
 
 ## Decision
 
