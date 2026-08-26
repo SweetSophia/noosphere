@@ -6295,6 +6295,7 @@ test_fresh_activation_recovery_stops_before_phase_owned_proof_validation() (
   # yet advanced from activation-running. The bound proof then becomes
   # unavailable before a fresh invocation can recover.
   : > "$fixture_dir/app-started"
+  rm -f -- "$fixture_dir/app-stopped"
   authorization_evidence=$(jq -er '.authorizationEvidence.path' "$state")
   rm -f -- "$authorization_evidence"
 
@@ -6345,6 +6346,7 @@ test_fresh_activation_stop_failure_persists_closure_intent() (
   }
 
   : > "$fixture_dir/app-started"
+  rm -f -- "$fixture_dir/app-stopped"
   : > "$fixture_dir/fail-closure-stop-once"
   authorization_evidence=$(jq -er '.authorizationEvidence.path' "$state")
   rm -f -- "$authorization_evidence"
@@ -6371,6 +6373,26 @@ test_fresh_activation_stop_failure_persists_closure_intent() (
   lifecycle=$(paste -sd, "$fixture_dir/lifecycle.log" 2>/dev/null || true)
   [[ "$lifecycle" == transition,authorize ]] || {
     printf 'fresh activation stop failure crossed writer replay boundary: %s\n' "$lifecycle" >&2
+    exit 1
+  }
+
+  retry_rc=0
+  NOOSPHERE_CONTROLLER_FIXTURE_INVOCATION_ID=11112222333344445555666677778888 \
+    run_fixture_controller "$state" "$shim" \
+      >"$fixture_dir/recovery.out" 2>"$fixture_dir/recovery.err" || retry_rc=$?
+  ((retry_rc != 0)) || {
+    echo 'fresh activation stop-failure recovery unexpectedly reported success' >&2
+    exit 1
+  }
+  jq -e '
+    .phase == "incident" and
+    .incidentClass == "closure-interruption" and
+    (.writerStopEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$")) and
+    (has("proofException") | not)
+  ' "$state" >/dev/null || {
+    echo 'fresh activation stop-failure state was not resumable to terminal interruption' >&2
+    sed 's/^/  recovery.err: /' "$fixture_dir/recovery.err" >&2 || true
+    jq . "$state" >&2 || true
     exit 1
   }
 )

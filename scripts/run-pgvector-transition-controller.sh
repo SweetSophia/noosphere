@@ -183,6 +183,13 @@ validate_controller_state() {
       ' "$state" >/dev/null ||
         die 'authorization evidence exception requires an exact closure-authorization-evidence state'
       ;;
+    fresh-writer-proof-deferred)
+      jq -e '
+        .phase == "closure-stop-pending" and
+        .incidentClass == "closure-interruption"
+      ' "$state" >/dev/null ||
+        die 'fresh writer proof deferral requires exact closure-interruption stop-pending state'
+      ;;
     *) die "unsupported controller proof exception: $proof_exception" ;;
   esac
   jq -e --arg validationMode "$validation_mode" '
@@ -212,7 +219,8 @@ validate_controller_state() {
     (.candidateComposeSha256 | type == "string" and test("^[a-f0-9]{64}$")) and
     (.guardJournal | type == "string" and startswith("/")) and
     ((.proofException == null) or
-     .proofException == "authorization-evidence-unavailable") and
+     .proofException == "authorization-evidence-unavailable" or
+     .proofException == "fresh-writer-proof-deferred") and
     if .proofException == "authorization-evidence-unavailable" then
       (.phase == "closure-stop-pending" or .phase == "incident") and
       .incidentClass == "closure-authorization-evidence" and
@@ -256,12 +264,13 @@ validate_controller_state() {
   esac
   case "$proof_phase" in
     closure-stop-pending)
-      if [[ $(jq -er '.proofException // ""' "$state") == authorization-evidence-unavailable ]]; then
-        # Authorization completed, but its evidence could not be persisted.
-        # The earlier guard proof still owns this transition, and the pending
-        # phase must remain valid long enough to durably bind the verified
-        # writer stop. The explicit exception prevents later postprocessing
-        # failures from discarding already-bound authorization evidence.
+      if [[ $(jq -er '.proofException // ""' "$state") == authorization-evidence-unavailable ||
+            $(jq -er '.proofException // ""' "$state") == fresh-writer-proof-deferred ]]; then
+        # The earlier guard proof owns the stop-pending transition while
+        # authorization evidence is unavailable or deliberately deferred until
+        # the writer stop can be retried. The postprocessing exception removes
+        # unavailable evidence; the fresh-writer exception preserves any bound
+        # evidence and is consumed after an inspect-verified stop.
         jq -e '(.guardEvidence.path | type == "string" and startswith("/")) and
                (.guardEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))' \
           "$state" >/dev/null ||
@@ -370,13 +379,17 @@ update_controller_phase() {
   [[ "$phase" != incident && "$phase" != closure-stop-pending && "$phase" != closure-evidence-pending || -n "$incident_class" ]] ||
     die 'closure pending and incident phases require a class'
   case "$proof_exception" in
-    ''|authorization-evidence-unavailable) ;;
+    ''|authorization-evidence-unavailable|fresh-writer-proof-deferred) ;;
     *) die "unsupported controller proof exception: $proof_exception" ;;
   esac
   [[ -z "$proof_exception" ||
-     ( ( "$phase" == closure-stop-pending || "$phase" == incident ) &&
-       "$incident_class" == closure-authorization-evidence ) ]] ||
-    die 'authorization evidence exception is valid only for closure-authorization-evidence closure state'
+     ( "$proof_exception" == authorization-evidence-unavailable &&
+       ( "$phase" == closure-stop-pending || "$phase" == incident ) &&
+       "$incident_class" == closure-authorization-evidence ) ||
+     ( "$proof_exception" == fresh-writer-proof-deferred &&
+       "$phase" == closure-stop-pending &&
+       "$incident_class" == closure-interruption ) ]] ||
+    die 'controller proof exception does not match its closure state'
   temp=$(mktemp "$(dirname "$state")/.controller-phase.XXXXXX")
   trap 'rm -f "$temp"' RETURN
   jq --arg phase "$phase" --arg incidentClass "$incident_class" --arg proofException "$proof_exception" '
@@ -385,7 +398,8 @@ update_controller_phase() {
     if ($phase == "closure-stop-pending" or $phase == "closure-evidence-pending" or $phase == "incident") then .incidentClass = $incidentClass
     else del(.incidentClass) end |
     if (($phase == "closure-stop-pending" or $phase == "incident") and $proofException != "") then
-      .proofException = $proofException | del(.authorizationEvidence)
+      .proofException = $proofException |
+      if $proofException == "authorization-evidence-unavailable" then del(.authorizationEvidence) else . end
     else del(.proofException) end
   ' "$state" > "$temp"
   write_controller_state_atomic "$state" "$temp" || write_exit=$?
@@ -460,7 +474,7 @@ resume_controller_state() {
     authorization-running|activation-running)
       stop_application_fail_closed return || stop_exit=$?
       if ((stop_exit != 0)); then
-        update_controller_phase "$state" closure-stop-pending closure-interruption '' writer-stop
+        update_controller_phase "$state" closure-stop-pending closure-interruption fresh-writer-proof-deferred writer-stop
         return "$stop_exit"
       fi
       ;;
@@ -1506,6 +1520,7 @@ complete_closure_stop_pending() {
   if ! stop_application_fail_closed; then
     return 1
   fi
+  [[ "$proof_exception" != fresh-writer-proof-deferred ]] || proof_exception=''
   update_controller_phase "$state" incident "$incident_class" "$proof_exception"
 }
 

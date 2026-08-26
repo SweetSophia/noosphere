@@ -282,7 +282,8 @@ blocked until the corrected bytes are fully re-gated.
 - [x] Stop a retained writer before phase-owned proof validation on a fresh
       invocation, then require full proof validation before state advancement.
 - [x] Persist `closure-stop-pending` when the fresh stop/evidence step fails,
-      without consulting unavailable phase-owned proof or replaying a writer.
+      keep that state full-valid through a one-phase proof deferral, and prove
+      the next invocation retries the stop without replaying a writer.
 - [x] Restore prior bytes or absence after post-rename durability failure and
       terminate fail-stopped if rollback cannot be made durable.
 - [x] Run seven direct owners, eleven impacted siblings, and focused `133/133` on

@@ -477,8 +477,11 @@ adds the following publication, writer-closure, and durability guarantees:
   writer-stop evidence and remains stop-only for operator resolution.
   If the stop or stop-evidence step itself fails, the controller durably
   publishes `closure-stop-pending` through the restricted structural validator
-  before returning nonzero; only a simultaneous intent-publication failure can
-  leave the original writer phase unchanged, and that phase remains stop-only.
+  with a one-phase proof deferral before returning nonzero. Full recovery
+  validates the durable guard proof, retries the stop, consumes the deferral,
+  and commits the terminal incident. Only a simultaneous intent-publication
+  failure can leave the original writer phase unchanged, and that phase remains
+  stop-only.
 - **Post-rename durability failures do not ordinary-fail with advanced state**:
   atomic state and stop-evidence publication preserves the prior object (or
   prior absence). If the first parent-directory fsync fails after rename, the
