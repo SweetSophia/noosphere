@@ -461,7 +461,8 @@ SQL
 
 guard_journal="$backup_dir/$volume.phase-a2b.json"
 docker_compose_version_sha=$(docker compose version --short | sha256sum | awk '{print $1}')
-effective_compose_sha=$(docker compose --env-file "$env_file" -f "$candidate_compose" config --no-interpolate | sha256sum | awk '{print $1}')
+effective_compose_sha=$(docker compose --project-directory "$(dirname "$live_compose")" \
+  --env-file "$env_file" -f "$candidate_compose" config --no-interpolate | sha256sum | awk '{print $1}')
 
 jq -n \
   --arg engineId "$engine_id" \

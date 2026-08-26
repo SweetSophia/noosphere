@@ -1827,11 +1827,13 @@ assert_private_docker_config() {
 }
 
 compose_model_signature() {
-  local state=$1 docker_path candidate env_file
+  local state=$1 docker_path candidate env_file project_directory
   docker_path=$(jq -er '.dockerPath' "$state")
   candidate=$(jq -er '.candidateCompose' "$state")
   env_file=$(jq -er '.envFile' "$state")
-  "$docker_path" compose --env-file "$env_file" -f "$candidate" config --no-interpolate |
+  project_directory=$(dirname "$(jq -er '.liveCompose' "$state")")
+  "$docker_path" compose --project-directory "$project_directory" \
+    --env-file "$env_file" -f "$candidate" config --no-interpolate |
     sha256sum | awk '{print $1}'
 }
 
@@ -1898,7 +1900,7 @@ copy_execution_input() {
 }
 
 create_execution_bundle() {
-  local state=$1 base config_source docker_host fixed_path
+  local state=$1 base config_source docker_host fixed_path project_directory
   [[ ${INVOCATION_ID:-} =~ ^[a-fA-F0-9]{32}$ ]] ||
     die 'execution input binding requires a systemd InvocationID'
   base="${state%.json}.inputs.$INVOCATION_ID"
@@ -1940,6 +1942,7 @@ create_execution_bundle() {
 
   docker_host=$(jq -er '.dockerEndpoint' "$state")
   fixed_path=$(jq -er '.fixedPath' "$state")
+  project_directory=$(dirname "$(jq -er '.liveCompose' "$state")")
   [[ $(DOCKER_CONFIG="$execution_controller_home/docker" DOCKER_HOST="$docker_host" \
       "$execution_docker_path" info --format '{{json .ClientInfo.Plugins}}' | \
       jq -er '[.[] | select(.Name == "compose") | .Path] | if length == 1 then .[0] else error("Compose plugin identity is ambiguous") end') == \
@@ -1950,7 +1953,8 @@ create_execution_bundle() {
       "$(jq -er '.dockerComposeVersionSha256' "$state")" ]] ||
     die 'bound Docker Compose version differs from the prepared identity'
   [[ $(DOCKER_CONFIG="$execution_controller_home/docker" DOCKER_HOST="$docker_host" \
-      "$execution_docker_path" compose --env-file "$execution_env_file" \
+      "$execution_docker_path" compose --project-directory "$project_directory" \
+      --env-file "$execution_env_file" \
       -f "$execution_candidate_compose" config --no-interpolate | sha256sum | awk '{print $1}') == \
       "$(jq -er '.effectiveComposeSha256' "$state")" ]] ||
     die 'bound candidate Compose model differs from the prepared model'

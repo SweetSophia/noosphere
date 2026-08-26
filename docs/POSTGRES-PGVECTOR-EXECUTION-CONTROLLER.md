@@ -299,6 +299,10 @@ enters a phase the guard has not authorised.
   activation inspect, and activation Compose calls all use that bundle's
   `HOME`, `DOCKER_CONFIG`, Docker executable, plugin, and fixed child `PATH`;
   the original prepared namespace is not consulted after binding.
+- **One effective Compose project directory**: candidate-model signatures,
+  invocation-bundle revalidation, and activation all resolve relative Compose
+  paths against the live Compose file's parent. Moving the candidate copy into
+  the invocation bundle cannot change bind mounts, build contexts, or includes.
 - **Trusted system-executable ownership**: production Docker and Compose
   executables may be root-owned or deployment-user-owned, but must be regular
   non-symlink files without group/world write permission before they are copied
@@ -492,8 +496,8 @@ adds the following publication, writer-closure, and durability guarantees:
   It returns the original failure only after rollback is durable; rollback-
   durability failure terminates fail-stopped.
 
-The current public-review correction passes eight direct owners, eleven impacted
-siblings, the full focused suite (`134/134`), the standalone transient-systemd
+The current public-review correction passes nine direct owners, eleven impacted
+siblings, the full focused suite (`135/135`), the standalone transient-systemd
 fixture, and the pinned-Docker `linux/amd64` interruption/recovery rehearsal,
 with zero owned residue. Three sequential read-only reviews were green on the
 frozen pre-publication bytes; updated public CI/review applies separately to the

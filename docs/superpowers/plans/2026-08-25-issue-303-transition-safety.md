@@ -9,7 +9,7 @@
 **Tech Stack:** Bash 5, jq, Docker Compose, systemd user units, repository shell fixtures.
 
 **Current status (2026-08-26):** PR #305 is open. Its public-review correction
-passes eight direct owners, eleven impacted siblings, the focused `134/134` suite,
+passes nine direct owners, eleven impacted siblings, the focused `135/135` suite,
 standalone transient-systemd and pinned-Docker rehearsals, static gates, privacy
 scan, and zero-residue inspection. Updated CI/review and all of Task 7 remain
 separately gated for the corrected head.
@@ -295,7 +295,7 @@ blocked until the corrected bytes are fully re-gated.
       the next invocation retries the stop without replaying a writer.
 - [x] Restore prior bytes or absence after post-rename durability failure and
       terminate fail-stopped if rollback cannot be made durable.
-- [x] Run eight direct owners, eleven impacted siblings, and focused `134/134` on
+- [x] Run nine direct owners, eleven impacted siblings, and focused `135/135` on
       the public-review correction with stable hashes.
 - [x] Rerun standalone transient-systemd and pinned-Docker `linux/amd64` against
       the corrected head with zero owned residue.
@@ -315,7 +315,10 @@ blocked until the corrected bytes are fully re-gated.
 - [x] Preserve an end-to-end owner that mutates original inputs only after
       `create_execution_bundle`, then requires activation to resolve the copied
       config/plugin and complete without writer replay.
-- [x] Rerun focused `134/134`, standalone transient-systemd, pinned-Docker, static,
+- [x] Bind candidate-model preparation, invocation-bundle revalidation, and
+      activation to the same live Compose project directory; prove relative
+      paths cannot change when the candidate file lives elsewhere.
+- [x] Rerun focused `135/135`, standalone transient-systemd, pinned-Docker, static,
       privacy, and zero-residue gates on the final correction.
 - [ ] Publish the correction and reconcile updated CI/review without merging or
       deploying.

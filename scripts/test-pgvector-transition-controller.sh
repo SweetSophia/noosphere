@@ -563,9 +563,32 @@ elif [[ ${1:-} == compose && ${2:-} == version ]]; then
   printf 'compose-version:%s\n' "$operation_lock_state" >> "$root/live-identity.log"
   printf 'v2.fixture\n'
 elif [[ ${1:-} == compose ]]; then
+  project_directory=''
+  compose_file=''
+  if [[ -e "$root/require-live-project-directory" ]]; then
+    compose_args=("$@")
+    for ((compose_index = 0; compose_index < ${#compose_args[@]}; compose_index++)); do
+      case ${compose_args[$compose_index]} in
+        --project-directory)
+          project_directory=${compose_args[$((compose_index + 1))]}
+          ;;
+        -f)
+          compose_file=${compose_args[$((compose_index + 1))]}
+          ;;
+      esac
+    done
+    if [[ -z "$project_directory" && -n "$compose_file" ]]; then
+      project_directory=$(dirname "$compose_file")
+    fi
+    printf '%s\n' "$project_directory" >> "$root/compose-project-directories.log"
+  fi
   if [[ " $* " == *" config "* ]]; then
     printf 'compose-config:%s\n' "$operation_lock_state" >> "$root/live-identity.log"
-    printf 'candidate model\n'
+    if [[ -e "$root/require-live-project-directory" ]]; then
+      printf 'candidate model:%s\n' "$project_directory"
+    else
+      printf 'candidate model\n'
+    fi
   elif [[ " $* " == *" up "* && " $* " == *" app "* ]]; then
     if [[ -e "$root/require-bundle-docker-config-on-activation" ]]; then
       expected_config=$(<"$root/expected-activation-docker-config")
@@ -893,7 +916,7 @@ VERIFIER
     --arg composePluginPath "$compose_plugin" \
     --arg composePluginSha256 "$(sha256sum "$compose_plugin" | awk '{print $1}')" \
     --arg dockerConfigSha256 "$(sha256sum "$config_file" | awk '{print $1}')" \
-    --arg effectiveComposeSha256 "$("$fake_docker" compose --env-file "$env_file" -f "$candidate" config --no-interpolate | sha256sum | awk '{print $1}')" \
+    --arg effectiveComposeSha256 "$("$fake_docker" compose --project-directory "$(dirname "$live")" --env-file "$env_file" -f "$candidate" config --no-interpolate | sha256sum | awk '{print $1}')" \
     --arg backupDir "$backup" \
     --arg lockRoot "$lock_root" \
     --arg controllerHome "$controller_home" \
@@ -2144,6 +2167,53 @@ test_activation_uses_invocation_private_docker_bundle() (
   }
   cmp -s "$actual_config/config.json" "$fixture_dir/expected-bundle-docker-config.json"
   cmp -s "$actual_plugin" "$fixture_dir/expected-bundle-compose-plugin"
+)
+
+test_candidate_model_uses_activation_project_directory() (
+  local fixture_dir manifest state shim fake_docker env_file candidate live candidate_dir rc=0
+  local effective_sha expected_project unique_projects
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  fake_docker=$(jq -er '.dockerPath' "$manifest")
+  env_file=$(jq -er '.envFile' "$manifest")
+  candidate=$(jq -er '.candidateCompose' "$manifest")
+  live=$(jq -er '.liveCompose' "$manifest")
+  expected_project=$(dirname "$live")
+  candidate_dir="$fixture_dir/candidate-input"
+  mkdir -m 700 "$candidate_dir"
+  mv -- "$candidate" "$candidate_dir/candidate-compose.yml"
+  candidate="$candidate_dir/candidate-compose.yml"
+  : > "$fixture_dir/require-live-project-directory"
+  effective_sha=$("$fake_docker" compose --project-directory "$expected_project" \
+    --env-file "$env_file" -f "$candidate" config --no-interpolate | sha256sum | awk '{print $1}')
+  jq --arg candidate "$candidate" \
+    --arg candidateSha "$(sha256sum "$candidate" | awk '{print $1}')" \
+    --arg effectiveSha "$effective_sha" '
+      .candidateCompose = $candidate |
+      .candidateComposeSha256 = $candidateSha |
+      .effectiveComposeSha256 = $effectiveSha
+    ' "$manifest" > "$manifest.next"
+  install -m 600 "$manifest.next" "$manifest"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_systemd_identity_shim "$fixture_dir")
+
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+  run_fixture_controller "$state" "$shim" env \
+    >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || rc=$?
+  ((rc == 0)) || {
+    echo 'candidate model and activation used different Compose project directories' >&2
+    sed 's/^/  controller.err: /' "$fixture_dir/controller.err" >&2 || true
+    exit 1
+  }
+  [[ $(jq -er '.phase' "$state") == complete ]]
+  unique_projects=$(sort -u "$fixture_dir/compose-project-directories.log")
+  [[ "$unique_projects" == "$expected_project" ]] || {
+    printf 'Compose calls used inconsistent project directories: %s\n' "$unique_projects" >&2
+    exit 1
+  }
 )
 
 test_failed_prejournal_recovery_commits_durable_incident() (
@@ -6688,6 +6758,8 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   test_compose_plugin_and_docker_config_identity_are_bound
   _clear_authority_root_for_isolation
   test_activation_uses_invocation_private_docker_bundle
+  _clear_authority_root_for_isolation
+  test_candidate_model_uses_activation_project_directory
   _clear_authority_root_for_isolation
   test_failed_prejournal_recovery_commits_durable_incident
   _clear_authority_root_for_isolation
