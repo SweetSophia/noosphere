@@ -35,8 +35,9 @@ backfill, shadow evaluation, or hybrid serving.
 - The guarded existing-volume transition and its execution controller are
   implemented. Issue #303's production-safety subset is open as PR #305; its
   public-review correction passes the focused and stateful rehearsal gates,
-  while updated CI/review remains pending. It is not merged, and transition
-  execution plus Phase D rollout remain explicit operator actions.
+  and updated CI/review is green on correction head `35df2d0` with zero
+  unresolved threads. It is not merged, and transition execution plus Phase D
+  rollout remain explicit operator actions.
 
 ## Automatic capture and enrichment
 

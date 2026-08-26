@@ -11,8 +11,9 @@
 **Current status (2026-08-26):** PR #305 is open. Its public-review correction
 passes nine direct owners, eleven impacted siblings, the focused `135/135` suite,
 standalone transient-systemd and pinned-Docker rehearsals, static gates, privacy
-scan, and zero-residue inspection. Updated CI/review and all of Task 7 remain
-separately gated for the corrected head.
+scan, and zero-residue inspection. Updated CI/review is green on correction head
+`35df2d0fa27f992f270eff56b6ed7b5201d874fc` with zero unresolved threads; all
+of Task 7 remains separately gated.
 
 ---
 
@@ -302,7 +303,7 @@ blocked until the corrected bytes are fully re-gated.
 - [x] Complete three sequential read-only reviews on the pre-publication bytes
       with zero release-floor blockers and a zero-hit privacy scan.
 - [x] Publish focused PR #305 without merging or deploying.
-- [ ] Observe updated CI/review through the mandatory window and keep
+- [x] Observe updated CI/review through the mandatory window and keep
       merge/deployment/transition separately authorized.
 
 ### Consolidated final-review addendum — 2026-08-26
@@ -320,5 +321,5 @@ blocked until the corrected bytes are fully re-gated.
       paths cannot change when the candidate file lives elsewhere.
 - [x] Rerun focused `135/135`, standalone transient-systemd, pinned-Docker, static,
       privacy, and zero-residue gates on the final correction.
-- [ ] Publish the correction and reconcile updated CI/review without merging or
+- [x] Publish the correction and reconcile updated CI/review without merging or
       deploying.
