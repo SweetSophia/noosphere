@@ -159,9 +159,18 @@ sha256_file() {
 }
 
 validate_controller_state() {
-  local state=$1 proof_phase proof_class proof_exception
+  local state=$1 validation_mode=${2:-full} proof_phase proof_class proof_exception
   assert_owned_regular_file "$state"
   [[ $(stat -c '%a' "$state") == 600 ]] || die 'controller state mode must be 0600'
+  case "$validation_mode" in
+    full) ;;
+    writer-stop)
+      jq -e '.phase == "authorization-running" or .phase == "activation-running"' \
+        "$state" >/dev/null 2>&1 ||
+        die 'writer-stop validation is valid only for a writer-capable running phase'
+      ;;
+    *) die "unsupported controller validation mode: $validation_mode" ;;
+  esac
   proof_exception=$(jq -er '.proofException // ""' "$state" 2>/dev/null) ||
     die 'controller state is malformed'
   case "$proof_exception" in
@@ -176,7 +185,7 @@ validate_controller_state() {
       ;;
     *) die "unsupported controller proof exception: $proof_exception" ;;
   esac
-  jq -e '
+  jq -e --arg validationMode "$validation_mode" '
     type == "object" and
     .version == 1 and
     (.phase == "prepared" or
@@ -211,7 +220,7 @@ validate_controller_state() {
     else
       true
     end and
-    if .phase == "complete" then
+    if $validationMode == "full" and .phase == "complete" then
       (.guardEvidence.path | type == "string" and startswith("/")) and
       (.guardEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$")) and
       (.authorizationEvidence.path | type == "string" and startswith("/")) and
@@ -221,15 +230,16 @@ validate_controller_state() {
       (.guardJournalEvidence.path | type == "string" and startswith("/")) and
       (.guardJournalEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$")) and
       .guardJournalEvidence.phase == "complete"
-    elif (.phase == "activation-running" or .phase == "closure-running") then
+    elif $validationMode == "full" and (.phase == "activation-running" or .phase == "closure-running") then
       (.authorizationEvidence.path | type == "string" and startswith("/")) and
       (.authorizationEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))
-    elif (.phase == "closure-stop-pending" or .phase == "closure-evidence-pending" or .phase == "incident") then
+    elif $validationMode == "full" and (.phase == "closure-stop-pending" or .phase == "closure-evidence-pending" or .phase == "incident") then
       (.incidentClass | type == "string" and length > 0)
     else
       true
     end
   ' "$state" >/dev/null || die 'controller state is malformed'
+  [[ "$validation_mode" == full ]] || return 0
   # Phase-owned proofs: every non-trivial phase carries evidence that its own
   # mechanism actually ran. Each requirement rejects with a key-specific
   # diagnostic so a mutation that strips one owned proof cannot pass silently.
@@ -435,6 +445,22 @@ restore_source_compose_snapshot() {
 resume_controller_state() {
   local state=$1 phase guard_journal live_compose source_snapshot source_sha candidate_sha live_sha
   local source_verify_exit=0
+  # execute_prepared_state has already revalidated the manifest, pinned Docker
+  # binary, engine/volume identity, operation lock, authority path, and every
+  # execution input before reaching resume. A fresh process that finds a
+  # writer-capable running phase must therefore inspect-stop that pinned app
+  # before phase-owned proof bytes are consulted: those bytes may be the
+  # unavailable/corrupt component that interrupted the prior process after
+  # activation. The full proof validator still runs immediately after the
+  # stop, before any state advancement or writer-capable work.
+  assert_owned_regular_file "$state"
+  [[ $(stat -c '%a' "$state") == 600 ]] || die 'controller state mode must be 0600'
+  phase=$(jq -er '.phase' "$state" 2>/dev/null) || die 'controller state is malformed'
+  case "$phase" in
+    authorization-running|activation-running)
+      stop_application_fail_closed
+      ;;
+  esac
   validate_controller_state "$state"
   phase=$(jq -er '.phase' "$state")
   guard_journal=$(jq -er '.guardJournal' "$state")
@@ -473,18 +499,14 @@ resume_controller_state() {
   # writer exists. Stop and commit an interruption incident before returning.
   case "$phase" in
     authorization-running)
-      jq -e 'has("writerStopEvidence")' "$state" >/dev/null &&
-        die 'state records a verified writer stop without a terminal incident; reauthorization is forbidden and requires operator resolution'
       assert_bound_guard_journal_unchanged "$state"
-      begin_closure_incident "$state" interruption
+      update_controller_phase "$state" incident closure-interruption
       die 'fresh invocation stopped an interrupted authorization phase; operator resolution is required'
       ;;
     activation-running)
-      jq -e 'has("writerStopEvidence")' "$state" >/dev/null &&
-        die 'state records a verified writer stop without a terminal incident; reactivation is forbidden and requires operator resolution'
       validate_bound_process_evidence "$state" authorizationEvidence authorization-running
       assert_bound_guard_journal_unchanged "$state"
-      begin_closure_incident "$state" interruption
+      update_controller_phase "$state" incident closure-interruption
       die 'fresh invocation stopped an interrupted activation phase; operator resolution is required'
       ;;
     closure-running)
@@ -1677,8 +1699,8 @@ assert_guard_journal_path() {
 }
 
 validate_execution_manifest() {
-  local state=$1
-  validate_controller_state "$state"
+  local state=$1 validation_mode=${2:-full}
+  validate_controller_state "$state" "$validation_mode"
   jq -e '
     (.guard | type == "string" and startswith("/")) and
     (.guardSha256 | type == "string" and test("^[a-f0-9]{64}$")) and
@@ -1795,8 +1817,8 @@ compose_model_signature() {
 }
 
 verify_execution_inputs() {
-  local state=$1 field path_field digest_field path expected docker_path plugin_path config_path
-  validate_execution_manifest "$state"
+  local state=$1 validation_mode=${2:-full} field path_field digest_field path expected docker_path plugin_path config_path
+  validate_execution_manifest "$state" "$validation_mode"
   assert_controller_execution_identity "$state"
   assert_owned_private_directory "$(dirname "$state")"
   assert_owned_private_directory "$(jq -er '.backupDir' "$state")"
@@ -2152,7 +2174,7 @@ execute_prepared_state() {
   local verify_stdout verify_stderr verify_evidence start_cursor end_cursor started_at ended_at
   local guard_exit=0 authorization_exit=0 verify_exit=0 postprocess_exit=0 boot_id phase guard_artifact_base verify_artifact_base
   local run_initial_guard=true run_authorization=true run_activation=true
-  local resume_closure_evidence=false
+  local resume_closure_evidence=false validation_mode=full
   local -a guard_args authorization_args
   local ambient_test_hook
   controller_state=$state
@@ -2171,7 +2193,13 @@ execute_prepared_state() {
         die "production execution rejected ambient test hook contamination: $ambient_test_hook is set; unset NOOSPHERE_CONTROLLER_TEST_* outside fixture mode"
     done
   fi
-  validate_execution_manifest "$state"
+  assert_owned_regular_file "$state"
+  [[ $(stat -c '%a' "$state") == 600 ]] || die 'controller state mode must be 0600'
+  phase=$(jq -er '.phase' "$state" 2>/dev/null) || die 'controller state is malformed'
+  case "$phase" in
+    authorization-running|activation-running) validation_mode=writer-stop ;;
+  esac
+  validate_execution_manifest "$state" "$validation_mode"
   docker_host=$(jq -er '.dockerEndpoint' "$state")
   fixed_path=$(jq -er '.fixedPath' "$state")
   controller_home=$(jq -er '.controllerHome' "$state")
@@ -2192,7 +2220,7 @@ execute_prepared_state() {
   [[ $(jq -er '.authorityRoot // empty' "$state") == "$authority_root" ]] ||
     die 'controller state was prepared under a different durable authority root; refusing execution'
   assert_live_engine_binding "$state" "$(jq -er '.dockerPath' "$state")"
-  verify_execution_inputs "$state"
+  verify_execution_inputs "$state" "$validation_mode"
   assert_postgres_volume_binding "$state" "$(jq -er '.dockerPath' "$state")"
   create_execution_bundle "$state"
   boot_id=$(< /proc/sys/kernel/random/boot_id)

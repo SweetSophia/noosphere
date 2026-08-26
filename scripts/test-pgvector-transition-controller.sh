@@ -5856,8 +5856,15 @@ test_closure_intent_failure_preserves_status_and_blocks_reauthorization() (
       >"$fixture_dir/retry.out" 2>"$fixture_dir/retry.err" || retry_rc=$?
   ((retry_rc != 0)) ||
     failures+=('closure-intent failure remained resumable through writer reauthorization')
-  rg -Fq 'verified writer stop without a terminal incident' "$fixture_dir/retry.err" ||
-    failures+=('closure-intent retry lacked the nonterminal writer-stop refusal diagnostic')
+  rg -Fq 'fresh invocation stopped an interrupted authorization phase; operator resolution is required' \
+    "$fixture_dir/retry.err" ||
+    failures+=('closure-intent retry lacked the fresh inspect-stop operator-resolution diagnostic')
+  jq -e '
+    .phase == "incident" and
+    .incidentClass == "closure-interruption" and
+    (.writerStopEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))
+  ' "$state" >/dev/null ||
+    failures+=('closure-intent retry did not promote its fresh stop to a terminal interruption incident')
   lifecycle=$(paste -sd, "$fixture_dir/lifecycle.log" 2>/dev/null || true)
   [[ "$lifecycle" == transition,authorize ]] ||
     failures+=("closure-intent retry crossed reauthorization/activation boundary: $lifecycle")
@@ -6204,7 +6211,7 @@ test_candidate_entry_swap_cannot_escape_prepared_digest() (
 )
 
 test_closure_intent_and_stop_failure_cannot_cross_writer_boundary() (
-  local fixture_dir manifest state shim initial_rc=0 retry_rc=0 lifecycle phase
+  local fixture_dir manifest state shim initial_rc=0 retry_rc=0 lifecycle phase control_tail
   fixture_dir=$(mktemp -d)
   trap 'rm -rf -- "$fixture_dir"' EXIT
   manifest="$fixture_dir/manifest.json"
@@ -6246,6 +6253,76 @@ test_closure_intent_and_stop_failure_cannot_cross_writer_boundary() (
       "$retry_rc" "$lifecycle" >&2
     exit 1
   fi
+  control_tail=$(tail -n 2 "$fixture_dir/app-control.log" 2>/dev/null | paste -sd, -)
+  [[ "$control_tail" == stop,inspect:false ]] || {
+    printf 'dual closure failure retry did not inspect-stop the retained writer before proof validation: %s\n' \
+      "$control_tail" >&2
+    exit 1
+  }
+  jq -e '
+    (.writerStopEvidence.path | type == "string" and startswith("/")) and
+    (.writerStopEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))
+  ' "$state" >/dev/null || {
+    echo 'dual closure failure retry did not durably bind its fresh writer stop' >&2
+    exit 1
+  }
+)
+
+test_fresh_activation_recovery_stops_before_phase_owned_proof_validation() (
+  local fixture_dir manifest state shim authorization_evidence initial_rc=0 retry_rc=0 control_tail
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_phase_snapshot_shim "$fixture_dir")
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+  NOOSPHERE_CONTROLLER_TEST_CAPTURE_PHASE=activation-running \
+    run_fixture_controller "$state" "$shim" env \
+      >"$fixture_dir/initial.out" 2>"$fixture_dir/initial.err" || initial_rc=$?
+  [[ "$initial_rc" == 86 && -e "$fixture_dir/controller-phase-snapshot-captured" ]] || {
+    printf 'fresh activation owner did not capture activation-running: rc=%s\n' "$initial_rc" >&2
+    exit 1
+  }
+  [[ $(jq -er '.phase' "$state") == activation-running ]] || {
+    echo 'fresh activation owner did not retain activation-running state' >&2
+    exit 1
+  }
+
+  # Exact crash image: Compose has started the app, but the controller has not
+  # yet advanced from activation-running. The bound proof then becomes
+  # unavailable before a fresh invocation can recover.
+  : > "$fixture_dir/app-started"
+  authorization_evidence=$(jq -er '.authorizationEvidence.path' "$state")
+  rm -f -- "$authorization_evidence"
+
+  NOOSPHERE_CONTROLLER_FIXTURE_INVOCATION_ID=fedcba9876543210fedcba9876543210 \
+    run_fixture_controller "$state" "$shim" \
+      >"$fixture_dir/retry.out" 2>"$fixture_dir/retry.err" || retry_rc=$?
+  ((retry_rc != 0)) || {
+    echo 'fresh activation recovery unexpectedly reported success' >&2
+    exit 1
+  }
+  if [[ -f "$fixture_dir/app-control.log" ]]; then
+    control_tail=$(tail -n 2 "$fixture_dir/app-control.log" | paste -sd, -)
+  else
+    control_tail=''
+  fi
+  [[ "$control_tail" == stop,inspect:false ]] || {
+    printf 'fresh activation recovery left the writer running before proof validation: %s\n' \
+      "$control_tail" >&2
+    exit 1
+  }
+  jq -e '
+    .phase == "activation-running" and
+    (.writerStopEvidence.path | type == "string" and startswith("/")) and
+    (.writerStopEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))
+  ' "$state" >/dev/null || {
+    echo 'fresh activation recovery did not bind stop evidence before proof validation failed' >&2
+    exit 1
+  }
 )
 
 test_detached_target_parent_cannot_false_complete_publication() (
@@ -6636,6 +6713,8 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   test_candidate_entry_swap_cannot_escape_prepared_digest
   _clear_authority_root_for_isolation
   test_closure_intent_and_stop_failure_cannot_cross_writer_boundary
+  _clear_authority_root_for_isolation
+  test_fresh_activation_recovery_stops_before_phase_owned_proof_validation
   _clear_authority_root_for_isolation
   test_detached_target_parent_cannot_false_complete_publication
   _clear_authority_root_for_isolation

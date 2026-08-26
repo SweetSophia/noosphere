@@ -8,11 +8,11 @@
 
 **Tech Stack:** Bash 5, jq, Docker Compose, systemd user units, repository shell fixtures.
 
-**Current status (2026-08-26):** the local implementation gate is verified on
-the frozen issue #303 bytes. Five final direct owners, eleven impacted siblings,
-the focused `131/131` suite, standalone transient-systemd fixture, pinned-Docker
-rehearsal, privacy scan, and three sequential reviews are green. Task 6's
-publication/CI steps and all of Task 7 remain pending and separately gated.
+**Current status (2026-08-26):** PR #305 is open. Its public-review correction
+passes six direct owners, eleven impacted siblings, the focused `132/132` suite,
+standalone transient-systemd and pinned-Docker rehearsals, static gates, privacy
+scan, and zero-residue inspection. Updated CI/review and all of Task 7 remain
+separately gated for the corrected head.
 
 ---
 
@@ -31,7 +31,7 @@ Add `test_authorization_postprocessing_failure_closes_writer_durably`. Inject `N
 
 - [x] **Step 3: Add the root-owned writable-parent owner**
 
-Add `test_root_owned_writable_compose_parent_is_rejected`. Simulate UID 0 for a mode-0777 publication parent, require `publish_compose_atomic` to fail, and prove the live Compose target bytes remain unchanged.
+Add `test_simulated_root_rejects_root_owned_writable_compose_parent`. Simulate UID 0 for a mode-0777 publication parent, require `publish_compose_atomic` to fail, and prove the live Compose target bytes remain unchanged.
 
 - [x] **Step 4: Register all three owners with authority isolation**
 
@@ -57,7 +57,7 @@ timeout 180s bash -c '
 timeout 180s bash -c '
   source scripts/test-pgvector-transition-controller.sh
   _clear_authority_root_for_isolation
-  test_root_owned_writable_compose_parent_is_rejected
+  test_simulated_root_rejects_root_owned_writable_compose_parent
 '
 ```
 
@@ -144,7 +144,7 @@ Remove the current-user-only conditional. Do not weaken the existing owned-file 
 
 - [x] **Step 2: Run the focused owner**
 
-Expected: `test_root_owned_writable_compose_parent_is_rejected` exits 0 and the target retains its original bytes.
+Expected: `test_simulated_root_rejects_root_owned_writable_compose_parent` exits 0 and the target retains its original bytes.
 
 ### Task 5: Verify the corrected controller before review
 
@@ -191,7 +191,7 @@ Require no Graphify artifacts, local paths, machine identifiers, credentials, to
 
 Document that the three production-safety blockers are implemented and verified; keep the transition and hybrid rollout explicitly operator-gated.
 
-- [ ] **Step 2: Commit, push, and open a focused PR**
+- [x] **Step 2: Commit, push, and open a focused PR**
 
 Use the `SweetSophia` GitHub account, verify exact PR scope, and leave the PR open.
 
@@ -279,12 +279,16 @@ blocked until the corrected bytes are fully re-gated.
       directory-fsync failure exposing advanced state/evidence.
 - [x] Bind publication to opened directory identities and exact staged bytes.
 - [x] Make fresh authorization/activation phases stop-only and fail closed.
+- [x] Stop a retained writer before phase-owned proof validation on a fresh
+      invocation, then require full proof validation before state advancement.
 - [x] Restore prior bytes or absence after post-rename durability failure and
       terminate fail-stopped if rollback cannot be made durable.
-- [x] Run five direct owners, eleven impacted siblings, focused `131/131`,
-      standalone transient-systemd, and pinned-Docker `linux/amd64` gates with
-      stable hashes and zero owned residue.
-- [x] Complete three sequential read-only reviews with zero release-floor
-      blockers and a zero-hit privacy scan.
-- [ ] Publish the focused PR, observe CI/review through the mandatory window,
-      and keep merge/deployment/transition separately authorized.
+- [x] Run six direct owners, eleven impacted siblings, and focused `132/132` on
+      the public-review correction with stable hashes.
+- [x] Rerun standalone transient-systemd and pinned-Docker `linux/amd64` against
+      the corrected head with zero owned residue.
+- [x] Complete three sequential read-only reviews on the pre-publication bytes
+      with zero release-floor blockers and a zero-hit privacy scan.
+- [x] Publish focused PR #305 without merging or deploying.
+- [ ] Observe updated CI/review through the mandatory window and keep
+      merge/deployment/transition separately authorized.

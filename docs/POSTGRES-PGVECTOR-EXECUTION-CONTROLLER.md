@@ -469,10 +469,12 @@ adds the following publication, writer-closure, and durability guarantees:
   an earlier pathname lookup.
 - **Fresh writer phases fail closed**: a fresh process that observes
   `authorization-running` or `activation-running` never replays authorization
-  or activation. It enters interruption closure, performs an inspect-verified
-  stop, and requires operator resolution. If closure-intent persistence and the
-  stop both fail, the unchanged writer phase causes the next invocation to
-  repeat the same stop-only handling.
+  or activation. After the immutable execution inputs, Docker binary,
+  engine/volume identity, lock, and authority path are validated, it performs
+  an inspect-verified stop **before** consulting phase-owned proof bytes. Full
+  proof validation then resumes before the interruption incident can advance.
+  If a proof is unavailable, the unresolved running phase retains durable
+  writer-stop evidence and remains stop-only for operator resolution.
 - **Post-rename durability failures do not ordinary-fail with advanced state**:
   atomic state and stop-evidence publication preserves the prior object (or
   prior absence). If the first parent-directory fsync fails after rename, the
@@ -480,10 +482,11 @@ adds the following publication, writer-closure, and durability guarantees:
   It returns the original failure only after rollback is durable; rollback-
   durability failure terminates fail-stopped.
 
-Local verification on the frozen issue #303 bytes completed with five direct
-owners, eleven impacted siblings, the full focused suite (`131/131`), the
-standalone transient-systemd fixture, and the pinned-Docker `linux/amd64`
-interruption/recovery rehearsal all green. Three sequential read-only reviews
-found zero release-floor blockers. These results verify the local implementation
-gate only: merge, deployment, the PostgreSQL transition, feature activation,
-backfill, and hybrid serving remain separately authorized operator actions.
+The current public-review correction passes six direct owners, eleven impacted
+siblings, the full focused suite (`132/132`), the standalone transient-systemd
+fixture, and the pinned-Docker `linux/amd64` interruption/recovery rehearsal,
+with zero owned residue. Three sequential read-only reviews were green on the
+frozen pre-publication bytes; updated public CI/review applies separately to the
+corrected PR head. Merge, deployment, the PostgreSQL transition, feature
+activation, backfill, and hybrid serving remain separately authorized operator
+actions.

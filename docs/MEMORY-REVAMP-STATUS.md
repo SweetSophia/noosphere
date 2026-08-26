@@ -33,9 +33,10 @@ backfill, shadow evaluation, or hybrid serving.
   hybrid retrieval remain opt-in; retrieval defaults to
   `NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false`.
 - The guarded existing-volume transition and its execution controller are
-  implemented. Issue #303's production-safety subset is locally verified but
-  not yet merged; transition execution and Phase D rollout remain explicit
-  operator actions.
+  implemented. Issue #303's production-safety subset is open as PR #305; its
+  public-review correction passes the focused and stateful rehearsal gates,
+  while updated CI/review remains pending. It is not merged, and transition
+  execution plus Phase D rollout remain explicit operator actions.
 
 ## Automatic capture and enrichment
 
