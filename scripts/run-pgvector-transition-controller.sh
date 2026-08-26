@@ -73,27 +73,84 @@ fsync_path() {
 }
 
 write_controller_state_atomic() {
-  local target=$1 source=$2 temp
+  local target=$1 source=$2 temp prior='' target_existed=false write_status rollback_status=0
   controller_state_write_active=true
   assert_owned_regular_file "$source"
+  jq -e 'type == "object" and (.phase | type == "string")' "$source" >/dev/null ||
+    die 'controller state must contain one phased JSON object'
   if path_present "$target"; then
     assert_owned_regular_file "$target"
     [[ $(stat -c '%a' "$target") == 600 ]] || die 'controller state mode must be 0600'
+    target_existed=true
+    prior=$(mktemp "${target}.prior.XXXXXX") || {
+      write_status=$?
+      controller_state_write_active=false
+      return "$write_status"
+    }
+    install -m 600 "$target" "$prior" || {
+      write_status=$?
+      rm -f "$prior"
+      prior=''
+      controller_state_write_active=false
+      return "$write_status"
+    }
+    fsync_path "$prior" || {
+      write_status=$?
+      rm -f "$prior"
+      prior=''
+      controller_state_write_active=false
+      return "$write_status"
+    }
   fi
-  jq -e 'type == "object" and (.phase | type == "string")' "$source" >/dev/null ||
-    die 'controller state must contain one phased JSON object'
-  temp=$(mktemp "${target}.tmp.XXXXXX")
-  trap 'rm -f "$temp"' RETURN
-  install -m 600 "$source" "$temp"
-  fsync_path "$temp"
-  mv -f "$temp" "$target"
-  fsync_path "$(dirname "$target")"
+  temp=$(mktemp "${target}.tmp.XXXXXX") || {
+    write_status=$?
+    [[ -z "$prior" ]] || rm -f "$prior"
+    prior=''
+    controller_state_write_active=false
+    return "$write_status"
+  }
+  trap 'rm -f "$temp"; [[ -z ${prior:-} ]] || rm -f "$prior"' RETURN
+  install -m 600 "$source" "$temp" || {
+    write_status=$?
+    controller_state_write_active=false
+    return "$write_status"
+  }
+  fsync_path "$temp" || {
+    write_status=$?
+    controller_state_write_active=false
+    return "$write_status"
+  }
+  mv -f "$temp" "$target" || {
+    write_status=$?
+    controller_state_write_active=false
+    return "$write_status"
+  }
+  fsync_path "$(dirname "$target")" || {
+    write_status=$?
+    if [[ "$target_existed" == true ]]; then
+      mv -f "$prior" "$target" || rollback_status=$?
+      if ((rollback_status == 0)); then
+        fsync_path "$(dirname "$target")" || rollback_status=$?
+      fi
+      prior=''
+    else
+      rm -f "$target" || rollback_status=$?
+      if ((rollback_status == 0)); then
+        fsync_path "$(dirname "$target")" || rollback_status=$?
+      fi
+    fi
+    controller_state_write_active=false
+    ((rollback_status == 0)) || die 'atomic state publication failed after rename and rollback could not be made durable'
+    return "$write_status"
+  }
+  [[ -z "$prior" ]] || rm -f "$prior"
+  prior=''
   trap - RETURN
   controller_state_write_active=false
   if [[ ${controller_interruption_pending:-false} == true &&
         -n ${controller_state:-} && "$target" == "$controller_state" ]]; then
     controller_interruption_pending=false
-    record_controller_interruption "$controller_signal"
+    record_controller_interruption "$controller_signal" || return $?
   fi
 }
 
@@ -102,9 +159,23 @@ sha256_file() {
 }
 
 validate_controller_state() {
-  local state=$1 proof_phase proof_class
+  local state=$1 proof_phase proof_class proof_exception
   assert_owned_regular_file "$state"
   [[ $(stat -c '%a' "$state") == 600 ]] || die 'controller state mode must be 0600'
+  proof_exception=$(jq -er '.proofException // ""' "$state" 2>/dev/null) ||
+    die 'controller state is malformed'
+  case "$proof_exception" in
+    '') ;;
+    authorization-evidence-unavailable)
+      jq -e '
+        (.phase == "closure-stop-pending" or .phase == "incident") and
+        .incidentClass == "closure-authorization-evidence" and
+        (has("authorizationEvidence") | not)
+      ' "$state" >/dev/null ||
+        die 'authorization evidence exception requires an exact closure-authorization-evidence state'
+      ;;
+    *) die "unsupported controller proof exception: $proof_exception" ;;
+  esac
   jq -e '
     type == "object" and
     .version == 1 and
@@ -131,6 +202,15 @@ validate_controller_state() {
     (.sourceSnapshotSha256 | type == "string" and test("^[a-f0-9]{64}$")) and
     (.candidateComposeSha256 | type == "string" and test("^[a-f0-9]{64}$")) and
     (.guardJournal | type == "string" and startswith("/")) and
+    ((.proofException == null) or
+     .proofException == "authorization-evidence-unavailable") and
+    if .proofException == "authorization-evidence-unavailable" then
+      (.phase == "closure-stop-pending" or .phase == "incident") and
+      .incidentClass == "closure-authorization-evidence" and
+      (has("authorizationEvidence") | not)
+    else
+      true
+    end and
     if .phase == "complete" then
       (.guardEvidence.path | type == "string" and startswith("/")) and
       (.guardEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$")) and
@@ -166,11 +246,24 @@ validate_controller_state() {
   esac
   case "$proof_phase" in
     closure-stop-pending)
-      jq -e '(.authorizationEvidence.path | type == "string" and startswith("/")) and
-             (.authorizationEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))' \
-        "$state" >/dev/null ||
-        die "authorizationEvidence is required for phase $proof_phase but missing or malformed"
-      validate_evidence_binding "$state" authorizationEvidence process
+      if [[ $(jq -er '.proofException // ""' "$state") == authorization-evidence-unavailable ]]; then
+        # Authorization completed, but its evidence could not be persisted.
+        # The earlier guard proof still owns this transition, and the pending
+        # phase must remain valid long enough to durably bind the verified
+        # writer stop. The explicit exception prevents later postprocessing
+        # failures from discarding already-bound authorization evidence.
+        jq -e '(.guardEvidence.path | type == "string" and startswith("/")) and
+               (.guardEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))' \
+          "$state" >/dev/null ||
+          die "guardEvidence is required for closure-authorization-evidence but missing or malformed"
+        validate_evidence_binding "$state" guardEvidence process
+      else
+        jq -e '(.authorizationEvidence.path | type == "string" and startswith("/")) and
+               (.authorizationEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))' \
+          "$state" >/dev/null ||
+          die "authorizationEvidence is required for phase $proof_phase but missing or malformed"
+        validate_evidence_binding "$state" authorizationEvidence process
+      fi
       ;;
     closure-evidence-pending)
       jq -e '(.writerStopEvidence.path | type == "string" and startswith("/")) and
@@ -184,7 +277,7 @@ validate_controller_state() {
     closure-stop-pending|closure-evidence-pending|incident)
       proof_class=$(jq -er '.incidentClass // ""' "$state")
       case "$proof_class" in
-        pre-journal-source-verification|pre-journal-source-restoration|pre-journal-source-restored|pre-journal-live-compose-divergence|closure-artifact-storage|closure-interruption|closure-writer-authorization|closure-app-activation|closure-postprocessing|closure-verification|closure-identity|closure-extension|closure-counts|closure-infrastructure|closure-app-health|isolated-app-health-requires-guard-revalidation) ;;
+        pre-journal-source-verification|pre-journal-source-restoration|pre-journal-source-restored|pre-journal-live-compose-divergence|closure-artifact-storage|closure-interruption|closure-writer-authorization|closure-app-activation|closure-authorization-evidence|closure-postprocessing|closure-verification|closure-identity|closure-extension|closure-counts|closure-infrastructure|closure-app-health|isolated-app-health-requires-guard-revalidation) ;;
         *) die "incident class is unsupported or unrecognized: ${proof_class:-empty}" ;;
       esac
       ;;
@@ -258,7 +351,7 @@ validate_evidence_binding() {
 }
 
 update_controller_phase() {
-  local state=$1 phase=$2 incident_class=${3:-} temp write_exit=0
+  local state=$1 phase=$2 incident_class=${3:-} proof_exception=${4:-} temp write_exit=0
   validate_controller_state "$state"
   case "$phase" in
     prepared|candidate-published|source-recovery-running|guard-exited|authorization-running|activation-running|closure-running|closure-stop-pending|closure-evidence-pending|complete|incident) ;;
@@ -266,13 +359,24 @@ update_controller_phase() {
   esac
   [[ "$phase" != incident && "$phase" != closure-stop-pending && "$phase" != closure-evidence-pending || -n "$incident_class" ]] ||
     die 'closure pending and incident phases require a class'
+  case "$proof_exception" in
+    ''|authorization-evidence-unavailable) ;;
+    *) die "unsupported controller proof exception: $proof_exception" ;;
+  esac
+  [[ -z "$proof_exception" ||
+     ( ( "$phase" == closure-stop-pending || "$phase" == incident ) &&
+       "$incident_class" == closure-authorization-evidence ) ]] ||
+    die 'authorization evidence exception is valid only for closure-authorization-evidence closure state'
   temp=$(mktemp "$(dirname "$state")/.controller-phase.XXXXXX")
   trap 'rm -f "$temp"' RETURN
-  jq --arg phase "$phase" --arg incidentClass "$incident_class" '
+  jq --arg phase "$phase" --arg incidentClass "$incident_class" --arg proofException "$proof_exception" '
     .phase = $phase |
     .updatedAt = (now | todateiso8601) |
     if ($phase == "closure-stop-pending" or $phase == "closure-evidence-pending" or $phase == "incident") then .incidentClass = $incidentClass
-    else del(.incidentClass) end
+    else del(.incidentClass) end |
+    if (($phase == "closure-stop-pending" or $phase == "incident") and $proofException != "") then
+      .proofException = $proofException | del(.authorizationEvidence)
+    else del(.proofException) end
   ' "$state" > "$temp"
   write_controller_state_atomic "$state" "$temp" || write_exit=$?
   trap - RETURN
@@ -363,22 +467,25 @@ resume_controller_state() {
       ;;
   esac
 
-  # Once the initial guard and completed journal are durably bound, resume the
-  # controller-owned writer lifecycle instead of delegating back to switch
-  # mode. Authorization is idempotent and activation is verified separately.
+  # A fresh controller invocation must never cross a writer boundary left by a
+  # prior process. The prior invocation may have failed while persisting its
+  # closure intent, so absence of writer-stop evidence is not proof that no
+  # writer exists. Stop and commit an interruption incident before returning.
   case "$phase" in
     authorization-running)
+      jq -e 'has("writerStopEvidence")' "$state" >/dev/null &&
+        die 'state records a verified writer stop without a terminal incident; reauthorization is forbidden and requires operator resolution'
       assert_bound_guard_journal_unchanged "$state"
-      resume_action=run-authorization
-      return
+      begin_closure_incident "$state" interruption
+      die 'fresh invocation stopped an interrupted authorization phase; operator resolution is required'
       ;;
     activation-running)
       jq -e 'has("writerStopEvidence")' "$state" >/dev/null &&
         die 'state records a verified writer stop without a terminal incident; reactivation is forbidden and requires operator resolution'
       validate_bound_process_evidence "$state" authorizationEvidence authorization-running
       assert_bound_guard_journal_unchanged "$state"
-      resume_action=run-activation
-      return
+      begin_closure_incident "$state" interruption
+      die 'fresh invocation stopped an interrupted activation phase; operator resolution is required'
       ;;
     closure-running)
       jq -e 'has("writerStopEvidence")' "$state" >/dev/null &&
@@ -792,25 +899,97 @@ assert_operation_lock_held() {
 }
 
 publish_compose_atomic() {
-  local source=$1 target=$2 staged parent parent_mode
-  assert_owned_regular_file "$source"
-  assert_owned_regular_file "$target"
-  for parent in "$(dirname "$source")" "$(dirname "$target")"; do
+  local source=$1 target=$2 expected_sha=${3:-} staged parent parent_mode current_uid resolved normalized
+  local source_parent target_parent source_name target_name source_via_fd target_via_fd
+  local source_parent_fd target_parent_fd source_parent_identity target_parent_identity opened_identity
+  source_parent=$(dirname "$source")
+  target_parent=$(dirname "$target")
+  source_name=$(basename "$source")
+  target_name=$(basename "$target")
+  current_uid=$(id -u)
+  for parent in "$source_parent" "$target_parent"; do
     [[ -d "$parent" && ! -L "$parent" ]] ||
       die "Compose publication parent is missing or unsafe: $parent"
-    if [[ $(stat -c '%u' "$parent") == "$(id -u)" ]]; then
-      parent_mode=$(stat -c '%a' "$parent")
-      (( (8#$parent_mode & 8#022) == 0 )) ||
-        die "Compose publication parent permits group/world writes: $parent"
+    resolved=$(realpath -e "$parent") ||
+      die "Compose publication parent cannot be resolved safely: $parent"
+    normalized=$(realpath -m "$parent")
+    [[ "$resolved" == "$normalized" ]] ||
+      die "Compose publication parent contains a symlink ancestor: $parent"
+    [[ $(stat -c '%u' "$resolved") == "$current_uid" ]] ||
+      die "Compose publication parent is not owned by the current user: $parent"
+    # Current ownership does not make a writable directory safe, so enforce
+    # the mode boundary independently for every publication parent.
+    parent_mode=$(stat -c '%a' "$resolved")
+    (( (8#$parent_mode & 8#022) == 0 )) ||
+      die "Compose publication parent permits group/world writes: $parent"
+    if [[ "$parent" == "$source_parent" ]]; then
+      source_parent_identity=$(stat -Lc '%d:%i' "$resolved")
+    fi
+    if [[ "$parent" == "$target_parent" ]]; then
+      target_parent_identity=$(stat -Lc '%d:%i' "$resolved")
     fi
   done
-  staged=$(mktemp "${target}.item3-publish.XXXXXX")
+
+  # Hold both accepted directories open and compare the descriptor identities
+  # with the pre-open identities. Re-resolving a pathname after open would only
+  # validate an attacker's replacement against itself.
+  exec {source_parent_fd}<"$source_parent" ||
+    die "could not anchor Compose source publication parent: $source_parent"
+  opened_identity=$(stat -Lc '%d:%i' "/proc/$BASHPID/fd/$source_parent_fd" 2>/dev/null || true)
+  if [[ -z "$opened_identity" || "$opened_identity" != "$source_parent_identity" ]]; then
+    printf 'Compose source publication parent changed while it was opened: %s\n' "$source_parent" >&2
+    exec {source_parent_fd}<&-
+    return 1
+  fi
+  exec {target_parent_fd}<"$target_parent" ||
+    die "could not anchor Compose target publication parent: $target_parent"
+  opened_identity=$(stat -Lc '%d:%i' "/proc/$BASHPID/fd/$target_parent_fd" 2>/dev/null || true)
+  if [[ -z "$opened_identity" || "$opened_identity" != "$target_parent_identity" ]]; then
+    printf 'Compose target publication parent changed while it was opened: %s\n' "$target_parent" >&2
+    exec {source_parent_fd}<&-
+    exec {target_parent_fd}<&-
+    return 1
+  fi
+  source_via_fd="/proc/$BASHPID/fd/$source_parent_fd/$source_name"
+  target_via_fd="/proc/$BASHPID/fd/$target_parent_fd/$target_name"
+  assert_owned_regular_file "$source_via_fd"
+  assert_owned_regular_file "$target_via_fd"
+
+  staged=$(mktemp "${target_via_fd}.item3-publish.XXXXXX")
   trap 'rm -f "$staged"' RETURN
-  install -m 600 "$source" "$staged"
+  install -m 600 "$source_via_fd" "$staged"
   fsync_path "$staged"
-  mv -f "$staged" "$target"
-  fsync_path "$(dirname "$target")"
+  if [[ -n "$expected_sha" ]]; then
+    [[ "$expected_sha" =~ ^[a-f0-9]{64}$ ]] || die 'expected Compose publication digest is malformed'
+    if [[ $(sha256_file "$staged") != "$expected_sha" ]]; then
+      printf 'staged Compose publication bytes do not match the prepared candidate digest\n' >&2
+      rm -f "$staged"
+      trap - RETURN
+      exec {source_parent_fd}<&-
+      exec {target_parent_fd}<&-
+      return 1
+    fi
+  fi
+  if [[ $(stat -Lc '%d:%i' "$target_parent" 2>/dev/null || true) != "$target_parent_identity" ]]; then
+    printf 'Compose target publication parent detached before rename: %s\n' "$target_parent" >&2
+    rm -f "$staged"
+    trap - RETURN
+    exec {source_parent_fd}<&-
+    exec {target_parent_fd}<&-
+    return 1
+  fi
+  mv -f "$staged" "$target_via_fd"
+  fsync_path "/proc/$BASHPID/fd/$target_parent_fd"
+  if [[ $(stat -Lc '%d:%i' "$target_parent" 2>/dev/null || true) != "$target_parent_identity" ]]; then
+    printf 'Compose target publication parent detached after rename: %s\n' "$target_parent" >&2
+    trap - RETURN
+    exec {source_parent_fd}<&-
+    exec {target_parent_fd}<&-
+    return 1
+  fi
   trap - RETURN
+  exec {source_parent_fd}<&-
+  exec {target_parent_fd}<&-
 }
 
 publish_candidate_under_lock() {
@@ -840,7 +1019,7 @@ publish_candidate_under_lock() {
   if [[ ${NOOSPHERE_CONTROLLER_TEST_INTERRUPT_AFTER_INTENT:-0} == 1 ]]; then
     die 'test interruption after candidate publication intent'
   fi
-  publish_compose_atomic "$candidate_compose" "$live_compose"
+  publish_compose_atomic "$candidate_compose" "$live_compose" "$candidate_sha"
 }
 
 child_path_for_state() {
@@ -1257,12 +1436,16 @@ assert_bound_guard_journal_unchanged() {
 }
 
 begin_closure_incident() {
-  local state=$1 failure_class=$2
-  if ! update_controller_phase "$state" closure-stop-pending "closure-$failure_class"; then
+  local state=$1 failure_class=$2 proof_exception=${3:-} intent_exit=0
+  update_controller_phase "$state" closure-stop-pending "closure-$failure_class" "$proof_exception" ||
+    intent_exit=$?
+  if ((intent_exit != 0)); then
     # Even if the durable intent write fails, attempt to remove the writer
-    # before returning the storage failure to the operator.
+    # before returning the exact first storage failure to the operator. The
+    # stop proof may bind to the unchanged pre-intent phase; resume rejects
+    # that nonterminal proof instead of reauthorizing the writer.
     stop_application_fail_closed || true
-    die 'could not persist closure incident; application stop was attempted'
+    return "$intent_exit"
   fi
   complete_closure_stop_pending "$state"
 }
@@ -1289,14 +1472,15 @@ complete_closure_evidence_pending() {
 }
 
 complete_closure_stop_pending() {
-  local state=$1 incident_class
+  local state=$1 incident_class proof_exception
   incident_class=$(jq -er '.incidentClass' "$state")
+  proof_exception=$(jq -er '.proofException // ""' "$state")
   # Do not depend on errexit here: callers intentionally invoke recovery from
   # conditional contexts where Bash suppresses it for the entire call stack.
   if ! stop_application_fail_closed; then
     return 1
   fi
-  update_controller_phase "$state" incident "$incident_class"
+  update_controller_phase "$state" incident "$incident_class" "$proof_exception"
 }
 
 commit_closure_outcome() {
@@ -1817,9 +2001,9 @@ assert_source_state_unchanged() {
 }
 
 stop_application_fail_closed() {
-  local docker_path app_container running stop_evidence stop_temp stopped_at
-  docker_path=${execution_docker_path:-$(jq -er '.dockerPath' "$controller_state")}
-  app_container=$(jq -er '.appContainer' "$controller_state")
+  local docker_path app_container running stop_evidence stop_temp stopped_at stop_phase stop_sha
+  docker_path=${execution_docker_path:-$(jq -er '.dockerPath' "$controller_state")} || return $?
+  app_container=$(jq -er '.appContainer' "$controller_state") || return $?
   "$docker_path" stop --time 60 "$app_container" >/dev/null 2>&1 ||
     die "failed to stop application container $app_container"
   running=$("$docker_path" inspect --format '{{.State.Running}}' "$app_container" 2>/dev/null) ||
@@ -1830,15 +2014,16 @@ stop_application_fail_closed() {
   # closure-evidence-pending and closure-incident phases carry their owned
   # writer-stop proof. A failure to persist the proof is fatal: the stop itself
   # succeeded, but the state must not advance without its owned evidence.
-  stopped_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  stopped_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) || return $?
   # Retry-distinct allocation: the first stop owns the canonical evidence
   # path; a later invocation that finds it allocates InvocationID-suffixed
   # paths so a prior truthful stop record is never overwritten.
-  stop_evidence="$(select_process_artifact_base "${controller_state%.json}" writer-stop).writer-stop.evidence.json"
-  stop_temp=$(mktemp "$(dirname "$controller_state")/.writer-stop-evidence.XXXXXX")
+  stop_evidence="$(select_process_artifact_base "${controller_state%.json}" writer-stop).writer-stop.evidence.json" || return $?
+  stop_temp=$(mktemp "$(dirname "$controller_state")/.writer-stop-evidence.XXXXXX") || return $?
   trap 'rm -f "$stop_temp"' RETURN
+  stop_phase=$(jq -er '.phase // ""' "$controller_state") || return $?
   jq -n \
-    --arg phase "$(jq -er '.phase // ""' "$controller_state")" \
+    --arg phase "$stop_phase" \
     --arg container "$app_container" \
     --arg stoppedAt "$stopped_at" \
     --arg invocationId "${INVOCATION_ID:-}" \
@@ -1847,33 +2032,48 @@ stop_application_fail_closed() {
       {version:1,phase:$phase,container:$container,stopExitCode:0,
        inspectRunning:false,stoppedAt:$stoppedAt,invocationId:$invocationId,
        bootId:$bootId,controllerMainPid:$controllerMainPid}
-    ' > "$stop_temp"
-  chmod 0600 "$stop_temp"
-  fsync_path "$stop_temp"
-  mv -f "$stop_temp" "$stop_evidence"
-  fsync_path "$(dirname "$stop_evidence")"
+    ' > "$stop_temp" || return $?
+  chmod 0600 "$stop_temp" || return $?
+  fsync_path "$stop_temp" || return $?
+  write_controller_state_atomic "$stop_evidence" "$stop_temp" || return $?
+  rm -f "$stop_temp" || return $?
   trap - RETURN
-  stop_temp=$(mktemp "$(dirname "$controller_state")/.controller-evidence.XXXXXX")
+  stop_temp=$(mktemp "$(dirname "$controller_state")/.controller-evidence.XXXXXX") || return $?
   trap 'rm -f "$stop_temp"' RETURN
-  jq --arg path "$stop_evidence" --arg sha256 "$(sha256_file "$stop_evidence")" '
+  stop_sha=$(sha256_file "$stop_evidence") || return $?
+  jq --arg path "$stop_evidence" --arg sha256 "$stop_sha" '
     .writerStopEvidence = {path:$path, sha256:$sha256}
-  ' "$controller_state" > "$stop_temp"
-  write_controller_state_atomic "$controller_state" "$stop_temp"
+  ' "$controller_state" > "$stop_temp" || return $?
+  write_controller_state_atomic "$controller_state" "$stop_temp" || return $?
   trap - RETURN
 }
 
 activate_application_for_verification() {
-  local state=$1 docker_path app_container running project_directory
+  local state=$1 docker_path app_container running project_directory inspect_exit=0
   docker_path=${execution_docker_path:-$(jq -er '.dockerPath' "$state")}
   app_container=$(jq -er '.appContainer' "$state")
   running=$("$docker_path" inspect --format '{{.State.Running}}' "$app_container" 2>/dev/null) ||
-    die "could not inspect application container before activation: $app_container"
-  [[ "$running" == true || "$running" == false ]] ||
-    die "application container has an invalid running state: $app_container"
+    inspect_exit=$?
+  if ((inspect_exit != 0)); then
+    printf 'PostgreSQL transition controller: could not inspect application container before activation: %s\n' \
+      "$app_container" >&2
+    return "$inspect_exit"
+  fi
+  if [[ "$running" != true && "$running" != false ]]; then
+    printf 'PostgreSQL transition controller: application container has an invalid running state: %s\n' \
+      "$app_container" >&2
+    return 1
+  fi
   [[ "$running" == false ]] || return 0
 
   project_directory=$(dirname "$(jq -er '.liveCompose' "$state")")
-  "$docker_path" compose \
+  env -i \
+    HOME="$HOME" \
+    DOCKER_CONFIG="$DOCKER_CONFIG" \
+    DOCKER_HOST="$DOCKER_HOST" \
+    COMPOSE_DISABLE_ENV_FILE=1 \
+    PATH="$PATH" \
+    "$docker_path" compose \
     --project-directory "$project_directory" \
     --env-file "$execution_env_file" \
     -f "$execution_candidate_compose" \
@@ -2096,13 +2296,28 @@ execute_prepared_state() {
     run_guard_with_inherited_lock "$state" "$engine_id" "$volume" "$lock_root" \
       "$guard" "${authorization_args[@]}" >"$authorization_stdout" 2>"$authorization_stderr" ||
       authorization_exit=$?
-    ended_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    end_cursor=$(capture_journal_cursor)
-    write_process_evidence_atomic "$authorization_evidence" authorization-running "$authorization_exit" \
-      "$authorization_stdout" "$authorization_stderr" "$INVOCATION_ID" "$boot_id" \
-      "$systemd_controller_main_pid" "$last_guard_pid" "$started_at" "$ended_at" "$start_cursor" "$end_cursor"
-    bind_process_evidence_to_state "$state" authorizationEvidence "$authorization_evidence" \
-      "$INVOCATION_ID" "$boot_id" "$systemd_controller_main_pid" "$last_guard_pid"
+    # This subprocess must be an unconditional simple command. Bash disables
+    # errexit throughout functions and subshells evaluated as an `if`/`||`
+    # condition, which can turn an ordinary durability failure into success
+    # when a later command returns zero. Disable only the parent's errexit long
+    # enough to capture the strict subprocess status after it has terminated.
+    set +e
+    (
+      set -Eeuo pipefail
+      ended_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      end_cursor=$(capture_journal_cursor)
+      write_process_evidence_atomic "$authorization_evidence" authorization-running "$authorization_exit" \
+        "$authorization_stdout" "$authorization_stderr" "$INVOCATION_ID" "$boot_id" \
+        "$systemd_controller_main_pid" "$last_guard_pid" "$started_at" "$ended_at" "$start_cursor" "$end_cursor"
+      bind_process_evidence_to_state "$state" authorizationEvidence "$authorization_evidence" \
+        "$INVOCATION_ID" "$boot_id" "$systemd_controller_main_pid" "$last_guard_pid"
+    )
+    postprocess_exit=$?
+    set -e
+    if ((postprocess_exit != 0)); then
+      begin_closure_incident "$state" authorization-evidence authorization-evidence-unavailable
+      return "$postprocess_exit"
+    fi
     if [[ -n ${controller_signal:-} ]]; then
       if ! abort_if_interrupted; then
         # A latched signal after successful writer authorization must not

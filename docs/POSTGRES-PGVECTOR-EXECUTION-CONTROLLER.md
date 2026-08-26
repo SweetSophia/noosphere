@@ -44,9 +44,14 @@ mutations remain exclusively inside the pinned guard.
 
 ## Durable phases
 
-`prepared` → `candidate-published` → `guard-exited` →
+The forward path is `prepared` → `candidate-published` → `guard-exited` →
 `authorization-running` → `activation-running` → `closure-running` →
 `complete`.
+
+Recovery can additionally enter `source-recovery-running`,
+`closure-stop-pending`, or `closure-evidence-pending`. Those phases are not
+alternate success paths: they preserve the next required fail-closed action
+across process exit or reboot.
 
 A closure failure first enters resumable `closure-stop-pending`. The controller
 stops the app writer and verifies it is not running before committing terminal
@@ -436,3 +441,49 @@ disposable-Docker suites.
 - **Writer-stop evidence is retry-distinct**: `stop_application_fail_closed` allocates its evidence path through `select_process_artifact_base` (writer-stop role). The first stop owns the canonical `.writer-stop.evidence.json`; a later invocation that finds it allocates an InvocationID-suffixed path, so a crash between evidence publication and phase advance can never overwrite a prior truthful stop record — the same contract the source-recovery role already enforces.
 - **Invocation-suffixed paths join the collision matrix**: whenever an InvocationID is present (always at execute), `assert_controller_artifact_paths_separate` also checks the `.<InvocationID>` suffixed guard/authorization/verify/source-recovery/writer-stop paths against every bound input, matching what a retrying invocation actually writes.
 - **New regression fixtures**: `test_writer_stop_evidence_is_retry_distinct` (canonical-first, InvocationID-distinct retry, prior bytes survive, unsafe InvocationID rejected) and `test_invocation_suffixed_artifacts_cannot_collide_with_bound_inputs` (suffixed writer-stop path rejected as bound input with collision diagnostic; clean control passes).
+
+## Issue #303 transition-safety corrections (Aug 26)
+
+The issue #303 hardening preserves the controller's existing trust boundary and
+adds the following publication, writer-closure, and durability guarantees:
+
+- **Hermetic Compose activation**: application activation runs with only the
+  prepared controller environment. Ambient values cannot override the bound
+  Compose interpolation inputs.
+- **Authorization postprocessing closes the writer**: if evidence publication
+  or binding fails after writer authorization, the controller commits closure
+  intent, stops the application, verifies `State.Running=false`, and records
+  the applicable incident instead of returning through an unclosed writer
+  boundary.
+- **All writable publication parents are rejected**: group/world-writable
+  Compose parents are unsafe regardless of owner. Ownership alone is not a
+  publication authorization.
+- **Descriptor-bound publication identity**: source and target parent device
+  and inode identities are captured before open and compared with the opened
+  directory descriptors. Candidate reads and target writes remain relative to
+  those descriptors, and target attachment is checked around rename. A
+  detached or retargeted parent cannot produce a false successful publication.
+- **Prepared bytes reach the publication boundary**: the exact staged Compose
+  inode is hashed against `candidateComposeSha256` before its descriptor-relative
+  rename. Successful publication therefore binds the reviewed bytes, not merely
+  an earlier pathname lookup.
+- **Fresh writer phases fail closed**: a fresh process that observes
+  `authorization-running` or `activation-running` never replays authorization
+  or activation. It enters interruption closure, performs an inspect-verified
+  stop, and requires operator resolution. If closure-intent persistence and the
+  stop both fail, the unchanged writer phase causes the next invocation to
+  repeat the same stop-only handling.
+- **Post-rename durability failures do not ordinary-fail with advanced state**:
+  atomic state and stop-evidence publication preserves the prior object (or
+  prior absence). If the first parent-directory fsync fails after rename, the
+  controller restores or removes the visible successor and fsyncs that rollback.
+  It returns the original failure only after rollback is durable; rollback-
+  durability failure terminates fail-stopped.
+
+Local verification on the frozen issue #303 bytes completed with five direct
+owners, eleven impacted siblings, the full focused suite (`131/131`), the
+standalone transient-systemd fixture, and the pinned-Docker `linux/amd64`
+interruption/recovery rehearsal all green. Three sequential read-only reviews
+found zero release-floor blockers. These results verify the local implementation
+gate only: merge, deployment, the PostgreSQL transition, feature activation,
+backfill, and hybrid serving remain separately authorized operator actions.
