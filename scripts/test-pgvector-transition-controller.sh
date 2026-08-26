@@ -6325,6 +6325,56 @@ test_fresh_activation_recovery_stops_before_phase_owned_proof_validation() (
   }
 )
 
+test_fresh_activation_stop_failure_persists_closure_intent() (
+  local fixture_dir manifest state shim authorization_evidence initial_rc=0 retry_rc=0 lifecycle
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_phase_snapshot_shim "$fixture_dir")
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+  NOOSPHERE_CONTROLLER_TEST_CAPTURE_PHASE=activation-running \
+    run_fixture_controller "$state" "$shim" env \
+      >"$fixture_dir/initial.out" 2>"$fixture_dir/initial.err" || initial_rc=$?
+  [[ "$initial_rc" == 86 && $(jq -er '.phase' "$state") == activation-running ]] || {
+    printf 'fresh stop-failure owner did not capture activation-running: rc=%s\n' "$initial_rc" >&2
+    exit 1
+  }
+
+  : > "$fixture_dir/app-started"
+  : > "$fixture_dir/fail-closure-stop-once"
+  authorization_evidence=$(jq -er '.authorizationEvidence.path' "$state")
+  rm -f -- "$authorization_evidence"
+
+  NOOSPHERE_CONTROLLER_FIXTURE_INVOCATION_ID=fedcba9876543210fedcba9876543210 \
+    run_fixture_controller "$state" "$shim" \
+      >"$fixture_dir/retry.out" 2>"$fixture_dir/retry.err" || retry_rc=$?
+  ((retry_rc != 0)) || {
+    echo 'fresh activation stop failure unexpectedly reported success' >&2
+    exit 1
+  }
+  [[ -e "$fixture_dir/closure-stop-failure-consumed" ]] || {
+    echo 'fresh activation stop-failure owner did not exercise the injected stop failure' >&2
+    exit 1
+  }
+  jq -e '
+    .phase == "closure-stop-pending" and
+    .incidentClass == "closure-interruption" and
+    (has("writerStopEvidence") | not)
+  ' "$state" >/dev/null || {
+    echo 'fresh activation stop failure did not preserve durable closure intent' >&2
+    exit 1
+  }
+  lifecycle=$(paste -sd, "$fixture_dir/lifecycle.log" 2>/dev/null || true)
+  [[ "$lifecycle" == transition,authorize ]] || {
+    printf 'fresh activation stop failure crossed writer replay boundary: %s\n' "$lifecycle" >&2
+    exit 1
+  }
+)
+
 test_detached_target_parent_cannot_false_complete_publication() (
   local fixture_dir source_parent target_parent detached_parent source target rc=0
   fixture_dir=$(mktemp -d)
@@ -6715,6 +6765,8 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   test_closure_intent_and_stop_failure_cannot_cross_writer_boundary
   _clear_authority_root_for_isolation
   test_fresh_activation_recovery_stops_before_phase_owned_proof_validation
+  _clear_authority_root_for_isolation
+  test_fresh_activation_stop_failure_persists_closure_intent
   _clear_authority_root_for_isolation
   test_detached_target_parent_cannot_false_complete_publication
   _clear_authority_root_for_isolation

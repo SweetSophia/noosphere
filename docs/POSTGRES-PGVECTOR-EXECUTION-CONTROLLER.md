@@ -475,6 +475,10 @@ adds the following publication, writer-closure, and durability guarantees:
   proof validation then resumes before the interruption incident can advance.
   If a proof is unavailable, the unresolved running phase retains durable
   writer-stop evidence and remains stop-only for operator resolution.
+  If the stop or stop-evidence step itself fails, the controller durably
+  publishes `closure-stop-pending` through the restricted structural validator
+  before returning nonzero; only a simultaneous intent-publication failure can
+  leave the original writer phase unchanged, and that phase remains stop-only.
 - **Post-rename durability failures do not ordinary-fail with advanced state**:
   atomic state and stop-evidence publication preserves the prior object (or
   prior absence). If the first parent-directory fsync fails after rename, the
@@ -482,8 +486,8 @@ adds the following publication, writer-closure, and durability guarantees:
   It returns the original failure only after rollback is durable; rollback-
   durability failure terminates fail-stopped.
 
-The current public-review correction passes six direct owners, eleven impacted
-siblings, the full focused suite (`132/132`), the standalone transient-systemd
+The current public-review correction passes seven direct owners, eleven impacted
+siblings, the full focused suite (`133/133`), the standalone transient-systemd
 fixture, and the pinned-Docker `linux/amd64` interruption/recovery rehearsal,
 with zero owned residue. Three sequential read-only reviews were green on the
 frozen pre-publication bytes; updated public CI/review applies separately to the

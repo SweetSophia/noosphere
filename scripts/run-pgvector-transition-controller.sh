@@ -361,8 +361,8 @@ validate_evidence_binding() {
 }
 
 update_controller_phase() {
-  local state=$1 phase=$2 incident_class=${3:-} proof_exception=${4:-} temp write_exit=0
-  validate_controller_state "$state"
+  local state=$1 phase=$2 incident_class=${3:-} proof_exception=${4:-} validation_mode=${5:-full} temp write_exit=0
+  validate_controller_state "$state" "$validation_mode"
   case "$phase" in
     prepared|candidate-published|source-recovery-running|guard-exited|authorization-running|activation-running|closure-running|closure-stop-pending|closure-evidence-pending|complete|incident) ;;
     *) die "invalid controller phase: $phase" ;;
@@ -444,7 +444,7 @@ restore_source_compose_snapshot() {
 
 resume_controller_state() {
   local state=$1 phase guard_journal live_compose source_snapshot source_sha candidate_sha live_sha
-  local source_verify_exit=0
+  local source_verify_exit=0 stop_exit=0
   # execute_prepared_state has already revalidated the manifest, pinned Docker
   # binary, engine/volume identity, operation lock, authority path, and every
   # execution input before reaching resume. A fresh process that finds a
@@ -458,7 +458,11 @@ resume_controller_state() {
   phase=$(jq -er '.phase' "$state" 2>/dev/null) || die 'controller state is malformed'
   case "$phase" in
     authorization-running|activation-running)
-      stop_application_fail_closed
+      stop_application_fail_closed return || stop_exit=$?
+      if ((stop_exit != 0)); then
+        update_controller_phase "$state" closure-stop-pending closure-interruption '' writer-stop
+        return "$stop_exit"
+      fi
       ;;
   esac
   validate_controller_state "$state"
@@ -2023,15 +2027,29 @@ assert_source_state_unchanged() {
 }
 
 stop_application_fail_closed() {
-  local docker_path app_container running stop_evidence stop_temp stopped_at stop_phase stop_sha
+  local failure_mode=${1:-die} docker_path app_container running stop_evidence stop_temp stopped_at stop_phase stop_sha
+  local stop_exit=0 inspect_exit=0
+  case "$failure_mode" in
+    die|return) ;;
+    *) die "unsupported application-stop failure mode: $failure_mode" ;;
+  esac
   docker_path=${execution_docker_path:-$(jq -er '.dockerPath' "$controller_state")} || return $?
   app_container=$(jq -er '.appContainer' "$controller_state") || return $?
-  "$docker_path" stop --time 60 "$app_container" >/dev/null 2>&1 ||
+  "$docker_path" stop --time 60 "$app_container" >/dev/null 2>&1 || stop_exit=$?
+  if ((stop_exit != 0)); then
+    [[ "$failure_mode" == return ]] && return "$stop_exit"
     die "failed to stop application container $app_container"
+  fi
   running=$("$docker_path" inspect --format '{{.State.Running}}' "$app_container" 2>/dev/null) ||
+    inspect_exit=$?
+  if ((inspect_exit != 0)); then
+    [[ "$failure_mode" == return ]] && return "$inspect_exit"
     die "could not verify stopped application container $app_container"
-  [[ "$running" == false ]] ||
+  fi
+  if [[ "$running" != false ]]; then
+    [[ "$failure_mode" == return ]] && return 1
     die "application container remains running after stop: $app_container"
+  fi
   # Every inspect-verified stop is durably evidenced and bound to the state so
   # closure-evidence-pending and closure-incident phases carry their owned
   # writer-stop proof. A failure to persist the proof is fatal: the stop itself
