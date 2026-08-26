@@ -567,6 +567,15 @@ elif [[ ${1:-} == compose ]]; then
     printf 'compose-config:%s\n' "$operation_lock_state" >> "$root/live-identity.log"
     printf 'candidate model\n'
   elif [[ " $* " == *" up "* && " $* " == *" app "* ]]; then
+    if [[ -e "$root/require-bundle-docker-config-on-activation" ]]; then
+      expected_config=$(<"$root/expected-activation-docker-config")
+      selected_plugin="$DOCKER_CONFIG/cli-plugins/docker-compose"
+      printf '%s\n' "$DOCKER_CONFIG" > "$root/activation-docker-config"
+      printf '%s\n' "$selected_plugin" > "$root/activation-compose-plugin"
+      [[ "$DOCKER_CONFIG" == "$expected_config" ]]
+      cmp -s "$DOCKER_CONFIG/config.json" "$root/expected-bundle-docker-config.json"
+      cmp -s "$selected_plugin" "$root/expected-bundle-compose-plugin"
+    fi
     printf 'activate\n' >> "$root/lifecycle.log"
     [[ -e "$root/writer-authorized" ]]
     [[ ! -e "$root/fail-activation" ]] || exit 71
@@ -1039,6 +1048,40 @@ capture_journal_cursor() {
 main "$@"
 SHIM
   } > "$shim"
+  chmod 0700 "$shim"
+  printf '%s\n' "$shim"
+}
+
+write_activation_bundle_namespace_shim() {
+  local fixture_dir=$1 shim
+  shim=$(write_systemd_identity_shim "$fixture_dir")
+  sed -i '$d' "$shim"
+  cat >> "$shim" <<'SHIM'
+eval "$(declare -f create_execution_bundle | sed '1s/create_execution_bundle/original_create_execution_bundle/')"
+create_execution_bundle() {
+  local state=$1 original_home original_plugin
+  original_create_execution_bundle "$@"
+  cp -- "$execution_controller_home/docker/config.json" \
+    "$controller_fixture_root/expected-bundle-docker-config.json"
+  cp -- "$execution_compose_plugin" \
+    "$controller_fixture_root/expected-bundle-compose-plugin"
+  printf '%s\n' "$execution_controller_home/docker" > \
+    "$controller_fixture_root/expected-activation-docker-config"
+
+  original_home=$(jq -er '.controllerHome' "$state")
+  original_plugin=$(jq -er '.composePluginPath' "$state")
+  mkdir -p -- "$original_home/docker/cli-plugins"
+  printf '{"cliPluginsExtraDirs":["/tmp/post-bundle-mutation"]}\n' > \
+    "$original_home/docker/config.json"
+  printf '#!/usr/bin/env bash\nprintf "mutated original plugin\\n"\n' > \
+    "$original_home/docker/cli-plugins/docker-compose"
+  printf '# post-bundle original plugin mutation\n' >> "$original_plugin"
+  chmod 0600 "$original_home/docker/config.json"
+  chmod 0700 "$original_home/docker/cli-plugins/docker-compose" "$original_plugin"
+  : > "$controller_fixture_root/require-bundle-docker-config-on-activation"
+}
+main "$@"
+SHIM
   chmod 0700 "$shim"
   printf '%s\n' "$shim"
 }
@@ -2066,6 +2109,41 @@ test_compose_plugin_and_docker_config_identity_are_bound() (
   }
   [[ $(jq -er '.phase' "$state") == prepared ]]
   [[ $(<"$live") == 'source model' ]]
+)
+
+test_activation_uses_invocation_private_docker_bundle() (
+  local fixture_dir manifest state shim rc=0 expected_config actual_config expected_plugin actual_plugin
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_activation_bundle_namespace_shim "$fixture_dir")
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+  run_fixture_controller "$state" "$shim" env \
+    >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || rc=$?
+  ((rc == 0)) || {
+    echo 'activation did not retain the invocation-private Docker namespace after original-input mutation' >&2
+    sed 's/^/  controller.err: /' "$fixture_dir/controller.err" >&2 || true
+    exit 1
+  }
+  [[ $(jq -er '.phase' "$state") == complete ]] || {
+    echo 'bundle-bound activation did not complete the controller lifecycle' >&2
+    exit 1
+  }
+  expected_config=$(<"$fixture_dir/expected-activation-docker-config")
+  actual_config=$(<"$fixture_dir/activation-docker-config")
+  expected_plugin="$expected_config/cli-plugins/docker-compose"
+  actual_plugin=$(<"$fixture_dir/activation-compose-plugin")
+  [[ "$actual_config" == "$expected_config" && "$actual_plugin" == "$expected_plugin" ]] || {
+    printf 'activation escaped its invocation bundle: config=%s plugin=%s\n' \
+      "$actual_config" "$actual_plugin" >&2
+    exit 1
+  }
+  cmp -s "$actual_config/config.json" "$fixture_dir/expected-bundle-docker-config.json"
+  cmp -s "$actual_plugin" "$fixture_dir/expected-bundle-compose-plugin"
 )
 
 test_failed_prejournal_recovery_commits_durable_incident() (
@@ -5439,7 +5517,7 @@ test_real_docker_rehearsal_declares_interruption_resume_coverage() (
 )
 
 test_activation_uses_only_bound_compose_interpolation_values() (
-  local fixture_dir fake_docker state env_file candidate live selected
+  local fixture_dir fake_docker state env_file candidate live selected execution_home
   fixture_dir=$(mktemp -d)
   trap 'rm -rf -- "$fixture_dir"' EXIT
   fake_docker="$fixture_dir/docker"
@@ -5447,6 +5525,7 @@ test_activation_uses_only_bound_compose_interpolation_values() (
   env_file="$fixture_dir/runtime.env"
   candidate="$fixture_dir/candidate-compose.yml"
   live="$fixture_dir/docker-compose.yml"
+  execution_home="$fixture_dir/execution-home"
 
   cat > "$fake_docker" <<'DOCKER'
 #!/bin/bash -p
@@ -5484,19 +5563,28 @@ DOCKER
   printf 'services:\n  app:\n    image: ${APP_IMAGE}\n' > "$candidate"
   printf 'source-model\n' > "$live"
   chmod 0600 "$env_file" "$candidate" "$live"
+  mkdir -m 700 -p "$execution_home/docker" "$fixture_dir/locks"
+  printf '{}\n' > "$execution_home/docker/config.json"
+  chmod 0600 "$execution_home/docker/config.json"
   jq -n \
     --arg dockerPath "$fake_docker" \
     --arg appContainer fixture-app \
     --arg liveCompose "$live" \
-    '{dockerPath:$dockerPath,appContainer:$appContainer,liveCompose:$liveCompose}' > "$state"
+    --arg dockerEndpoint 'unix:///fixture/docker.sock' \
+    --arg lockRoot "$fixture_dir/locks" \
+    --arg fixedPath '/usr/sbin:/usr/bin:/sbin:/bin' \
+    '{dockerPath:$dockerPath,appContainer:$appContainer,liveCompose:$liveCompose,
+      dockerEndpoint:$dockerEndpoint,lockRoot:$lockRoot,fixedPath:$fixedPath}' > "$state"
   chmod 0600 "$state"
 
+  eval "$(extract_function child_path_for_state)"
   eval "$(extract_function activate_application_for_verification)"
   die() {
     printf 'fixture: %s\n' "$*" >&2
     exit 1
   }
   execution_docker_path=$fake_docker
+  execution_controller_home=$execution_home
   execution_env_file=$env_file
   execution_candidate_compose=$candidate
   HOME="$fixture_dir/home"
@@ -6598,6 +6686,8 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   test_guard_arguments_are_semantically_bound_to_manifest
   _clear_authority_root_for_isolation
   test_compose_plugin_and_docker_config_identity_are_bound
+  _clear_authority_root_for_isolation
+  test_activation_uses_invocation_private_docker_bundle
   _clear_authority_root_for_isolation
   test_failed_prejournal_recovery_commits_durable_incident
   _clear_authority_root_for_isolation

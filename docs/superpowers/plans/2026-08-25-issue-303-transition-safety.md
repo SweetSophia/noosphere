@@ -9,7 +9,7 @@
 **Tech Stack:** Bash 5, jq, Docker Compose, systemd user units, repository shell fixtures.
 
 **Current status (2026-08-26):** PR #305 is open. Its public-review correction
-passes seven direct owners, eleven impacted siblings, the focused `133/133` suite,
+passes eight direct owners, eleven impacted siblings, the focused `134/134` suite,
 standalone transient-systemd and pinned-Docker rehearsals, static gates, privacy
 scan, and zero-residue inspection. Updated CI/review and all of Task 7 remain
 separately gated for the corrected head.
@@ -203,6 +203,7 @@ Address valid feedback within the approved definition of done. Do not merge, dep
 
 **Files:**
 - Modify: `install-openclaw.sh`
+- Modify: `.github/workflows/postgres-pgvector-rehearsal.yml`
 - Modify: installer regression fixtures selected after inventory
 - Modify: `docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md`
 - Modify as needed: `README.md`
@@ -222,6 +223,14 @@ Keep the checksum-pinned installer invocation as the supported user workflow. Th
 - [ ] **Step 4: Verify new install, successful upgrade, interrupted upgrade, and rerun recovery**
 
 Require deterministic artifact modes, byte pinning, state/evidence preservation, zero owned residue, and unchanged production opt-in boundaries. Publish this automation only after its own focused fixtures, full installer checks, sequential native reviews, and PR gate are GREEN.
+
+- [ ] **Step 5: Make controller gates rollout-authoritative in CI**
+
+Add the controller and both controller fixture scripts to a path-filtered
+workflow. Require the focused controller suite and pinned-Docker interruption
+rehearsal on controller/test changes before the installer or controller can be
+treated as rollout-authoritative. This is a pre-rollout gate, not evidence
+against the locally executed bytes in PR #305.
 
 ---
 
@@ -286,7 +295,7 @@ blocked until the corrected bytes are fully re-gated.
       the next invocation retries the stop without replaying a writer.
 - [x] Restore prior bytes or absence after post-rename durability failure and
       terminate fail-stopped if rollback cannot be made durable.
-- [x] Run seven direct owners, eleven impacted siblings, and focused `133/133` on
+- [x] Run eight direct owners, eleven impacted siblings, and focused `134/134` on
       the public-review correction with stable hashes.
 - [x] Rerun standalone transient-systemd and pinned-Docker `linux/amd64` against
       the corrected head with zero owned residue.
@@ -295,3 +304,18 @@ blocked until the corrected bytes are fully re-gated.
 - [x] Publish focused PR #305 without merging or deploying.
 - [ ] Observe updated CI/review through the mandatory window and keep
       merge/deployment/transition separately authorized.
+
+### Consolidated final-review addendum — 2026-08-26
+
+- [x] Reproduce activation escaping the invocation-private Docker namespace
+      after the original config/plugin bytes are mutated post-bundle.
+- [x] Bind activation inspect and Compose calls to the copied controller home,
+      Docker config, Docker executable/plugin namespace, fixed child `PATH`,
+      runtime directory, and deterministic locale.
+- [x] Preserve an end-to-end owner that mutates original inputs only after
+      `create_execution_bundle`, then requires activation to resolve the copied
+      config/plugin and complete without writer replay.
+- [x] Rerun focused `134/134`, standalone transient-systemd, pinned-Docker, static,
+      privacy, and zero-residue gates on the final correction.
+- [ ] Publish the correction and reconcile updated CI/review without merging or
+      deploying.

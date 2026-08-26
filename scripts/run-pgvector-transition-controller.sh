@@ -2105,9 +2105,27 @@ stop_application_fail_closed() {
 
 activate_application_for_verification() {
   local state=$1 docker_path app_container running project_directory inspect_exit=0
+  local controller_home docker_config docker_host lock_root child_path
+  local -a docker_env
   docker_path=${execution_docker_path:-$(jq -er '.dockerPath' "$state")}
+  controller_home=${execution_controller_home:-$(jq -er '.controllerHome' "$state")}
+  docker_config="$controller_home/docker"
+  docker_host=$(jq -er '.dockerEndpoint' "$state")
+  lock_root=$(jq -er '.lockRoot' "$state")
+  child_path=$(child_path_for_state "$state")
+  docker_env=(
+    "HOME=$controller_home"
+    "DOCKER_CONFIG=$docker_config"
+    "DOCKER_HOST=$docker_host"
+    COMPOSE_DISABLE_ENV_FILE=1
+    "XDG_RUNTIME_DIR=$lock_root"
+    LANG=C.UTF-8
+    LC_ALL=C.UTF-8
+    "PATH=$child_path"
+  )
   app_container=$(jq -er '.appContainer' "$state")
-  running=$("$docker_path" inspect --format '{{.State.Running}}' "$app_container" 2>/dev/null) ||
+  running=$(env -i "${docker_env[@]}" \
+    "$docker_path" inspect --format '{{.State.Running}}' "$app_container" 2>/dev/null) ||
     inspect_exit=$?
   if ((inspect_exit != 0)); then
     printf 'PostgreSQL transition controller: could not inspect application container before activation: %s\n' \
@@ -2122,19 +2140,15 @@ activate_application_for_verification() {
   [[ "$running" == false ]] || return 0
 
   project_directory=$(dirname "$(jq -er '.liveCompose' "$state")")
-  env -i \
-    HOME="$HOME" \
-    DOCKER_CONFIG="$DOCKER_CONFIG" \
-    DOCKER_HOST="$DOCKER_HOST" \
-    COMPOSE_DISABLE_ENV_FILE=1 \
-    PATH="$PATH" \
+  env -i "${docker_env[@]}" \
     "$docker_path" compose \
     --project-directory "$project_directory" \
     --env-file "$execution_env_file" \
     -f "$execution_candidate_compose" \
     up -d --no-deps --force-recreate app >/dev/null ||
     return 1
-  running=$("$docker_path" inspect --format '{{.State.Running}}' "$app_container" 2>/dev/null) ||
+  running=$(env -i "${docker_env[@]}" \
+    "$docker_path" inspect --format '{{.State.Running}}' "$app_container" 2>/dev/null) ||
     return 1
   [[ "$running" == true ]]
 }

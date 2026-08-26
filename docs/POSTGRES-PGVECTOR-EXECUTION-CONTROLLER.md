@@ -295,7 +295,10 @@ enters a phase the guard has not authorised.
   verified guard, verifier, Docker client, Compose plugin, Docker config,
   environment file, source snapshot, and candidate Compose file into a private
   bundle. The copies are re-hashed and their Compose/plugin identity is checked
-  before use, closing hash-then-pathname replacement races.
+  before use, closing hash-then-pathname replacement races. Guard, verifier,
+  activation inspect, and activation Compose calls all use that bundle's
+  `HOME`, `DOCKER_CONFIG`, Docker executable, plugin, and fixed child `PATH`;
+  the original prepared namespace is not consulted after binding.
 - **Trusted system-executable ownership**: production Docker and Compose
   executables may be root-owned or deployment-user-owned, but must be regular
   non-symlink files without group/world write permission before they are copied
@@ -489,8 +492,8 @@ adds the following publication, writer-closure, and durability guarantees:
   It returns the original failure only after rollback is durable; rollback-
   durability failure terminates fail-stopped.
 
-The current public-review correction passes seven direct owners, eleven impacted
-siblings, the full focused suite (`133/133`), the standalone transient-systemd
+The current public-review correction passes eight direct owners, eleven impacted
+siblings, the full focused suite (`134/134`), the standalone transient-systemd
 fixture, and the pinned-Docker `linux/amd64` interruption/recovery rehearsal,
 with zero owned residue. Three sequential read-only reviews were green on the
 frozen pre-publication bytes; updated public CI/review applies separately to the
