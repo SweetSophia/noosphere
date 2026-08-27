@@ -148,6 +148,18 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+
+      - name: Install pinned Node in controller bootstrap path
+        run: |
+          node_path=$(command -v node)
+          [[ "$node_path" == /* && -f "$node_path" ]]
+          sudo install -o root -g root -m 0755 "$node_path" /usr/bin/node
+          cmp -s "$node_path" /usr/bin/node
+
       - name: Start persistent user manager
         run: |
           runtime_dir="/run/user/$(id -u)"
@@ -183,6 +195,18 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+
+      - name: Install pinned Node in controller bootstrap path
+        run: |
+          node_path=$(command -v node)
+          [[ "$node_path" == /* && -f "$node_path" ]]
+          sudo install -o root -g root -m 0755 "$node_path" /usr/bin/node
+          cmp -s "$node_path" /usr/bin/node
 
       - name: Start persistent user manager
         run: |
