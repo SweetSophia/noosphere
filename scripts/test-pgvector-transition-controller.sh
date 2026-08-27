@@ -6701,6 +6701,17 @@ test_verification_url_requires_a_local_ipv4_interface() (
   fi
 )
 
+test_verification_url_accepts_ipv4_loopback_range() (
+  eval "$(extract_function query_local_ipv4_addresses)"
+  eval "$(extract_function assert_local_verification_url)"
+  query_local_ipv4_addresses() {
+    printf '%s\n' 127.0.0.1
+  }
+
+  assert_local_verification_url 'http://127.0.0.2:16578'
+  assert_local_verification_url 'http://127.255.255.254:16578'
+)
+
 # Per-test isolation helper: clear the durable authority namespace so a
 # prior test's stale record (pointing at an already-rm-rf'd fixture_dir)
 # cannot fire the R3-1 unrecognized-phase arm before the current test
@@ -6983,6 +6994,8 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   test_detached_target_parent_cannot_false_complete_publication
   _clear_authority_root_for_isolation
   test_postrename_fsync_failure_cannot_expose_advanced_publications
+  _clear_authority_root_for_isolation
+  test_verification_url_accepts_ipv4_loopback_range
   _clear_authority_root_for_isolation
   test_verification_url_requires_a_local_ipv4_interface
   echo 'PostgreSQL transition controller focused fixtures passed.'

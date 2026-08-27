@@ -94,7 +94,7 @@ assert_local_verification_url() {
     printf 'verification URL cannot use a wildcard address: %s\n' "$url" >&2
     return 1
   }
-  [[ "$host" != 127.0.0.1 ]] || return 0
+  ((10#${octets[0]} != 127)) || return 0
   while IFS= read -r assigned_address; do
     if [[ "$assigned_address" == "$host" ]]; then
       assigned=true

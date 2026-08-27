@@ -571,15 +571,28 @@ const finalizeNewInstall = installer.indexOf('"$POSTGRES_SWITCH_SCRIPT" --record
 const authorizeWriter = installer.indexOf('"$POSTGRES_SWITCH_SCRIPT" --authorize-writer');
 const startApp = installer.indexOf("docker compose up -d app");
 const candidateGateTemplate = installer.indexOf("marker=/run/noosphere-pgvector/candidate-authorized");
-const transitionRoute =
-  installer.match(/route_postgres_install_transition\(\) \{([\s\S]*?)\n}\n\nacquire_postgres_operation_lock\(\)/)?.[1] ?? "";
+const transitionRouteMatch = installer.match(
+  /^route_postgres_install_transition\(\) \{([\s\S]*?)^}\n\n(?=reconcile_postgres_controller_before_configuration\(\))/m,
+);
+const transitionRoute = transitionRouteMatch?.[1] ?? "";
 const existingSwitchBlock = transitionRoute.indexOf('if [[ "$existing_switch_required" == true ]]');
 const candidatePull = transitionRoute.indexOf('-f "$POSTGRES_CONTROLLER_CANDIDATE" pull');
 const controllerManifest = transitionRoute.indexOf("write_postgres_controller_manifest");
 const controllerExecution = transitionRoute.indexOf("run_existing_postgres_controller_transition");
+const installerLockReacquisition = transitionRoute.indexOf("acquire_postgres_operation_lock");
+const controllerCompletion = transitionRoute.indexOf("controller_transition_completed=true");
 const newInstallBlock = transitionRoute.indexOf('if [[ "$new_install_required" == true ]]');
 const recoveredSwitchResume = installer.indexOf('if [[ "$resume_recovered_switch" == true ]]');
 const composeTemplatePublish = installer.indexOf('cat > "$compose_target"');
+expect(
+  transitionRouteMatch !== null &&
+    !transitionRoute.includes("reconcile_postgres_controller_before_configuration") &&
+    !transitionRoute.includes("acquire_postgres_operation_lock() {") &&
+    controllerExecution >= 0 &&
+    installerLockReacquisition > controllerExecution &&
+    controllerCompletion > installerLockReacquisition,
+  "installer route policy must be scoped to one function and reacquire the operation lock before post-controller completion",
+);
 expect(
   installer.includes(
     "# Route only real source transitions through the controller. New installs keep\n" +
@@ -1111,12 +1124,30 @@ const installerControllerDispatches = Array.from(
   (match) => match[1],
 );
 expect(
-  installerControllerDefinitions.length === 7 &&
-    installerControllerDispatches.length === 7 &&
-    new Set(installerControllerDispatches).size === 7 &&
+  installerControllerDefinitions.length === 8 &&
+    installerControllerDispatches.length === 8 &&
+    new Set(installerControllerDispatches).size === 8 &&
     JSON.stringify([...installerControllerDefinitions].sort()) ===
       JSON.stringify([...installerControllerDispatches].sort()),
-  "the installer transition-controller fixture must define and dispatch exactly seven unique owners",
+  "the installer transition-controller fixture must define and dispatch exactly eight unique owners",
+);
+const focusedControllerFixture = read("scripts/test-pgvector-transition-controller.sh");
+const focusedControllerDefinitions = Array.from(
+  focusedControllerFixture.matchAll(/^(test_[A-Za-z0-9_]+)\(\) \(/gm),
+  (match) => match[1],
+);
+const focusedControllerDispatches = Array.from(
+  focusedControllerFixture.matchAll(/^  (test_[A-Za-z0-9_]+)$/gm),
+  (match) => match[1],
+);
+expect(
+  focusedControllerDefinitions.length === 137 &&
+    focusedControllerDispatches.length === 137 &&
+    new Set(focusedControllerDispatches).size === 137 &&
+    focusedControllerDefinitions.includes("test_verification_url_accepts_ipv4_loopback_range") &&
+    JSON.stringify([...focusedControllerDefinitions].sort()) ===
+      JSON.stringify([...focusedControllerDispatches].sort()),
+  "the focused transition-controller fixture must define and dispatch exactly 137 unique owners, including full IPv4 loopback coverage",
 );
 const controllerWorkflowTriggerPaths = [
   ".github/workflows/postgres-pgvector-rehearsal.yml",

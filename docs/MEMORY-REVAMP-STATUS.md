@@ -34,11 +34,12 @@ backfill, shadow evaluation, or hybrid serving.
   `NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false`.
 - The guarded existing-volume transition and its execution controller were
   merged in PR #305 with focused/systemd and pinned-Docker hosted gates green.
-  Task 7's one-command installer integration is implemented on a separate local
-  branch with checksum-pinned private staging, controller-routed existing-volume
-  upgrades, durable rerun recovery, and seven installer owners. It is not yet
-  published or hosted-CI verified. Transition execution and Phase D rollout
-  remain explicit operator actions.
+  Task 7's one-command installer integration is published as PR #306 with
+  checksum-pinned private staging, controller-routed existing-volume upgrades,
+  durable rerun recovery, eight installer owners, and 137 focused controller
+  owners. The review-fix head still requires exact-head hosted CI and regular
+  merge so pinned intermediate commits remain reachable. Transition execution
+  and Phase D rollout remain explicit operator actions.
 
 ## Automatic capture and enrichment
 

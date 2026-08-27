@@ -765,6 +765,7 @@ route_postgres_install_transition() {
       -f "$POSTGRES_CONTROLLER_CANDIDATE" pull
     write_postgres_controller_manifest
     run_existing_postgres_controller_transition
+    acquire_postgres_operation_lock || return 1
     controller_transition_completed=true
     return 0
   fi
@@ -824,30 +825,30 @@ reconcile_postgres_controller_before_configuration() {
 
 acquire_postgres_operation_lock() {
   local docker_host engine_id lock_root lock_key lock_path
-  docker_host=$(resolve_local_docker_endpoint) || exit 1
+  docker_host=$(resolve_local_docker_endpoint) || return 1
   lock_root=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
   [[ "$lock_root" == /* && -d "$lock_root" && ! -L "$lock_root" ]] || {
     echo "Runtime lock directory is unavailable or unsafe: $lock_root" >&2
-    exit 1
+    return 1
   }
   [[ $(stat -c '%u' "$lock_root") == "$(id -u)" ]] || {
     echo 'Runtime lock directory is not owned by the current user.' >&2
-    exit 1
+    return 1
   }
   engine_id=$(docker info --format '{{.ID}}') || {
     echo 'Could not determine the Docker engine ID.' >&2
-    exit 1
+    return 1
   }
   [[ -n "$engine_id" ]] || {
     echo 'Docker engine ID is empty.' >&2
-    exit 1
+    return 1
   }
   lock_key=$(printf '%s\0%s' "$engine_id" noosphere_postgres_data | sha256sum | awk '{print $1}')
   lock_path="$lock_root/noosphere-pgvector-switch-$lock_key.lock"
   exec 8>"$lock_path"
   flock -w 5 8 || {
     echo 'Another installer or PostgreSQL image switch is active for noosphere_postgres_data.' >&2
-    exit 1
+    return 1
   }
   export NOOSPHERE_A2B_LOCK_FD=8
   export NOOSPHERE_A2B_LOCK_PATH="$lock_path"

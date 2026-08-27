@@ -188,7 +188,8 @@ enters a phase the guard has not authorised.
   that exact recorded file.
 - **Bound verifier target**: the prepared manifest records an HTTP IPv4
   `appUrl`, and the verifier child receives that exact value as
-  `NOOSPHERE_APP_URL`. Loopback is always admitted; a non-loopback address must
+  `NOOSPHERE_APP_URL`. The complete IPv4 `127/8` loopback range is always
+  admitted; a non-loopback address must
   be assigned to a local interface every time the manifest is validated.
   Wildcard, DNS, HTTPS, and remote targets remain rejected. Disposable
   rehearsals continue to use a unique loopback health port.
@@ -501,9 +502,9 @@ adds the following publication, writer-closure, and durability guarantees:
 The hardened controller was merged in PR #305 after the full focused suite
 (`135/135`), standalone transient-systemd fixture, pinned-Docker `linux/amd64`
 interruption/recovery rehearsal, and exact-head hosted gates passed with zero
-owned residue. The installer-integration branch adds one focused local-address
-owner and seven installer owners; its publication and exact-head hosted results
-remain separate gates. Deployment, the PostgreSQL transition, feature
+owned residue. PR #306 adds two focused local-address owners and eight installer
+owners, for exact focused parity of `137/137/137`. Its review-fix exact-head
+hosted result remains a separate gate. Deployment, the PostgreSQL transition, feature
 activation, backfill, and hybrid serving remain separately authorized operator
 actions.
 
@@ -516,7 +517,11 @@ Compose file, write a private source snapshot and candidate, bind all execution
 inputs in the controller manifest, then prepare state while inheriting the
 installer's engine-plus-volume lock. The installer releases only that lock
 descriptor before launching the controller under the required transient user
-unit, allowing the controller to reacquire authority without deadlocking.
+unit, allowing the controller to reacquire authority without deadlocking. After
+the controller returns successfully, the installer must reacquire the same
+engine-plus-volume lock before marking the transition complete or entering
+secret publication, plugin installation, OpenClaw config mutation, or gateway
+restart. Reacquisition failure stops the installer.
 
 On interruption, the stable controller state is resumed before the installer
 rewrites bound `.env` or candidate bytes. A successful controller run owns the
@@ -526,6 +531,11 @@ Complete state is accepted only when the durable guard journal's exact path and
 SHA-256 match the state's `guardJournalEvidence` binding and the journal records
 a completed source switch. New installs and already-complete transitions retain
 the established direct guard path.
+
+The published installer and helper URLs pin intermediate commits. PR #306 must
+therefore use a regular merge rather than squash so those commit objects remain
+ancestors of the target branch and the immutable raw-URL trust chain is
+preserved.
 
 The transient authority process requires Node to resolve from the root-trusted
 bootstrap PATH (`/usr/sbin:/usr/bin:/sbin:/bin`). An nvm-only Node installation

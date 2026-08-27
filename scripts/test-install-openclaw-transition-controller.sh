@@ -462,6 +462,45 @@ test_existing_upgrade_routes_through_controller() (
     "$fixture/docker.log" >/dev/null
 )
 
+test_existing_upgrade_reacquires_operation_lock() (
+  local fixture bin plugin expected_lock_path
+  fixture=$(mktemp -d)
+  trap 'release_postgres_operation_lock >/dev/null 2>&1 || true; rm -rf "$fixture"' EXIT
+  bin="$fixture/bin"
+  mkdir -m 700 "$bin" "$fixture/home" "$fixture/runtime"
+  plugin="$fixture/docker-compose"
+  write_fake_docker "$bin/docker" "$plugin"
+  export FIXTURE_COMPOSE_PLUGIN=$plugin
+  export FIXTURE_DOCKER_LOG="$fixture/docker.log"
+  PATH="$bin:/usr/bin:/bin"
+  XDG_RUNTIME_DIR="$fixture/runtime"
+  existing_switch_required=true
+  new_install_required=false
+  controller_transition_completed=false
+  NOOSPHERE_HOME="$fixture/home"
+  POSTGRES_CONTROLLER_CANDIDATE="$NOOSPHERE_HOME/candidate-compose.yml"
+  : > "$NOOSPHERE_HOME/.env"
+  : > "$POSTGRES_CONTROLLER_CANDIDATE"
+
+  assert_postgres_controller_bootstrap_node() { :; }
+  resolve_local_docker_endpoint() { printf 'unix:///fixture/docker.sock\n'; }
+  write_postgres_controller_manifest() { :; }
+  run_existing_postgres_controller_transition() {
+    release_postgres_operation_lock
+  }
+
+  acquire_postgres_operation_lock
+  expected_lock_path=$NOOSPHERE_A2B_LOCK_PATH
+  route_postgres_install_transition
+
+  [[ "$controller_transition_completed" == true ]]
+  [[ -n ${NOOSPHERE_A2B_LOCK_FD:-} ]]
+  [[ ${NOOSPHERE_A2B_LOCK_PATH:-} == "$expected_lock_path" ]]
+  if flock -n "$expected_lock_path" -c true; then
+    fail 'competing installer acquired the operation lock after controller completion'
+  fi
+)
+
 main() {
   test_controller_artifacts_are_checksum_pinned_and_private
   test_artifact_mismatch_preserves_existing_private_targets
@@ -470,7 +509,10 @@ main() {
   test_new_install_bypasses_transition_controller
   test_complete_controller_state_requires_guard_closure
   test_existing_upgrade_routes_through_controller
+  test_existing_upgrade_reacquires_operation_lock
   printf 'OpenClaw installer transition-controller fixtures passed.\n'
 }
 
-main "$@"
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  main "$@"
+fi
