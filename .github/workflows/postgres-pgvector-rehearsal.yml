@@ -162,6 +162,12 @@ jobs:
           sudo chmod 0755 /usr/local/bin
           [[ $(stat -c '%u:%a' /usr/local/bin) == 0:755 ]]
 
+      - name: Install focused fixture tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ripgrep
+          rg --version
+
       - name: Start persistent user manager
         run: |
           runtime_dir="/run/user/$(id -u)"

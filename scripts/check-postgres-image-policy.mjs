@@ -1076,6 +1076,10 @@ expect(
     ) === 1 &&
     countLiteral(focusedControllerJob, "sudo chmod 0755 /usr/local/bin") === 1 &&
     countLiteral(dockerControllerJob, "sudo chmod 0755 /usr/local/bin") === 1 &&
+    countLiteral(
+      focusedControllerJob,
+      "sudo apt-get install --yes --no-install-recommends ripgrep",
+    ) === 1 &&
     countLiteral(focusedControllerJob, 'sudo loginctl disable-linger "$USER"') === 1 &&
     countLiteral(dockerControllerJob, 'sudo loginctl disable-linger "$USER"') === 1 &&
     countLiteral(
