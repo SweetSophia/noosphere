@@ -1074,13 +1074,15 @@ expect(
       dockerControllerJob,
       'sudo install -o root -g root -m 0755 "$node_path" /usr/bin/node',
     ) === 1 &&
+    countLiteral(focusedControllerJob, "sudo chmod 0755 /usr/local/bin") === 1 &&
+    countLiteral(dockerControllerJob, "sudo chmod 0755 /usr/local/bin") === 1 &&
     countLiteral(focusedControllerJob, 'sudo loginctl disable-linger "$USER"') === 1 &&
     countLiteral(dockerControllerJob, 'sudo loginctl disable-linger "$USER"') === 1 &&
     countLiteral(
       dockerControllerJob,
       'docker pull --platform linux/amd64 "$image"',
     ) === 1,
-  "the path-filtered PostgreSQL rehearsal workflow must install pinned Node in the controller bootstrap path and run the focused and pinned-Docker interruption gates under disposable persistent user managers",
+  "the path-filtered PostgreSQL rehearsal workflow must install pinned Node, harden the controller bootstrap PATH, and run the focused and pinned-Docker interruption gates under disposable persistent user managers",
 );
 
 const verifyScript = read("scripts/verify-deploy.sh");

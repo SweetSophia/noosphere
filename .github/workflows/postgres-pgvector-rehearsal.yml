@@ -159,6 +159,8 @@ jobs:
           [[ "$node_path" == /* && -f "$node_path" ]]
           sudo install -o root -g root -m 0755 "$node_path" /usr/bin/node
           cmp -s "$node_path" /usr/bin/node
+          sudo chmod 0755 /usr/local/bin
+          [[ $(stat -c '%u:%a' /usr/local/bin) == 0:755 ]]
 
       - name: Start persistent user manager
         run: |
@@ -207,6 +209,8 @@ jobs:
           [[ "$node_path" == /* && -f "$node_path" ]]
           sudo install -o root -g root -m 0755 "$node_path" /usr/bin/node
           cmp -s "$node_path" /usr/bin/node
+          sudo chmod 0755 /usr/local/bin
+          [[ $(stat -c '%u:%a' /usr/local/bin) == 0:755 ]]
 
       - name: Start persistent user manager
         run: |
