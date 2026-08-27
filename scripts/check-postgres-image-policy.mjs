@@ -844,6 +844,13 @@ const digestTestScript = read("scripts/test-digest-order-independence.sh");
 const postgresRehearsalWorkflow = read(
   ".github/workflows/postgres-pgvector-rehearsal.yml",
 );
+const workflowJob = (source, name) => {
+  const start = source.indexOf(`  ${name}:\n`);
+  if (start < 0) return "";
+  const remainder = source.slice(start + 3);
+  const nextJob = remainder.search(/^  [a-z0-9][a-z0-9-]*:\n/m);
+  return nextJob < 0 ? source.slice(start) : source.slice(start, start + 3 + nextJob);
+};
 const shellFunctionDeclarationPattern = (name) => {
   const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(
@@ -1017,6 +1024,69 @@ expect(
       /- "scripts\/test-digest-order-independence\.sh"/g,
     )?.length === 2,
   "the PostgreSQL rehearsal must run deterministic digest security, coverage, streaming, and failure regressions on both architectures",
+);
+
+const focusedControllerJob = workflowJob(
+  postgresRehearsalWorkflow,
+  "test-transition-controller",
+);
+const dockerControllerJob = workflowJob(
+  postgresRehearsalWorkflow,
+  "rehearse-transition-controller",
+);
+const controllerWorkflowTriggerPaths = [
+  ".github/workflows/postgres-pgvector-rehearsal.yml",
+  "scripts/run-pgvector-transition-controller.sh",
+  "scripts/test-pgvector-transition-controller.sh",
+  "scripts/test-pgvector-transition-controller-systemd.sh",
+  "scripts/test-pgvector-transition-controller-docker.sh",
+  "scripts/switch-pgvector-compose.sh",
+  "scripts/verify-deploy.sh",
+];
+expect(
+  controllerWorkflowTriggerPaths.every(
+    (relativePath) =>
+      countLiteral(postgresRehearsalWorkflow, `- "${relativePath}"`) === 2,
+  ) &&
+    countLiteral(
+      focusedControllerJob,
+      "run: scripts/test-pgvector-transition-controller.sh",
+    ) === 1 &&
+    countLiteral(
+      dockerControllerJob,
+      "run: scripts/test-pgvector-transition-controller-docker.sh linux/amd64",
+    ) === 1 &&
+    countLiteral(focusedControllerJob, 'sudo loginctl enable-linger "$USER"') === 1 &&
+    countLiteral(dockerControllerJob, 'sudo loginctl enable-linger "$USER"') === 1 &&
+    countLiteral(
+      focusedControllerJob,
+      "uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6",
+    ) === 1 &&
+    countLiteral(
+      dockerControllerJob,
+      "uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6",
+    ) === 1 &&
+    countLiteral(
+      focusedControllerJob,
+      'sudo install -o root -g root -m 0755 "$node_path" /usr/bin/node',
+    ) === 1 &&
+    countLiteral(
+      dockerControllerJob,
+      'sudo install -o root -g root -m 0755 "$node_path" /usr/bin/node',
+    ) === 1 &&
+    countLiteral(focusedControllerJob, "sudo chmod 0755 /usr/local/bin") === 1 &&
+    countLiteral(dockerControllerJob, "sudo chmod 0755 /usr/local/bin") === 1 &&
+    countLiteral(
+      focusedControllerJob,
+      "sudo apt-get install --yes --no-install-recommends ripgrep",
+    ) === 1 &&
+    countLiteral(focusedControllerJob, 'sudo loginctl disable-linger "$USER"') === 1 &&
+    countLiteral(dockerControllerJob, 'sudo loginctl disable-linger "$USER"') === 1 &&
+    countLiteral(
+      dockerControllerJob,
+      'docker pull --platform linux/amd64 "$image"',
+    ) === 1,
+  "the path-filtered PostgreSQL rehearsal workflow must install pinned Node, harden the controller bootstrap PATH, install the focused fixture toolchain, and run the focused and pinned-Docker interruption gates under disposable persistent user managers",
 );
 
 const verifyScript = read("scripts/verify-deploy.sh");

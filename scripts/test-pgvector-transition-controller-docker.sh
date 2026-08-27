@@ -2,9 +2,9 @@
 set -Eeuo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-CONTROLLER="$ROOT_DIR/scripts/run-pgvector-transition-controller.sh"
-GUARD="$ROOT_DIR/scripts/switch-pgvector-compose.sh"
-VERIFIER="$ROOT_DIR/scripts/verify-deploy.sh"
+CONTROLLER_SOURCE="$ROOT_DIR/scripts/run-pgvector-transition-controller.sh"
+GUARD_SOURCE="$ROOT_DIR/scripts/switch-pgvector-compose.sh"
+VERIFIER_SOURCE="$ROOT_DIR/scripts/verify-deploy.sh"
 
 cleanup_state_authority_record() {
   local runtime_root=$1 authority=$2
@@ -33,7 +33,7 @@ CANDIDATE_IMAGE='ghcr.io/sweetsophia/noosphere-postgres-pgvector@sha256:12bc9b34
   echo 'The controller Docker rehearsal currently supports linux/amd64 only.' >&2
   exit 1
 }
-for path in "$CONTROLLER" "$GUARD" "$VERIFIER"; do
+for path in "$CONTROLLER_SOURCE" "$GUARD_SOURCE" "$VERIFIER_SOURCE"; do
   [[ -x "$path" && -f "$path" && ! -L "$path" ]] || {
     echo "Required executable is missing or unsafe: $path" >&2
     exit 1
@@ -238,6 +238,40 @@ trap cleanup EXIT INT TERM
   exit 1
 }
 
+# Model the intended installed-artifact execution boundary instead of binding
+# mutable checkout artifacts directly. Shared Git repositories commonly create
+# executable files as 0775 under umask 0002. The current public installer stages
+# the guard and verifier, while controller integration remains downstream Task 7;
+# this rehearsal pre-stages all three verified bytes with private modes so the
+# controller boundary itself is deterministic without claiming installer coverage.
+execution_artifact_dir="$tmp_dir/execution-artifacts"
+install -d -m 700 "$execution_artifact_dir"
+CONTROLLER="$execution_artifact_dir/run-pgvector-transition-controller.sh"
+GUARD="$execution_artifact_dir/switch-pgvector-compose.sh"
+VERIFIER="$execution_artifact_dir/verify-deploy.sh"
+install -m 700 "$CONTROLLER_SOURCE" "$CONTROLLER"
+install -m 700 "$GUARD_SOURCE" "$GUARD"
+install -m 700 "$VERIFIER_SOURCE" "$VERIFIER"
+
+for path in "$CONTROLLER" "$GUARD" "$VERIFIER"; do
+  mode=$(stat -c '%a' "$path")
+  [[ -x "$path" && -f "$path" && ! -L "$path" ]] || {
+    echo "Installed execution artifact is missing or unsafe: $path" >&2
+    exit 1
+  }
+  [[ $(stat -c '%u' "$path") == "$(id -u)" ]] || {
+    echo "Installed execution artifact has the wrong owner: $path" >&2
+    exit 1
+  }
+  (( (8#$mode & 8#022) == 0 )) || {
+    echo "Installed execution artifact permits group/world writes: $path" >&2
+    exit 1
+  }
+done
+cmp -s "$CONTROLLER_SOURCE" "$CONTROLLER"
+cmp -s "$GUARD_SOURCE" "$GUARD"
+cmp -s "$VERIFIER_SOURCE" "$VERIFIER"
+
 cat > "$live_compose" <<YAML
 name: $project
 
@@ -427,7 +461,8 @@ SQL
 
 guard_journal="$backup_dir/$volume.phase-a2b.json"
 docker_compose_version_sha=$(docker compose version --short | sha256sum | awk '{print $1}')
-effective_compose_sha=$(docker compose --env-file "$env_file" -f "$candidate_compose" config --no-interpolate | sha256sum | awk '{print $1}')
+effective_compose_sha=$(docker compose --project-directory "$(dirname "$live_compose")" \
+  --env-file "$env_file" -f "$candidate_compose" config --no-interpolate | sha256sum | awk '{print $1}')
 
 jq -n \
   --arg engineId "$engine_id" \

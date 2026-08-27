@@ -44,9 +44,14 @@ mutations remain exclusively inside the pinned guard.
 
 ## Durable phases
 
-`prepared` → `candidate-published` → `guard-exited` →
+The forward path is `prepared` → `candidate-published` → `guard-exited` →
 `authorization-running` → `activation-running` → `closure-running` →
 `complete`.
+
+Recovery can additionally enter `source-recovery-running`,
+`closure-stop-pending`, or `closure-evidence-pending`. Those phases are not
+alternate success paths: they preserve the next required fail-closed action
+across process exit or reboot.
 
 A closure failure first enters resumable `closure-stop-pending`. The controller
 stops the app writer and verifies it is not running before committing terminal
@@ -290,7 +295,14 @@ enters a phase the guard has not authorised.
   verified guard, verifier, Docker client, Compose plugin, Docker config,
   environment file, source snapshot, and candidate Compose file into a private
   bundle. The copies are re-hashed and their Compose/plugin identity is checked
-  before use, closing hash-then-pathname replacement races.
+  before use, closing hash-then-pathname replacement races. Guard, verifier,
+  activation inspect, and activation Compose calls all use that bundle's
+  `HOME`, `DOCKER_CONFIG`, Docker executable, plugin, and fixed child `PATH`;
+  the original prepared namespace is not consulted after binding.
+- **One effective Compose project directory**: candidate-model signatures,
+  invocation-bundle revalidation, and activation all resolve relative Compose
+  paths against the live Compose file's parent. Moving the candidate copy into
+  the invocation bundle cannot change bind mounts, build contexts, or includes.
 - **Trusted system-executable ownership**: production Docker and Compose
   executables may be root-owned or deployment-user-owned, but must be regular
   non-symlink files without group/world write permission before they are copied
@@ -436,3 +448,68 @@ disposable-Docker suites.
 - **Writer-stop evidence is retry-distinct**: `stop_application_fail_closed` allocates its evidence path through `select_process_artifact_base` (writer-stop role). The first stop owns the canonical `.writer-stop.evidence.json`; a later invocation that finds it allocates an InvocationID-suffixed path, so a crash between evidence publication and phase advance can never overwrite a prior truthful stop record — the same contract the source-recovery role already enforces.
 - **Invocation-suffixed paths join the collision matrix**: whenever an InvocationID is present (always at execute), `assert_controller_artifact_paths_separate` also checks the `.<InvocationID>` suffixed guard/authorization/verify/source-recovery/writer-stop paths against every bound input, matching what a retrying invocation actually writes.
 - **New regression fixtures**: `test_writer_stop_evidence_is_retry_distinct` (canonical-first, InvocationID-distinct retry, prior bytes survive, unsafe InvocationID rejected) and `test_invocation_suffixed_artifacts_cannot_collide_with_bound_inputs` (suffixed writer-stop path rejected as bound input with collision diagnostic; clean control passes).
+
+## Issue #303 transition-safety corrections (Aug 26)
+
+The issue #303 hardening preserves the controller's existing trust boundary and
+adds the following publication, writer-closure, and durability guarantees:
+
+- **Hermetic Compose activation**: application activation runs with only the
+  prepared controller environment. Ambient values cannot override the bound
+  Compose interpolation inputs.
+- **Authorization postprocessing closes the writer**: if evidence publication
+  or binding fails after writer authorization, the controller commits closure
+  intent, stops the application, verifies `State.Running=false`, and records
+  the applicable incident instead of returning through an unclosed writer
+  boundary.
+- **All writable publication parents are rejected**: group/world-writable
+  Compose parents are unsafe regardless of owner. Ownership alone is not a
+  publication authorization.
+- **Descriptor-bound publication identity**: source and target parent device
+  and inode identities are captured before open and compared with the opened
+  directory descriptors. Candidate reads and target writes remain relative to
+  those descriptors, and target attachment is checked around rename. A
+  detached or retargeted parent cannot produce a false successful publication.
+- **Prepared bytes reach the publication boundary**: the exact staged Compose
+  inode is hashed against `candidateComposeSha256` before its descriptor-relative
+  rename. Successful publication therefore binds the reviewed bytes, not merely
+  an earlier pathname lookup.
+- **Fresh writer phases fail closed**: a fresh process that observes
+  `authorization-running` or `activation-running` never replays authorization
+  or activation. After the immutable execution inputs, Docker binary,
+  engine/volume identity, lock, and authority path are validated, it performs
+  an inspect-verified stop **before** consulting phase-owned proof bytes. Full
+  proof validation then resumes before the interruption incident can advance.
+  If a proof is unavailable, the unresolved running phase retains durable
+  writer-stop evidence and remains stop-only for operator resolution.
+  If the stop or stop-evidence step itself fails, the controller durably
+  publishes `closure-stop-pending` through the restricted structural validator
+  with a one-phase proof deferral before returning nonzero. Full recovery
+  validates the durable guard proof, retries the stop, consumes the deferral,
+  and commits the terminal incident. Only a simultaneous intent-publication
+  failure can leave the original writer phase unchanged, and that phase remains
+  stop-only.
+- **Post-rename durability failures do not ordinary-fail with advanced state**:
+  atomic state and stop-evidence publication preserves the prior object (or
+  prior absence). If the first parent-directory fsync fails after rename, the
+  controller restores or removes the visible successor and fsyncs that rollback.
+  It returns the original failure only after rollback is durable; rollback-
+  durability failure terminates fail-stopped.
+
+The current public-review correction passes nine direct owners, eleven impacted
+siblings, the full focused suite (`135/135`), the standalone transient-systemd
+fixture, and the pinned-Docker `linux/amd64` interruption/recovery rehearsal,
+with zero owned residue. Three sequential read-only reviews were green on the
+frozen pre-publication bytes; updated public CI/review applies separately to the
+corrected PR head. Merge, deployment, the PostgreSQL transition, feature
+activation, backfill, and hybrid serving remain separately authorized operator
+actions.
+
+The path-filtered `postgres-pgvector-rehearsal.yml` workflow makes these
+controller gates mandatory evidence on controller, fixture, guard, verifier, or
+workflow changes. One job runs the focused suite, including the real transient
+user-systemd owner. A separate `linux/amd64` job pulls the fixture's two
+digest-pinned images and runs the real-Docker interruption/recovery rehearsal.
+Both jobs use disposable lingering user managers and carry only read-only
+repository permission; they do not authenticate to a registry or touch a
+production Docker endpoint.

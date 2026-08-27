@@ -18,9 +18,13 @@ on:
       - "prisma/schema.prisma"
       - "scripts/rehearse-pgvector-volume-upgrade.sh"
       - "scripts/check-postgres-image-policy.mjs"
+      - "scripts/run-pgvector-transition-controller.sh"
       - "scripts/switch-pgvector-compose.sh"
       - "scripts/test-digest-order-independence.sh"
       - "scripts/test-pgvector-compose-switch.sh"
+      - "scripts/test-pgvector-transition-controller.sh"
+      - "scripts/test-pgvector-transition-controller-systemd.sh"
+      - "scripts/test-pgvector-transition-controller-docker.sh"
       - "scripts/verify-deploy.sh"
   push:
     branches: [main, master]
@@ -39,9 +43,13 @@ on:
       - "prisma/schema.prisma"
       - "scripts/rehearse-pgvector-volume-upgrade.sh"
       - "scripts/check-postgres-image-policy.mjs"
+      - "scripts/run-pgvector-transition-controller.sh"
       - "scripts/switch-pgvector-compose.sh"
       - "scripts/test-digest-order-independence.sh"
       - "scripts/test-pgvector-compose-switch.sh"
+      - "scripts/test-pgvector-transition-controller.sh"
+      - "scripts/test-pgvector-transition-controller-systemd.sh"
+      - "scripts/test-pgvector-transition-controller-docker.sh"
       - "scripts/verify-deploy.sh"
 
 permissions:
@@ -130,3 +138,121 @@ jobs:
           if [[ -x scripts/rehearse-pgvector-volume-upgrade.sh ]]; then
             scripts/rehearse-pgvector-volume-upgrade.sh --cleanup-run "$REHEARSAL_RUN_ID"
           fi
+
+  test-transition-controller:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+
+      - name: Install pinned Node in controller bootstrap path
+        run: |
+          node_path=$(command -v node)
+          [[ "$node_path" == /* && -f "$node_path" ]]
+          sudo install -o root -g root -m 0755 "$node_path" /usr/bin/node
+          cmp -s "$node_path" /usr/bin/node
+          sudo chmod 0755 /usr/local/bin
+          [[ $(stat -c '%u:%a' /usr/local/bin) == 0:755 ]]
+
+      - name: Install focused fixture tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ripgrep
+          rg --version
+
+      - name: Start persistent user manager
+        run: |
+          runtime_dir="/run/user/$(id -u)"
+          sudo loginctl enable-linger "$USER"
+          sudo systemctl start "user@$(id -u).service"
+          for _ in $(seq 1 100); do
+            [[ -S "$runtime_dir/bus" ]] && break
+            sleep 0.1
+          done
+          [[ -S "$runtime_dir/bus" ]]
+          {
+            printf 'XDG_RUNTIME_DIR=%s\n' "$runtime_dir"
+            printf 'DBUS_SESSION_BUS_ADDRESS=unix:path=%s/bus\n' "$runtime_dir"
+          } >> "$GITHUB_ENV"
+          XDG_RUNTIME_DIR="$runtime_dir" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus" \
+            systemctl --user show-environment >/dev/null
+          [[ $(loginctl show-user "$(id -u)" -p Linger --value) == yes ]]
+
+      - name: Run focused transition-controller fixture
+        timeout-minutes: 25
+        run: scripts/test-pgvector-transition-controller.sh
+
+      - name: Disable CI user linger
+        if: always()
+        run: sudo loginctl disable-linger "$USER"
+
+  rehearse-transition-controller:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+
+      - name: Install pinned Node in controller bootstrap path
+        run: |
+          node_path=$(command -v node)
+          [[ "$node_path" == /* && -f "$node_path" ]]
+          sudo install -o root -g root -m 0755 "$node_path" /usr/bin/node
+          cmp -s "$node_path" /usr/bin/node
+          sudo chmod 0755 /usr/local/bin
+          [[ $(stat -c '%u:%a' /usr/local/bin) == 0:755 ]]
+
+      - name: Start persistent user manager
+        run: |
+          runtime_dir="/run/user/$(id -u)"
+          sudo loginctl enable-linger "$USER"
+          sudo systemctl start "user@$(id -u).service"
+          for _ in $(seq 1 100); do
+            [[ -S "$runtime_dir/bus" ]] && break
+            sleep 0.1
+          done
+          [[ -S "$runtime_dir/bus" ]]
+          {
+            printf 'XDG_RUNTIME_DIR=%s\n' "$runtime_dir"
+            printf 'DBUS_SESSION_BUS_ADDRESS=unix:path=%s/bus\n' "$runtime_dir"
+          } >> "$GITHUB_ENV"
+          XDG_RUNTIME_DIR="$runtime_dir" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus" \
+            systemctl --user show-environment >/dev/null
+          [[ $(loginctl show-user "$(id -u)" -p Linger --value) == yes ]]
+
+      - name: Pull pinned controller rehearsal images
+        run: |
+          mapfile -t images < <(
+            sed -nE "s/^(SOURCE_IMAGE|CANDIDATE_IMAGE)='([^']+)'$/\2/p" \
+              scripts/test-pgvector-transition-controller-docker.sh
+          )
+          [[ ${#images[@]} -eq 2 ]]
+          for image in "${images[@]}"; do
+            [[ "$image" =~ ^[^[:space:]]+@sha256:[0-9a-f]{64}$ ]]
+            docker pull --platform linux/amd64 "$image"
+          done
+
+      - name: Run pinned-Docker interruption and recovery rehearsal
+        timeout-minutes: 35
+        run: scripts/test-pgvector-transition-controller-docker.sh linux/amd64
+
+      - name: Disable CI user linger
+        if: always()
+        run: sudo loginctl disable-linger "$USER"

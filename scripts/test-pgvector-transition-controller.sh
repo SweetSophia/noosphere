@@ -563,10 +563,42 @@ elif [[ ${1:-} == compose && ${2:-} == version ]]; then
   printf 'compose-version:%s\n' "$operation_lock_state" >> "$root/live-identity.log"
   printf 'v2.fixture\n'
 elif [[ ${1:-} == compose ]]; then
+  project_directory=''
+  compose_file=''
+  if [[ -e "$root/require-live-project-directory" ]]; then
+    compose_args=("$@")
+    for ((compose_index = 0; compose_index < ${#compose_args[@]}; compose_index++)); do
+      case ${compose_args[$compose_index]} in
+        --project-directory)
+          project_directory=${compose_args[$((compose_index + 1))]}
+          ;;
+        -f)
+          compose_file=${compose_args[$((compose_index + 1))]}
+          ;;
+      esac
+    done
+    if [[ -z "$project_directory" && -n "$compose_file" ]]; then
+      project_directory=$(dirname "$compose_file")
+    fi
+    printf '%s\n' "$project_directory" >> "$root/compose-project-directories.log"
+  fi
   if [[ " $* " == *" config "* ]]; then
     printf 'compose-config:%s\n' "$operation_lock_state" >> "$root/live-identity.log"
-    printf 'candidate model\n'
+    if [[ -e "$root/require-live-project-directory" ]]; then
+      printf 'candidate model:%s\n' "$project_directory"
+    else
+      printf 'candidate model\n'
+    fi
   elif [[ " $* " == *" up "* && " $* " == *" app "* ]]; then
+    if [[ -e "$root/require-bundle-docker-config-on-activation" ]]; then
+      expected_config=$(<"$root/expected-activation-docker-config")
+      selected_plugin="$DOCKER_CONFIG/cli-plugins/docker-compose"
+      printf '%s\n' "$DOCKER_CONFIG" > "$root/activation-docker-config"
+      printf '%s\n' "$selected_plugin" > "$root/activation-compose-plugin"
+      [[ "$DOCKER_CONFIG" == "$expected_config" ]]
+      cmp -s "$DOCKER_CONFIG/config.json" "$root/expected-bundle-docker-config.json"
+      cmp -s "$selected_plugin" "$root/expected-bundle-compose-plugin"
+    fi
     printf 'activate\n' >> "$root/lifecycle.log"
     [[ -e "$root/writer-authorized" ]]
     [[ ! -e "$root/fail-activation" ]] || exit 71
@@ -586,10 +618,23 @@ elif [[ ${1:-} == stop ]]; then
     kill -KILL "$PPID"
     exit 137
   fi
+  if [[ -e "$root/fail-closure-stop-once" &&
+        ! -e "$root/closure-stop-failure-consumed" ]]; then
+    : > "$root/closure-stop-failure-consumed"
+    exit 76
+  fi
   printf 'stop\n' >> "$root/app-control.log"
   : > "$root/app-stopped"
   exit 0
 elif [[ ${1:-} == inspect ]]; then
+  if [[ -e "$root/fail-initial-activation-inspect" &&
+        -e "$root/writer-authorized" &&
+        ${@: -1} == fixture-app &&
+        ! -e "$root/initial-activation-inspect-failure-consumed" &&
+        ! -e "$root/app-started" ]]; then
+    : > "$root/initial-activation-inspect-failure-consumed"
+    exit 75
+  fi
   if [[ -e "$root/app-stopped" ]]; then
     printf 'inspect:false\n' >> "$root/app-control.log"
     printf 'false\n'
@@ -776,10 +821,10 @@ VERIFIER
 set -euo pipefail
 mode=${NOOSPHERE_EXPECTED_POSTGRES_IMAGE_MODE:-missing}
 root=${NOOSPHERE_CONTROLLER_FIXTURE_ROOT:-$fixture_root}
-trap 'printf "1\n" > "$root/'"$mode"'-verifier-term-count"; sleep 1; : > "$root/'"$mode"'-verifier-delay-complete"; exit 143' TERM INT HUP
+trap 'printf "1\n" > "$root/'"$mode"'-verifier-term-count"; printf "source verifier interrupted\n" >&2; deadline=$((SECONDS + 1)); while ((SECONDS < deadline)); do :; done; : > "$root/'"$mode"'-verifier-delay-complete"; exit 143' TERM INT HUP
 printf '%s\n' "$$" > "$root/$mode-verifier-pid"
 : > "$root/$mode-verifier-running"
-while :; do sleep 0.1; done
+while :; do :; done
 VERIFIER
     } > "$verifier"
   elif [[ "$verifier_mode" == signal-zero ]]; then
@@ -871,7 +916,7 @@ VERIFIER
     --arg composePluginPath "$compose_plugin" \
     --arg composePluginSha256 "$(sha256sum "$compose_plugin" | awk '{print $1}')" \
     --arg dockerConfigSha256 "$(sha256sum "$config_file" | awk '{print $1}')" \
-    --arg effectiveComposeSha256 "$("$fake_docker" compose --env-file "$env_file" -f "$candidate" config --no-interpolate | sha256sum | awk '{print $1}')" \
+    --arg effectiveComposeSha256 "$("$fake_docker" compose --project-directory "$(dirname "$live")" --env-file "$env_file" -f "$candidate" config --no-interpolate | sha256sum | awk '{print $1}')" \
     --arg backupDir "$backup" \
     --arg lockRoot "$lock_root" \
     --arg controllerHome "$controller_home" \
@@ -1030,6 +1075,40 @@ SHIM
   printf '%s\n' "$shim"
 }
 
+write_activation_bundle_namespace_shim() {
+  local fixture_dir=$1 shim
+  shim=$(write_systemd_identity_shim "$fixture_dir")
+  sed -i '$d' "$shim"
+  cat >> "$shim" <<'SHIM'
+eval "$(declare -f create_execution_bundle | sed '1s/create_execution_bundle/original_create_execution_bundle/')"
+create_execution_bundle() {
+  local state=$1 original_home original_plugin
+  original_create_execution_bundle "$@"
+  cp -- "$execution_controller_home/docker/config.json" \
+    "$controller_fixture_root/expected-bundle-docker-config.json"
+  cp -- "$execution_compose_plugin" \
+    "$controller_fixture_root/expected-bundle-compose-plugin"
+  printf '%s\n' "$execution_controller_home/docker" > \
+    "$controller_fixture_root/expected-activation-docker-config"
+
+  original_home=$(jq -er '.controllerHome' "$state")
+  original_plugin=$(jq -er '.composePluginPath' "$state")
+  mkdir -p -- "$original_home/docker/cli-plugins"
+  printf '{"cliPluginsExtraDirs":["/tmp/post-bundle-mutation"]}\n' > \
+    "$original_home/docker/config.json"
+  printf '#!/usr/bin/env bash\nprintf "mutated original plugin\\n"\n' > \
+    "$original_home/docker/cli-plugins/docker-compose"
+  printf '# post-bundle original plugin mutation\n' >> "$original_plugin"
+  chmod 0600 "$original_home/docker/config.json"
+  chmod 0700 "$original_home/docker/cli-plugins/docker-compose" "$original_plugin"
+  : > "$controller_fixture_root/require-bundle-docker-config-on-activation"
+}
+main "$@"
+SHIM
+  chmod 0700 "$shim"
+  printf '%s\n' "$shim"
+}
+
 write_guard_journal_race_shim() {
   local fixture_dir=$1 shim
   shim=$(write_systemd_identity_shim "$fixture_dir")
@@ -1127,6 +1206,116 @@ write_process_evidence_atomic() {
     : > "$controller_fixture_root/source-evidence-publication-crash-consumed"
     exit 86
   fi
+}
+main "$@"
+SHIM
+  chmod 0700 "$shim"
+  printf '%s\n' "$shim"
+}
+
+write_authorization_postprocessing_non_die_failure_shim() {
+  local fixture_dir=$1 shim
+  shim=$(write_systemd_identity_shim "$fixture_dir")
+  sed -i '$d' "$shim"
+  cat >> "$shim" <<'SHIM'
+eval "$(declare -f fsync_path | sed '1s/fsync_path/original_fsync_path/')"
+fsync_path() {
+  if [[ ${controller_test_hooks_enabled:-false} == true &&
+        -e "$controller_fixture_root/fail-authorization-postprocessing-fsync" &&
+        ! -e "$controller_fixture_root/authorization-postprocessing-fsync-failure-consumed" &&
+        -f "$controller_fixture_root/lifecycle.log" &&
+        $(tail -n 1 "$controller_fixture_root/lifecycle.log") == authorize ]]; then
+    : > "$controller_fixture_root/authorization-postprocessing-fsync-failure-consumed"
+    return 74
+  fi
+  original_fsync_path "$@"
+}
+main "$@"
+SHIM
+  chmod 0700 "$shim"
+  printf '%s\n' "$shim"
+}
+
+write_writer_stop_evidence_fsync_failure_shim() {
+  local fixture_dir=$1 shim
+  shim=$(write_systemd_identity_shim "$fixture_dir")
+  sed -i '$d' "$shim"
+  cat >> "$shim" <<'SHIM'
+eval "$(declare -f fsync_path | sed '1s/fsync_path/original_fsync_path/')"
+fsync_path() {
+  if [[ ${controller_test_hooks_enabled:-false} == true &&
+        "$1" == */.writer-stop-evidence.* &&
+        ! -e "$controller_fixture_root/writer-stop-evidence-fsync-failure-consumed" ]]; then
+    : > "$controller_fixture_root/writer-stop-evidence-fsync-failure-consumed"
+    return 74
+  fi
+  original_fsync_path "$@"
+}
+main "$@"
+SHIM
+  chmod 0700 "$shim"
+  printf '%s\n' "$shim"
+}
+
+write_writer_stop_postrename_fsync_failure_shim() {
+  local fixture_dir=$1 shim
+  shim=$(write_systemd_identity_shim "$fixture_dir")
+  sed -i '$d' "$shim"
+  cat >> "$shim" <<'SHIM'
+eval "$(declare -f fsync_path | sed '1s/fsync_path/original_fsync_path/')"
+fsync_path() {
+  if [[ ${controller_test_hooks_enabled:-false} == true &&
+        "$1" == "$controller_fixture_root" &&
+        ! -e "$controller_fixture_root/writer-stop-postrename-fsync-failure-consumed" ]] &&
+     compgen -G "${controller_state%.json}.writer-stop*.evidence.json" >/dev/null; then
+    : > "$controller_fixture_root/writer-stop-postrename-fsync-failure-consumed"
+    return 74
+  fi
+  original_fsync_path "$@"
+}
+main "$@"
+SHIM
+  chmod 0700 "$shim"
+  printf '%s\n' "$shim"
+}
+
+write_authorization_evidence_late_failure_shim() {
+  local fixture_dir=$1 shim
+  shim=$(write_systemd_identity_shim "$fixture_dir")
+  sed -i '$d' "$shim"
+  cat >> "$shim" <<'SHIM'
+eval "$(declare -f bind_process_evidence_to_state | sed '1s/bind_process_evidence_to_state/original_bind_process_evidence_to_state/')"
+bind_process_evidence_to_state() {
+  local key=$2
+  original_bind_process_evidence_to_state "$@"
+  if [[ ${controller_test_hooks_enabled:-false} == true &&
+        "$key" == authorizationEvidence &&
+        ! -e "$controller_fixture_root/authorization-evidence-late-failure-consumed" ]]; then
+    : > "$controller_fixture_root/authorization-evidence-late-failure-consumed"
+    return 74
+  fi
+}
+main "$@"
+SHIM
+  chmod 0700 "$shim"
+  printf '%s\n' "$shim"
+}
+
+write_closure_intent_fsync_failure_shim() {
+  local fixture_dir=$1 shim
+  shim=$(write_systemd_identity_shim "$fixture_dir")
+  sed -i '$d' "$shim"
+  cat >> "$shim" <<'SHIM'
+eval "$(declare -f write_controller_state_atomic | sed '1s/write_controller_state_atomic/original_write_controller_state_atomic/')"
+write_controller_state_atomic() {
+  local source=$2
+  if [[ ${controller_test_hooks_enabled:-false} == true &&
+        $(jq -r '.phase // empty' "$source") == closure-stop-pending &&
+        ! -e "$controller_fixture_root/closure-intent-fsync-failure-consumed" ]]; then
+    : > "$controller_fixture_root/closure-intent-fsync-failure-consumed"
+    return 73
+  fi
+  original_write_controller_state_atomic "$@"
 }
 main "$@"
 SHIM
@@ -1943,6 +2132,88 @@ test_compose_plugin_and_docker_config_identity_are_bound() (
   }
   [[ $(jq -er '.phase' "$state") == prepared ]]
   [[ $(<"$live") == 'source model' ]]
+)
+
+test_activation_uses_invocation_private_docker_bundle() (
+  local fixture_dir manifest state shim rc=0 expected_config actual_config expected_plugin actual_plugin
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_activation_bundle_namespace_shim "$fixture_dir")
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+  run_fixture_controller "$state" "$shim" env \
+    >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || rc=$?
+  ((rc == 0)) || {
+    echo 'activation did not retain the invocation-private Docker namespace after original-input mutation' >&2
+    sed 's/^/  controller.err: /' "$fixture_dir/controller.err" >&2 || true
+    exit 1
+  }
+  [[ $(jq -er '.phase' "$state") == complete ]] || {
+    echo 'bundle-bound activation did not complete the controller lifecycle' >&2
+    exit 1
+  }
+  expected_config=$(<"$fixture_dir/expected-activation-docker-config")
+  actual_config=$(<"$fixture_dir/activation-docker-config")
+  expected_plugin="$expected_config/cli-plugins/docker-compose"
+  actual_plugin=$(<"$fixture_dir/activation-compose-plugin")
+  [[ "$actual_config" == "$expected_config" && "$actual_plugin" == "$expected_plugin" ]] || {
+    printf 'activation escaped its invocation bundle: config=%s plugin=%s\n' \
+      "$actual_config" "$actual_plugin" >&2
+    exit 1
+  }
+  cmp -s "$actual_config/config.json" "$fixture_dir/expected-bundle-docker-config.json"
+  cmp -s "$actual_plugin" "$fixture_dir/expected-bundle-compose-plugin"
+)
+
+test_candidate_model_uses_activation_project_directory() (
+  local fixture_dir manifest state shim fake_docker env_file candidate live candidate_dir rc=0
+  local effective_sha expected_project unique_projects
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  fake_docker=$(jq -er '.dockerPath' "$manifest")
+  env_file=$(jq -er '.envFile' "$manifest")
+  candidate=$(jq -er '.candidateCompose' "$manifest")
+  live=$(jq -er '.liveCompose' "$manifest")
+  expected_project=$(dirname "$live")
+  candidate_dir="$fixture_dir/candidate-input"
+  mkdir -m 700 "$candidate_dir"
+  mv -- "$candidate" "$candidate_dir/candidate-compose.yml"
+  candidate="$candidate_dir/candidate-compose.yml"
+  : > "$fixture_dir/require-live-project-directory"
+  effective_sha=$("$fake_docker" compose --project-directory "$expected_project" \
+    --env-file "$env_file" -f "$candidate" config --no-interpolate | sha256sum | awk '{print $1}')
+  jq --arg candidate "$candidate" \
+    --arg candidateSha "$(sha256sum "$candidate" | awk '{print $1}')" \
+    --arg effectiveSha "$effective_sha" '
+      .candidateCompose = $candidate |
+      .candidateComposeSha256 = $candidateSha |
+      .effectiveComposeSha256 = $effectiveSha
+    ' "$manifest" > "$manifest.next"
+  install -m 600 "$manifest.next" "$manifest"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_systemd_identity_shim "$fixture_dir")
+
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+  run_fixture_controller "$state" "$shim" env \
+    >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || rc=$?
+  ((rc == 0)) || {
+    echo 'candidate model and activation used different Compose project directories' >&2
+    sed 's/^/  controller.err: /' "$fixture_dir/controller.err" >&2 || true
+    exit 1
+  }
+  [[ $(jq -er '.phase' "$state") == complete ]]
+  unique_projects=$(sort -u "$fixture_dir/compose-project-directories.log")
+  [[ "$unique_projects" == "$expected_project" ]] || {
+    printf 'Compose calls used inconsistent project directories: %s\n' "$unique_projects" >&2
+    exit 1
+  }
 )
 
 test_failed_prejournal_recovery_commits_durable_incident() (
@@ -3706,7 +3977,7 @@ test_source_recovery_signal_persists_process_evidence() (
       if [[ "$case_name" == ordinary ]]; then
         expected_stderr_sha=$(printf 'source verification failed\n' | sha256sum | awk '{print $1}')
       else
-        expected_stderr_sha=$(printf 'Terminated%17ssleep 0.1\n' '' | sha256sum | awk '{print $1}')
+        expected_stderr_sha=$(printf 'source verifier interrupted\n' | sha256sum | awk '{print $1}')
       fi
       [[ "$stdout_sha" == "$expected_stdout_sha" && "$stderr_sha" == "$expected_stderr_sha" ]] ||
         failures+=("source recovery $case_name logs do not match the independently expected bytes")
@@ -5315,6 +5586,1093 @@ test_real_docker_rehearsal_declares_interruption_resume_coverage() (
   }
 )
 
+test_activation_uses_only_bound_compose_interpolation_values() (
+  local fixture_dir fake_docker state env_file candidate live selected execution_home
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  fake_docker="$fixture_dir/docker"
+  state="$fixture_dir/controller.json"
+  env_file="$fixture_dir/runtime.env"
+  candidate="$fixture_dir/candidate-compose.yml"
+  live="$fixture_dir/docker-compose.yml"
+  execution_home="$fixture_dir/execution-home"
+
+  cat > "$fake_docker" <<'DOCKER'
+#!/bin/bash -p
+set -Eeuo pipefail
+root=$(/usr/bin/dirname "$0")
+case ${1:-} in
+  inspect)
+    if [[ -e "$root/app-running" ]]; then
+      printf 'true\n'
+    else
+      printf 'false\n'
+    fi
+    ;;
+  compose)
+    env_file=''
+    while (($# > 0)); do
+      if [[ $1 == --env-file ]]; then
+        shift
+        env_file=$1
+        break
+      fi
+      shift
+    done
+    [[ -n "$env_file" ]]
+    bound_image=$(/usr/bin/sed -n 's/^APP_IMAGE=//p' "$env_file" | /usr/bin/tail -1)
+    selected_image=${APP_IMAGE:-$bound_image}
+    printf '%s\n' "$selected_image" > "$root/selected-image"
+    : > "$root/app-running"
+    ;;
+  *) exit 64 ;;
+esac
+DOCKER
+  chmod 0700 "$fake_docker"
+  printf 'APP_IMAGE=expected/image@sha256:bound\n' > "$env_file"
+  printf 'services:\n  app:\n    image: ${APP_IMAGE}\n' > "$candidate"
+  printf 'source-model\n' > "$live"
+  chmod 0600 "$env_file" "$candidate" "$live"
+  mkdir -m 700 -p "$execution_home/docker" "$fixture_dir/locks"
+  printf '{}\n' > "$execution_home/docker/config.json"
+  chmod 0600 "$execution_home/docker/config.json"
+  jq -n \
+    --arg dockerPath "$fake_docker" \
+    --arg appContainer fixture-app \
+    --arg liveCompose "$live" \
+    --arg dockerEndpoint 'unix:///fixture/docker.sock' \
+    --arg lockRoot "$fixture_dir/locks" \
+    --arg fixedPath '/usr/sbin:/usr/bin:/sbin:/bin' \
+    '{dockerPath:$dockerPath,appContainer:$appContainer,liveCompose:$liveCompose,
+      dockerEndpoint:$dockerEndpoint,lockRoot:$lockRoot,fixedPath:$fixedPath}' > "$state"
+  chmod 0600 "$state"
+
+  eval "$(extract_function child_path_for_state)"
+  eval "$(extract_function activate_application_for_verification)"
+  die() {
+    printf 'fixture: %s\n' "$*" >&2
+    exit 1
+  }
+  execution_docker_path=$fake_docker
+  execution_controller_home=$execution_home
+  execution_env_file=$env_file
+  execution_candidate_compose=$candidate
+  HOME="$fixture_dir/home"
+  DOCKER_CONFIG="$HOME/docker"
+  DOCKER_HOST='unix:///fixture/docker.sock'
+  PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+  export HOME DOCKER_CONFIG DOCKER_HOST PATH
+
+  APP_IMAGE=attacker/image \
+    activate_application_for_verification "$state" || {
+      echo 'activation fixture failed before observing Compose interpolation' >&2
+      exit 1
+    }
+  selected=$(<"$fixture_dir/selected-image")
+  [[ "$selected" == expected/image@sha256:bound ]] || {
+    printf 'ambient APP_IMAGE overrode the bound Compose env file during activation: %s\n' \
+      "$selected" >&2
+    exit 1
+  }
+)
+
+test_authorization_postprocessing_failure_closes_writer_durably() (
+  local fixture_dir manifest state shim rc=0 lifecycle control_tail
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_systemd_identity_shim "$fixture_dir")
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+  run_fixture_controller "$state" "$shim" env \
+    NOOSPHERE_CONTROLLER_TEST_FAIL_EVIDENCE=authorization-running \
+    >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || rc=$?
+
+  ((rc != 0)) || {
+    echo 'authorization evidence postprocessing failure unexpectedly reported success' >&2
+    exit 1
+  }
+  rg -Fq 'test evidence failure at phase authorization-running' \
+    "$fixture_dir/controller.err" || {
+      echo 'authorization postprocessing owner missed its injected evidence failure' >&2
+      exit 1
+    }
+  lifecycle=$(paste -sd, "$fixture_dir/lifecycle.log" 2>/dev/null || true)
+  [[ "$lifecycle" == transition,authorize ]] || {
+    printf 'authorization postprocessing failure crossed the activation boundary: %s\n' \
+      "$lifecycle" >&2
+    exit 1
+  }
+  [[ ! -e "$fixture_dir/app-started" ]] || {
+    echo 'authorization postprocessing failure activated the application writer' >&2
+    exit 1
+  }
+  if [[ -f "$fixture_dir/app-control.log" ]]; then
+    control_tail=$(tail -n 2 "$fixture_dir/app-control.log" | paste -sd, -)
+  else
+    control_tail=''
+  fi
+  [[ "$control_tail" == stop,inspect:false ]] || {
+    echo 'authorization postprocessing failure did not inspect-verify writer closure' >&2
+    exit 1
+  }
+  jq -e '
+    .phase == "incident" and
+    .incidentClass == "closure-authorization-evidence" and
+    .proofException == "authorization-evidence-unavailable" and
+    (.writerStopEvidence.path | type == "string" and startswith("/")) and
+    (.writerStopEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))
+  ' "$state" >/dev/null || {
+    echo 'authorization postprocessing failure lacks a durable closure incident and writer-stop proof' >&2
+    exit 1
+  }
+)
+
+test_authorization_postprocessing_ordinary_failure_is_fail_closed() (
+  local fixture_dir manifest state shim rc=0 lifecycle control_tail
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  : > "$fixture_dir/fail-authorization-postprocessing-fsync"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_authorization_postprocessing_non_die_failure_shim "$fixture_dir")
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+  run_fixture_controller "$state" "$shim" \
+    >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || rc=$?
+
+  [[ -e "$fixture_dir/authorization-postprocessing-fsync-failure-consumed" ]] || {
+    echo 'authorization postprocessing owner missed its ordinary fsync failure' >&2
+    exit 1
+  }
+  ((rc != 0)) || {
+    echo 'ordinary authorization postprocessing failure was ignored under conditional errexit' >&2
+    exit 1
+  }
+  lifecycle=$(paste -sd, "$fixture_dir/lifecycle.log" 2>/dev/null || true)
+  [[ "$lifecycle" == transition,authorize ]] || {
+    printf 'ordinary authorization postprocessing failure crossed the activation boundary: %s\n' \
+      "$lifecycle" >&2
+    exit 1
+  }
+  [[ ! -e "$fixture_dir/app-started" ]] || {
+    echo 'ordinary authorization postprocessing failure activated the application writer' >&2
+    exit 1
+  }
+  if [[ -f "$fixture_dir/app-control.log" ]]; then
+    control_tail=$(tail -n 2 "$fixture_dir/app-control.log" | paste -sd, -)
+  else
+    control_tail=''
+  fi
+  [[ "$control_tail" == stop,inspect:false ]] || {
+    echo 'ordinary authorization postprocessing failure did not inspect-verify writer closure' >&2
+    exit 1
+  }
+  jq -e '
+    .phase == "incident" and
+    .incidentClass == "closure-authorization-evidence" and
+    .proofException == "authorization-evidence-unavailable" and
+    (.writerStopEvidence.path | type == "string" and startswith("/")) and
+    (.writerStopEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))
+  ' "$state" >/dev/null || {
+    echo 'ordinary authorization postprocessing failure lacks its exact durable closure proof' >&2
+    exit 1
+  }
+)
+
+test_closure_postprocessing_proof_exception_is_scoped() (
+  local fixture_dir manifest state mutated shim rc=0
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  mutated="$fixture_dir/missing-authorization-evidence.json"
+  write_execution_fixture "$fixture_dir" "$manifest" complete success
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_phase_snapshot_shim "$fixture_dir")
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+  run_fixture_controller "$state" "$shim" env \
+    NOOSPHERE_CONTROLLER_TEST_FAIL_EVIDENCE=closure-running \
+    NOOSPHERE_CONTROLLER_TEST_CAPTURE_PHASE=closure-stop-pending \
+    NOOSPHERE_CONTROLLER_TEST_CAPTURE_INCIDENT_CLASS=closure-postprocessing \
+    >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || rc=$?
+
+  [[ "$rc" == 86 && -e "$fixture_dir/controller-phase-snapshot-captured" ]] || {
+    echo 'controller did not capture the later closure-postprocessing baseline' >&2
+    exit 1
+  }
+  /bin/bash -c 'source "$1"; validate_controller_state "$2"' \
+    _ "$CONTROLLER" "$state"
+
+  jq '.proofException = "authorization-evidence-unavailable" | del(.authorizationEvidence)' \
+    "$state" > "$mutated"
+  chmod 0600 "$mutated"
+  if /bin/bash -c 'source "$1"; validate_controller_state "$2"' \
+    _ "$CONTROLLER" "$mutated" \
+      >"$fixture_dir/validate.out" 2>"$fixture_dir/validate.err"; then
+    echo 'later closure-postprocessing accepted missing authorization evidence' >&2
+    exit 1
+  fi
+  rg -qi 'authorization.*evidence.*(required|exception)|(required|exception).*authorization.*evidence' \
+    "$fixture_dir/validate.err" || {
+      echo 'missing authorization-evidence rejection lacked its proof diagnostic' >&2
+      exit 1
+  }
+)
+
+test_phase_state_fsync_failure_does_not_advance() (
+  local fixture_dir state rc=0
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  state="$fixture_dir/controller.json"
+  printf '{"phase":"prepared"}\n' > "$state"
+  chmod 0600 "$state"
+
+  eval "$(extract_function path_present)"
+  eval "$(extract_function assert_owned_regular_file)"
+  eval "$(extract_function write_controller_state_atomic)"
+  eval "$(extract_function update_controller_phase)"
+  validate_controller_state() { :; }
+  record_controller_interruption() { :; }
+  die() {
+    printf 'fixture: %s\n' "$*" >&2
+    exit 1
+  }
+  fsync_path() {
+    if [[ "$1" == "$state.tmp."* &&
+          ! -e "$fixture_dir/state-fsync-failure-consumed" ]]; then
+      : > "$fixture_dir/state-fsync-failure-consumed"
+      return 74
+    fi
+    :
+  }
+
+  set +e
+  update_controller_phase "$state" candidate-published \
+    >"$fixture_dir/update.out" 2>"$fixture_dir/update.err"
+  rc=$?
+  set -e
+
+  [[ -e "$fixture_dir/state-fsync-failure-consumed" ]] || {
+    echo 'phase-state owner missed its injected fsync failure' >&2
+    exit 1
+  }
+  ((rc != 0)) || {
+    echo 'phase-state fsync failure was swallowed as success' >&2
+    exit 1
+  }
+  [[ $(jq -er '.phase' "$state") == prepared ]] || {
+    echo 'phase-state fsync failure still advanced the controller phase' >&2
+    exit 1
+  }
+)
+
+test_writer_stop_evidence_fsync_failure_is_not_bound() (
+  local fixture_dir manifest state shim rc=0 control_tail
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest" complete fail
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_writer_stop_evidence_fsync_failure_shim "$fixture_dir")
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+  run_fixture_controller "$state" "$shim" \
+    >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || rc=$?
+
+  [[ -e "$fixture_dir/writer-stop-evidence-fsync-failure-consumed" ]] || {
+    echo 'writer-stop owner missed its injected evidence fsync failure' >&2
+    exit 1
+  }
+  ((rc != 0)) || {
+    echo 'writer-stop evidence fsync failure unexpectedly reported success' >&2
+    exit 1
+  }
+  if [[ -f "$fixture_dir/app-control.log" ]]; then
+    control_tail=$(tail -n 2 "$fixture_dir/app-control.log" | paste -sd, -)
+  else
+    control_tail=''
+  fi
+  [[ "$control_tail" == stop,inspect:false ]] || {
+    echo 'writer-stop evidence failure did not inspect-verify the application stop' >&2
+    exit 1
+  }
+  jq -e '
+    .phase == "closure-stop-pending" and
+    .incidentClass == "closure-verification" and
+    (has("writerStopEvidence") | not)
+  ' "$state" >/dev/null || {
+    echo 'writer-stop evidence fsync failure advanced or bound non-durable evidence' >&2
+    exit 1
+  }
+  [[ ! -e "${state%.json}.writer-stop.evidence.json" ]] || {
+    echo 'writer-stop evidence fsync failure published a non-durable evidence file' >&2
+    exit 1
+  }
+)
+
+test_late_authorization_evidence_failure_remains_resumable() (
+  local fixture_dir manifest state shim rc=0 retry_rc=0 control_tail
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_authorization_evidence_late_failure_shim "$fixture_dir")
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+  run_fixture_controller "$state" "$shim" \
+    >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || rc=$?
+
+  [[ -e "$fixture_dir/authorization-evidence-late-failure-consumed" ]] || {
+    echo 'late authorization-evidence owner missed its injected bind failure' >&2
+    exit 1
+  }
+  ((rc != 0)) || {
+    echo 'late authorization-evidence failure unexpectedly reported success' >&2
+    exit 1
+  }
+  control_tail=$(tail -n 2 "$fixture_dir/app-control.log" 2>/dev/null | paste -sd, -)
+  [[ "$control_tail" == stop,inspect:false ]] || {
+    echo 'late authorization-evidence failure did not inspect-verify writer closure' >&2
+    exit 1
+  }
+  jq -e '
+    .phase == "incident" and
+    .incidentClass == "closure-authorization-evidence" and
+    .proofException == "authorization-evidence-unavailable" and
+    (has("authorizationEvidence") | not) and
+    (.writerStopEvidence.path | type == "string" and startswith("/"))
+  ' "$state" >/dev/null || {
+    echo 'late authorization-evidence failure stranded an invalid closure state' >&2
+    exit 1
+  }
+  /bin/bash -c 'source "$1"; validate_controller_state "$2"' \
+    _ "$CONTROLLER" "$state" || {
+      echo 'late authorization-evidence incident is not independently resumable' >&2
+      exit 1
+    }
+
+  NOOSPHERE_CONTROLLER_FIXTURE_INVOCATION_ID=fedcba9876543210fedcba9876543210 \
+    run_fixture_controller "$state" "$shim" \
+      >"$fixture_dir/retry.out" 2>"$fixture_dir/retry.err" || retry_rc=$?
+  ((retry_rc != 0)) || {
+    echo 'terminal authorization-evidence incident unexpectedly resumed execution' >&2
+    exit 1
+  }
+  jq -e '
+    .phase == "incident" and
+    .incidentClass == "closure-authorization-evidence" and
+    .proofException == "authorization-evidence-unavailable" and
+    (has("authorizationEvidence") | not)
+  ' "$state" >/dev/null || {
+    echo 'terminal authorization-evidence retry changed the durable incident' >&2
+    exit 1
+  }
+)
+
+test_closure_intent_failure_preserves_status_and_blocks_reauthorization() (
+  local fixture_dir manifest state shim rc=0 retry_rc=0 lifecycle control_tail
+  local -a failures=()
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_closure_intent_fsync_failure_shim "$fixture_dir")
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+  run_fixture_controller "$state" "$shim" env \
+    NOOSPHERE_CONTROLLER_TEST_FAIL_EVIDENCE=authorization-running \
+    >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || rc=$?
+
+  [[ -e "$fixture_dir/closure-intent-fsync-failure-consumed" ]] ||
+    failures+=('closure-intent owner missed its injected state-publication failure')
+  [[ "$rc" == 73 ]] ||
+    failures+=("closure-intent failure returned $rc instead of preserving status 73")
+  control_tail=$(tail -n 2 "$fixture_dir/app-control.log" 2>/dev/null | paste -sd, -)
+  [[ "$control_tail" == stop,inspect:false ]] ||
+    failures+=("closure-intent failure lacked an inspect-verified stop (control_tail=$control_tail)")
+  jq -e '
+    .phase == "authorization-running" and
+    (.writerStopEvidence.path | type == "string" and startswith("/")) and
+    (.writerStopEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))
+  ' "$state" >/dev/null ||
+    failures+=('closure-intent failure did not preserve its truthful pre-intent phase and writer-stop proof')
+
+  NOOSPHERE_CONTROLLER_FIXTURE_INVOCATION_ID=fedcba9876543210fedcba9876543210 \
+    run_fixture_controller "$state" "$shim" \
+      >"$fixture_dir/retry.out" 2>"$fixture_dir/retry.err" || retry_rc=$?
+  ((retry_rc != 0)) ||
+    failures+=('closure-intent failure remained resumable through writer reauthorization')
+  rg -Fq 'fresh invocation stopped an interrupted authorization phase; operator resolution is required' \
+    "$fixture_dir/retry.err" ||
+    failures+=('closure-intent retry lacked the fresh inspect-stop operator-resolution diagnostic')
+  jq -e '
+    .phase == "incident" and
+    .incidentClass == "closure-interruption" and
+    (.writerStopEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))
+  ' "$state" >/dev/null ||
+    failures+=('closure-intent retry did not promote its fresh stop to a terminal interruption incident')
+  lifecycle=$(paste -sd, "$fixture_dir/lifecycle.log" 2>/dev/null || true)
+  [[ "$lifecycle" == transition,authorize ]] ||
+    failures+=("closure-intent retry crossed reauthorization/activation boundary: $lifecycle")
+
+  ((${#failures[@]} == 0)) || {
+    printf '%s\n' "${failures[@]}" >&2
+    exit 1
+  }
+)
+
+test_initial_activation_inspect_failure_commits_durable_closure() (
+  local fixture_dir manifest state shim rc=0 retry_rc=0 lifecycle control_tail
+  local -a failures=()
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  : > "$fixture_dir/fail-initial-activation-inspect"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_systemd_identity_shim "$fixture_dir")
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+  run_fixture_controller "$state" "$shim" \
+    >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || rc=$?
+  [[ -e "$fixture_dir/initial-activation-inspect-failure-consumed" ]] ||
+    failures+=('activation-inspect owner missed the initial inspect boundary')
+  ((rc != 0)) || failures+=('initial activation inspect failure unexpectedly reported success')
+  lifecycle=$(paste -sd, "$fixture_dir/lifecycle.log" 2>/dev/null || true)
+  [[ "$lifecycle" == transition,authorize ]] ||
+    failures+=("initial activation inspect failure crossed activation: $lifecycle")
+  if [[ -f "$fixture_dir/app-control.log" ]]; then
+    control_tail=$(tail -n 2 "$fixture_dir/app-control.log" | paste -sd, -)
+  else
+    control_tail=''
+  fi
+  [[ "$control_tail" == stop,inspect:false ]] ||
+    failures+=("initial activation inspect failure lacked a fresh stop proof (control_tail=$control_tail)")
+  jq -e '
+    .phase == "incident" and
+    .incidentClass == "closure-app-activation" and
+    (.authorizationEvidence.sha256 | test("^[a-f0-9]{64}$")) and
+    (.writerStopEvidence.sha256 | test("^[a-f0-9]{64}$"))
+  ' "$state" >/dev/null ||
+    failures+=('initial activation inspect failure bypassed durable app-activation closure')
+
+  NOOSPHERE_CONTROLLER_FIXTURE_INVOCATION_ID=fedcba9876543210fedcba9876543210 \
+    run_fixture_controller "$state" "$shim" \
+      >"$fixture_dir/retry.out" 2>"$fixture_dir/retry.err" || retry_rc=$?
+  ((retry_rc != 0)) || failures+=('activation-inspect incident was resumable')
+  [[ $(paste -sd, "$fixture_dir/lifecycle.log" 2>/dev/null || true) == transition,authorize ]] ||
+    failures+=('activation-inspect incident retry reauthorized or activated the writer')
+
+  ((${#failures[@]} == 0)) || {
+    printf '%s\n' "${failures[@]}" >&2
+    exit 1
+  }
+)
+
+test_compose_publication_is_anchored_against_ancestor_retarget() (
+  local fixture_dir source_root original_root attacker_root target_root source target
+  local -a failures=()
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  source_root="$fixture_dir/source-root"
+  original_root="$fixture_dir/source-root-original"
+  attacker_root="$fixture_dir/attacker-root"
+  target_root="$fixture_dir/target-root"
+  install -d -m 700 "$source_root/parent" "$attacker_root/parent" "$target_root"
+  source="$source_root/parent/candidate.yml"
+  target="$target_root/live-compose.yml"
+  printf 'reviewed-candidate\n' > "$source"
+  printf 'attacker-candidate\n' > "$attacker_root/parent/candidate.yml"
+  printf 'source-model\n' > "$target"
+  chmod 0600 "$source" "$attacker_root/parent/candidate.yml" "$target"
+
+  eval "$(extract_function assert_owned_regular_file)"
+  eval "$(extract_function publish_compose_atomic)"
+  die() { printf 'fixture: %s\n' "$*" >&2; exit 1; }
+  fsync_path() { :; }
+  mktemp() {
+    if [[ $1 == *.item3-publish.* &&
+          ! -e "$fixture_dir/ancestor-retarget-consumed" ]]; then
+      command mv "$source_root" "$original_root"
+      command ln -s "$attacker_root" "$source_root"
+      : > "$fixture_dir/ancestor-retarget-consumed"
+    fi
+    command mktemp "$@"
+  }
+
+  if ! publish_compose_atomic "$source" "$target"; then
+    failures+=('anchored publication rejected a path that was safe when opened')
+  fi
+  [[ -e "$fixture_dir/ancestor-retarget-consumed" ]] ||
+    failures+=('publication owner missed its deterministic ancestor retarget')
+  [[ $(<"$target") == reviewed-candidate ]] ||
+    failures+=("ancestor retarget substituted publication bytes: $(<"$target")")
+
+  ((${#failures[@]} == 0)) || {
+    printf '%s\n' "${failures[@]}" >&2
+    exit 1
+  }
+)
+
+test_simulated_root_rejects_root_owned_writable_compose_parent() (
+  local fixture_dir unsafe_dir safe_dir source target definition mutant
+  local -a failures=()
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  unsafe_dir="$fixture_dir/root-owned-writable"
+  safe_dir="$fixture_dir/safe"
+  install -d -m 777 "$unsafe_dir"
+  install -d -m 700 "$safe_dir"
+  source="$unsafe_dir/candidate.yml"
+  target="$safe_dir/live-compose.yml"
+  printf 'candidate-model\n' > "$source"
+  printf 'source-model\n' > "$target"
+  chmod 0600 "$source" "$target"
+
+  eval "$(extract_function assert_owned_regular_file)"
+  definition=$(extract_function publish_compose_atomic)
+  eval "$definition"
+  die() { printf 'fixture: %s\n' "$*" >&2; exit 1; }
+  fsync_path() { :; }
+  id() {
+    [[ ${1:-} == -u ]] && { printf '0\n'; return; }
+    command id "$@"
+  }
+  stat() {
+    if [[ $1 == -c && $2 == %u &&
+          ( $3 == "$fixture_dir"/* || $3 == /proc/*/fd/* ) ]]; then
+      printf '0\n'
+      return
+    fi
+    command stat "$@"
+  }
+
+  if (publish_compose_atomic "$source" "$target"); then
+    failures+=('simulated root accepted a root-owned mode-0777 publication parent')
+  fi
+  [[ $(<"$target") == source-model ]] ||
+    failures+=('simulated-root writable-parent rejection changed target bytes')
+
+  # Mutation proof: delete only the parent-mode guard from an extracted copy.
+  # The same owner must then expose the unsafe publication by observing the
+  # target overwrite; this keeps the fixture meaningful under a root runner.
+  mutant=$(printf '%s\n' "$definition" | awk '
+    /^publish_compose_atomic\(\) \{/ { sub(/publish_compose_atomic/, "publish_compose_atomic_without_parent_mode") }
+    /^[[:space:]]*parent_mode=\$\(stat -c/ { skip = 2; next }
+    skip > 0 { skip--; next }
+    { print }
+  ')
+  eval "$mutant"
+  printf 'source-model\n' > "$target"
+  if ! publish_compose_atomic_without_parent_mode "$source" "$target"; then
+    failures+=('simulated-root owner could not exercise its parent-mode mutation')
+  elif [[ $(<"$target") != candidate-model ]]; then
+    failures+=('simulated-root owner did not detect the removed parent-mode guard')
+  fi
+
+  ((${#failures[@]} == 0)) || {
+    printf '%s\n' "${failures[@]}" >&2
+    exit 1
+  }
+)
+
+test_foreign_owned_compose_parents_are_rejected() (
+  local fixture_dir safe_source_dir safe_target_dir foreign_source_dir foreign_target_dir
+  local source target simulated_current_uid=0 foreign_uid
+  local -a failures=()
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  safe_source_dir="$fixture_dir/safe-source"
+  safe_target_dir="$fixture_dir/safe-target"
+  foreign_source_dir="$fixture_dir/foreign-source"
+  foreign_target_dir="$fixture_dir/foreign-target"
+  install -d -m 700 \
+    "$safe_source_dir" "$safe_target_dir" "$foreign_source_dir" "$foreign_target_dir"
+  foreign_uid=$(( simulated_current_uid == 0 ? 1 : 0 ))
+
+  eval "$(extract_function assert_owned_regular_file)"
+  eval "$(extract_function publish_compose_atomic)"
+  die() {
+    printf 'fixture: %s\n' "$*" >&2
+    exit 1
+  }
+  fsync_path() { :; }
+  id() {
+    if [[ ${1:-} == -u ]]; then
+      printf '%s\n' "$simulated_current_uid"
+      return 0
+    fi
+    command id "$@"
+  }
+  stat() {
+    if [[ $1 == -c && $2 == %u ]]; then
+      if [[ $3 == "$foreign_source_dir" || $3 == "$foreign_target_dir" ]]; then
+        printf '%s\n' "$foreign_uid"
+        return 0
+      fi
+      if [[ $3 == "$fixture_dir"/* ]]; then
+        printf '%s\n' "$simulated_current_uid"
+        return 0
+      fi
+    fi
+    command stat "$@"
+  }
+
+  source="$foreign_source_dir/candidate.yml"
+  target="$safe_target_dir/live-compose.yml"
+  printf 'candidate-from-foreign-parent\n' > "$source"
+  printf 'source-model\n' > "$target"
+  chmod 0600 "$source" "$target"
+  if (publish_compose_atomic "$source" "$target"); then
+    failures+=('publication accepted a foreign-owned source parent')
+  fi
+  [[ $(<"$target") == source-model ]] ||
+    failures+=('foreign-owned source parent rejection overwrote the live Compose target')
+
+  source="$safe_source_dir/candidate.yml"
+  target="$foreign_target_dir/live-compose.yml"
+  printf 'candidate-to-foreign-parent\n' > "$source"
+  printf 'source-model\n' > "$target"
+  chmod 0600 "$source" "$target"
+  if (publish_compose_atomic "$source" "$target"); then
+    failures+=('publication accepted a foreign-owned target parent')
+  fi
+  [[ $(<"$target") == source-model ]] ||
+    failures+=('foreign-owned target parent rejection overwrote the live Compose target')
+
+  ((${#failures[@]} == 0)) || {
+    printf '%s\n' "${failures[@]}" >&2
+    exit 1
+  }
+)
+
+test_preopen_parent_retarget_cannot_substitute_publication_identity() (
+  local fixture_dir source_parent original_parent attacker_parent target_parent source target rc=0
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  source_parent="$fixture_dir/source-parent"
+  original_parent="$fixture_dir/source-parent-original"
+  attacker_parent="$fixture_dir/attacker-parent"
+  target_parent="$fixture_dir/target-parent"
+  install -d -m 700 "$source_parent" "$attacker_parent" "$target_parent"
+  source="$source_parent/candidate.yml"
+  target="$target_parent/live-compose.yml"
+  printf 'reviewed-candidate\n' > "$source"
+  printf 'attacker-candidate\n' > "$attacker_parent/candidate.yml"
+  printf 'source-model\n' > "$target"
+  chmod 0600 "$source" "$attacker_parent/candidate.yml" "$target"
+
+  eval "$(extract_function assert_owned_regular_file)"
+  eval "$(extract_function publish_compose_atomic)"
+  die() { printf 'fixture: %s\n' "$*" >&2; exit 1; }
+  fsync_path() { :; }
+  stat() {
+    local result
+    if [[ $1 == -c && $2 == %a && $3 == "$target_parent" &&
+          ! -e "$fixture_dir/preopen-parent-retarget-consumed" ]]; then
+      result=$(command stat "$@")
+      printf '%s\n' "$result"
+      command mv "$source_parent" "$original_parent"
+      command ln -s "$attacker_parent" "$source_parent"
+      : > "$fixture_dir/preopen-parent-retarget-consumed"
+      return 0
+    fi
+    command stat "$@"
+  }
+
+  publish_compose_atomic "$source" "$target" || rc=$?
+  [[ -e "$fixture_dir/preopen-parent-retarget-consumed" ]] || {
+    echo 'pre-open parent-retarget owner missed the final validation boundary' >&2
+    exit 1
+  }
+  if ((rc == 0)) && [[ $(<"$target") != reviewed-candidate ]]; then
+    printf 'pre-open parent retarget substituted publication bytes: %s\n' \
+      "$(<"$target")" >&2
+    exit 1
+  fi
+  ((rc != 0)) || [[ $(<"$target") == reviewed-candidate ]]
+)
+
+test_candidate_entry_swap_cannot_escape_prepared_digest() (
+  local fixture_dir candidate_parent target_parent candidate live source_snapshot state
+  local expected_candidate_sha source_sha rc=0
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  candidate_parent="$fixture_dir/candidate-parent"
+  target_parent="$fixture_dir/target-parent"
+  install -d -m 700 "$candidate_parent" "$target_parent"
+  candidate="$candidate_parent/candidate.yml"
+  live="$target_parent/live-compose.yml"
+  source_snapshot="$fixture_dir/source-compose.yml"
+  state="$fixture_dir/controller.json"
+  printf 'reviewed-candidate\n' > "$candidate"
+  printf 'source-model\n' > "$live"
+  printf 'source-model\n' > "$source_snapshot"
+  chmod 0600 "$candidate" "$live" "$source_snapshot"
+  expected_candidate_sha=$(sha256sum "$candidate" | awk '{print $1}')
+  source_sha=$(sha256sum "$source_snapshot" | awk '{print $1}')
+  jq -n \
+    --arg liveCompose "$live" \
+    --arg sourceSnapshot "$source_snapshot" \
+    --arg sourceSha "$source_sha" \
+    --arg candidateSha "$expected_candidate_sha" \
+    '{phase:"prepared",engineId:"fixture-engine",volume:"fixture-volume",
+      liveCompose:$liveCompose,sourceSnapshot:$sourceSnapshot,
+      sourceSnapshotSha256:$sourceSha,candidateComposeSha256:$candidateSha}' > "$state"
+  chmod 0600 "$state"
+
+  eval "$(extract_function path_present)"
+  eval "$(extract_function assert_owned_regular_file)"
+  eval "$(extract_function sha256_file)"
+  eval "$(extract_function publish_compose_atomic)"
+  eval "$(extract_function publish_candidate_under_lock)"
+  die() { printf 'fixture: %s\n' "$*" >&2; exit 1; }
+  fsync_path() { :; }
+  validate_controller_state() { :; }
+  assert_operation_lock_held() { :; }
+  update_controller_phase() {
+    local next_phase=$2 replacement
+    if [[ "$next_phase" == candidate-published &&
+          ! -e "$fixture_dir/candidate-entry-swap-consumed" ]]; then
+      replacement="$candidate_parent/candidate.replacement"
+      printf 'attacker-candidate\n' > "$replacement"
+      chmod 0600 "$replacement"
+      command mv -f "$replacement" "$candidate"
+      : > "$fixture_dir/candidate-entry-swap-consumed"
+    fi
+  }
+
+  publish_candidate_under_lock "$state" "$candidate" "$fixture_dir/locks" || rc=$?
+  [[ -e "$fixture_dir/candidate-entry-swap-consumed" ]] || {
+    echo 'candidate-entry owner missed the post-digest publication-intent boundary' >&2
+    exit 1
+  }
+  if ((rc == 0)) && [[ $(sha256sum "$live" | awk '{print $1}') != "$expected_candidate_sha" ]]; then
+    printf 'candidate entry swap published bytes outside the prepared digest: %s\n' \
+      "$(<"$live")" >&2
+    exit 1
+  fi
+  ((rc != 0)) || [[ $(sha256sum "$live" | awk '{print $1}') == "$expected_candidate_sha" ]]
+)
+
+test_closure_intent_and_stop_failure_cannot_cross_writer_boundary() (
+  local fixture_dir manifest state shim initial_rc=0 retry_rc=0 lifecycle phase control_tail
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  : > "$fixture_dir/fail-closure-stop-once"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_closure_intent_fsync_failure_shim "$fixture_dir")
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+  run_fixture_controller "$state" "$shim" env \
+    NOOSPHERE_CONTROLLER_TEST_FAIL_EVIDENCE=authorization-running \
+    >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || initial_rc=$?
+  ((initial_rc != 0)) || {
+    echo 'dual closure failure unexpectedly reported initial success' >&2
+    exit 1
+  }
+  [[ -e "$fixture_dir/closure-intent-fsync-failure-consumed" &&
+     -e "$fixture_dir/closure-stop-failure-consumed" ]] || {
+    echo 'dual closure owner missed its intent-write or fixture-Docker stop failure' >&2
+    exit 1
+  }
+  phase=$(jq -r '.phase // empty' "$state")
+  [[ "$phase" == authorization-running || "$phase" == activation-running ]] || {
+    printf 'dual closure owner did not retain a resumable writer phase: %s\n' "$phase" >&2
+    exit 1
+  }
+  jq -e 'has("writerStopEvidence") | not' "$state" >/dev/null || {
+    echo 'dual closure owner unexpectedly bound writer-stop evidence' >&2
+    exit 1
+  }
+
+  NOOSPHERE_CONTROLLER_FIXTURE_INVOCATION_ID=fedcba9876543210fedcba9876543210 \
+    run_fixture_controller "$state" "$shim" \
+      >"$fixture_dir/retry.out" 2>"$fixture_dir/retry.err" || retry_rc=$?
+  lifecycle=$(paste -sd, "$fixture_dir/lifecycle.log" 2>/dev/null || true)
+  if [[ "$lifecycle" == *,authorize,authorize* || "$lifecycle" == *,activate* || "$retry_rc" == 0 ]]; then
+    printf 'dual closure failure retry crossed writer reauthorization/reactivation: rc=%s lifecycle=%s\n' \
+      "$retry_rc" "$lifecycle" >&2
+    exit 1
+  fi
+  control_tail=$(tail -n 2 "$fixture_dir/app-control.log" 2>/dev/null | paste -sd, -)
+  [[ "$control_tail" == stop,inspect:false ]] || {
+    printf 'dual closure failure retry did not inspect-stop the retained writer before proof validation: %s\n' \
+      "$control_tail" >&2
+    exit 1
+  }
+  jq -e '
+    (.writerStopEvidence.path | type == "string" and startswith("/")) and
+    (.writerStopEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))
+  ' "$state" >/dev/null || {
+    echo 'dual closure failure retry did not durably bind its fresh writer stop' >&2
+    exit 1
+  }
+)
+
+test_fresh_activation_recovery_stops_before_phase_owned_proof_validation() (
+  local fixture_dir manifest state shim authorization_evidence initial_rc=0 retry_rc=0 control_tail
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_phase_snapshot_shim "$fixture_dir")
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+  NOOSPHERE_CONTROLLER_TEST_CAPTURE_PHASE=activation-running \
+    run_fixture_controller "$state" "$shim" env \
+      >"$fixture_dir/initial.out" 2>"$fixture_dir/initial.err" || initial_rc=$?
+  [[ "$initial_rc" == 86 && -e "$fixture_dir/controller-phase-snapshot-captured" ]] || {
+    printf 'fresh activation owner did not capture activation-running: rc=%s\n' "$initial_rc" >&2
+    exit 1
+  }
+  [[ $(jq -er '.phase' "$state") == activation-running ]] || {
+    echo 'fresh activation owner did not retain activation-running state' >&2
+    exit 1
+  }
+
+  # Exact crash image: Compose has started the app, but the controller has not
+  # yet advanced from activation-running. The bound proof then becomes
+  # unavailable before a fresh invocation can recover.
+  : > "$fixture_dir/app-started"
+  rm -f -- "$fixture_dir/app-stopped"
+  authorization_evidence=$(jq -er '.authorizationEvidence.path' "$state")
+  rm -f -- "$authorization_evidence"
+
+  NOOSPHERE_CONTROLLER_FIXTURE_INVOCATION_ID=fedcba9876543210fedcba9876543210 \
+    run_fixture_controller "$state" "$shim" \
+      >"$fixture_dir/retry.out" 2>"$fixture_dir/retry.err" || retry_rc=$?
+  ((retry_rc != 0)) || {
+    echo 'fresh activation recovery unexpectedly reported success' >&2
+    exit 1
+  }
+  if [[ -f "$fixture_dir/app-control.log" ]]; then
+    control_tail=$(tail -n 2 "$fixture_dir/app-control.log" | paste -sd, -)
+  else
+    control_tail=''
+  fi
+  [[ "$control_tail" == stop,inspect:false ]] || {
+    printf 'fresh activation recovery left the writer running before proof validation: %s\n' \
+      "$control_tail" >&2
+    exit 1
+  }
+  jq -e '
+    .phase == "activation-running" and
+    (.writerStopEvidence.path | type == "string" and startswith("/")) and
+    (.writerStopEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$"))
+  ' "$state" >/dev/null || {
+    echo 'fresh activation recovery did not bind stop evidence before proof validation failed' >&2
+    exit 1
+  }
+)
+
+test_fresh_activation_stop_failure_persists_closure_intent() (
+  local fixture_dir manifest state shim authorization_evidence initial_rc=0 retry_rc=0 lifecycle
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_phase_snapshot_shim "$fixture_dir")
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+  NOOSPHERE_CONTROLLER_TEST_CAPTURE_PHASE=activation-running \
+    run_fixture_controller "$state" "$shim" env \
+      >"$fixture_dir/initial.out" 2>"$fixture_dir/initial.err" || initial_rc=$?
+  [[ "$initial_rc" == 86 && $(jq -er '.phase' "$state") == activation-running ]] || {
+    printf 'fresh stop-failure owner did not capture activation-running: rc=%s\n' "$initial_rc" >&2
+    exit 1
+  }
+
+  : > "$fixture_dir/app-started"
+  rm -f -- "$fixture_dir/app-stopped"
+  : > "$fixture_dir/fail-closure-stop-once"
+  authorization_evidence=$(jq -er '.authorizationEvidence.path' "$state")
+  rm -f -- "$authorization_evidence"
+
+  NOOSPHERE_CONTROLLER_FIXTURE_INVOCATION_ID=fedcba9876543210fedcba9876543210 \
+    run_fixture_controller "$state" "$shim" \
+      >"$fixture_dir/retry.out" 2>"$fixture_dir/retry.err" || retry_rc=$?
+  ((retry_rc != 0)) || {
+    echo 'fresh activation stop failure unexpectedly reported success' >&2
+    exit 1
+  }
+  [[ -e "$fixture_dir/closure-stop-failure-consumed" ]] || {
+    echo 'fresh activation stop-failure owner did not exercise the injected stop failure' >&2
+    exit 1
+  }
+  jq -e '
+    .phase == "closure-stop-pending" and
+    .incidentClass == "closure-interruption" and
+    (has("writerStopEvidence") | not)
+  ' "$state" >/dev/null || {
+    echo 'fresh activation stop failure did not preserve durable closure intent' >&2
+    exit 1
+  }
+  lifecycle=$(paste -sd, "$fixture_dir/lifecycle.log" 2>/dev/null || true)
+  [[ "$lifecycle" == transition,authorize ]] || {
+    printf 'fresh activation stop failure crossed writer replay boundary: %s\n' "$lifecycle" >&2
+    exit 1
+  }
+
+  retry_rc=0
+  NOOSPHERE_CONTROLLER_FIXTURE_INVOCATION_ID=11112222333344445555666677778888 \
+    run_fixture_controller "$state" "$shim" \
+      >"$fixture_dir/recovery.out" 2>"$fixture_dir/recovery.err" || retry_rc=$?
+  ((retry_rc != 0)) || {
+    echo 'fresh activation stop-failure recovery unexpectedly reported success' >&2
+    exit 1
+  }
+  jq -e '
+    .phase == "incident" and
+    .incidentClass == "closure-interruption" and
+    (.writerStopEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$")) and
+    (has("proofException") | not)
+  ' "$state" >/dev/null || {
+    echo 'fresh activation stop-failure state was not resumable to terminal interruption' >&2
+    sed 's/^/  recovery.err: /' "$fixture_dir/recovery.err" >&2 || true
+    jq . "$state" >&2 || true
+    exit 1
+  }
+)
+
+test_detached_target_parent_cannot_false_complete_publication() (
+  local fixture_dir source_parent target_parent detached_parent source target rc=0
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf -- "$fixture_dir"' EXIT
+  source_parent="$fixture_dir/source-parent"
+  target_parent="$fixture_dir/target-parent"
+  detached_parent="$fixture_dir/target-parent-detached"
+  install -d -m 700 "$source_parent" "$target_parent"
+  source="$source_parent/candidate.yml"
+  target="$target_parent/live-compose.yml"
+  printf 'reviewed-candidate\n' > "$source"
+  printf 'source-model\n' > "$target"
+  chmod 0600 "$source" "$target"
+
+  eval "$(extract_function assert_owned_regular_file)"
+  eval "$(extract_function publish_compose_atomic)"
+  die() { printf 'fixture: %s\n' "$*" >&2; exit 1; }
+  fsync_path() { :; }
+  mktemp() {
+    if [[ $1 == *.item3-publish.* &&
+          ! -e "$fixture_dir/detached-target-parent-consumed" ]]; then
+      command mv "$target_parent" "$detached_parent"
+      command install -d -m 700 "$target_parent"
+      printf 'source-model\n' > "$target"
+      chmod 0600 "$target"
+      : > "$fixture_dir/detached-target-parent-consumed"
+    fi
+    command mktemp "$@"
+  }
+
+  publish_compose_atomic "$source" "$target" || rc=$?
+  [[ -e "$fixture_dir/detached-target-parent-consumed" ]] || {
+    echo 'detached-target owner missed the post-descriptor publication boundary' >&2
+    exit 1
+  }
+  if ((rc == 0)) && [[ $(<"$target") != reviewed-candidate ]]; then
+    printf 'detached target parent falsely reported publication success: live=%s detached=%s\n' \
+      "$(<"$target")" "$(<"$detached_parent/live-compose.yml")" >&2
+    exit 1
+  fi
+  ((rc != 0)) || [[ $(<"$target") == reviewed-candidate ]]
+)
+
+test_postrename_fsync_failure_cannot_expose_advanced_publications() (
+  local state_case_rc=0 writer_case_rc=0
+
+  (
+    local fixture_dir state rc=0 phase
+    fixture_dir=$(mktemp -d)
+    trap 'rm -rf -- "$fixture_dir"' EXIT
+    state="$fixture_dir/controller.json"
+    printf '{"phase":"prepared"}\n' > "$state"
+    chmod 0600 "$state"
+    eval "$(extract_function path_present)"
+    eval "$(extract_function assert_owned_regular_file)"
+    eval "$(extract_function write_controller_state_atomic)"
+    eval "$(extract_function update_controller_phase)"
+    validate_controller_state() { :; }
+    record_controller_interruption() { :; }
+    die() { printf 'fixture: %s\n' "$*" >&2; exit 1; }
+    fsync_path() {
+      if [[ "$1" == "$fixture_dir" &&
+            ! -e "$fixture_dir/state-postrename-fsync-failure-consumed" ]]; then
+        : > "$fixture_dir/state-postrename-fsync-failure-consumed"
+        return 74
+      fi
+      :
+    }
+    set +e
+    update_controller_phase "$state" candidate-published
+    rc=$?
+    set -e
+    [[ -e "$fixture_dir/state-postrename-fsync-failure-consumed" ]] || {
+      echo 'post-rename state owner missed the parent-directory fsync boundary' >&2
+      exit 1
+    }
+    ((rc != 0)) || {
+      echo 'post-rename state parent-fsync failure unexpectedly reported success' >&2
+      exit 1
+    }
+    phase=$(jq -r '.phase // empty' "$state")
+    [[ "$phase" == prepared ]] || {
+      printf 'post-rename state fsync failure exposed advanced phase: %s\n' "$phase" >&2
+      exit 1
+    }
+  ) || state_case_rc=$?
+
+  (
+    local fixture_dir manifest state shim rc=0 evidence_count
+    fixture_dir=$(mktemp -d)
+    trap 'rm -rf -- "$fixture_dir"' EXIT
+    manifest="$fixture_dir/manifest.json"
+    state="$fixture_dir/controller.json"
+    write_execution_fixture "$fixture_dir" "$manifest" complete fail
+    export XDG_RUNTIME_DIR="$fixture_dir/locks"
+    shim=$(write_writer_stop_postrename_fsync_failure_shim "$fixture_dir")
+    "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+    run_fixture_controller "$state" "$shim" \
+      >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || rc=$?
+    [[ -e "$fixture_dir/writer-stop-postrename-fsync-failure-consumed" ]] || {
+      echo 'post-rename writer-stop owner missed the evidence parent-directory fsync boundary' >&2
+      exit 1
+    }
+    ((rc != 0)) || {
+      echo 'post-rename writer-stop parent-fsync failure unexpectedly reported success' >&2
+      exit 1
+    }
+    evidence_count=$(compgen -G "${state%.json}.writer-stop*.evidence.json" | wc -l)
+    [[ "$evidence_count" == 0 ]] || {
+      printf 'post-rename writer-stop fsync failure exposed %s advanced evidence object(s)\n' \
+        "$evidence_count" >&2
+      exit 1
+    }
+  ) || writer_case_rc=$?
+
+  ((state_case_rc == 0 && writer_case_rc == 0)) || exit 1
+)
+
 # Per-test isolation helper: clear the durable authority namespace so a
 # prior test's stale record (pointing at an already-rm-rf'd fixture_dir)
 # cannot fire the R3-1 unrecognized-phase arm before the current test
@@ -5398,6 +6756,10 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   test_guard_arguments_are_semantically_bound_to_manifest
   _clear_authority_root_for_isolation
   test_compose_plugin_and_docker_config_identity_are_bound
+  _clear_authority_root_for_isolation
+  test_activation_uses_invocation_private_docker_bundle
+  _clear_authority_root_for_isolation
+  test_candidate_model_uses_activation_project_directory
   _clear_authority_root_for_isolation
   test_failed_prejournal_recovery_commits_durable_incident
   _clear_authority_root_for_isolation
@@ -5555,5 +6917,43 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   test_incident_classes_and_stop_proofs_are_closed_world
   _clear_authority_root_for_isolation
   test_real_docker_rehearsal_declares_interruption_resume_coverage
+  _clear_authority_root_for_isolation
+  test_activation_uses_only_bound_compose_interpolation_values
+  _clear_authority_root_for_isolation
+  test_authorization_postprocessing_failure_closes_writer_durably
+  _clear_authority_root_for_isolation
+  test_authorization_postprocessing_ordinary_failure_is_fail_closed
+  _clear_authority_root_for_isolation
+  test_closure_postprocessing_proof_exception_is_scoped
+  _clear_authority_root_for_isolation
+  test_phase_state_fsync_failure_does_not_advance
+  _clear_authority_root_for_isolation
+  test_writer_stop_evidence_fsync_failure_is_not_bound
+  _clear_authority_root_for_isolation
+  test_late_authorization_evidence_failure_remains_resumable
+  _clear_authority_root_for_isolation
+  test_closure_intent_failure_preserves_status_and_blocks_reauthorization
+  _clear_authority_root_for_isolation
+  test_initial_activation_inspect_failure_commits_durable_closure
+  _clear_authority_root_for_isolation
+  test_compose_publication_is_anchored_against_ancestor_retarget
+  _clear_authority_root_for_isolation
+  test_simulated_root_rejects_root_owned_writable_compose_parent
+  _clear_authority_root_for_isolation
+  test_foreign_owned_compose_parents_are_rejected
+  _clear_authority_root_for_isolation
+  test_preopen_parent_retarget_cannot_substitute_publication_identity
+  _clear_authority_root_for_isolation
+  test_candidate_entry_swap_cannot_escape_prepared_digest
+  _clear_authority_root_for_isolation
+  test_closure_intent_and_stop_failure_cannot_cross_writer_boundary
+  _clear_authority_root_for_isolation
+  test_fresh_activation_recovery_stops_before_phase_owned_proof_validation
+  _clear_authority_root_for_isolation
+  test_fresh_activation_stop_failure_persists_closure_intent
+  _clear_authority_root_for_isolation
+  test_detached_target_parent_cannot_false_complete_publication
+  _clear_authority_root_for_isolation
+  test_postrename_fsync_failure_cannot_expose_advanced_publications
   echo 'PostgreSQL transition controller focused fixtures passed.'
 fi

@@ -1,7 +1,7 @@
 # Memory Capture and Hybrid Retrieval Revamp Status
 
 Status: active implementation status
-Last verified: 2026-08-24 against `master` after PR #300
+Last verified: 2026-08-26 against `master` plus the locally verified issue #303 branch
 
 This document is the authoritative implementation matrix for Noosphere's
 automatic-memory-capture and authorization-safe hybrid-retrieval revamp. It
@@ -33,8 +33,12 @@ backfill, shadow evaluation, or hybrid serving.
   hybrid retrieval remain opt-in; retrieval defaults to
   `NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false`.
 - The guarded existing-volume transition and its execution controller are
-  implemented, but transition execution and Phase D rollout remain explicit
-  operator actions. Issue #303 holds pre-transition controller hardening.
+  implemented. Issue #303's production-safety subset is open as PR #305; its
+  public-review correction passes the focused and stateful rehearsal gates,
+  and updated CI/review is green with zero unresolved threads. The PR now carries
+  path-filtered focused/systemd and pinned-Docker controller jobs as the Task 7
+  Step 5 pre-rollout gate. It is not merged; Task 7 installer integration,
+  transition execution, and Phase D rollout remain explicit operator actions.
 
 ## Automatic capture and enrichment
 
@@ -61,7 +65,7 @@ The detailed privacy and lifecycle contract remains in
 | A3: optional feature storage | Implemented in PR #287 | Feature schema remains absent until explicit activation | Activate and validate against the target database |
 | B: provider, worker, consent, profile, and backfill tooling | Implemented in PR #288 | No serving profile or worker is required by the keyword-only runtime | Configure an approved provider, activate the worker layer, create a preparing profile, and backfill |
 | C: authorization-safe exact hybrid recall and RRF | Implemented in PR #289, with provider hardening in PR #291 | Disabled by `NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false`; lexical fallback remains authoritative | Complete Phase D gates before returning hybrid rankings |
-| Existing-volume execution controller | Implemented in PR #300 | Does not run automatically | Resolve the production-safety subset of issue #303, then obtain explicit transition authorization |
+| Existing-volume execution controller | Base controller implemented in PR #300; issue #303 production-safety hardening locally verified and pending PR/CI | Does not run automatically | Merge the focused hardening only after its publication gates, then obtain explicit transition authorization |
 | D: transition, coverage, shadow evaluation, quality acceptance, and serving | Not completed | Keyword-only recall remains the safe default | Transition the target database, activate layers, backfill to the coverage threshold, run opt-in shadow evaluation, and approve serving |
 
 Issue #261 remains open until the operator rollout and Phase D acceptance work is
@@ -81,12 +85,14 @@ own transition, activation, profile, coverage, and serving evidence.
 
 1. Keep this matrix and the linked ADRs synchronized as the source of status
    truth.
-2. Address the three production-safety mechanisms in issue #303 before any
-   existing-volume transition: bound Compose interpolation, durable writer
-   closure after post-authorization failure, and rejection of unsafe root-owned
-   writable Compose parents.
-3. Handle issue #303's remaining harness, documentation, and portability items
-   as a separately bounded follow-up.
+2. Publish and merge issue #303's locally verified production-safety subset:
+   bound Compose interpolation, durable writer closure after post-authorization
+   failure, rejection of writable Compose parents regardless of owner,
+   descriptor/digest-bound publication, fresh-invocation writer closure, and
+   rollback-capable state/evidence publication.
+3. Keep issue #303's remaining status-fidelity, portability, and unrelated
+   hardening observations outside that bounded release floor unless a concrete
+   safety reproducer promotes one.
 4. Obtain explicit operator approval for the PostgreSQL transition, then perform
    feature activation, profile backfill, shadow evaluation, coverage/relevance
    acceptance, and serving activation in that order.
