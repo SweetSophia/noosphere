@@ -2067,8 +2067,8 @@ describe("OpenClaw Noosphere CLI helpers", () => {
     const combined = commands.join("\n");
 
     assert.equal(commands.length, 4);
-    assert.match(combined, /ec4945fe97ea2cd5c46d77f91ee53b00dfc61195/);
-    assert.match(combined, /d438c729395df29477407df6c1a31408ea5dd5c13cb3081e319ce3a5bcbffe1a/);
+    assert.match(combined, /86827ea185e69db26bffbf1b397a1210e112c97c/);
+    assert.match(combined, /2321e60b4772fcee0d6f865c124469ec380cb4417060305ff16295d3ff9d1891/);
     assert.match(commands[0], /mktemp/);
     assert.match(commands[1], /curl .* -o \"\$installer\"/);
     assert.match(commands[2], /sha256sum -c -/);
