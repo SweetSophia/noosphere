@@ -821,10 +821,10 @@ VERIFIER
 set -euo pipefail
 mode=${NOOSPHERE_EXPECTED_POSTGRES_IMAGE_MODE:-missing}
 root=${NOOSPHERE_CONTROLLER_FIXTURE_ROOT:-$fixture_root}
-trap 'printf "1\n" > "$root/'"$mode"'-verifier-term-count"; sleep 1; : > "$root/'"$mode"'-verifier-delay-complete"; exit 143' TERM INT HUP
+trap 'printf "1\n" > "$root/'"$mode"'-verifier-term-count"; printf "source verifier interrupted\n" >&2; deadline=$((SECONDS + 1)); while ((SECONDS < deadline)); do :; done; : > "$root/'"$mode"'-verifier-delay-complete"; exit 143' TERM INT HUP
 printf '%s\n' "$$" > "$root/$mode-verifier-pid"
 : > "$root/$mode-verifier-running"
-while :; do sleep 0.1; done
+while :; do :; done
 VERIFIER
     } > "$verifier"
   elif [[ "$verifier_mode" == signal-zero ]]; then
@@ -3977,7 +3977,7 @@ test_source_recovery_signal_persists_process_evidence() (
       if [[ "$case_name" == ordinary ]]; then
         expected_stderr_sha=$(printf 'source verification failed\n' | sha256sum | awk '{print $1}')
       else
-        expected_stderr_sha=$(printf 'Terminated%17ssleep 0.1\n' '' | sha256sum | awk '{print $1}')
+        expected_stderr_sha=$(printf 'source verifier interrupted\n' | sha256sum | awk '{print $1}')
       fi
       [[ "$stdout_sha" == "$expected_stdout_sha" && "$stderr_sha" == "$expected_stderr_sha" ]] ||
         failures+=("source recovery $case_name logs do not match the independently expected bytes")

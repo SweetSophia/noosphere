@@ -240,6 +240,13 @@ managers. The PostgreSQL image policy owns the trigger paths, commands, pinned
 image pull, bootstrap Node installation, and user-manager setup/cleanup contract.
 Steps 1–4 remain open and continue to block the one-command installer rollout.
 
+The first hosted runs additionally established and closed three concrete runner
+portability gaps: Node was absent from the controller bootstrap path,
+`/usr/local/bin` was writable on the hosted image, and `ripgrep` was absent.
+The focused source-recovery signal owner also emitted a Bash-version-specific
+job-control line; it now generates one deterministic stderr marker from a
+builtin-only delayed trap while preserving exact process/log SHA binding.
+
 ---
 
 ## Evidence claim
