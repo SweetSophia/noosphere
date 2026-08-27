@@ -2066,13 +2066,17 @@ describe("OpenClaw Noosphere CLI helpers", () => {
     const commands = getVerifiedInstallerCommands();
     const combined = commands.join("\n");
 
-    assert.equal(commands.length, 4);
+    assert.equal(commands.length, 8);
     assert.match(combined, /86827ea185e69db26bffbf1b397a1210e112c97c/);
     assert.match(combined, /2321e60b4772fcee0d6f865c124469ec380cb4417060305ff16295d3ff9d1891/);
-    assert.match(commands[0], /mktemp/);
-    assert.match(commands[1], /curl .* -o \"\$installer\"/);
-    assert.match(commands[2], /sha256sum -c -/);
-    assert.match(commands[3], /^bash /);
+    assert.equal(commands[0], "(");
+    assert.equal(commands[1], "  set -e");
+    assert.match(commands[2], /mktemp/);
+    assert.match(commands[3], /trap .*rm -f .* EXIT/);
+    assert.match(commands[4], /curl .* -o \"\$installer\"/);
+    assert.match(commands[5], /sha256sum -c -/);
+    assert.match(commands[6], /^  bash /);
+    assert.equal(commands[7], ")");
     assert.doesNotMatch(combined, /\/master\/install-openclaw\.sh|install-openclaw\.sh \| bash/);
   });
 

@@ -46,10 +46,14 @@ Use the installer from the repository:
 ```bash
 # Installer commit: 86827ea185e69db26bffbf1b397a1210e112c97c
 # Expected SHA-256: 2321e60b4772fcee0d6f865c124469ec380cb4417060305ff16295d3ff9d1891
-installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/86827ea185e69db26bffbf1b397a1210e112c97c/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '2321e60b4772fcee0d6f865c124469ec380cb4417060305ff16295d3ff9d1891' "$installer" | sha256sum -c -
-bash "$installer" && rm -f "$installer"
+(
+  set -e
+  installer="$(mktemp)"
+  trap 'rm -f "$installer"' EXIT
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/86827ea185e69db26bffbf1b397a1210e112c97c/install-openclaw.sh -o "$installer"
+  printf '%s  %s\n' '2321e60b4772fcee0d6f865c124469ec380cb4417060305ff16295d3ff9d1891' "$installer" | sha256sum -c -
+  bash "$installer"
+)
 ```
 
 The installer:
@@ -425,10 +429,14 @@ Use the guarded installer for upgrades as well as first-time setup:
 ```bash
 # Installer commit: 86827ea185e69db26bffbf1b397a1210e112c97c
 # Expected SHA-256: 2321e60b4772fcee0d6f865c124469ec380cb4417060305ff16295d3ff9d1891
-installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/86827ea185e69db26bffbf1b397a1210e112c97c/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '2321e60b4772fcee0d6f865c124469ec380cb4417060305ff16295d3ff9d1891' "$installer" | sha256sum -c -
-bash "$installer" && rm -f "$installer"
+(
+  set -e
+  installer="$(mktemp)"
+  trap 'rm -f "$installer"' EXIT
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/86827ea185e69db26bffbf1b397a1210e112c97c/install-openclaw.sh -o "$installer"
+  printf '%s  %s\n' '2321e60b4772fcee0d6f865c124469ec380cb4417060305ff16295d3ff9d1891' "$installer" | sha256sum -c -
+  bash "$installer"
+)
 openclaw noosphere doctor
 ```
 
@@ -558,10 +566,14 @@ First use the reviewed installer revision and verify its checksum before executi
 ```bash
 # Installer commit: 86827ea185e69db26bffbf1b397a1210e112c97c
 # Expected SHA-256: 2321e60b4772fcee0d6f865c124469ec380cb4417060305ff16295d3ff9d1891
-installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/86827ea185e69db26bffbf1b397a1210e112c97c/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '2321e60b4772fcee0d6f865c124469ec380cb4417060305ff16295d3ff9d1891' "$installer" | sha256sum -c -
-bash "$installer" && rm -f "$installer"
+(
+  set -e
+  installer="$(mktemp)"
+  trap 'rm -f "$installer"' EXIT
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/86827ea185e69db26bffbf1b397a1210e112c97c/install-openclaw.sh -o "$installer"
+  printf '%s  %s\n' '2321e60b4772fcee0d6f865c124469ec380cb4417060305ff16295d3ff9d1891' "$installer" | sha256sum -c -
+  bash "$installer"
+)
 ```
 
 The current installer protects `curl | bash` runs by redirecting the bootstrap container's stdin from `/dev/null`, so Docker Compose cannot consume the remaining installer script before app/plugin setup. If the issue persists, inspect the partial state before retrying:

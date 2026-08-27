@@ -502,7 +502,7 @@ adds the following publication, writer-closure, and durability guarantees:
 The hardened controller was merged in PR #305 after the full focused suite
 (`135/135`), standalone transient-systemd fixture, pinned-Docker `linux/amd64`
 interruption/recovery rehearsal, and exact-head hosted gates passed with zero
-owned residue. PR #306 adds two focused local-address owners and eight installer
+owned residue. PR #306 adds two focused local-address owners and ten installer
 owners, for exact focused parity of `137/137/137`. Its review-fix exact-head
 hosted result remains a separate gate. Deployment, the PostgreSQL transition, feature
 activation, backfill, and hybrid serving remain separately authorized operator
@@ -521,7 +521,15 @@ unit, allowing the controller to reacquire authority without deadlocking. After
 the controller returns successfully, the installer must reacquire the same
 engine-plus-volume lock before marking the transition complete or entering
 secret publication, plugin installation, OpenClaw config mutation, or gateway
-restart. Reacquisition failure stops the installer.
+restart. Reacquisition reads the manifest's recorded `dockerEndpoint` and
+`engineId`, rejects any live identity drift, and only then opens that exact
+engine-plus-volume lock. Reacquisition failure stops the installer.
+
+A rerun that validates already-complete state, or resumes nonterminal state to
+completion, carries `controller_transition_completed=true` across later
+inventory and Compose preparation. It therefore skips controller-owned init,
+writer authorization, activation, and final verification rather than repeating
+them after a prior post-controller installer failure.
 
 On interruption, the stable controller state is resumed before the installer
 rewrites bound `.env` or candidate bytes. A successful controller run owns the
@@ -552,7 +560,7 @@ controller revalidation. Non-loopback verification additionally requires the
 The path-filtered `postgres-pgvector-rehearsal.yml` workflow makes these
 controller gates mandatory evidence on controller, installer, fixture, guard,
 verifier, or workflow changes. One job runs the focused controller suite, the
-real transient user-systemd owner, and the seven-owner installer integration
+real transient user-systemd owner, and the ten-owner installer integration
 fixture. A separate `linux/amd64` job pulls the fixture's two
 digest-pinned images and runs the real-Docker interruption/recovery rehearsal.
 Both jobs use disposable lingering user managers and carry only read-only

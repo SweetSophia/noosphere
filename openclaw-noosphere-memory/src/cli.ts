@@ -73,10 +73,14 @@ type CliActionHandler<TArgs extends readonly unknown[]> = (...args: TArgs) => vo
 
 export function getVerifiedInstallerCommands(): string[] {
   return [
-    'installer="$(mktemp)"',
-    `curl -fsSL ${VERIFIED_INSTALLER_URL} -o "$installer"`,
-    `printf '%s  %s\\n' '${VERIFIED_INSTALLER_SHA256}' "$installer" | sha256sum -c -`,
-    'bash "$installer" && rm -f "$installer"',
+    "(",
+    "  set -e",
+    '  installer="$(mktemp)"',
+    '  trap \'rm -f "$installer"\' EXIT',
+    `  curl -fsSL ${VERIFIED_INSTALLER_URL} -o "$installer"`,
+    `  printf '%s  %s\\n' '${VERIFIED_INSTALLER_SHA256}' "$installer" | sha256sum -c -`,
+    '  bash "$installer"',
+    ")",
   ];
 }
 

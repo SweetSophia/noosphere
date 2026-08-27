@@ -10,10 +10,14 @@ const VERIFIED_INSTALLER_SHA256 = "2321e60b4772fcee0d6f865c124469ec380cb44170603
 const VERIFIED_INSTALLER_URL = `https://raw.githubusercontent.com/SweetSophia/noosphere/${VERIFIED_INSTALLER_REF}/install-openclaw.sh`;
 export function getVerifiedInstallerCommands() {
     return [
-        'installer="$(mktemp)"',
-        `curl -fsSL ${VERIFIED_INSTALLER_URL} -o "$installer"`,
-        `printf '%s  %s\\n' '${VERIFIED_INSTALLER_SHA256}' "$installer" | sha256sum -c -`,
-        'bash "$installer" && rm -f "$installer"',
+        "(",
+        "  set -e",
+        '  installer="$(mktemp)"',
+        '  trap \'rm -f "$installer"\' EXIT',
+        `  curl -fsSL ${VERIFIED_INSTALLER_URL} -o "$installer"`,
+        `  printf '%s  %s\\n' '${VERIFIED_INSTALLER_SHA256}' "$installer" | sha256sum -c -`,
+        '  bash "$installer"',
+        ")",
     ];
 }
 export function registerNoosphereCli(program, rawConfig, rootConfig) {

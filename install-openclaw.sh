@@ -765,7 +765,7 @@ route_postgres_install_transition() {
       -f "$POSTGRES_CONTROLLER_CANDIDATE" pull
     write_postgres_controller_manifest
     run_existing_postgres_controller_transition
-    acquire_postgres_operation_lock || return 1
+    reacquire_postgres_operation_lock_from_manifest || return 1
     controller_transition_completed=true
     return 0
   fi
@@ -809,6 +809,7 @@ reconcile_postgres_controller_before_configuration() {
         echo "Guard evidence: $guard_evidence" >&2
         return 1
       }
+      controller_transition_completed=true
       ;;
     incident)
       echo "PostgreSQL transition is in terminal incident state: $POSTGRES_CONTROLLER_STATE" >&2
@@ -818,14 +819,20 @@ reconcile_postgres_controller_before_configuration() {
       echo "Resuming PostgreSQL transition controller state: $controller_phase"
       assert_postgres_controller_bootstrap_node || return 1
       run_existing_postgres_controller_transition || return 1
-      acquire_postgres_operation_lock || return 1
+      reacquire_postgres_operation_lock_from_manifest || return 1
+      controller_transition_completed=true
       ;;
   esac
 }
 
 acquire_postgres_operation_lock() {
+  local expected_docker_host=${1:-} expected_engine_id=${2:-}
   local docker_host engine_id lock_root lock_key lock_path
   docker_host=$(resolve_local_docker_endpoint) || return 1
+  [[ -z "$expected_docker_host" || "$docker_host" == "$expected_docker_host" ]] || {
+    echo 'Docker endpoint changed while the PostgreSQL transition controller was active.' >&2
+    return 1
+  }
   lock_root=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
   [[ "$lock_root" == /* && -d "$lock_root" && ! -L "$lock_root" ]] || {
     echo "Runtime lock directory is unavailable or unsafe: $lock_root" >&2
@@ -835,12 +842,16 @@ acquire_postgres_operation_lock() {
     echo 'Runtime lock directory is not owned by the current user.' >&2
     return 1
   }
-  engine_id=$(docker info --format '{{.ID}}') || {
+  engine_id=$(DOCKER_HOST="$docker_host" docker info --format '{{.ID}}') || {
     echo 'Could not determine the Docker engine ID.' >&2
     return 1
   }
   [[ -n "$engine_id" ]] || {
     echo 'Docker engine ID is empty.' >&2
+    return 1
+  }
+  [[ -z "$expected_engine_id" || "$engine_id" == "$expected_engine_id" ]] || {
+    echo 'Docker engine identity changed while the PostgreSQL transition controller was active.' >&2
     return 1
   }
   lock_key=$(printf '%s\0%s' "$engine_id" noosphere_postgres_data | sha256sum | awk '{print $1}')
@@ -852,6 +863,16 @@ acquire_postgres_operation_lock() {
   }
   export NOOSPHERE_A2B_LOCK_FD=8
   export NOOSPHERE_A2B_LOCK_PATH="$lock_path"
+}
+
+reacquire_postgres_operation_lock_from_manifest() {
+  local expected_docker_host expected_engine_id
+  assert_installer_owned_regular_file "$POSTGRES_CONTROLLER_MANIFEST" || return 1
+  expected_docker_host=$(jq -er '.dockerEndpoint | select(type == "string" and length > 0)' \
+    "$POSTGRES_CONTROLLER_MANIFEST") || return 1
+  expected_engine_id=$(jq -er '.engineId | select(type == "string" and length > 0)' \
+    "$POSTGRES_CONTROLLER_MANIFEST") || return 1
+  acquire_postgres_operation_lock "$expected_docker_host" "$expected_engine_id"
 }
 
 extract_bootstrap_json() {
@@ -1100,6 +1121,7 @@ fi
 mkdir -p "$NOOSPHERE_HOME" "$SECRETS_DIR"
 chmod 700 "$SECRETS_DIR" || true
 POSTGRES_BACKUP_DIR="$NOOSPHERE_HOME/backups/postgres-pgvector"
+controller_transition_completed=false
 acquire_postgres_operation_lock
 resolve_runtime_config
 prepare_postgres_controller_runtime
@@ -1411,7 +1433,6 @@ if [[ "$resume_recovered_switch" == true ]]; then
 fi
 
 compose_target="$NOOSPHERE_HOME/docker-compose.yml"
-controller_transition_completed=false
 if [[ "$existing_switch_required" == true ]]; then
   install -m 600 "$NOOSPHERE_HOME/docker-compose.yml" "$POSTGRES_CONTROLLER_SOURCE"
   fsync_installer_path "$POSTGRES_CONTROLLER_SOURCE"

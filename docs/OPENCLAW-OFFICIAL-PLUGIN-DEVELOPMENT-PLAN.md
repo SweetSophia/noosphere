@@ -28,10 +28,14 @@ or:
 ```bash
 # Installer commit: 86827ea185e69db26bffbf1b397a1210e112c97c
 # Expected SHA-256: 2321e60b4772fcee0d6f865c124469ec380cb4417060305ff16295d3ff9d1891
-installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/86827ea185e69db26bffbf1b397a1210e112c97c/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '2321e60b4772fcee0d6f865c124469ec380cb4417060305ff16295d3ff9d1891' "$installer" | sha256sum -c -
-bash "$installer" && rm -f "$installer"
+(
+  set -e
+  installer="$(mktemp)"
+  trap 'rm -f "$installer"' EXIT
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/86827ea185e69db26bffbf1b397a1210e112c97c/install-openclaw.sh -o "$installer"
+  printf '%s  %s\n' '2321e60b4772fcee0d6f865c124469ec380cb4417060305ff16295d3ff9d1891' "$installer" | sha256sum -c -
+  bash "$installer"
+)
 ```
 
 ## 2. Decisions Already Made

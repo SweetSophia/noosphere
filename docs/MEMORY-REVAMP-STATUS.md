@@ -36,7 +36,7 @@ backfill, shadow evaluation, or hybrid serving.
   merged in PR #305 with focused/systemd and pinned-Docker hosted gates green.
   Task 7's one-command installer integration is published as PR #306 with
   checksum-pinned private staging, controller-routed existing-volume upgrades,
-  durable rerun recovery, eight installer owners, and 137 focused controller
+  durable rerun recovery, ten installer owners, and 137 focused controller
   owners. The review-fix head still requires exact-head hosted CI and regular
   merge so pinned intermediate commits remain reachable. Transition execution
   and Phase D rollout remain explicit operator actions.
@@ -86,11 +86,9 @@ own transition, activation, profile, coverage, and serving evidence.
 
 1. Keep this matrix and the linked ADRs synchronized as the source of status
    truth.
-2. Publish and merge issue #303's locally verified production-safety subset:
-   bound Compose interpolation, durable writer closure after post-authorization
-   failure, rejection of writable Compose parents regardless of owner,
-   descriptor/digest-bound publication, fresh-invocation writer closure, and
-   rollback-capable state/evidence publication.
+2. Complete PR #306 exact-head hosted CI and sequential review, then regular-
+   merge it so the checksum-pinned helper and installer commits remain reachable
+   from `master`. PR #305's production-safety subset is complete.
 3. Keep issue #303's remaining status-fidelity, portability, and unrelated
    hardening observations outside that bounded release floor unless a concrete
    safety reproducer promotes one.

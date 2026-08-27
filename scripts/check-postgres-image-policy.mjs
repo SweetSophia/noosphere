@@ -555,7 +555,7 @@ expect(
   "install-openclaw.sh must keep writers stopped until its guarded transaction finishes",
 );
 expect(
-  installer.includes("engine_id=$(docker info --format '{{.ID}}') || {") &&
+  installer.includes('engine_id=$(DOCKER_HOST="$docker_host" docker info --format') &&
     installer.includes("Docker engine ID is empty."),
   "install-openclaw.sh must fail closed when Docker engine identity is unavailable",
 );
@@ -579,7 +579,9 @@ const existingSwitchBlock = transitionRoute.indexOf('if [[ "$existing_switch_req
 const candidatePull = transitionRoute.indexOf('-f "$POSTGRES_CONTROLLER_CANDIDATE" pull');
 const controllerManifest = transitionRoute.indexOf("write_postgres_controller_manifest");
 const controllerExecution = transitionRoute.indexOf("run_existing_postgres_controller_transition");
-const installerLockReacquisition = transitionRoute.indexOf("acquire_postgres_operation_lock");
+const installerLockReacquisition = transitionRoute.indexOf(
+  "reacquire_postgres_operation_lock_from_manifest",
+);
 const controllerCompletion = transitionRoute.indexOf("controller_transition_completed=true");
 const newInstallBlock = transitionRoute.indexOf('if [[ "$new_install_required" == true ]]');
 const recoveredSwitchResume = installer.indexOf('if [[ "$resume_recovered_switch" == true ]]');
@@ -592,6 +594,15 @@ expect(
     installerLockReacquisition > controllerExecution &&
     controllerCompletion > installerLockReacquisition,
   "installer route policy must be scoped to one function and reacquire the operation lock before post-controller completion",
+);
+expect(
+  installer.includes("reacquire_postgres_operation_lock_from_manifest() {") &&
+    installer.includes("expected_docker_host=$(jq -er '.dockerEndpoint") &&
+    installer.includes("expected_engine_id=$(jq -er '.engineId") &&
+    installer.includes('acquire_postgres_operation_lock "$expected_docker_host" "$expected_engine_id"') &&
+    installer.includes('[[ -z "$expected_docker_host" || "$docker_host" == "$expected_docker_host" ]]') &&
+    installer.includes('[[ -z "$expected_engine_id" || "$engine_id" == "$expected_engine_id" ]]'),
+  "post-controller lock reacquisition must remain bound to the manifest Docker endpoint and engine identity",
 );
 expect(
   installer.includes(
@@ -613,6 +624,7 @@ expect(
     installer.includes('actual_guard_sha=$(sha256sum "$guard_evidence"') &&
     installer.includes('[[ "$actual_guard_sha" == "$expected_guard_sha" ]]') &&
     installer.includes('.mode == "switch" and .phase == "complete"') &&
+    installer.includes("controller_transition_completed=true") &&
     earlyControllerReconciliation >= 0 &&
     firstRuntimeSecretWrite > earlyControllerReconciliation,
   "complete/nonterminal controller state must reconcile before installer runtime-secret writes",
@@ -690,10 +702,13 @@ for (const relativePath of [
   expect(
     text.includes(verifiedInstallerRef) &&
       text.includes(verifiedInstallerSha256) &&
+      text.includes('"  set -e"') &&
+      text.includes(`trap \\'rm -f "$installer"\\' EXIT`) &&
       text.includes("sha256sum -c -") &&
       text.indexOf("curl -fsSL") < text.indexOf("sha256sum -c -") &&
-      text.indexOf("sha256sum -c -") < text.indexOf('bash "$installer"'),
-    `${relativePath} must route setup and upgrades through the immutable checksum-verified installer`,
+      text.indexOf("sha256sum -c -") < text.indexOf('bash "$installer"') &&
+      !text.includes('bash "$installer" && rm -f "$installer"'),
+    `${relativePath} must route setup and upgrades through a fail-fast, cleanup-safe immutable installer block`,
   );
   expect(
     !text.includes("noosphere/master/install-openclaw.sh") &&
@@ -714,11 +729,18 @@ for (const relativePath of [
   "docs/articles/noosphere-medium-article.md",
 ]) {
   const text = read(relativePath);
+  const checksumCount = countLiteral(text, "sha256sum -c -");
+  const safeInstallerBlocks = Array.from(
+    text.matchAll(
+      /^(\s*)\(\n\1  set -e\n\1  installer="\$\(mktemp\)"\n\1  trap 'rm -f "\$installer"' EXIT\n\1  curl -fsSL [^\n]+ -o "\$installer"\n\1  printf '[^\n]+' '[a-f0-9]{64}' "\$installer" \| sha256sum -c -\n\1  bash "\$installer"\n\1\)$/gm,
+    ),
+  ).length;
   expect(
     text.includes(verifiedInstallerRef) &&
       text.includes(verifiedInstallerSha256) &&
-      text.includes("sha256sum -c -"),
-    `${relativePath} must document the immutable checksum-verified installer`,
+      checksumCount > 0 &&
+      safeInstallerBlocks === checksumCount,
+    `${relativePath} must gate every immutable installer execution on checksum success and trap cleanup`,
   );
   expect(
     !text.includes("noosphere/master/install-openclaw.sh") &&
@@ -1124,12 +1146,12 @@ const installerControllerDispatches = Array.from(
   (match) => match[1],
 );
 expect(
-  installerControllerDefinitions.length === 8 &&
-    installerControllerDispatches.length === 8 &&
-    new Set(installerControllerDispatches).size === 8 &&
+  installerControllerDefinitions.length === 10 &&
+    installerControllerDispatches.length === 10 &&
+    new Set(installerControllerDispatches).size === 10 &&
     JSON.stringify([...installerControllerDefinitions].sort()) ===
       JSON.stringify([...installerControllerDispatches].sort()),
-  "the installer transition-controller fixture must define and dispatch exactly eight unique owners",
+  "the installer transition-controller fixture must define and dispatch exactly ten unique owners",
 );
 const focusedControllerFixture = read("scripts/test-pgvector-transition-controller.sh");
 const focusedControllerDefinitions = Array.from(

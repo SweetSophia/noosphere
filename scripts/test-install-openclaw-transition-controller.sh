@@ -426,20 +426,23 @@ test_complete_controller_state_requires_guard_closure() (
   [[ $rc != 0 ]] || fail 'writable complete controller state passed early reconciliation'
 
   chmod 0600 "$POSTGRES_CONTROLLER_STATE"
+  controller_transition_completed=false
   reconcile_postgres_controller_before_configuration
+  [[ "$controller_transition_completed" == true ]]
 )
 
 test_existing_upgrade_routes_through_controller() (
   local fixture bin plugin trace
   fixture=$(mktemp -d)
-  trap 'rm -rf "$fixture"' EXIT
+  trap 'release_postgres_operation_lock >/dev/null 2>&1 || true; rm -rf "$fixture"' EXIT
   bin="$fixture/bin"
-  mkdir -m 700 "$bin" "$fixture/home"
+  mkdir -m 700 "$bin" "$fixture/home" "$fixture/runtime"
   plugin="$fixture/docker-compose"
   write_fake_docker "$bin/docker" "$plugin"
   export FIXTURE_COMPOSE_PLUGIN=$plugin
   export FIXTURE_DOCKER_LOG="$fixture/docker.log"
   PATH="$bin:/usr/bin:/bin"
+  XDG_RUNTIME_DIR="$fixture/runtime"
   trace="$fixture/trace.log"
   : > "$trace"
   existing_switch_required=true
@@ -447,12 +450,18 @@ test_existing_upgrade_routes_through_controller() (
   controller_transition_completed=false
   NOOSPHERE_HOME="$fixture/home"
   POSTGRES_CONTROLLER_CANDIDATE="$NOOSPHERE_HOME/candidate-compose.yml"
+  POSTGRES_CONTROLLER_MANIFEST="$NOOSPHERE_HOME/manifest.json"
   : > "$NOOSPHERE_HOME/.env"
   : > "$POSTGRES_CONTROLLER_CANDIDATE"
 
   assert_postgres_controller_bootstrap_node() { printf 'bootstrap\n' >> "$trace"; }
   resolve_local_docker_endpoint() { printf 'unix:///fixture/docker.sock\n'; }
-  write_postgres_controller_manifest() { printf 'manifest\n' >> "$trace"; }
+  write_postgres_controller_manifest() {
+    printf 'manifest\n' >> "$trace"
+    printf '{"dockerEndpoint":"unix:///fixture/docker.sock","engineId":"fixture-engine"}\n' \
+      > "$POSTGRES_CONTROLLER_MANIFEST"
+    chmod 0600 "$POSTGRES_CONTROLLER_MANIFEST"
+  }
   run_existing_postgres_controller_transition() { printf 'controller\n' >> "$trace"; }
   route_postgres_install_transition
 
@@ -479,12 +488,17 @@ test_existing_upgrade_reacquires_operation_lock() (
   controller_transition_completed=false
   NOOSPHERE_HOME="$fixture/home"
   POSTGRES_CONTROLLER_CANDIDATE="$NOOSPHERE_HOME/candidate-compose.yml"
+  POSTGRES_CONTROLLER_MANIFEST="$NOOSPHERE_HOME/manifest.json"
   : > "$NOOSPHERE_HOME/.env"
   : > "$POSTGRES_CONTROLLER_CANDIDATE"
 
   assert_postgres_controller_bootstrap_node() { :; }
   resolve_local_docker_endpoint() { printf 'unix:///fixture/docker.sock\n'; }
-  write_postgres_controller_manifest() { :; }
+  write_postgres_controller_manifest() {
+    printf '{"dockerEndpoint":"unix:///fixture/docker.sock","engineId":"fixture-engine"}\n' \
+      > "$POSTGRES_CONTROLLER_MANIFEST"
+    chmod 0600 "$POSTGRES_CONTROLLER_MANIFEST"
+  }
   run_existing_postgres_controller_transition() {
     release_postgres_operation_lock
   }
@@ -501,6 +515,67 @@ test_existing_upgrade_reacquires_operation_lock() (
   fi
 )
 
+test_existing_upgrade_rejects_lock_identity_change() (
+  local fixture bin plugin expected_lock_path rc=0
+  fixture=$(mktemp -d)
+  trap 'release_postgres_operation_lock >/dev/null 2>&1 || true; rm -rf "$fixture"' EXIT
+  bin="$fixture/bin"
+  mkdir -m 700 "$bin" "$fixture/home" "$fixture/runtime"
+  plugin="$fixture/docker-compose"
+  write_fake_docker "$bin/docker" "$plugin"
+  export FIXTURE_COMPOSE_PLUGIN=$plugin
+  export FIXTURE_DOCKER_LOG="$fixture/docker.log"
+  PATH="$bin:/usr/bin:/bin"
+  XDG_RUNTIME_DIR="$fixture/runtime"
+  existing_switch_required=true
+  new_install_required=false
+  controller_transition_completed=false
+  NOOSPHERE_HOME="$fixture/home"
+  POSTGRES_CONTROLLER_CANDIDATE="$NOOSPHERE_HOME/candidate-compose.yml"
+  POSTGRES_CONTROLLER_MANIFEST="$NOOSPHERE_HOME/manifest.json"
+  : > "$NOOSPHERE_HOME/.env"
+  : > "$POSTGRES_CONTROLLER_CANDIDATE"
+  FIXTURE_DOCKER_ENDPOINT=unix:///fixture/docker.sock
+
+  assert_postgres_controller_bootstrap_node() { :; }
+  resolve_local_docker_endpoint() { printf '%s\n' "$FIXTURE_DOCKER_ENDPOINT"; }
+  write_postgres_controller_manifest() {
+    printf '{"dockerEndpoint":"unix:///fixture/docker.sock","engineId":"fixture-engine"}\n' \
+      > "$POSTGRES_CONTROLLER_MANIFEST"
+    chmod 0600 "$POSTGRES_CONTROLLER_MANIFEST"
+  }
+  run_existing_postgres_controller_transition() {
+    release_postgres_operation_lock
+    FIXTURE_DOCKER_ENDPOINT=unix:///fixture/changed.sock
+  }
+
+  acquire_postgres_operation_lock
+  expected_lock_path=$NOOSPHERE_A2B_LOCK_PATH
+  route_postgres_install_transition || rc=$?
+
+  [[ $rc != 0 ]]
+  [[ "$controller_transition_completed" == false ]]
+  [[ -z ${NOOSPHERE_A2B_LOCK_FD:-} && -z ${NOOSPHERE_A2B_LOCK_PATH:-} ]]
+  flock -n "$expected_lock_path" -c true
+)
+
+test_nonterminal_reconciliation_marks_controller_completion() (
+  local fixture
+  fixture=$(mktemp -d)
+  trap 'rm -rf "$fixture"' EXIT
+  POSTGRES_CONTROLLER_STATE="$fixture/state.json"
+  printf '{"phase":"prepared"}\n' > "$POSTGRES_CONTROLLER_STATE"
+  chmod 0600 "$POSTGRES_CONTROLLER_STATE"
+  controller_transition_completed=false
+
+  assert_postgres_controller_bootstrap_node() { :; }
+  run_existing_postgres_controller_transition() { :; }
+  reacquire_postgres_operation_lock_from_manifest() { :; }
+
+  reconcile_postgres_controller_before_configuration
+  [[ "$controller_transition_completed" == true ]]
+)
+
 main() {
   test_controller_artifacts_are_checksum_pinned_and_private
   test_artifact_mismatch_preserves_existing_private_targets
@@ -510,6 +585,8 @@ main() {
   test_complete_controller_state_requires_guard_closure
   test_existing_upgrade_routes_through_controller
   test_existing_upgrade_reacquires_operation_lock
+  test_existing_upgrade_rejects_lock_identity_change
+  test_nonterminal_reconciliation_marks_controller_completion
   printf 'OpenClaw installer transition-controller fixtures passed.\n'
 }
 
