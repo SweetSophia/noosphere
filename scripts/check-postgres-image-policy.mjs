@@ -580,6 +580,14 @@ const controllerExecution = transitionRoute.indexOf("run_existing_postgres_contr
 const newInstallBlock = transitionRoute.indexOf('if [[ "$new_install_required" == true ]]');
 const recoveredSwitchResume = installer.indexOf('if [[ "$resume_recovered_switch" == true ]]');
 const composeTemplatePublish = installer.indexOf('cat > "$compose_target"');
+expect(
+  installer.includes(
+    "# Route only real source transitions through the controller. New installs keep\n" +
+      "# a direct guard claim; already-complete installations need neither pre-step.\n" +
+      "route_postgres_install_transition",
+  ),
+  "installer transition routing commentary must remain non-executable before the main route call",
+);
 const installerMain = installer.indexOf("\nmain() {");
 const earlyControllerReconciliation = installer.indexOf(
   "\nreconcile_postgres_controller_before_configuration\n",

@@ -1637,7 +1637,7 @@ fsync_installer_path "$compose_target"
 fsync_installer_path "$(dirname "$compose_target")"
 
 # Route only real source transitions through the controller. New installs keep
-a direct guard claim; already-complete installations need neither pre-step.
+# a direct guard claim; already-complete installations need neither pre-step.
 route_postgres_install_transition
 
 if [[ "$controller_transition_completed" != true ]]; then
