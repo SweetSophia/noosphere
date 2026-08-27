@@ -504,3 +504,12 @@ frozen pre-publication bytes; updated public CI/review applies separately to the
 corrected PR head. Merge, deployment, the PostgreSQL transition, feature
 activation, backfill, and hybrid serving remain separately authorized operator
 actions.
+
+The path-filtered `postgres-pgvector-rehearsal.yml` workflow makes these
+controller gates mandatory evidence on controller, fixture, guard, verifier, or
+workflow changes. One job runs the focused suite, including the real transient
+user-systemd owner. A separate `linux/amd64` job pulls the fixture's two
+digest-pinned images and runs the real-Docker interruption/recovery rehearsal.
+Both jobs use disposable lingering user managers and carry only read-only
+repository permission; they do not authenticate to a registry or touch a
+production Docker endpoint.

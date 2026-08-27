@@ -13,7 +13,7 @@ passes nine direct owners, eleven impacted siblings, the focused `135/135` suite
 standalone transient-systemd and pinned-Docker rehearsals, static gates, privacy
 scan, and zero-residue inspection. Updated CI/review is green on correction head
 `35df2d0fa27f992f270eff56b6ed7b5201d874fc` with zero unresolved threads; all
-of Task 7 remains separately gated.
+of Task 7 remains separately gated except the Step 5 rollout-authority CI wiring.
 
 ---
 
@@ -225,13 +225,20 @@ Keep the checksum-pinned installer invocation as the supported user workflow. Th
 
 Require deterministic artifact modes, byte pinning, state/evidence preservation, zero owned residue, and unchanged production opt-in boundaries. Publish this automation only after its own focused fixtures, full installer checks, sequential native reviews, and PR gate are GREEN.
 
-- [ ] **Step 5: Make controller gates rollout-authoritative in CI**
+- [x] **Step 5: Make controller gates rollout-authoritative in CI**
 
 Add the controller and both controller fixture scripts to a path-filtered
 workflow. Require the focused controller suite and pinned-Docker interruption
 rehearsal on controller/test changes before the installer or controller can be
 treated as rollout-authoritative. This is a pre-rollout gate, not evidence
 against the locally executed bytes in PR #305.
+
+The path-filtered PostgreSQL rehearsal workflow now runs the focused controller
+suite (including its transient-systemd fixture) and the pinned-Docker
+`linux/amd64` interruption/recovery rehearsal under disposable persistent user
+managers. The PostgreSQL image policy owns the trigger paths, commands, pinned
+image pull, and user-manager setup/cleanup contract. Steps 1–4 remain open and
+continue to block the one-command installer rollout.
 
 ---
 

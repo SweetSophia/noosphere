@@ -35,9 +35,10 @@ backfill, shadow evaluation, or hybrid serving.
 - The guarded existing-volume transition and its execution controller are
   implemented. Issue #303's production-safety subset is open as PR #305; its
   public-review correction passes the focused and stateful rehearsal gates,
-  and updated CI/review is green on correction head `35df2d0` with zero
-  unresolved threads. It is not merged, and transition execution plus Phase D
-  rollout remain explicit operator actions.
+  and updated CI/review is green with zero unresolved threads. The PR now carries
+  path-filtered focused/systemd and pinned-Docker controller jobs as the Task 7
+  Step 5 pre-rollout gate. It is not merged; Task 7 installer integration,
+  transition execution, and Phase D rollout remain explicit operator actions.
 
 ## Automatic capture and enrichment
 
