@@ -245,7 +245,7 @@ portability gaps: Node was absent from the controller bootstrap path,
 `/usr/local/bin` was writable on the hosted image, and `ripgrep` was absent.
 The focused source-recovery signal owner also emitted a Bash-version-specific
 job-control line; it now generates one deterministic stderr marker from a
-builtin-only delayed trap while preserving exact process/log SHA binding.
+built-in-only delayed trap while preserving exact process/log SHA binding.
 
 ---
 

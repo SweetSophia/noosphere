@@ -1086,7 +1086,7 @@ expect(
       dockerControllerJob,
       'docker pull --platform linux/amd64 "$image"',
     ) === 1,
-  "the path-filtered PostgreSQL rehearsal workflow must install pinned Node, harden the controller bootstrap PATH, and run the focused and pinned-Docker interruption gates under disposable persistent user managers",
+  "the path-filtered PostgreSQL rehearsal workflow must install pinned Node, harden the controller bootstrap PATH, install the focused fixture toolchain, and run the focused and pinned-Docker interruption gates under disposable persistent user managers",
 );
 
 const verifyScript = read("scripts/verify-deploy.sh");
