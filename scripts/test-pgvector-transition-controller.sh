@@ -1647,6 +1647,7 @@ test_prepare_refuses_to_overwrite_active_or_terminal_state() (
     acquire_operation_lock assert_operation_lock_held claim_authoritative_state_path \
     query_postgres_volume_fingerprint \
     assert_trusted_fixed_path assert_guard_journal_path \
+    query_local_ipv4_addresses assert_local_verification_url \
     validate_execution_manifest validate_guard_arguments query_compose_plugin_path \
     assert_private_docker_config compose_model_signature verify_execution_inputs \
     assert_controller_execution_identity \
@@ -6673,6 +6674,33 @@ test_postrename_fsync_failure_cannot_expose_advanced_publications() (
   ((state_case_rc == 0 && writer_case_rc == 0)) || exit 1
 )
 
+test_verification_url_requires_a_local_ipv4_interface() (
+  eval "$(extract_function query_local_ipv4_addresses)"
+  eval "$(extract_function assert_local_verification_url)"
+  query_local_ipv4_addresses() {
+    printf '%s\n' 127.0.0.1 192.0.2.10
+  }
+
+  assert_local_verification_url 'http://127.0.0.1:16578'
+  assert_local_verification_url 'http://192.0.2.10:16578'
+  if assert_local_verification_url 'http://198.51.100.20:16578' >/dev/null 2>&1; then
+    echo 'unassigned IPv4 verification target was accepted' >&2
+    exit 1
+  fi
+  if assert_local_verification_url 'http://0.0.0.0:16578' >/dev/null 2>&1; then
+    echo 'wildcard verification target was accepted' >&2
+    exit 1
+  fi
+  if assert_local_verification_url 'http://localhost:16578' >/dev/null 2>&1; then
+    echo 'DNS verification target was accepted' >&2
+    exit 1
+  fi
+  if assert_local_verification_url 'https://192.0.2.10:16578' >/dev/null 2>&1; then
+    echo 'HTTPS verification target was accepted' >&2
+    exit 1
+  fi
+)
+
 # Per-test isolation helper: clear the durable authority namespace so a
 # prior test's stale record (pointing at an already-rm-rf'd fixture_dir)
 # cannot fire the R3-1 unrecognized-phase arm before the current test
@@ -6955,5 +6983,7 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   test_detached_target_parent_cannot_false_complete_publication
   _clear_authority_root_for_isolation
   test_postrename_fsync_failure_cannot_expose_advanced_publications
+  _clear_authority_root_for_isolation
+  test_verification_url_requires_a_local_ipv4_interface
   echo 'PostgreSQL transition controller focused fixtures passed.'
 fi

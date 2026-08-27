@@ -22,6 +22,7 @@ on:
       - "scripts/switch-pgvector-compose.sh"
       - "scripts/test-digest-order-independence.sh"
       - "scripts/test-pgvector-compose-switch.sh"
+      - "scripts/test-install-openclaw-transition-controller.sh"
       - "scripts/test-pgvector-transition-controller.sh"
       - "scripts/test-pgvector-transition-controller-systemd.sh"
       - "scripts/test-pgvector-transition-controller-docker.sh"
@@ -47,6 +48,7 @@ on:
       - "scripts/switch-pgvector-compose.sh"
       - "scripts/test-digest-order-independence.sh"
       - "scripts/test-pgvector-compose-switch.sh"
+      - "scripts/test-install-openclaw-transition-controller.sh"
       - "scripts/test-pgvector-transition-controller.sh"
       - "scripts/test-pgvector-transition-controller-systemd.sh"
       - "scripts/test-pgvector-transition-controller-docker.sh"
@@ -190,6 +192,10 @@ jobs:
       - name: Run focused transition-controller fixture
         timeout-minutes: 25
         run: scripts/test-pgvector-transition-controller.sh
+
+      - name: Run installer transition-controller fixture
+        timeout-minutes: 10
+        run: scripts/test-install-openclaw-transition-controller.sh
 
       - name: Disable CI user linger
         if: always()

@@ -32,13 +32,13 @@ backfill, shadow evaluation, or hybrid serving.
   image. Feature-schema activation, provider/worker operation, backfill, and
   hybrid retrieval remain opt-in; retrieval defaults to
   `NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false`.
-- The guarded existing-volume transition and its execution controller are
-  implemented. Issue #303's production-safety subset is open as PR #305; its
-  public-review correction passes the focused and stateful rehearsal gates,
-  and updated CI/review is green with zero unresolved threads. The PR now carries
-  path-filtered focused/systemd and pinned-Docker controller jobs as the Task 7
-  Step 5 pre-rollout gate. It is not merged; Task 7 installer integration,
-  transition execution, and Phase D rollout remain explicit operator actions.
+- The guarded existing-volume transition and its execution controller were
+  merged in PR #305 with focused/systemd and pinned-Docker hosted gates green.
+  Task 7's one-command installer integration is implemented on a separate local
+  branch with checksum-pinned private staging, controller-routed existing-volume
+  upgrades, durable rerun recovery, and seven installer owners. It is not yet
+  published or hosted-CI verified. Transition execution and Phase D rollout
+  remain explicit operator actions.
 
 ## Automatic capture and enrichment
 
@@ -65,7 +65,7 @@ The detailed privacy and lifecycle contract remains in
 | A3: optional feature storage | Implemented in PR #287 | Feature schema remains absent until explicit activation | Activate and validate against the target database |
 | B: provider, worker, consent, profile, and backfill tooling | Implemented in PR #288 | No serving profile or worker is required by the keyword-only runtime | Configure an approved provider, activate the worker layer, create a preparing profile, and backfill |
 | C: authorization-safe exact hybrid recall and RRF | Implemented in PR #289, with provider hardening in PR #291 | Disabled by `NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false`; lexical fallback remains authoritative | Complete Phase D gates before returning hybrid rankings |
-| Existing-volume execution controller | Base controller implemented in PR #300; issue #303 production-safety hardening locally verified and pending PR/CI | Does not run automatically | Merge the focused hardening only after its publication gates, then obtain explicit transition authorization |
+| Existing-volume execution controller | Base controller implemented in PR #300; issue #303 production-safety hardening merged in PR #305; one-command installer integration implemented locally | Does not run without invoking the checksum-pinned installer, and production transition is not authorized | Publish/review the installer integration, pass exact-head hosted gates, then obtain explicit transition authorization |
 | D: transition, coverage, shadow evaluation, quality acceptance, and serving | Not completed | Keyword-only recall remains the safe default | Transition the target database, activate layers, backfill to the coverage threshold, run opt-in shadow evaluation, and approve serving |
 
 Issue #261 remains open until the operator rollout and Phase D acceptance work is

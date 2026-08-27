@@ -186,10 +186,12 @@ enters a phase the guard has not authorised.
   Compose-env-file suppression, lock root, locale, and PATH. The PATH prepends
   the recorded Docker executable's directory and must resolve `docker` back to
   that exact recorded file.
-- **Bound verifier target**: the prepared manifest records a loopback-only
+- **Bound verifier target**: the prepared manifest records an HTTP IPv4
   `appUrl`, and the verifier child receives that exact value as
-  `NOOSPHERE_APP_URL`. A disposable rehearsal therefore cannot accidentally
-  validate the production app endpoint.
+  `NOOSPHERE_APP_URL`. Loopback is always admitted; a non-loopback address must
+  be assigned to a local interface every time the manifest is validated.
+  Wildcard, DNS, HTTPS, and remote targets remain rejected. Disposable
+  rehearsals continue to use a unique loopback health port.
 - **Signal latch enforcement**: the first TERM/INT/HUP is durably recorded and
   stored in the controller latch. It is forwarded to whichever child is active,
   and every later phase boundary refuses to continue with the corresponding
@@ -496,19 +498,52 @@ adds the following publication, writer-closure, and durability guarantees:
   It returns the original failure only after rollback is durable; rollback-
   durability failure terminates fail-stopped.
 
-The current public-review correction passes nine direct owners, eleven impacted
-siblings, the full focused suite (`135/135`), the standalone transient-systemd
-fixture, and the pinned-Docker `linux/amd64` interruption/recovery rehearsal,
-with zero owned residue. Three sequential read-only reviews were green on the
-frozen pre-publication bytes; updated public CI/review applies separately to the
-corrected PR head. Merge, deployment, the PostgreSQL transition, feature
+The hardened controller was merged in PR #305 after the full focused suite
+(`135/135`), standalone transient-systemd fixture, pinned-Docker `linux/amd64`
+interruption/recovery rehearsal, and exact-head hosted gates passed with zero
+owned residue. The installer-integration branch adds one focused local-address
+owner and seven installer owners; its publication and exact-head hosted results
+remain separate gates. Deployment, the PostgreSQL transition, feature
 activation, backfill, and hybrid serving remain separately authorized operator
 actions.
 
+## Installer-owned existing-volume entry point
+
+`install-openclaw.sh` remains the one user-facing entry point. It installs the
+controller, guard, and verifier into `~/.noosphere` with mode `0700` only after
+their immutable SHA-256 pins match. Existing-volume upgrades preserve the live
+Compose file, write a private source snapshot and candidate, bind all execution
+inputs in the controller manifest, then prepare state while inheriting the
+installer's engine-plus-volume lock. The installer releases only that lock
+descriptor before launching the controller under the required transient user
+unit, allowing the controller to reacquire authority without deadlocking.
+
+On interruption, the stable controller state is resumed before the installer
+rewrites bound `.env` or candidate bytes. A successful controller run owns the
+guard, Compose `init` dependency, writer authorization, app activation, and
+full verifier; the installer does not repeat those writer-boundary operations.
+Complete state is accepted only when the durable guard journal's exact path and
+SHA-256 match the state's `guardJournalEvidence` binding and the journal records
+a completed source switch. New installs and already-complete transitions retain
+the established direct guard path.
+
+The transient authority process requires Node to resolve from the root-trusted
+bootstrap PATH (`/usr/sbin:/usr/bin:/sbin:/bin`). An nvm-only Node installation
+fails before preparation with an explicit remediation instead of broadening the
+trusted PATH. The installer verifies user-manager linger and reachability; when
+necessary, it enables linger through `loginctl` and starts `user@UID.service`
+through `sudo` before rechecking the user manager.
+
+Installer-side Compose version/model hashing uses the same sanitized Docker,
+Compose, proxy, shell-startup, HOME, Docker-config, host, and PATH contract as
+controller revalidation. Non-loopback verification additionally requires the
+`ip` command from `iproute2` so the selected IPv4 address can be proven local.
+
 The path-filtered `postgres-pgvector-rehearsal.yml` workflow makes these
-controller gates mandatory evidence on controller, fixture, guard, verifier, or
-workflow changes. One job runs the focused suite, including the real transient
-user-systemd owner. A separate `linux/amd64` job pulls the fixture's two
+controller gates mandatory evidence on controller, installer, fixture, guard,
+verifier, or workflow changes. One job runs the focused controller suite, the
+real transient user-systemd owner, and the seven-owner installer integration
+fixture. A separate `linux/amd64` job pulls the fixture's two
 digest-pinned images and runs the real-Docker interruption/recovery rehearsal.
 Both jobs use disposable lingering user managers and carry only read-only
 repository permission; they do not authenticate to a registry or touch a

@@ -18,9 +18,13 @@ Install these on the machine running OpenClaw Gateway:
 - Docker
 - Docker Compose v2 (`docker compose`)
 - Node.js 22+
+- `iproute2` (`ip`) when binding Noosphere to a non-loopback IPv4 address
+- For an existing-volume upgrade, Node must also resolve from the root-trusted
+  system PATH (`/usr/sbin:/usr/bin:/sbin:/bin`); nvm-only Node is not admitted
+  inside the transient transition authority.
 - OpenClaw CLI
 - `curl`
-- `jq`, `sha256sum`, and `flock`
+- `jq`, `sha256sum`, `flock`, `systemd-run`, `systemctl`, and `loginctl`
 
 Verify:
 
@@ -53,16 +57,18 @@ The installer:
 1. **Prompts for IP address selection** — detects available network interfaces (localhost, Tailscale, local network IPs) and lets you choose which address Noosphere will bind to. You can also select `0.0.0.0` (all interfaces) or enter a custom IP.
 2. Creates `~/.noosphere/`.
 3. Generates local secrets.
-4. For an existing install, takes an exclusive operation lock and writes a fail-closed candidate Compose gate while the source container keeps running unchanged.
-5. Runs the offline, restore-tested PostgreSQL image switch; candidate recreation remains blocked until the guard creates exact authorization.
-6. For a new database, durably claims the still-absent named volume, creates it with provenance labels, then starts PostgreSQL and Redis on the rehearsed candidate.
-7. Runs Prisma migrations through `docker/migrate-or-baseline.mjs`.
-8. Runs repeatable bootstrap through `docker/bootstrap.mjs` using the same generated admin/API credentials that are later written to `.env` and OpenClaw secrets.
-9. Finalizes new-install provenance before starting Noosphere (or validates completed switch evidence), then runs full deployment verification.
-10. Writes `~/.openclaw/secrets/noosphere-memory.json`.
-11. Installs or updates `noosphere-memory` in OpenClaw.
-12. Patches OpenClaw config with the Noosphere base URL, API key secret reference, and `hooks.allowPromptInjection: true`.
-13. Restarts OpenClaw Gateway when available.
+4. Installs the checksum-pinned transition controller, guard, and verifier privately with mode `0700`.
+5. For an existing install, keeps live Compose bytes unchanged, binds a private source snapshot, candidate, environment, Docker/Compose tooling, and verifier target, then prepares controller state under the inherited engine-plus-volume lock.
+   Caller `DOCKER_*`, `COMPOSE_*`, proxy, and shell-startup controls are removed while hashing the Compose version and effective model, matching controller revalidation exactly.
+6. Releases that lock descriptor and runs the existing-volume transition under a collected transient user-systemd unit. The controller owns the offline restore rehearsal, candidate publication, Compose `init` dependency, writer authorization, app activation, and full verification. If interrupted, rerunning the same installer command resumes the durable controller state before touching its bound inputs.
+7. For a new database, durably claims the still-absent named volume, creates it with provenance labels, then starts PostgreSQL and Redis on the rehearsed candidate.
+8. Runs Prisma migrations through `docker/migrate-or-baseline.mjs`.
+9. Runs repeatable bootstrap through `docker/bootstrap.mjs` using the same generated admin/API credentials that are later written to `.env` and OpenClaw secrets.
+10. Finalizes new-install provenance before starting Noosphere (or validates completed switch evidence), then runs full deployment verification.
+11. Writes `~/.openclaw/secrets/noosphere-memory.json`.
+12. Installs or updates `noosphere-memory` in OpenClaw.
+13. Patches OpenClaw config with the Noosphere base URL, API key secret reference, and `hooks.allowPromptInjection: true`.
+14. Restarts OpenClaw Gateway when available.
 
 > **Note:** The installer can still prompt when run through `curl | bash` by reading from `/dev/tty` if a controlling terminal is available. The interactive IP prompt is skipped when `APP_URL` is set, or when no interactive terminal is available (for example CI/cron/background automation). In non-interactive mode, the script auto-detects the best available IP (Tailscale > localhost). Set `APP_URL` beforehand to force a specific address in any mode.
 
