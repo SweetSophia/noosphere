@@ -736,9 +736,13 @@ expect(
   installer.includes(
     `PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${releaseVersion}}"`,
   ) &&
-    installer.includes('openclaw plugins install "$PLUGIN_SPEC" --force') &&
+    installer.includes(`NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-${releaseVersion}}"`) &&
+    installer.includes('PLUGIN_INSTALL_ARGS=(plugins install "$PLUGIN_SPEC" --force)') &&
+    installer.includes('if [[ "$PLUGIN_SPEC" == npm:* ]]') &&
+    installer.includes('PLUGIN_INSTALL_ARGS+=(--pin)') &&
+    installer.includes('openclaw "${PLUGIN_INSTALL_ARGS[@]}"') &&
     !installer.includes('openclaw plugins update "$PLUGIN_ID"'),
-  "install-openclaw.sh must install the version-bound OpenClaw package on both fresh and existing installations",
+  "install-openclaw.sh must default app and plugin to one release, force deterministic reinstall, and pin npm specs",
 );
 
 for (const relativePath of [

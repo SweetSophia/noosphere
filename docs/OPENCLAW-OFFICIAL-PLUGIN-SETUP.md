@@ -219,7 +219,7 @@ These manual start commands are for a new database volume. Before upgrading an e
 Install the plugin package:
 
 ```bash
-openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.12.0
+openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.12.0 --pin
 ```
 
 Create an OpenClaw secret file. Use an ADMIN-scoped Noosphere API key when you want `openclaw noosphere doctor` and `openclaw noosphere status` to pass; READ/WRITE-only keys can still work for narrower recall/save tools but will fail authenticated status checks. Do not paste real API keys into shared docs or commits:

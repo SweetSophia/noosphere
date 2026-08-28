@@ -81,6 +81,9 @@ updateFile("install-openclaw.sh", (text) =>
   text.replace(
     /^PLUGIN_SPEC="\$\{NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia\/openclaw-noosphere-memory@.*\}"$/m,
     `PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${version}}"`,
+  ).replace(
+    /^  NOOSPHERE_VERSION="\$\{NOOSPHERE_VERSION:-(?:latest|\d+\.\d+\.\d+)\}"$/m,
+    `  NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-${version}}"`,
   ),
 );
 

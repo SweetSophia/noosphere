@@ -313,7 +313,7 @@ resolve_runtime_config() {
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-$(env_get "$runtime_env" NOOSPHERE_PORT)}"
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-$(env_get "$runtime_env" NOOSPHERE_VERSION)}"
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-latest}"
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.12.0}"
   NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-$(env_get "$runtime_env" NOOSPHERE_IMAGE)}"
   APP_URL="${APP_URL:-$(env_get "$runtime_env" APP_URL)}"
   BIND_ADDRESS="${BIND_ADDRESS:-$(env_get "$runtime_env" BIND_ADDRESS)}"
@@ -1761,11 +1761,11 @@ cat > "$SECRETS_FILE" <<JSON
 JSON
 
 echo "Installing OpenClaw plugin: ${PLUGIN_SPEC}"
-if openclaw plugins inspect "$PLUGIN_ID" >/dev/null 2>&1; then
-  openclaw plugins install "$PLUGIN_SPEC" --force
-else
-  openclaw plugins install "$PLUGIN_SPEC"
+PLUGIN_INSTALL_ARGS=(plugins install "$PLUGIN_SPEC" --force)
+if [[ "$PLUGIN_SPEC" == npm:* ]]; then
+  PLUGIN_INSTALL_ARGS+=(--pin)
 fi
+openclaw "${PLUGIN_INSTALL_ARGS[@]}"
 
 PATCH_FILE="$(mktemp)"
 cat > "$PATCH_FILE" <<JSON5

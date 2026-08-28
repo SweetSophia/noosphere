@@ -373,11 +373,14 @@ Default runtime locations:
     Noosphere runtime: ~/.noosphere
     OpenClaw secret file: ~/.openclaw/secrets/noosphere-memory.json
     Default app URL: http://127.0.0.1:6578
-    Docker image: ghcr.io/sweetsophia/noosphere:latest
+    Docker image: ghcr.io/sweetsophia/noosphere:1.12.0
 
-If you want a pinned image version:
+The direct installer defaults to the same coordinated release contract. To
+state that contract explicitly while preserving override support:
 
-    NOOSPHERE_VERSION=v1.5.5 \
+    NOOSPHERE_VERSION=1.12.0 \
+    NOOSPHERE_IMAGE=ghcr.io/sweetsophia/noosphere:1.12.0 \
+    NOOSPHERE_PLUGIN_SPEC=npm:@sweetsophia/openclaw-noosphere-memory@1.12.0 \
     NOOSPHERE_PORT=6578 \
     APP_URL=http://127.0.0.1:6578 \
     bash install-openclaw.sh

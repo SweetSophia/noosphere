@@ -9,7 +9,7 @@ supplement.
 Use OpenClaw's plugin installer:
 
 ```bash
-openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.12.0
+openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.12.0 --pin
 ```
 
 For the full local Noosphere + OpenClaw setup, use the repository installer:

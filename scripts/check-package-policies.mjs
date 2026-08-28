@@ -108,6 +108,28 @@ function stripYamlComment(line) {
   return line;
 }
 
+function hasDockerRefTagEntry(lines) {
+  return lines.some((line) => {
+    const fields = new Map(
+      line.split(",").map((field) => {
+        const separator = field.indexOf("=");
+        return separator === -1
+          ? [field.trim(), ""]
+          : [field.slice(0, separator).trim(), field.slice(separator + 1).trim()];
+      }),
+    );
+    return fields.get("type") === "ref" && fields.get("event") === "tag";
+  });
+}
+
+function unpinnedActionUses(lines) {
+  return lines
+    .map(yamlKeyValue)
+    .filter((entry) => entry?.key === "uses")
+    .map((entry) => entry.value)
+    .filter((value) => !/@[0-9a-f]{40}$/.test(value));
+}
+
 function parseYamlScalar(value) {
   const trimmed = value.trim();
   const quote = trimmed[0];
@@ -290,7 +312,7 @@ expect(
 );
 expect(
   dockerPublishWorkflowLines.includes("type=semver,pattern={{version}}") &&
-    !dockerPublishWorkflowLines.includes("type=ref,event=tag"),
+    !hasDockerRefTagEntry(dockerPublishWorkflowLines),
   "The Docker publish workflow must strip the release tag's v prefix so NOOSPHERE_VERSION resolves to a published image tag.",
 );
 expect(
@@ -300,6 +322,10 @@ expect(
     dockerPublishWorkflowLines.includes("push: ${{ github.ref_type == 'tag' }}") &&
     !dockerPublishWorkflow.includes("enable={{is_default_branch}}"),
   "The Docker workflow must bind v$VERSION and publish latest only from the canonical application tag.",
+);
+expect(
+  unpinnedActionUses(dockerPublishWorkflowLines).length === 0,
+  `The authenticated Docker publisher must pin every action to a full commit SHA; unpinned: ${unpinnedActionUses(dockerPublishWorkflowLines).join(", ")}`,
 );
 expect(
   hermesReleaseWorkflowLines.includes("contents: read") &&
