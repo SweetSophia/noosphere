@@ -744,6 +744,13 @@ expect(
     !installer.includes('openclaw plugins update "$PLUGIN_ID"'),
   "install-openclaw.sh must default app and plugin to one release, force deterministic reinstall, and pin npm specs",
 );
+expect(
+  installer.includes("verify_min_articles=1") &&
+    installer.includes('if [[ "$new_install_required" == true ]]') &&
+    installer.includes("verify_min_articles=0") &&
+    installer.includes('NOOSPHERE_MIN_ARTICLES="$verify_min_articles"'),
+  "install-openclaw.sh must allow zero articles only for a proven new install",
+);
 
 for (const relativePath of [
   "openclaw-noosphere-memory/src/cli.ts",

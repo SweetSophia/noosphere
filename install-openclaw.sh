@@ -1734,10 +1734,15 @@ docker compose up -d app
 wait_for_container_healthy noosphere-openclaw-app 30
 wait_for_http_health "$APP_URL" 60
 
+verify_min_articles=1
+if [[ "$new_install_required" == true ]]; then
+  verify_min_articles=0
+fi
 NOOSPHERE_APP_URL="$APP_URL" \
 NOOSPHERE_DB_CONTAINER=noosphere-openclaw-db \
 NOOSPHERE_EXPECTED_DB_VOLUME=noosphere_postgres_data \
 NOOSPHERE_EXPECTED_POSTGRES_IMAGE_MODE=candidate \
+NOOSPHERE_MIN_ARTICLES="$verify_min_articles" \
 NOOSPHERE_POSTGRES_EVIDENCE="$POSTGRES_BACKUP_DIR/noosphere_postgres_data.phase-a2b.json" \
   "$POSTGRES_VERIFY_SCRIPT"
 else
