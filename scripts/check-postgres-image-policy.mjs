@@ -786,6 +786,7 @@ for (const relativePath of [
 }
 
 const switchScript = read("scripts/switch-pgvector-compose.sh");
+const controllerScript = read("scripts/run-pgvector-transition-controller.sh");
 expect(
   !switchScript.includes("imagetools") && !switchScript.includes("docker buildx"),
   "switch-pgvector-compose.sh must verify guarded recovery from local immutable image evidence without registry lookups",
@@ -875,7 +876,7 @@ const recoveredSourceStateValidation = switchScript.indexOf(
 );
 const recoveredMutation = switchScript.indexOf(
   'if [[ "$journal_phase" == recovered ]]; then\n' +
-    '    if docker inspect "$app_container"',
+    '    stop_app_writer_for_recovery',
 );
 expect(
   recoveredEvidenceValidation >= 0 &&
@@ -974,8 +975,11 @@ expect(
     switchTestScript.includes(
       "Versioned journal did not select signature version 2",
     ) &&
-    switchTestScript.includes("Unsupported data signature version was accepted"),
-  "test-pgvector-compose-switch.sh must prove historical recovery compatibility, signature-version dispatch, and post-render mutation rejection",
+    switchTestScript.includes("Unsupported data signature version was accepted") &&
+    switchTestScript.includes(
+      "Recovery writer-stop accepted a failed container classification as absence",
+    ),
+  "test-pgvector-compose-switch.sh must prove historical recovery compatibility, fail-closed writer classification, signature-version dispatch, and post-render mutation rejection",
 );
 
 const digestTestScript = read("scripts/test-digest-order-independence.sh");
@@ -1198,14 +1202,46 @@ const focusedControllerDispatches = Array.from(
   focusedControllerFixture.matchAll(/^  (test_[A-Za-z0-9_]+)$/gm),
   (match) => match[1],
 );
+const sourceRecoveryStart = switchScript.indexOf("attempt_source_recovery() (");
+const sourceRecoveryEnd = switchScript.indexOf("\n)\n\nrecover_source()", sourceRecoveryStart);
+const sourceRecovery =
+  sourceRecoveryStart >= 0 && sourceRecoveryEnd > sourceRecoveryStart
+    ? switchScript.slice(sourceRecoveryStart, sourceRecoveryEnd)
+    : "";
 expect(
-  focusedControllerDefinitions.length === 137 &&
-    focusedControllerDispatches.length === 137 &&
-    new Set(focusedControllerDispatches).size === 137 &&
+  switchScript.includes("container_running_state()") &&
+    switchScript.includes("docker container inspect") &&
+    switchScript.includes("docker container ls --all --format '{{.Names}}'") &&
+    !switchScript.includes('docker inspect "$app_container"') &&
+    !switchScript.includes(
+      'docker container inspect "$app_container" --format \'{{.State.Running}}\'',
+    ) &&
+    controllerScript.includes("container_running_state()") &&
+    controllerScript.includes('finalContainerState == "absent"') &&
+    controllerScript.includes('inspectRunning == null') &&
+    controllerScript.includes('.stopExitCode | type == "number"') &&
+    sourceRecovery !== "" &&
+    countLiteral(sourceRecovery, "stop_app_writer_for_recovery") === 2 &&
+    !sourceRecovery.includes('if docker container inspect "$app_container"') &&
+    focusedControllerDefinitions.includes(
+      "test_absent_app_after_guard_is_authorized_recreated_and_completed",
+    ) &&
+    focusedControllerDefinitions.includes(
+      "test_absent_app_activation_failure_records_truthful_stop_evidence",
+    ) &&
+    focusedControllerDefinitions.includes(
+      "test_writer_stop_evidence_rejects_nonnumeric_stop_exit",
+    ),
+  "PostgreSQL transition ownership must distinguish exact app-container absence from same-named images, fail closed during source recovery, recreate absent apps through Compose, and bind truthful typed stop evidence",
+);
+expect(
+  focusedControllerDefinitions.length === 140 &&
+    focusedControllerDispatches.length === 140 &&
+    new Set(focusedControllerDispatches).size === 140 &&
     focusedControllerDefinitions.includes("test_verification_url_accepts_ipv4_loopback_range") &&
     JSON.stringify([...focusedControllerDefinitions].sort()) ===
       JSON.stringify([...focusedControllerDispatches].sort()),
-  "the focused transition-controller fixture must define and dispatch exactly 137 unique owners, including full IPv4 loopback coverage",
+  "the focused transition-controller fixture must define and dispatch exactly 140 unique owners, including absent-app recovery, typed stop evidence, and full IPv4 loopback coverage",
 );
 const controllerWorkflowTriggerPaths = [
   ".github/workflows/postgres-pgvector-rehearsal.yml",

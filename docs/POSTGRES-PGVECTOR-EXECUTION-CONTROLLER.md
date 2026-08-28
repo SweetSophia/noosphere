@@ -499,14 +499,22 @@ adds the following publication, writer-closure, and durability guarantees:
   It returns the original failure only after rollback is durable; rollback-
   durability failure terminates fail-stopped.
 
+- **Absent writers remain fail-closed without image aliasing**: app identity uses
+  `docker container inspect`, never generic `docker inspect`, so a same-named
+  image cannot impersonate a container. A failed inspect counts as absent only
+  after an exact-name container listing succeeds. The controller records
+  `finalContainerState=absent` with `inspectRunning=null`, authorizes only while
+  the writer is stopped or absent, recreates an absent app through the bound
+  Compose model, and then verifies the recreated container is running.
+
 The hardened controller was merged in PR #305 after the full focused suite
 (`135/135`), standalone transient-systemd fixture, pinned-Docker `linux/amd64`
 interruption/recovery rehearsal, and exact-head hosted gates passed with zero
-owned residue. PR #306 adds two focused local-address owners and thirteen installer
-owners, for exact focused parity of `137/137/137`. Its review-fix exact-head
-hosted result remains a separate gate. Deployment, the PostgreSQL transition, feature
-activation, backfill, and hybrid serving remain separately authorized operator
-actions.
+owned residue. PR #306 added two focused local-address owners and thirteen
+installer owners for exact focused parity of `137/137/137`; the production
+follow-up adds three absent-app/evidence owners for `140/140/140`. Deployment, the
+PostgreSQL transition, feature activation, backfill, and hybrid serving remain
+separately authorized operator actions.
 
 ## Installer-owned existing-volume entry point
 

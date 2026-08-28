@@ -36,9 +36,10 @@ backfill, shadow evaluation, or hybrid serving.
   merged in PR #305 with focused/systemd and pinned-Docker hosted gates green.
   Task 7's one-command installer integration is published as PR #306 with
   checksum-pinned private staging, controller-routed existing-volume upgrades,
-  durable rerun recovery, thirteen installer owners, and 137 focused controller
-  owners. The review-fix head still requires exact-head hosted CI and regular
-  merge so pinned intermediate commits remain reachable. Transition execution
+  durable rerun recovery, thirteen installer owners, and 140 focused controller
+  owners. The post-production follow-up owns absent app-container authorization,
+  recreation, and truthful stop evidence; its exact-head hosted CI and regular
+  merge remain required so pinned intermediate commits stay reachable. Transition
   and Phase D rollout remain explicit operator actions.
 
 ## Automatic capture and enrichment
