@@ -427,8 +427,88 @@ test_complete_controller_state_requires_guard_closure() (
 
   chmod 0600 "$POSTGRES_CONTROLLER_STATE"
   controller_transition_completed=false
+  reacquire_postgres_operation_lock_from_manifest() { :; }
   reconcile_postgres_controller_before_configuration
   [[ "$controller_transition_completed" == true ]]
+)
+
+write_complete_controller_reconciliation_fixture() {
+  local fixture=$1 docker_endpoint=$2 engine_id=$3 lock_root=$4 evidence evidence_sha
+  POSTGRES_CONTROLLER_STATE="$fixture/state.json"
+  POSTGRES_CONTROLLER_MANIFEST="$fixture/manifest.json"
+  POSTGRES_BACKUP_DIR="$fixture/backups"
+  mkdir -m 700 "$POSTGRES_BACKUP_DIR" "$lock_root"
+  evidence="$POSTGRES_BACKUP_DIR/noosphere_postgres_data.phase-a2b.json"
+  printf '{"mode":"switch","phase":"complete"}\n' > "$evidence"
+  chmod 0600 "$evidence"
+  evidence_sha=$(sha256_file "$evidence")
+  jq -n --arg path "$evidence" --arg sha "$evidence_sha" \
+    '{phase:"complete",guardJournalEvidence:{path:$path,sha256:$sha,phase:"complete"}}' \
+    > "$POSTGRES_CONTROLLER_STATE"
+  jq -n --arg dockerEndpoint "$docker_endpoint" --arg engineId "$engine_id" --arg lockRoot "$lock_root" \
+    '{dockerEndpoint:$dockerEndpoint,engineId:$engineId,lockRoot:$lockRoot}' \
+    > "$POSTGRES_CONTROLLER_MANIFEST"
+  chmod 0600 "$POSTGRES_CONTROLLER_STATE" "$POSTGRES_CONTROLLER_MANIFEST"
+}
+
+test_complete_reconciliation_reacquires_manifest_operation_lock() (
+  local fixture expected_lock_key expected_lock_path
+  fixture=$(mktemp -d)
+  trap 'release_postgres_operation_lock >/dev/null 2>&1 || true; rm -rf "$fixture"' EXIT
+  XDG_RUNTIME_DIR="$fixture/runtime"
+  write_complete_controller_reconciliation_fixture \
+    "$fixture" unix:///fixture/docker.sock fixture-engine "$XDG_RUNTIME_DIR"
+  controller_transition_completed=false
+  resolve_local_docker_endpoint() { printf 'unix:///fixture/docker.sock\n'; }
+  docker() { printf 'fixture-engine\n'; }
+
+  reconcile_postgres_controller_before_configuration
+
+  expected_lock_key=$(printf '%s\0%s' fixture-engine noosphere_postgres_data | sha256sum | awk '{print $1}')
+  expected_lock_path="$XDG_RUNTIME_DIR/noosphere-pgvector-switch-$expected_lock_key.lock"
+  [[ "$controller_transition_completed" == true ]]
+  [[ ${NOOSPHERE_A2B_LOCK_PATH:-} == "$expected_lock_path" ]]
+  if flock -n "$expected_lock_path" -c true; then
+    fail 'complete reconciliation did not retain the manifest operation lock'
+  fi
+)
+
+test_complete_reconciliation_rejects_manifest_engine_drift() (
+  local fixture rc=0
+  fixture=$(mktemp -d)
+  trap 'release_postgres_operation_lock >/dev/null 2>&1 || true; rm -rf "$fixture"' EXIT
+  XDG_RUNTIME_DIR="$fixture/runtime"
+  write_complete_controller_reconciliation_fixture \
+    "$fixture" unix:///fixture/docker.sock manifest-engine "$XDG_RUNTIME_DIR"
+  controller_transition_completed=false
+  resolve_local_docker_endpoint() { printf 'unix:///fixture/docker.sock\n'; }
+  docker() { printf 'current-engine\n'; }
+
+  acquire_postgres_operation_lock
+  reconcile_postgres_controller_before_configuration || rc=$?
+
+  [[ $rc != 0 ]]
+  [[ "$controller_transition_completed" == false ]]
+)
+
+test_complete_reconciliation_rejects_manifest_lock_root_drift() (
+  local fixture manifest_lock_root rc=0
+  fixture=$(mktemp -d)
+  trap 'release_postgres_operation_lock >/dev/null 2>&1 || true; rm -rf "$fixture"' EXIT
+  XDG_RUNTIME_DIR="$fixture/current-runtime"
+  manifest_lock_root="$fixture/manifest-runtime"
+  write_complete_controller_reconciliation_fixture \
+    "$fixture" unix:///fixture/docker.sock fixture-engine "$manifest_lock_root"
+  mkdir -m 700 "$XDG_RUNTIME_DIR"
+  controller_transition_completed=false
+  resolve_local_docker_endpoint() { printf 'unix:///fixture/docker.sock\n'; }
+  docker() { printf 'fixture-engine\n'; }
+
+  acquire_postgres_operation_lock
+  reconcile_postgres_controller_before_configuration || rc=$?
+
+  [[ $rc != 0 ]]
+  [[ "$controller_transition_completed" == false ]]
 )
 
 test_existing_upgrade_routes_through_controller() (
@@ -458,7 +538,8 @@ test_existing_upgrade_routes_through_controller() (
   resolve_local_docker_endpoint() { printf 'unix:///fixture/docker.sock\n'; }
   write_postgres_controller_manifest() {
     printf 'manifest\n' >> "$trace"
-    printf '{"dockerEndpoint":"unix:///fixture/docker.sock","engineId":"fixture-engine"}\n' \
+    jq -n --arg lockRoot "$XDG_RUNTIME_DIR" \
+      '{dockerEndpoint:"unix:///fixture/docker.sock",engineId:"fixture-engine",lockRoot:$lockRoot}' \
       > "$POSTGRES_CONTROLLER_MANIFEST"
     chmod 0600 "$POSTGRES_CONTROLLER_MANIFEST"
   }
@@ -495,7 +576,8 @@ test_existing_upgrade_reacquires_operation_lock() (
   assert_postgres_controller_bootstrap_node() { :; }
   resolve_local_docker_endpoint() { printf 'unix:///fixture/docker.sock\n'; }
   write_postgres_controller_manifest() {
-    printf '{"dockerEndpoint":"unix:///fixture/docker.sock","engineId":"fixture-engine"}\n' \
+    jq -n --arg lockRoot "$XDG_RUNTIME_DIR" \
+      '{dockerEndpoint:"unix:///fixture/docker.sock",engineId:"fixture-engine",lockRoot:$lockRoot}' \
       > "$POSTGRES_CONTROLLER_MANIFEST"
     chmod 0600 "$POSTGRES_CONTROLLER_MANIFEST"
   }
@@ -540,7 +622,8 @@ test_existing_upgrade_rejects_lock_identity_change() (
   assert_postgres_controller_bootstrap_node() { :; }
   resolve_local_docker_endpoint() { printf '%s\n' "$FIXTURE_DOCKER_ENDPOINT"; }
   write_postgres_controller_manifest() {
-    printf '{"dockerEndpoint":"unix:///fixture/docker.sock","engineId":"fixture-engine"}\n' \
+    jq -n --arg lockRoot "$XDG_RUNTIME_DIR" \
+      '{dockerEndpoint:"unix:///fixture/docker.sock",engineId:"fixture-engine",lockRoot:$lockRoot}' \
       > "$POSTGRES_CONTROLLER_MANIFEST"
     chmod 0600 "$POSTGRES_CONTROLLER_MANIFEST"
   }
@@ -583,6 +666,9 @@ main() {
   test_interrupted_controller_rerun_reuses_bound_state
   test_new_install_bypasses_transition_controller
   test_complete_controller_state_requires_guard_closure
+  test_complete_reconciliation_reacquires_manifest_operation_lock
+  test_complete_reconciliation_rejects_manifest_engine_drift
+  test_complete_reconciliation_rejects_manifest_lock_root_drift
   test_existing_upgrade_routes_through_controller
   test_existing_upgrade_reacquires_operation_lock
   test_existing_upgrade_rejects_lock_identity_change

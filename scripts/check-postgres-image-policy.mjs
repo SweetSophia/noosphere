@@ -575,6 +575,23 @@ const transitionRouteMatch = installer.match(
   /^route_postgres_install_transition\(\) \{([\s\S]*?)^}\n\n(?=reconcile_postgres_controller_before_configuration\(\))/m,
 );
 const transitionRoute = transitionRouteMatch?.[1] ?? "";
+const controllerReconciliationMatch = installer.match(
+  /^reconcile_postgres_controller_before_configuration\(\) \{([\s\S]*?)^}\n\n(?=acquire_postgres_operation_lock\(\))/m,
+);
+const controllerReconciliation = controllerReconciliationMatch?.[1] ?? "";
+const completeReconciliationStart = controllerReconciliation.indexOf("    complete)");
+const incidentReconciliationStart = controllerReconciliation.indexOf("    incident)");
+const completeReconciliation =
+  completeReconciliationStart >= 0 && incidentReconciliationStart > completeReconciliationStart
+    ? controllerReconciliation.slice(completeReconciliationStart, incidentReconciliationStart)
+    : "";
+const completeGuardClosure = completeReconciliation.indexOf('.mode == "switch" and .phase == "complete"');
+const completeLockReacquisition = completeReconciliation.indexOf(
+  "reacquire_postgres_operation_lock_from_manifest",
+);
+const completeControllerCompletion = completeReconciliation.indexOf(
+  "controller_transition_completed=true",
+);
 const existingSwitchBlock = transitionRoute.indexOf('if [[ "$existing_switch_required" == true ]]');
 const candidatePull = transitionRoute.indexOf('-f "$POSTGRES_CONTROLLER_CANDIDATE" pull');
 const controllerManifest = transitionRoute.indexOf("write_postgres_controller_manifest");
@@ -596,13 +613,28 @@ expect(
   "installer route policy must be scoped to one function and reacquire the operation lock before post-controller completion",
 );
 expect(
+  controllerReconciliationMatch !== null &&
+    !controllerReconciliation.includes("acquire_postgres_operation_lock() {") &&
+    completeGuardClosure >= 0 &&
+    completeLockReacquisition > completeGuardClosure &&
+    completeControllerCompletion > completeLockReacquisition,
+  "complete controller reconciliation must bind the manifest operation lock after closure validation and before completion",
+);
+expect(
   installer.includes("reacquire_postgres_operation_lock_from_manifest() {") &&
     installer.includes("expected_docker_host=$(jq -er '.dockerEndpoint") &&
     installer.includes("expected_engine_id=$(jq -er '.engineId") &&
-    installer.includes('acquire_postgres_operation_lock "$expected_docker_host" "$expected_engine_id"') &&
+    installer.includes("expected_lock_root=$(jq -er '.lockRoot") &&
+    installer.includes(
+      'acquire_postgres_operation_lock "$expected_docker_host" "$expected_engine_id" "$expected_lock_root"',
+    ) &&
     installer.includes('[[ -z "$expected_docker_host" || "$docker_host" == "$expected_docker_host" ]]') &&
-    installer.includes('[[ -z "$expected_engine_id" || "$engine_id" == "$expected_engine_id" ]]'),
-  "post-controller lock reacquisition must remain bound to the manifest Docker endpoint and engine identity",
+    installer.includes('[[ -z "$expected_engine_id" || "$engine_id" == "$expected_engine_id" ]]') &&
+    installer.includes(
+      '[[ $(realpath -m "$ambient_lock_root") == "$(realpath -m "$expected_lock_root")" ]]',
+    ) &&
+    installer.includes("Runtime lock directory changed while the PostgreSQL transition controller was active."),
+  "post-controller lock reacquisition must remain bound to the manifest Docker endpoint, engine identity, and lock root",
 );
 expect(
   installer.includes(
@@ -1146,12 +1178,12 @@ const installerControllerDispatches = Array.from(
   (match) => match[1],
 );
 expect(
-  installerControllerDefinitions.length === 10 &&
-    installerControllerDispatches.length === 10 &&
-    new Set(installerControllerDispatches).size === 10 &&
+  installerControllerDefinitions.length === 13 &&
+    installerControllerDispatches.length === 13 &&
+    new Set(installerControllerDispatches).size === 13 &&
     JSON.stringify([...installerControllerDefinitions].sort()) ===
       JSON.stringify([...installerControllerDispatches].sort()),
-  "the installer transition-controller fixture must define and dispatch exactly ten unique owners",
+  "the installer transition-controller fixture must define and dispatch exactly thirteen unique owners",
 );
 const focusedControllerFixture = read("scripts/test-pgvector-transition-controller.sh");
 const focusedControllerDefinitions = Array.from(

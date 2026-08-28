@@ -502,7 +502,7 @@ adds the following publication, writer-closure, and durability guarantees:
 The hardened controller was merged in PR #305 after the full focused suite
 (`135/135`), standalone transient-systemd fixture, pinned-Docker `linux/amd64`
 interruption/recovery rehearsal, and exact-head hosted gates passed with zero
-owned residue. PR #306 adds two focused local-address owners and ten installer
+owned residue. PR #306 adds two focused local-address owners and thirteen installer
 owners, for exact focused parity of `137/137/137`. Its review-fix exact-head
 hosted result remains a separate gate. Deployment, the PostgreSQL transition, feature
 activation, backfill, and hybrid serving remain separately authorized operator
@@ -521,9 +521,12 @@ unit, allowing the controller to reacquire authority without deadlocking. After
 the controller returns successfully, the installer must reacquire the same
 engine-plus-volume lock before marking the transition complete or entering
 secret publication, plugin installation, OpenClaw config mutation, or gateway
-restart. Reacquisition reads the manifest's recorded `dockerEndpoint` and
-`engineId`, rejects any live identity drift, and only then opens that exact
-engine-plus-volume lock. Reacquisition failure stops the installer.
+restart. Reacquisition reads the manifest's recorded `dockerEndpoint`,
+`engineId`, and `lockRoot`; it rejects live endpoint, engine, or runtime-root
+drift and only then opens that exact engine-plus-volume lock. Fresh controller
+return, nonterminal recovery, and already-complete reconciliation all use this
+same binding before installer continuation. Reacquisition failure stops the
+installer.
 
 A rerun that validates already-complete state, or resumes nonterminal state to
 completion, carries `controller_transition_completed=true` across later
@@ -537,8 +540,9 @@ guard, Compose `init` dependency, writer authorization, app activation, and
 full verifier; the installer does not repeat those writer-boundary operations.
 Complete state is accepted only when the durable guard journal's exact path and
 SHA-256 match the state's `guardJournalEvidence` binding and the journal records
-a completed source switch. New installs and already-complete transitions retain
-the established direct guard path.
+a completed source switch. New installs retain the established direct guard
+path; already-complete transitions skip controller work only after manifest-bound
+operation-lock reacquisition succeeds.
 
 The published installer and helper URLs pin intermediate commits. PR #306 must
 therefore use a regular merge rather than squash so those commit objects remain

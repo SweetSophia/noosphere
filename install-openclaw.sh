@@ -809,6 +809,7 @@ reconcile_postgres_controller_before_configuration() {
         echo "Guard evidence: $guard_evidence" >&2
         return 1
       }
+      reacquire_postgres_operation_lock_from_manifest || return 1
       controller_transition_completed=true
       ;;
     incident)
@@ -826,14 +827,26 @@ reconcile_postgres_controller_before_configuration() {
 }
 
 acquire_postgres_operation_lock() {
-  local expected_docker_host=${1:-} expected_engine_id=${2:-}
-  local docker_host engine_id lock_root lock_key lock_path
+  local expected_docker_host=${1:-} expected_engine_id=${2:-} expected_lock_root=${3:-}
+  local docker_host engine_id ambient_lock_root lock_root lock_key lock_path
   docker_host=$(resolve_local_docker_endpoint) || return 1
   [[ -z "$expected_docker_host" || "$docker_host" == "$expected_docker_host" ]] || {
     echo 'Docker endpoint changed while the PostgreSQL transition controller was active.' >&2
     return 1
   }
-  lock_root=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+  ambient_lock_root=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+  lock_root=$ambient_lock_root
+  if [[ -n "$expected_lock_root" ]]; then
+    [[ "$expected_lock_root" == /* ]] || {
+      echo 'Manifest runtime lock directory is not absolute.' >&2
+      return 1
+    }
+    [[ $(realpath -m "$ambient_lock_root") == "$(realpath -m "$expected_lock_root")" ]] || {
+      echo 'Runtime lock directory changed while the PostgreSQL transition controller was active.' >&2
+      return 1
+    }
+    lock_root=$expected_lock_root
+  fi
   [[ "$lock_root" == /* && -d "$lock_root" && ! -L "$lock_root" ]] || {
     echo "Runtime lock directory is unavailable or unsafe: $lock_root" >&2
     return 1
@@ -866,13 +879,15 @@ acquire_postgres_operation_lock() {
 }
 
 reacquire_postgres_operation_lock_from_manifest() {
-  local expected_docker_host expected_engine_id
+  local expected_docker_host expected_engine_id expected_lock_root
   assert_installer_owned_regular_file "$POSTGRES_CONTROLLER_MANIFEST" || return 1
   expected_docker_host=$(jq -er '.dockerEndpoint | select(type == "string" and length > 0)' \
     "$POSTGRES_CONTROLLER_MANIFEST") || return 1
   expected_engine_id=$(jq -er '.engineId | select(type == "string" and length > 0)' \
     "$POSTGRES_CONTROLLER_MANIFEST") || return 1
-  acquire_postgres_operation_lock "$expected_docker_host" "$expected_engine_id"
+  expected_lock_root=$(jq -er '.lockRoot | select(type == "string" and startswith("/"))' \
+    "$POSTGRES_CONTROLLER_MANIFEST") || return 1
+  acquire_postgres_operation_lock "$expected_docker_host" "$expected_engine_id" "$expected_lock_root"
 }
 
 extract_bootstrap_json() {
