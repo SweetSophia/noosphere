@@ -1,11 +1,11 @@
-name: Publish Hermes plugin bundle
+name: Build Hermes plugin bundle
 
 on:
   push:
     tags: ["v-hermes-*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   package-hermes:
@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
 
       - name: Validate release version metadata
         run: |
@@ -30,6 +32,7 @@ jobs:
 
       - name: Test Hermes provider
         run: |
+          bash -n hermes-noosphere-memory/install-hermes.sh
           python3 -m unittest discover -s hermes-noosphere-memory/tests
           python3 -m compileall -q hermes-noosphere-memory/plugins/memory/noosphere
 
@@ -41,6 +44,18 @@ jobs:
           sha256sum --check "${archive}.sha256"
           tar -tzf "$archive" >/dev/null
 
+      - name: Verify release bundle installation
+        run: |
+          version=$(cat VERSION)
+          temp_root=$(mktemp -d)
+          trap 'rm -rf "$temp_root"' EXIT
+          tar -xzf "dist/hermes-noosphere-memory-${version}.tar.gz" -C "$temp_root"
+          HERMES_HOME="$temp_root/hermes-home" \
+            "$temp_root/hermes-noosphere-memory-${version}/install-hermes.sh"
+          installed_version=$(sed -n 's/^version:[[:space:]]*//p' \
+            "$temp_root/hermes-home/plugins/noosphere/plugin.yaml")
+          test "$installed_version" = "$version"
+
       - name: Upload workflow artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -49,34 +64,3 @@ jobs:
             dist/hermes-noosphere-memory-*.tar.gz
             dist/hermes-noosphere-memory-*.tar.gz.sha256
           if-no-files-found: error
-
-      - name: Attach bundle to coordinated GitHub release
-        if: startsWith(github.ref, 'refs/tags/v-hermes-')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          version=${GITHUB_REF_NAME#v-hermes-}
-          release_tag="v${version}"
-          gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null || {
-            printf 'Create the coordinated %s GitHub release before pushing %s.\n' "$release_tag" "$GITHUB_REF_NAME" >&2
-            exit 1
-          }
-          for asset in \
-            "dist/hermes-noosphere-memory-${version}.tar.gz" \
-            "dist/hermes-noosphere-memory-${version}.tar.gz.sha256"; do
-            asset_name=$(basename "$asset")
-            existing_dir="/tmp/existing-${asset_name}"
-            mkdir -p "$existing_dir"
-            if gh release download "$release_tag" \
-              --repo "$GITHUB_REPOSITORY" \
-              --pattern "$asset_name" \
-              --dir "$existing_dir" >/dev/null 2>&1; then
-              cmp "$asset" "$existing_dir/$asset_name" || {
-                printf 'refusing to replace non-identical release asset: %s\n' "$asset_name" >&2
-                exit 1
-              }
-              printf 'Existing release asset is byte-identical: %s\n' "$asset_name"
-            else
-              gh release upload "$release_tag" "$asset" --repo "$GITHUB_REPOSITORY"
-            fi
-          done

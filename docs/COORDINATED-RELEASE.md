@@ -33,17 +33,24 @@ any tag is created.
 
 ## Publication order
 
-The Hermes workflow attaches assets to the main GitHub release, so the release
-must exist before the Hermes tag is pushed.
+Default-branch and pull-request Docker runs build both architectures but do not
+publish registry tags. Only the canonical application release tag may move
+`latest`.
 
-1. Create and push annotated `vX.Y.Z` at the exact reviewed merge commit.
-2. Create the non-draft, non-prerelease GitHub release for `vX.Y.Z` and read it
-   back.
-3. Create all four annotated plugin tags at that same commit and push them in one
-   explicit command.
-4. Wait for the Docker, npm, and Hermes publication workflows. Unknown,
-   interrupted, cancelled, or timed-out runs are failures, not passes.
-5. Never move, overwrite, or force-push a published release tag.
+1. Wait for all exact merge-commit workflows; no registry artifact is promoted
+   by the merge itself.
+2. Create and push annotated `vX.Y.Z` at the exact reviewed merge commit. Wait
+   for the canonical Docker publication and record its digest.
+3. Create the four annotated plugin tags at that same commit, preferably one at
+   a time, and wait for each npm/Hermes workflow. The Hermes workflow produces a
+   read-only Actions artifact; it does not mutate a GitHub Release.
+4. Verify every registry artifact independently. Unknown, interrupted,
+   cancelled, or timed-out runs are failures, not passes.
+5. Create a **draft** GitHub Release with `--verify-tag`, attach the downloaded
+   Hermes archive and checksum, and read the draft back.
+6. Publish that draft only after every artifact and tag target is verified. This
+   is the final coordinated public promotion.
+7. Never move, overwrite, or force-push a published release tag.
 
 ## Public readback
 

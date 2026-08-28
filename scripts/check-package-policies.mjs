@@ -32,6 +32,7 @@ const policy = {
   },
   npmPublishWorkflow: ".github/workflows/npm-publish.yml",
   dockerPublishWorkflow: ".github/workflows/docker-publish.yml",
+  hermesReleaseWorkflow: ".github/workflows/hermes-release.yml",
   forbiddenPublishSignals: ["injectedmemory", "noosphereinjectedmemory"],
 };
 
@@ -221,6 +222,8 @@ const npmPublishWorkflow = readText(policy.npmPublishWorkflow);
 const npmPublishWorkflowLines = workflowLines(npmPublishWorkflow);
 const dockerPublishWorkflow = readText(policy.dockerPublishWorkflow);
 const dockerPublishWorkflowLines = workflowLines(dockerPublishWorkflow);
+const hermesReleaseWorkflow = readText(policy.hermesReleaseWorkflow);
+const hermesReleaseWorkflowLines = workflowLines(hermesReleaseWorkflow);
 
 expect(
   injectedPackage.private === true,
@@ -289,6 +292,23 @@ expect(
   dockerPublishWorkflowLines.includes("type=semver,pattern={{version}}") &&
     !dockerPublishWorkflowLines.includes("type=ref,event=tag"),
   "The Docker publish workflow must strip the release tag's v prefix so NOOSPHERE_VERSION resolves to a published image tag.",
+);
+expect(
+  dockerPublishWorkflow.includes('GITHUB_REF_NAME" != "v${version}"') &&
+    dockerPublishWorkflowLines.includes("flavor: latest=auto") &&
+    dockerPublishWorkflowLines.includes("if: github.ref_type == 'tag'") &&
+    dockerPublishWorkflowLines.includes("push: ${{ github.ref_type == 'tag' }}") &&
+    !dockerPublishWorkflow.includes("enable={{is_default_branch}}"),
+  "The Docker workflow must bind v$VERSION and publish latest only from the canonical application tag.",
+);
+expect(
+  hermesReleaseWorkflowLines.includes("contents: read") &&
+    hermesReleaseWorkflowLines.includes("persist-credentials: false") &&
+    hermesReleaseWorkflow.includes("actions/upload-artifact@") &&
+    hermesReleaseWorkflow.includes("Verify release bundle installation") &&
+    !hermesReleaseWorkflow.includes("GH_TOKEN") &&
+    !hermesReleaseWorkflow.includes("gh release upload"),
+  "The Hermes tag workflow must be secret-free, install-test its bundle, and publish only a read-only Actions artifact.",
 );
 
 if (failures.length > 0) {
