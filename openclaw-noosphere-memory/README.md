@@ -15,14 +15,14 @@ openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory
 For the full local Noosphere + OpenClaw setup, use the repository installer:
 
 ```bash
-# Installer commit: bbeb076c618d0b50cc49de10a1c39388c2a7d6da
-# Expected SHA-256: 3234f9cb84079b421015e647e83fa833136738cba26057b5e64332a1e7e9316e
+# Installer commit: 66ab1f7d8a912fa79bf1cca8be6bf3cc947e9d1a
+# Expected SHA-256: 6d84b86ab71f04fcba17157f4a0197d773b78a2e919b15ebf4406ec8ac751e2c
 (
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/bbeb076c618d0b50cc49de10a1c39388c2a7d6da/install-openclaw.sh -o "$installer"
-  printf '%s  %s\n' '3234f9cb84079b421015e647e83fa833136738cba26057b5e64332a1e7e9316e' "$installer" | sha256sum -c -
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/66ab1f7d8a912fa79bf1cca8be6bf3cc947e9d1a/install-openclaw.sh -o "$installer"
+  printf '%s  %s\n' '6d84b86ab71f04fcba17157f4a0197d773b78a2e919b15ebf4406ec8ac751e2c' "$installer" | sha256sum -c -
   bash "$installer"
 )
 ```

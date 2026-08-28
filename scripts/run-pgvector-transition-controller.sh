@@ -384,8 +384,9 @@ validate_controller_state() {
 # a well-shaped binding: the file must exist, be an owned regular non-symlink
 # 0600 file, match its recorded digest, and (for process evidence) carry the
 # controller evidence schema. The writer-stop proof must additionally name
-# this state's application container and prove an inspect-verified stop, so a
-# forged or foreign stop record cannot satisfy a closure proof.
+# this state's application container and prove either an inspect-verified stop
+# or exact-name-confirmed absence, so a forged or foreign record cannot satisfy
+# a closure proof.
 validate_evidence_binding() {
   local state=$1 key=$2 kind=${3:-process} path recorded actual
   path=$(jq -er --arg k "$key" '.[$k].path // empty' "$state" 2>/dev/null) || path=''
@@ -406,9 +407,20 @@ validate_evidence_binding() {
   if [[ "$key" == writerStopEvidence ]]; then
     jq -e --arg app "$(jq -er '.appContainer // ""' "$state")" \
       'type == "object" and .container == $app and .container != "" and
-       .inspectRunning == false and .stopExitCode == 0' \
+       (.stopExitCode | type == "number" and . >= 0 and . <= 255 and floor == .) and
+       ((has("finalContainerState") | not) and
+        .inspectRunning == false and .stopExitCode == 0 or
+        .finalContainerState == "stopped" and
+        .inspectRunning == false and .stopExitCode == 0 and
+        .stopAttempted == true and
+        (.initialContainerState == "true" or .initialContainerState == "false") or
+        .finalContainerState == "absent" and
+        .inspectRunning == null and
+        ((.stopAttempted == false and .initialContainerState == "absent" and .stopExitCode == 0) or
+         (.stopAttempted == true and
+          (.initialContainerState == "true" or .initialContainerState == "false"))))' \
       "$path" >/dev/null ||
-      die "writerStopEvidence file does not prove this state's application container was inspect-verified stopped: $path"
+      die "writerStopEvidence file does not prove this state's application container was stopped or absent: $path"
   fi
 }
 
@@ -2090,8 +2102,29 @@ assert_source_state_unchanged() {
   run_source_verifier_hermetic "$controller_state" "$verifier" >/dev/null
 }
 
+# Return true, false, or absent for one exact container name. `docker inspect`
+# is intentionally not used: it may resolve a same-named image when the
+# container is absent. A failed container-only inspect is classified as absent
+# only after a successful exact-name container listing; daemon, permission, and
+# inconsistent identity failures remain fail closed.
+container_running_state() {
+  local docker_path=$1 container=$2 running names name
+  if running=$("$docker_path" container inspect --format '{{.State.Running}}' "$container" 2>/dev/null); then
+    case "$running" in
+      true|false) printf '%s\n' "$running"; return 0 ;;
+      *) return 1 ;;
+    esac
+  fi
+  names=$("$docker_path" container ls --all --format '{{.Names}}' 2>/dev/null) || return $?
+  while IFS= read -r name; do
+    [[ "$name" != "$container" ]] || return 1
+  done <<< "$names"
+  printf 'absent\n'
+}
+
 stop_application_fail_closed() {
-  local failure_mode=${1:-die} docker_path app_container running stop_evidence stop_temp stopped_at stop_phase stop_sha
+  local failure_mode=${1:-die} docker_path app_container initial_state final_state
+  local stop_evidence stop_temp stopped_at stop_phase stop_sha inspect_running stop_attempted=false
   local stop_exit=0 inspect_exit=0
   case "$failure_mode" in
     die|return) ;;
@@ -2099,25 +2132,44 @@ stop_application_fail_closed() {
   esac
   docker_path=${execution_docker_path:-$(jq -er '.dockerPath' "$controller_state")} || return $?
   app_container=$(jq -er '.appContainer' "$controller_state") || return $?
-  "$docker_path" stop --time 60 "$app_container" >/dev/null 2>&1 || stop_exit=$?
-  if ((stop_exit != 0)); then
+  initial_state=$(container_running_state "$docker_path" "$app_container") || inspect_exit=$?
+  if ((inspect_exit != 0)); then
+    [[ "$failure_mode" == return ]] && return "$inspect_exit"
+    die "could not classify application container before stop: $app_container"
+  fi
+  if [[ "$initial_state" != absent ]]; then
+    stop_attempted=true
+    "$docker_path" container stop --time 60 "$app_container" >/dev/null 2>&1 || stop_exit=$?
+  fi
+  final_state=$(container_running_state "$docker_path" "$app_container") || inspect_exit=$?
+  if ((inspect_exit != 0)); then
+    [[ "$failure_mode" == return ]] && return "$inspect_exit"
+    die "could not verify stopped or absent application container $app_container"
+  fi
+  if ((stop_exit != 0)) && [[ "$final_state" != absent ]]; then
     [[ "$failure_mode" == return ]] && return "$stop_exit"
     die "failed to stop application container $app_container"
   fi
-  running=$("$docker_path" inspect --format '{{.State.Running}}' "$app_container" 2>/dev/null) ||
-    inspect_exit=$?
-  if ((inspect_exit != 0)); then
-    [[ "$failure_mode" == return ]] && return "$inspect_exit"
-    die "could not verify stopped application container $app_container"
+  case "$final_state" in
+    false)
+      final_state=stopped
+      inspect_running=false
+      ;;
+    absent)
+      inspect_running=null
+      ;;
+    *)
+      [[ "$failure_mode" == return ]] && return 1
+      die "application container remains running after stop: $app_container"
+      ;;
+  esac
+  if [[ "$final_state" == absent && "$stop_attempted" == false ]]; then
+    stop_exit=0
   fi
-  if [[ "$running" != false ]]; then
-    [[ "$failure_mode" == return ]] && return 1
-    die "application container remains running after stop: $app_container"
-  fi
-  # Every inspect-verified stop is durably evidenced and bound to the state so
-  # closure-evidence-pending and closure-incident phases carry their owned
-  # writer-stop proof. A failure to persist the proof is fatal: the stop itself
-  # succeeded, but the state must not advance without its owned evidence.
+  # Every verified stopped/absent state is durably evidenced and bound to the
+  # controller state so closure-evidence-pending and closure-incident phases
+  # carry their owned writer-stop proof. A failure to persist the proof is
+  # fatal: the state must not advance without its owned evidence.
   stopped_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) || return $?
   # Retry-distinct allocation: the first stop owns the canonical evidence
   # path; a later invocation that finds it allocates InvocationID-suffixed
@@ -2129,12 +2181,19 @@ stop_application_fail_closed() {
   jq -n \
     --arg phase "$stop_phase" \
     --arg container "$app_container" \
+    --arg initialContainerState "$initial_state" \
+    --arg finalContainerState "$final_state" \
     --arg stoppedAt "$stopped_at" \
     --arg invocationId "${INVOCATION_ID:-}" \
     --arg bootId "$(</proc/sys/kernel/random/boot_id)" \
-    --argjson controllerMainPid "${systemd_controller_main_pid:-0}" '
-      {version:1,phase:$phase,container:$container,stopExitCode:0,
-       inspectRunning:false,stoppedAt:$stoppedAt,invocationId:$invocationId,
+    --argjson controllerMainPid "${systemd_controller_main_pid:-0}" \
+    --argjson stopAttempted "$stop_attempted" \
+    --argjson stopExitCode "$stop_exit" \
+    --argjson inspectRunning "$inspect_running" '
+      {version:1,phase:$phase,container:$container,stopExitCode:$stopExitCode,
+       stopAttempted:$stopAttempted,initialContainerState:$initialContainerState,
+       finalContainerState:$finalContainerState,inspectRunning:$inspectRunning,
+       stoppedAt:$stoppedAt,invocationId:$invocationId,
        bootId:$bootId,controllerMainPid:$controllerMainPid}
     ' > "$stop_temp" || return $?
   chmod 0600 "$stop_temp" || return $?
@@ -2153,7 +2212,7 @@ stop_application_fail_closed() {
 }
 
 activate_application_for_verification() {
-  local state=$1 docker_path app_container running project_directory inspect_exit=0
+  local state=$1 docker_path app_container running project_directory inspect_exit=0 probe_script
   local controller_home docker_config docker_host lock_root child_path
   local -a docker_env
   docker_path=${execution_docker_path:-$(jq -er '.dockerPath' "$state")}
@@ -2173,20 +2232,21 @@ activate_application_for_verification() {
     "PATH=$child_path"
   )
   app_container=$(jq -er '.appContainer' "$state")
+  probe_script="$(declare -f container_running_state)"$'\n''container_running_state "$1" "$2"'
   running=$(env -i "${docker_env[@]}" \
-    "$docker_path" inspect --format '{{.State.Running}}' "$app_container" 2>/dev/null) ||
+    bash -p -c "$probe_script" _ "$docker_path" "$app_container") ||
     inspect_exit=$?
   if ((inspect_exit != 0)); then
     printf 'PostgreSQL transition controller: could not inspect application container before activation: %s\n' \
       "$app_container" >&2
     return "$inspect_exit"
   fi
-  if [[ "$running" != true && "$running" != false ]]; then
+  if [[ "$running" != true && "$running" != false && "$running" != absent ]]; then
     printf 'PostgreSQL transition controller: application container has an invalid running state: %s\n' \
       "$app_container" >&2
     return 1
   fi
-  [[ "$running" == false ]] || return 0
+  [[ "$running" != true ]] || return 0
 
   project_directory=$(dirname "$(jq -er '.liveCompose' "$state")")
   env -i "${docker_env[@]}" \
@@ -2197,7 +2257,7 @@ activate_application_for_verification() {
     up -d --no-deps --force-recreate app >/dev/null ||
     return 1
   running=$(env -i "${docker_env[@]}" \
-    "$docker_path" inspect --format '{{.State.Running}}' "$app_container" 2>/dev/null) ||
+    bash -p -c "$probe_script" _ "$docker_path" "$app_container") ||
     return 1
   [[ "$running" == true ]]
 }

@@ -602,6 +602,7 @@ elif [[ ${1:-} == compose ]]; then
     printf 'activate\n' >> "$root/lifecycle.log"
     [[ -e "$root/writer-authorized" ]]
     [[ ! -e "$root/fail-activation" ]] || exit 71
+    rm -f "$root/app-container-absent"
     : > "$root/app-started"
     rm -f "$root/app-stopped"
     if [[ -e "$root/signal-after-activation" ]]; then
@@ -611,7 +612,7 @@ elif [[ ${1:-} == compose ]]; then
     printf 'unexpected fake Docker Compose arguments: %s\n' "$*" >&2
     exit 1
   fi
-elif [[ ${1:-} == stop ]]; then
+elif [[ ${1:-} == stop || ( ${1:-} == container && ${2:-} == stop ) ]]; then
   if [[ -e "$root/kill-controller-if-incident-before-stop" &&
         $(jq -er '.phase' "$root/controller.json") == incident ]]; then
     : > "$root/incident-persisted-before-stop"
@@ -623,10 +624,42 @@ elif [[ ${1:-} == stop ]]; then
     : > "$root/closure-stop-failure-consumed"
     exit 76
   fi
+  if [[ -e "$root/app-container-absent" && ${@: -1} == fixture-app ]]; then
+    exit 1
+  fi
   printf 'stop\n' >> "$root/app-control.log"
   : > "$root/app-stopped"
   exit 0
+elif [[ ${1:-} == container && ${2:-} == inspect ]]; then
+  if [[ -e "$root/app-container-absent" && ${@: -1} == fixture-app ]]; then
+    exit 1
+  fi
+  if [[ -e "$root/fail-initial-activation-inspect" &&
+        -e "$root/writer-authorized" &&
+        ${@: -1} == fixture-app &&
+        ! -e "$root/initial-activation-inspect-failure-consumed" &&
+        ! -e "$root/app-started" ]]; then
+    : > "$root/initial-activation-inspect-failure-consumed"
+    exit 75
+  fi
+  if [[ -e "$root/app-stopped" ]]; then
+    printf 'inspect:false\n' >> "$root/app-control.log"
+    printf 'false\n'
+  else
+    printf 'inspect:true\n' >> "$root/app-control.log"
+    printf 'true\n'
+  fi
+elif [[ ${1:-} == container && ${2:-} == ls ]]; then
+  [[ ! -e "$root/fail-container-list" ]] || exit 75
+  if [[ ! -e "$root/app-container-absent" ]]; then
+    printf 'fixture-app\n'
+  fi
+  exit 0
 elif [[ ${1:-} == inspect ]]; then
+  if [[ -e "$root/app-container-absent" && ${@: -1} == fixture-app ]]; then
+    printf 'template has no entry for key "State"\n' >&2
+    exit 1
+  fi
   if [[ -e "$root/fail-initial-activation-inspect" &&
         -e "$root/writer-authorized" &&
         ${@: -1} == fixture-app &&
@@ -679,6 +712,7 @@ if [[ "$authorize_writer" == true ]]; then
 fi
 printf 'transition\n' >> "$root/lifecycle.log"
 : > "$root/app-stopped"
+[[ ! -e "$root/guard-removes-app-container" ]] || : > "$root/app-container-absent"
 case "$fixture_mode" in
   prejournal-fail) exit 23 ;;
   third-state-fail)
@@ -3357,6 +3391,65 @@ test_writer_activation_lifecycle_is_ordered_and_evidence_bound() (
     "$authorization_evidence" >/dev/null
 )
 
+test_absent_app_after_guard_is_authorized_recreated_and_completed() (
+  local fixture_dir manifest state shim rc=0
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  : > "$fixture_dir/guard-removes-app-container"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_systemd_identity_shim "$fixture_dir")
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+  run_fixture_controller "$state" "$shim" env \
+    >"$fixture_dir/controller.out" 2>"$fixture_dir/controller.err" || rc=$?
+  ((rc == 0)) || {
+    echo 'controller could not recreate an app container absent after the guard' >&2
+    while IFS= read -r line; do printf '  controller: %s\n' "$line" >&2; done < "$fixture_dir/controller.err"
+    exit 1
+  }
+  jq -e '.phase == "complete" and .incidentClass == null' "$state" >/dev/null
+  [[ $(paste -sd, "$fixture_dir/lifecycle.log") == transition,authorize,activate,verify ]]
+  [[ ! -e "$fixture_dir/app-container-absent" ]]
+  [[ -e "$fixture_dir/app-started" ]]
+)
+
+test_absent_app_activation_failure_records_truthful_stop_evidence() (
+  local fixture_dir manifest state shim rc=0 writer_stop
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf "$fixture_dir"' EXIT
+  manifest="$fixture_dir/manifest.json"
+  state="$fixture_dir/controller.json"
+  write_execution_fixture "$fixture_dir" "$manifest"
+  : > "$fixture_dir/guard-removes-app-container"
+  : > "$fixture_dir/fail-activation"
+  export XDG_RUNTIME_DIR="$fixture_dir/locks"
+  shim=$(write_systemd_identity_shim "$fixture_dir")
+  "$CONTROLLER" --prepare --manifest "$manifest" --state "$state"
+
+  run_fixture_controller "$state" "$shim" env >/dev/null 2>&1 || rc=$?
+  ((rc != 0))
+  jq -e '.phase == "incident" and .incidentClass == "closure-app-activation"' \
+    "$state" >/dev/null || {
+      echo 'absent app activation failure did not commit its closure incident' >&2
+      exit 1
+    }
+  writer_stop=$(jq -er '.writerStopEvidence.path' "$state")
+  jq -e '
+    .phase == "closure-stop-pending" and
+    .container == "fixture-app" and
+    .stopExitCode == 0 and
+    .finalContainerState == "absent" and
+    .inspectRunning == null
+  ' "$writer_stop" >/dev/null || {
+    echo 'absent app closure did not record truthful absent-container stop evidence' >&2
+    exit 1
+  }
+  [[ ! -e "$fixture_dir/app-started" ]]
+)
+
 test_authorization_evidence_is_durable_before_activation() (
   local fixture_dir manifest state shim rc=0 resume_rc=0 authorization_evidence
   fixture_dir=$(mktemp -d)
@@ -5053,6 +5146,121 @@ PROBE
   }
 )
 
+test_writer_stop_evidence_rejects_nonnumeric_stop_exit() (
+  local fixture_dir evidence state functions rc=0
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf "$fixture_dir"' EXIT
+  evidence="$fixture_dir/writer-stop.evidence.json"
+  state="$fixture_dir/controller.json"
+  functions="$fixture_dir/functions.sh"
+
+  jq -n '{
+    version: 1,
+    phase: "closure-stop-pending",
+    container: "fixture-app",
+    stopExitCode: "bogus",
+    initialContainerState: "absent",
+    finalContainerState: "absent",
+    inspectRunning: null,
+    stopAttempted: false
+  }' > "$evidence"
+  chmod 0600 "$evidence"
+  jq -n --arg path "$evidence" --arg sha "$(sha256sum "$evidence" | awk '{print $1}')" '{
+    appContainer: "fixture-app",
+    writerStopEvidence: {path: $path, sha256: $sha}
+  }' > "$state"
+
+  cat > "$functions" <<'SUPPORT'
+die() { printf 'fixture: %s\n' "$*" >&2; exit 1; }
+assert_owned_regular_file() { [[ -f "$1" && ! -L "$1" ]]; }
+sha256_file() { sha256sum "$1" | awk '{print $1}'; }
+SUPPORT
+  extract_function validate_evidence_binding >> "$functions"
+
+  bash -c 'source "$1"; validate_evidence_binding "$2" writerStopEvidence' \
+    _ "$functions" "$state" >"$fixture_dir/bogus.out" 2>"$fixture_dir/bogus.err" || rc=$?
+  ((rc != 0)) || {
+    echo 'Writer-stop evidence accepted a nonnumeric stopExitCode' >&2
+    exit 1
+  }
+  rg -q 'does not prove.*stopped or absent' "$fixture_dir/bogus.err" || {
+    echo 'Nonnumeric writer-stop evidence lacked its fail-closed diagnostic' >&2
+    exit 1
+  }
+
+  jq '.stopExitCode = 0' "$evidence" > "$evidence.tmp"
+  mv "$evidence.tmp" "$evidence"
+  chmod 0600 "$evidence"
+  jq --arg sha "$(sha256sum "$evidence" | awk '{print $1}')" \
+    '.writerStopEvidence.sha256 = $sha' "$state" > "$state.tmp"
+  mv "$state.tmp" "$state"
+  bash -c 'source "$1"; validate_evidence_binding "$2" writerStopEvidence' \
+    _ "$functions" "$state" || {
+    echo 'Writer-stop evidence rejected a numeric absent-container stopExitCode control' >&2
+    exit 1
+  }
+
+  jq '.finalContainerState = "stopped" |
+      .initialContainerState = "true" |
+      .inspectRunning = false |
+      .stopAttempted = "bogus"' "$evidence" > "$evidence.tmp"
+  mv "$evidence.tmp" "$evidence"
+  chmod 0600 "$evidence"
+  jq --arg sha "$(sha256sum "$evidence" | awk '{print $1}')" \
+    '.writerStopEvidence.sha256 = $sha' "$state" > "$state.tmp"
+  mv "$state.tmp" "$state"
+  rc=0
+  bash -c 'source "$1"; validate_evidence_binding "$2" writerStopEvidence' \
+    _ "$functions" "$state" >/dev/null 2>&1 || rc=$?
+  ((rc != 0)) || {
+    echo 'Writer-stop evidence accepted a non-boolean stopAttempted field' >&2
+    exit 1
+  }
+
+  jq '.stopAttempted = false' "$evidence" > "$evidence.tmp"
+  mv "$evidence.tmp" "$evidence"
+  chmod 0600 "$evidence"
+  jq --arg sha "$(sha256sum "$evidence" | awk '{print $1}')" \
+    '.writerStopEvidence.sha256 = $sha' "$state" > "$state.tmp"
+  mv "$state.tmp" "$state"
+  rc=0
+  bash -c 'source "$1"; validate_evidence_binding "$2" writerStopEvidence' \
+    _ "$functions" "$state" >/dev/null 2>&1 || rc=$?
+  ((rc != 0)) || {
+    echo 'Writer-stop evidence accepted stopped state without a stop attempt' >&2
+    exit 1
+  }
+
+  jq '.stopAttempted = true' "$evidence" > "$evidence.tmp"
+  mv "$evidence.tmp" "$evidence"
+  chmod 0600 "$evidence"
+  jq --arg sha "$(sha256sum "$evidence" | awk '{print $1}')" \
+    '.writerStopEvidence.sha256 = $sha' "$state" > "$state.tmp"
+  mv "$state.tmp" "$state"
+  bash -c 'source "$1"; validate_evidence_binding "$2" writerStopEvidence' \
+    _ "$functions" "$state" || {
+    echo 'Writer-stop evidence rejected a consistent stopped-container control' >&2
+    exit 1
+  }
+
+  jq '.finalContainerState = "absent" |
+      .inspectRunning = null |
+      .initialContainerState = "absent" |
+      .stopAttempted = true' "$evidence" > "$evidence.tmp"
+  mv "$evidence.tmp" "$evidence"
+  chmod 0600 "$evidence"
+  jq --arg sha "$(sha256sum "$evidence" | awk '{print $1}')" \
+    '.writerStopEvidence.sha256 = $sha' "$state" > "$state.tmp"
+  mv "$state.tmp" "$state"
+  rc=0
+  bash -c 'source "$1"; validate_evidence_binding "$2" writerStopEvidence' \
+    _ "$functions" "$state" >/dev/null 2>&1 || rc=$?
+  ((rc != 0)) || {
+    echo 'Writer-stop evidence accepted an impossible absent-to-attempted transition' >&2
+    exit 1
+  }
+)
+
 test_invocation_suffixed_artifacts_cannot_collide_with_bound_inputs() (
   # Re-review round 2, findings 1-2: the collision matrix must also cover the
   # InvocationID-suffixed artifact paths a retrying invocation will use.
@@ -5603,12 +5811,18 @@ test_activation_uses_only_bound_compose_interpolation_values() (
 set -Eeuo pipefail
 root=$(/usr/bin/dirname "$0")
 case ${1:-} in
-  inspect)
-    if [[ -e "$root/app-running" ]]; then
-      printf 'true\n'
-    else
-      printf 'false\n'
-    fi
+  container)
+    case ${2:-} in
+      inspect)
+        if [[ -e "$root/app-running" ]]; then
+          printf 'true\n'
+        else
+          printf 'false\n'
+        fi
+        ;;
+      ls) printf 'fixture-app\n' ;;
+      *) exit 64 ;;
+    esac
     ;;
   compose)
     env_file=''
@@ -5649,6 +5863,7 @@ DOCKER
   chmod 0600 "$state"
 
   eval "$(extract_function child_path_for_state)"
+  eval "$(extract_function container_running_state)"
   eval "$(extract_function activate_application_for_verification)"
   die() {
     printf 'fixture: %s\n' "$*" >&2
@@ -6056,11 +6271,11 @@ test_initial_activation_inspect_failure_commits_durable_closure() (
   [[ "$lifecycle" == transition,authorize ]] ||
     failures+=("initial activation inspect failure crossed activation: $lifecycle")
   if [[ -f "$fixture_dir/app-control.log" ]]; then
-    control_tail=$(tail -n 2 "$fixture_dir/app-control.log" | paste -sd, -)
+    control_tail=$(tail -n 3 "$fixture_dir/app-control.log" | paste -sd, -)
   else
     control_tail=''
   fi
-  [[ "$control_tail" == stop,inspect:false ]] ||
+  [[ "$control_tail" == inspect:false,stop,inspect:false ]] ||
     failures+=("initial activation inspect failure lacked a fresh stop proof (control_tail=$control_tail)")
   jq -e '
     .phase == "incident" and
@@ -6881,6 +7096,10 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   _clear_authority_root_for_isolation
   test_writer_activation_lifecycle_is_ordered_and_evidence_bound
   _clear_authority_root_for_isolation
+  test_absent_app_after_guard_is_authorized_recreated_and_completed
+  _clear_authority_root_for_isolation
+  test_absent_app_activation_failure_records_truthful_stop_evidence
+  _clear_authority_root_for_isolation
   test_authorization_evidence_is_durable_before_activation
   _clear_authority_root_for_isolation
   test_app_activation_failure_is_fail_closed_before_final_verification
@@ -6930,6 +7149,8 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   test_transient_systemd_fixture_independently_proves_identity_and_cursors
   _clear_authority_root_for_isolation
   test_writer_stop_evidence_is_retry_distinct
+  _clear_authority_root_for_isolation
+  test_writer_stop_evidence_rejects_nonnumeric_stop_exit
   _clear_authority_root_for_isolation
   test_invocation_suffixed_artifacts_cannot_collide_with_bound_inputs
   _clear_authority_root_for_isolation
