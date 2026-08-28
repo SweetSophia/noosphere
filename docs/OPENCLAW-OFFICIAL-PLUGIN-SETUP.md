@@ -436,8 +436,8 @@ Use the guarded installer for upgrades as well as first-time setup:
   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/bbeb076c618d0b50cc49de10a1c39388c2a7d6da/install-openclaw.sh -o "$installer"
   printf '%s  %s\n' '3234f9cb84079b421015e647e83fa833136738cba26057b5e64332a1e7e9316e' "$installer" | sha256sum -c -
   bash "$installer"
+  openclaw noosphere doctor
 )
-openclaw noosphere doctor
 ```
 
 Do not replace this with an unrestricted `docker compose pull && docker compose up`. The installer preserves the existing `.env`, proves backup restoration and exact source rollback with writers stopped, promotes the candidate database image only after invariants pass, then runs migration/bootstrap and deployment verification. Existing bootstrap admin accounts keep their current password unless `NOOSPHERE_ADMIN_PASSWORD_RESET=true`; `NOOSPHERE_FORCE_ADMIN=true` re-asserts the ADMIN role without rotating the password.

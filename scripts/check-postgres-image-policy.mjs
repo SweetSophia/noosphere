@@ -764,7 +764,7 @@ for (const relativePath of [
   const checksumCount = countLiteral(text, "sha256sum -c -");
   const safeInstallerBlocks = Array.from(
     text.matchAll(
-      /^(\s*)\(\n\1  set -e\n\1  installer="\$\(mktemp\)"\n\1  trap 'rm -f "\$installer"' EXIT\n\1  curl -fsSL [^\n]+ -o "\$installer"\n\1  printf '[^\n]+' '[a-f0-9]{64}' "\$installer" \| sha256sum -c -\n\1  bash "\$installer"\n\1\)$/gm,
+      /^(\s*)\(\n\1  set -e\n\1  installer="\$\(mktemp\)"\n\1  trap 'rm -f "\$installer"' EXIT\n\1  curl -fsSL [^\n]+ -o "\$installer"\n\1  printf '[^\n]+' '[a-f0-9]{64}' "\$installer" \| sha256sum -c -\n\1  bash "\$installer"\n(?:\1  openclaw noosphere (?:doctor|status)\n)*\1\)$/gm,
     ),
   ).length;
   expect(
@@ -773,6 +773,10 @@ for (const relativePath of [
       checksumCount > 0 &&
       safeInstallerBlocks === checksumCount,
     `${relativePath} must gate every immutable installer execution on checksum success and trap cleanup`,
+  );
+  expect(
+    !/^\s*\)\n\s*openclaw noosphere (?:doctor|status)$/m.test(text),
+    `${relativePath} must keep immediate post-install checks inside the fail-fast installer subshell`,
   );
   expect(
     !text.includes("noosphere/master/install-openclaw.sh") &&

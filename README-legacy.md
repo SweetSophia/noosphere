@@ -421,9 +421,9 @@ On the machine running OpenClaw Gateway:
   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/bbeb076c618d0b50cc49de10a1c39388c2a7d6da/install-openclaw.sh -o "$installer"
   printf '%s  %s\n' '3234f9cb84079b421015e647e83fa833136738cba26057b5e64332a1e7e9316e' "$installer" | sha256sum -c -
   bash "$installer"
+  openclaw noosphere doctor
+  openclaw noosphere status
 )
-openclaw noosphere doctor
-openclaw noosphere status
 ```
 
 In an interactive terminal, the installer asks which IP address Noosphere should bind to and prints the resulting URL. Choose `127.0.0.1` for a local-only install, or another network address (e.g., from Tailscale or your LAN) when OpenClaw and browsers need to reach Noosphere over that interface. For non-interactive installs, set `APP_URL` and `BIND_ADDRESS` explicitly when you need deterministic network binding.

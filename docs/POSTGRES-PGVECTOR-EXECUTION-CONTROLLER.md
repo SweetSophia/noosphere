@@ -564,7 +564,7 @@ controller revalidation. Non-loopback verification additionally requires the
 The path-filtered `postgres-pgvector-rehearsal.yml` workflow makes these
 controller gates mandatory evidence on controller, installer, fixture, guard,
 verifier, or workflow changes. One job runs the focused controller suite, the
-real transient user-systemd owner, and the ten-owner installer integration
+real transient user-systemd owner, and the thirteen-owner installer integration
 fixture. A separate `linux/amd64` job pulls the fixture's two
 digest-pinned images and runs the real-Docker interruption/recovery rehearsal.
 Both jobs use disposable lingering user managers and carry only read-only
