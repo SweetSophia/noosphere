@@ -48,13 +48,27 @@ Not implemented yet:
 
 Those are intentionally left for later PRs so each step stays reviewable.
 
+## Install the 1.12.0 Release Bundle
+
+The coordinated Noosphere release attaches a deterministic Hermes provider
+bundle and checksum to the main GitHub release:
+
+```bash
+curl -fsSLO https://github.com/SweetSophia/noosphere/releases/download/v1.12.0/hermes-noosphere-memory-1.12.0.tar.gz
+curl -fsSLO https://github.com/SweetSophia/noosphere/releases/download/v1.12.0/hermes-noosphere-memory-1.12.0.tar.gz.sha256
+sha256sum --check hermes-noosphere-memory-1.12.0.tar.gz.sha256
+tar -xzf hermes-noosphere-memory-1.12.0.tar.gz
+cd hermes-noosphere-memory-1.12.0
+./install-hermes.sh
+```
+
 ## Install From a Cloned Repository
 
 Use this path to clone the Noosphere repository and run the helper script that
 copies the Hermes plugin and setup skill into the active Hermes profile:
 
 ```bash
-git clone https://github.com/SweetSophia/noosphere.git
+git clone --branch v-hermes-1.12.0 --depth 1 https://github.com/SweetSophia/noosphere.git
 cd noosphere/hermes-noosphere-memory
 ./install-hermes.sh
 ```

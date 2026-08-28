@@ -9,7 +9,7 @@ supplement.
 Use OpenClaw's plugin installer:
 
 ```bash
-openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory
+openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.12.0
 ```
 
 For the full local Noosphere + OpenClaw setup, use the repository installer:
@@ -23,7 +23,7 @@ For the full local Noosphere + OpenClaw setup, use the repository installer:
   trap 'rm -f "$installer"' EXIT
   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/66ab1f7d8a912fa79bf1cca8be6bf3cc947e9d1a/install-openclaw.sh -o "$installer"
   printf '%s  %s\n' '6d84b86ab71f04fcba17157f4a0197d773b78a2e919b15ebf4406ec8ac751e2c' "$installer" | sha256sum -c -
-  bash "$installer"
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.12.0}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.12.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.12.0}" bash "$installer"
 )
 ```
 
@@ -137,8 +137,10 @@ exclude private agent/project memory that other agents must not see.
 Package releases use package-specific tag prefixes so independent packages do
 not trigger each other's publish jobs:
 
-- `v-openclaw-1.5.7` publishes `@sweetsophia/openclaw-noosphere-memory`
-- `v-opencode-0.1.0` publishes `@sweetsophia/opencode-noosphere-memory`
+- `v-openclaw-1.12.0` publishes `@sweetsophia/openclaw-noosphere-memory@1.12.0`
+- `v-opencode-1.12.0` publishes `@sweetsophia/opencode-noosphere-memory@1.12.0`
+- `v-kilocode-1.12.0` publishes `@sweetsophia/kilocode-noosphere-memory@1.12.0`
+- `v-hermes-1.12.0` attaches the deterministic Hermes bundle to release `v1.12.0`
 
 New plugin packages should add their own `v-{package}-*` tag prefix in CI before
 they are published.

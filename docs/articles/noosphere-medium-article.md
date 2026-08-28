@@ -361,7 +361,7 @@ Quick install on the machine running OpenClaw Gateway:
       trap 'rm -f "$installer"' EXIT
       curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/66ab1f7d8a912fa79bf1cca8be6bf3cc947e9d1a/install-openclaw.sh -o "$installer"
       printf '%s  %s\n' '6d84b86ab71f04fcba17157f4a0197d773b78a2e919b15ebf4406ec8ac751e2c' "$installer" | sha256sum -c -
-      bash "$installer"
+      NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.12.0}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.12.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.12.0}" bash "$installer"
       openclaw noosphere doctor
       openclaw noosphere status
     )

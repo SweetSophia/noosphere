@@ -8,15 +8,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-08-29
+
+Minor release adding the default-off automatic-memory Phase A foundation,
+optional hybrid pgvector/RRF retrieval, coordinated 1.12.0 integrations for
+OpenClaw, Hermes Agent, Opencode, and Kilo Code, and interruption-safe database
+image transitions. The application API remains backward compatible. Prisma
+migrations add the Phase A persistence schema; hybrid retrieval remains opt-in,
+and keyword-only retrieval remains the default until separately activated.
+
+### Added
+
+- **Automatic-memory Phase A foundation
+  ([#281](https://github.com/SweetSophia/noosphere/pull/281),
+  [#282](https://github.com/SweetSophia/noosphere/pull/282))**: adds encrypted
+  capture persistence, principals, lifecycle jobs, revocation/tombstone and
+  privacy-review APIs, maintenance ownership, and clean-miss capture guidance.
+  Automatic extraction and promotion remain disabled pending later phases.
+- **Optional exact hybrid retrieval
+  ([#287](https://github.com/SweetSophia/noosphere/pull/287),
+  [#288](https://github.com/SweetSophia/noosphere/pull/288),
+  [#289](https://github.com/SweetSophia/noosphere/pull/289))**: adds staged
+  pgvector storage, an embedding provider/worker, deterministic backfill and
+  validation, authorization-safe scoped SQL, reciprocal-rank fusion, and
+  rollback-to-keyword-only tooling.
+- **Coordinated Hermes release artifact**: the Hermes `MemoryProvider` now ships
+  as a deterministic, checksum-verified GitHub release bundle alongside the
+  three provenance-enabled npm plugins.
+- **Native application images for AMD64 and ARM64**: the main GHCR image now
+  publishes a multi-platform index for `linux/amd64` and `linux/arm64`.
+
+### Changed
+
+- **Pinned PostgreSQL 16 + pgvector image and rehearsed volume upgrades
+  ([#284](https://github.com/SweetSophia/noosphere/pull/284),
+  [#285](https://github.com/SweetSophia/noosphere/pull/285))**: the production
+  database candidate is built and smoke-tested per architecture, assembled only
+  from tested digests, and validated for schema/data integrity before promotion.
+- **All existing-volume upgrades use the durable execution controller
+  ([#286](https://github.com/SweetSophia/noosphere/pull/286),
+  [#300](https://github.com/SweetSophia/noosphere/pull/300),
+  [#305](https://github.com/SweetSophia/noosphere/pull/305),
+  [#306](https://github.com/SweetSophia/noosphere/pull/306),
+  [#307](https://github.com/SweetSophia/noosphere/pull/307))**: the installer
+  now owns lock transfer, immutable helper verification, backup/restore proof,
+  rollback rehearsal, writer-stop evidence, systemd recovery, app activation,
+  and final closure verification. A proven absent application container is
+  handled without confusing a same-named image for container evidence.
+- **Version-bound public integration commands**: OpenClaw setup/upgrade output
+  and release documentation retain the checksum-pinned installer while
+  defaulting both the deployed application image and OpenClaw plugin package to
+  1.12.0. Persisted older image pins no longer defeat a release upgrade;
+  operators can still override `NOOSPHERE_VERSION`, `NOOSPHERE_IMAGE`, or
+  `NOOSPHERE_PLUGIN_SPEC` explicitly.
+
+### Security
+
+- The transition controller fails closed on ambiguous Docker/container state,
+  inconsistent writer-stop evidence, unbound Compose/engine identity, unsafe
+  evidence paths, supervisor property mismatches, and interrupted closure.
+- Capture and key-management changes preserve scoped authorization, encrypted
+  sensitive capture content, revocation semantics, and bounded request bodies.
+
 ### Fixed
 
 - **Keep memory-capture guidance available on clean auto-recall misses
-  ([#281](https://github.com/SweetSophia/noosphere/pull/281))**: the OpenClaw
-  hook now keeps advisory `noosphere_save` guidance when an eligible recall
-  succeeds without injectable memory text, while dependency and malformed
-  response failures continue to fail open. The staged automatic-capture and
-  recall-enrichment plan is documented in the
-  [architecture ADR](docs/AUTOMATIC-MEMORY-CAPTURE-AND-ENRICHMENT-ADR.md).
+  ([#281](https://github.com/SweetSophia/noosphere/pull/281))** while provider
+  and malformed-response failures continue to fail open.
+- **Broaden retryable provider transport failures
+  ([#291](https://github.com/SweetSophia/noosphere/pull/291))** without retrying
+  permanent authentication or validation errors.
+- **Make transition evidence and digest comparison durable and portable
+  ([#292](https://github.com/SweetSophia/noosphere/pull/292),
+  [#295](https://github.com/SweetSophia/noosphere/pull/295),
+  [#296](https://github.com/SweetSophia/noosphere/pull/296),
+  [#299](https://github.com/SweetSophia/noosphere/pull/299))** across non-root
+  app reads, legacy recovery, OID ordering differences, and schema round trips.
 
 ## [1.11.0] - 2026-07-12
 
@@ -271,7 +338,8 @@ changes.
   backfill pipeline, and the memory provider refactor. Refer to the commit
   history (`git log v1.8.0..v1.9.0`) for the full set of changes.
 
-[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/SweetSophia/noosphere/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/SweetSophia/noosphere/compare/v1.10.3...v1.11.0
 [1.10.3]: https://github.com/SweetSophia/noosphere/compare/v1.10.2...v1.10.3
 [1.10.2]: https://github.com/SweetSophia/noosphere/compare/v1.10.1...v1.10.2

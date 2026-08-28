@@ -38,7 +38,7 @@ NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH="${NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH:-}"
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH="${NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH:-}"
 NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS="${NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS:-}"
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS="${NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS:-}"
-PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory}"
+PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.12.0}"
 SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$HOME/.openclaw/secrets}"
 SECRETS_FILE="${NOOSPHERE_SECRETS_FILE:-$SECRETS_DIR/noosphere-memory.json}"
 SECRET_PROVIDER_ID="${NOOSPHERE_SECRET_PROVIDER_ID:-noosphere-memory}"
@@ -1762,7 +1762,7 @@ JSON
 
 echo "Installing OpenClaw plugin: ${PLUGIN_SPEC}"
 if openclaw plugins inspect "$PLUGIN_ID" >/dev/null 2>&1; then
-  openclaw plugins update "$PLUGIN_ID" || openclaw plugins install "$PLUGIN_SPEC" --force
+  openclaw plugins install "$PLUGIN_SPEC" --force
 else
   openclaw plugins install "$PLUGIN_SPEC"
 fi

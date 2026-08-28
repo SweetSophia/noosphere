@@ -13,20 +13,20 @@ It provides:
 You need two things before this plugin will do anything useful:
 
 1. **A reachable Noosphere instance.** The plugin defaults to
-   `http://127.0.0.1:6578`. For a local install, the cleanest path is the
-   repository's Docker Compose stack — it provisions just Noosphere, without
-   pulling in any other plugin:
+   `http://127.0.0.1:6578`. For a local install, use the repository's guarded
+   [1.12.0 Quick Start](https://github.com/SweetSophia/noosphere/blob/v1.12.0/README.md#quick-start). It provisions Noosphere without
+   installing any agent plugin. For the 1.12.0 release snapshot:
 
    ```bash
-   git clone https://github.com/SweetSophia/noosphere.git
+   git clone --branch v1.12.0 --depth 1 https://github.com/SweetSophia/noosphere.git
    cd noosphere
    cp noosphere.env.example .env
-   # Edit .env: POSTGRES_PASSWORD, NEXTAUTH_SECRET, NOOSPHERE_ADMIN_PASSWORD,
-   # and NOOSPHERE_BOOTSTRAP_API_KEY. Generate strong values, for example:
-   # openssl rand -hex 32
-   # printf 'noo_%s\n' "$(openssl rand -hex 32)"
-   docker compose -f docker-compose.noosphere.yml up -d
+   # Set NOOSPHERE_VERSION=1.12.0, then follow the guarded Quick Start.
    ```
+
+   Do not replace the guarded prepare/init/record sequence with an unrestricted
+   `docker compose up`; the database service intentionally refuses startup
+   without transition evidence.
 
    The bootstrap key is whatever you put in `NOOSPHERE_BOOTSTRAP_API_KEY` and
    has full `ADMIN` scope. To point at an existing Noosphere instead, set
@@ -52,7 +52,7 @@ You need two things before this plugin will do anything useful:
 ## Install
 
 ```bash
-npm install -g @sweetsophia/kilocode-noosphere-memory
+npm install -g @sweetsophia/kilocode-noosphere-memory@1.12.0
 ```
 
 Add it to `~/.config/kilo/kilo.json`:
@@ -60,7 +60,7 @@ Add it to `~/.config/kilo/kilo.json`:
 ```json
 {
   "plugin": [
-    "@sweetsophia/kilocode-noosphere-memory"
+    "@sweetsophia/kilocode-noosphere-memory@1.12.0"
   ]
 }
 ```
@@ -68,7 +68,7 @@ Add it to `~/.config/kilo/kilo.json`:
 You can also install it with Kilo's plugin command:
 
 ```bash
-kilo plugin @sweetsophia/kilocode-noosphere-memory --global
+kilo plugin @sweetsophia/kilocode-noosphere-memory@1.12.0 --global
 ```
 
 Or configure it with explicit options:
@@ -77,7 +77,7 @@ Or configure it with explicit options:
 {
   "plugin": [
     [
-      "@sweetsophia/kilocode-noosphere-memory",
+      "@sweetsophia/kilocode-noosphere-memory@1.12.0",
       {
         "baseUrl": "http://127.0.0.1:6578",
         "autoRecall": true,

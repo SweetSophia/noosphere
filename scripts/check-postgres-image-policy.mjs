@@ -49,6 +49,13 @@ function expect(condition, message) {
   if (!condition) failures.push(message);
 }
 
+const releaseVersion = read("VERSION").trim();
+const versionBoundInstallerCommand =
+  `NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-${releaseVersion}}" ` +
+  `NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${releaseVersion}}" ` +
+  `NOOSPHERE_PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${releaseVersion}}" ` +
+  'bash "$installer"';
+
 function countLiteral(text, literal) {
   if (!literal) return 0;
   return text.split(literal).length - 1;
@@ -725,6 +732,14 @@ expect(
   countLiteral(installer, '"$POSTGRES_VERIFY_SCRIPT"') >= 2,
   "install-openclaw.sh must prepare and execute full deployment verification",
 );
+expect(
+  installer.includes(
+    `PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${releaseVersion}}"`,
+  ) &&
+    installer.includes('openclaw plugins install "$PLUGIN_SPEC" --force') &&
+    !installer.includes('openclaw plugins update "$PLUGIN_ID"'),
+  "install-openclaw.sh must install the version-bound OpenClaw package on both fresh and existing installations",
+);
 
 for (const relativePath of [
   "openclaw-noosphere-memory/src/cli.ts",
@@ -734,6 +749,9 @@ for (const relativePath of [
   expect(
     text.includes(verifiedInstallerRef) &&
       text.includes(verifiedInstallerSha256) &&
+      text.includes("VERIFIED_NOOSPHERE_VERSION") &&
+      text.includes(releaseVersion) &&
+      text.includes("NOOSPHERE_VERSION") &&
       text.includes('"  set -e"') &&
       text.includes(`trap \\'rm -f "$installer"\\' EXIT`) &&
       text.includes("sha256sum -c -") &&
@@ -764,12 +782,13 @@ for (const relativePath of [
   const checksumCount = countLiteral(text, "sha256sum -c -");
   const safeInstallerBlocks = Array.from(
     text.matchAll(
-      /^(\s*)\(\n\1  set -e\n\1  installer="\$\(mktemp\)"\n\1  trap 'rm -f "\$installer"' EXIT\n\1  curl -fsSL [^\n]+ -o "\$installer"\n\1  printf '[^\n]+' '[a-f0-9]{64}' "\$installer" \| sha256sum -c -\n\1  bash "\$installer"\n(?:\1  openclaw noosphere (?:doctor|status)\n)*\1\)$/gm,
+      /^(\s*)\(\n\1  set -e\n\1  installer="\$\(mktemp\)"\n\1  trap 'rm -f "\$installer"' EXIT\n\1  curl -fsSL [^\n]+ -o "\$installer"\n\1  printf '[^\n]+' '[a-f0-9]{64}' "\$installer" \| sha256sum -c -\n\1  NOOSPHERE_VERSION="\$\{NOOSPHERE_VERSION:-[0-9]+\.[0-9]+\.[0-9]+\}" NOOSPHERE_IMAGE="\$\{NOOSPHERE_IMAGE:-ghcr\.io\/sweetsophia\/noosphere:[0-9]+\.[0-9]+\.[0-9]+\}" NOOSPHERE_PLUGIN_SPEC="\$\{NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia\/openclaw-noosphere-memory@[0-9]+\.[0-9]+\.[0-9]+\}" bash "\$installer"\n(?:\1  openclaw noosphere (?:doctor|status)\n)*\1\)$/gm,
     ),
   ).length;
   expect(
     text.includes(verifiedInstallerRef) &&
       text.includes(verifiedInstallerSha256) &&
+      text.includes(versionBoundInstallerCommand) &&
       checksumCount > 0 &&
       safeInstallerBlocks === checksumCount,
     `${relativePath} must gate every immutable installer execution on checksum success and trap cleanup`,

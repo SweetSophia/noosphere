@@ -7,6 +7,7 @@ const DEFAULT_COMPOSE_FILE = "~/.noosphere/docker-compose.yml";
 const DEFAULT_LOG_TAIL = 80;
 const VERIFIED_INSTALLER_REF = "66ab1f7d8a912fa79bf1cca8be6bf3cc947e9d1a";
 const VERIFIED_INSTALLER_SHA256 = "6d84b86ab71f04fcba17157f4a0197d773b78a2e919b15ebf4406ec8ac751e2c";
+const VERIFIED_NOOSPHERE_VERSION = "1.12.0";
 const VERIFIED_INSTALLER_URL = `https://raw.githubusercontent.com/SweetSophia/noosphere/${VERIFIED_INSTALLER_REF}/install-openclaw.sh`;
 export function getVerifiedInstallerCommands() {
     return [
@@ -16,7 +17,7 @@ export function getVerifiedInstallerCommands() {
         '  trap \'rm -f "$installer"\' EXIT',
         `  curl -fsSL ${VERIFIED_INSTALLER_URL} -o "$installer"`,
         `  printf '%s  %s\\n' '${VERIFIED_INSTALLER_SHA256}' "$installer" | sha256sum -c -`,
-        '  bash "$installer"',
+        `  NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-${VERIFIED_NOOSPHERE_VERSION}}" NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${VERIFIED_NOOSPHERE_VERSION}}" NOOSPHERE_PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${VERIFIED_NOOSPHERE_VERSION}}" bash "$installer"`,
         ")",
     ];
 }

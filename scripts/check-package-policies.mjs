@@ -31,6 +31,7 @@ const policy = {
     packageName: "@sweetsophia/openclaw-noosphere-memory",
   },
   npmPublishWorkflow: ".github/workflows/npm-publish.yml",
+  dockerPublishWorkflow: ".github/workflows/docker-publish.yml",
   forbiddenPublishSignals: ["injectedmemory", "noosphereinjectedmemory"],
 };
 
@@ -218,6 +219,8 @@ const openclawPackage = readJson(`${policy.openclaw.dir}/package.json`);
 const openclawLock = readJson(`${policy.openclaw.dir}/package-lock.json`);
 const npmPublishWorkflow = readText(policy.npmPublishWorkflow);
 const npmPublishWorkflowLines = workflowLines(npmPublishWorkflow);
+const dockerPublishWorkflow = readText(policy.dockerPublishWorkflow);
+const dockerPublishWorkflowLines = workflowLines(dockerPublishWorkflow);
 
 expect(
   injectedPackage.private === true,
@@ -281,6 +284,11 @@ expect(
   !hasWorkflowInput(npmPublishWorkflowLines, "publish_injected") &&
     !hasForbiddenHelperPublishKey(npmPublishWorkflowLines, policy.forbiddenPublishSignals),
   "The npm publish workflow must not expose a publish_injected* dispatch input/job for the bundled-only helper.",
+);
+expect(
+  dockerPublishWorkflowLines.includes("type=semver,pattern={{version}}") &&
+    !dockerPublishWorkflowLines.includes("type=ref,event=tag"),
+  "The Docker publish workflow must strip the release tag's v prefix so NOOSPHERE_VERSION resolves to a published image tag.",
 );
 
 if (failures.length > 0) {

@@ -2075,7 +2075,10 @@ describe("OpenClaw Noosphere CLI helpers", () => {
     assert.match(commands[3], /trap .*rm -f .* EXIT/);
     assert.match(commands[4], /curl .* -o \"\$installer\"/);
     assert.match(commands[5], /sha256sum -c -/);
-    assert.match(commands[6], /^  bash /);
+    assert.equal(
+      commands[6],
+      '  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.12.0}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.12.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.12.0}" bash "$installer"',
+    );
     assert.equal(commands[7], ")");
     assert.doesNotMatch(combined, /\/master\/install-openclaw\.sh|install-openclaw\.sh \| bash/);
   });
