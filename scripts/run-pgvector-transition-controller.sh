@@ -407,13 +407,18 @@ validate_evidence_binding() {
   if [[ "$key" == writerStopEvidence ]]; then
     jq -e --arg app "$(jq -er '.appContainer // ""' "$state")" \
       'type == "object" and .container == $app and .container != "" and
-       (.stopExitCode | type == "number" and . >= 0 and floor == .) and
+       (.stopExitCode | type == "number" and . >= 0 and . <= 255 and floor == .) and
        ((has("finalContainerState") | not) and
         .inspectRunning == false and .stopExitCode == 0 or
         .finalContainerState == "stopped" and
-        .inspectRunning == false and .stopExitCode == 0 or
+        .inspectRunning == false and .stopExitCode == 0 and
+        .stopAttempted == true and
+        (.initialContainerState == "true" or .initialContainerState == "false") or
         .finalContainerState == "absent" and
-        .inspectRunning == null and (.stopAttempted | type == "boolean"))' \
+        .inspectRunning == null and
+        ((.stopAttempted == false and .initialContainerState == "absent" and .stopExitCode == 0) or
+         (.stopAttempted == true and
+          (.initialContainerState == "true" or .initialContainerState == "false"))))' \
       "$path" >/dev/null ||
       die "writerStopEvidence file does not prove this state's application container was stopped or absent: $path"
   fi

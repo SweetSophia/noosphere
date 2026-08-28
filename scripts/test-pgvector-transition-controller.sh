@@ -5159,6 +5159,7 @@ test_writer_stop_evidence_rejects_nonnumeric_stop_exit() (
     phase: "closure-stop-pending",
     container: "fixture-app",
     stopExitCode: "bogus",
+    initialContainerState: "absent",
     finalContainerState: "absent",
     inspectRunning: null,
     stopAttempted: false
@@ -5196,6 +5197,66 @@ SUPPORT
   bash -c 'source "$1"; validate_evidence_binding "$2" writerStopEvidence' \
     _ "$functions" "$state" || {
     echo 'Writer-stop evidence rejected a numeric absent-container stopExitCode control' >&2
+    exit 1
+  }
+
+  jq '.finalContainerState = "stopped" |
+      .initialContainerState = "true" |
+      .inspectRunning = false |
+      .stopAttempted = "bogus"' "$evidence" > "$evidence.tmp"
+  mv "$evidence.tmp" "$evidence"
+  chmod 0600 "$evidence"
+  jq --arg sha "$(sha256sum "$evidence" | awk '{print $1}')" \
+    '.writerStopEvidence.sha256 = $sha' "$state" > "$state.tmp"
+  mv "$state.tmp" "$state"
+  rc=0
+  bash -c 'source "$1"; validate_evidence_binding "$2" writerStopEvidence' \
+    _ "$functions" "$state" >/dev/null 2>&1 || rc=$?
+  ((rc != 0)) || {
+    echo 'Writer-stop evidence accepted a non-boolean stopAttempted field' >&2
+    exit 1
+  }
+
+  jq '.stopAttempted = false' "$evidence" > "$evidence.tmp"
+  mv "$evidence.tmp" "$evidence"
+  chmod 0600 "$evidence"
+  jq --arg sha "$(sha256sum "$evidence" | awk '{print $1}')" \
+    '.writerStopEvidence.sha256 = $sha' "$state" > "$state.tmp"
+  mv "$state.tmp" "$state"
+  rc=0
+  bash -c 'source "$1"; validate_evidence_binding "$2" writerStopEvidence' \
+    _ "$functions" "$state" >/dev/null 2>&1 || rc=$?
+  ((rc != 0)) || {
+    echo 'Writer-stop evidence accepted stopped state without a stop attempt' >&2
+    exit 1
+  }
+
+  jq '.stopAttempted = true' "$evidence" > "$evidence.tmp"
+  mv "$evidence.tmp" "$evidence"
+  chmod 0600 "$evidence"
+  jq --arg sha "$(sha256sum "$evidence" | awk '{print $1}')" \
+    '.writerStopEvidence.sha256 = $sha' "$state" > "$state.tmp"
+  mv "$state.tmp" "$state"
+  bash -c 'source "$1"; validate_evidence_binding "$2" writerStopEvidence' \
+    _ "$functions" "$state" || {
+    echo 'Writer-stop evidence rejected a consistent stopped-container control' >&2
+    exit 1
+  }
+
+  jq '.finalContainerState = "absent" |
+      .inspectRunning = null |
+      .initialContainerState = "absent" |
+      .stopAttempted = true' "$evidence" > "$evidence.tmp"
+  mv "$evidence.tmp" "$evidence"
+  chmod 0600 "$evidence"
+  jq --arg sha "$(sha256sum "$evidence" | awk '{print $1}')" \
+    '.writerStopEvidence.sha256 = $sha' "$state" > "$state.tmp"
+  mv "$state.tmp" "$state"
+  rc=0
+  bash -c 'source "$1"; validate_evidence_binding "$2" writerStopEvidence' \
+    _ "$functions" "$state" >/dev/null 2>&1 || rc=$?
+  ((rc != 0)) || {
+    echo 'Writer-stop evidence accepted an impossible absent-to-attempted transition' >&2
     exit 1
   }
 )

@@ -1695,7 +1695,9 @@ fi
 if [[ "$mode" == prepare-new-install ]]; then
   assert_candidate_authorization_gate
   if ! path_present "$journal"; then
-    docker container inspect "$db_container" >/dev/null 2>&1 && die 'new-install database container already exists without a durable claim'
+    db_state=$(container_running_state "$db_container") ||
+      die 'could not classify the database container before the new-install claim'
+    [[ "$db_state" == absent ]] || die 'new-install database container already exists without a durable claim'
     initial_app_state=$(container_running_state "$app_container") ||
       die 'could not classify the app container before the new-install claim'
     [[ "$initial_app_state" == absent ]] || die 'new-install app container already exists without a durable claim'
@@ -1756,15 +1758,18 @@ if [[ "$mode" == prepare-new-install ]]; then
 
   fail_closed_on_die=true
   assert_app_writer_not_running 'app writer must remain stopped until new-install evidence is complete'
-  if docker container inspect "$db_container" >/dev/null 2>&1; then
-    [[ $(docker container inspect "$db_container" --format '{{.State.Running}}') == true ]] ||
-      die 'prepared new-install database container exists but is not running'
-    assert_image_identity "$db_container" "$CANDIDATE_IMAGE" candidate
-    assert_volume_consumers "$db_container"
-    assert_container_volume_mount "$db_container"
-  else
-    assert_volume_consumers
-  fi
+  db_state=$(container_running_state "$db_container") ||
+    die 'could not classify the prepared new-install database container'
+  case "$db_state" in
+    true)
+      assert_image_identity "$db_container" "$CANDIDATE_IMAGE" candidate
+      assert_volume_consumers "$db_container"
+      assert_container_volume_mount "$db_container"
+      ;;
+    absent) assert_volume_consumers ;;
+    false) die 'prepared new-install database container exists but is not running' ;;
+    *) die 'prepared new-install database container has an unsupported state' ;;
+  esac
   operation_complete=true
   trap - ERR
   log "new-install volume claim prepared: $journal"
@@ -1778,7 +1783,9 @@ if [[ "$mode" == record-new-install ]]; then
     die 'new-install finalization requires prepared provisioning evidence'
   fail_closed_on_die=true
   assert_app_writer_not_running 'app writer must remain stopped until new-install evidence is complete'
-  [[ $(docker container inspect "$db_container" --format '{{.State.Running}}') == true ]] || die 'new-install database is not running'
+  db_state=$(container_running_state "$db_container") ||
+    die 'could not classify the new-install database during finalization'
+  [[ "$db_state" == true ]] || die 'new-install database is not running'
   platform=$(jq -er '.platform' "$journal")
   expected_volume=$(jq -er '.volumeFingerprint' "$journal")
   assert_new_install_volume_claim "$expected_volume" >/dev/null

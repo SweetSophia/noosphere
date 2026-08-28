@@ -1212,6 +1212,10 @@ expect(
   switchScript.includes("container_running_state()") &&
     switchScript.includes("docker container inspect") &&
     switchScript.includes("docker container ls --all --format '{{.Names}}'") &&
+    switchScript.includes('db_state=$(container_running_state "$db_container")') &&
+    switchScript.includes("could not classify the database container before the new-install claim") &&
+    switchScript.includes("could not classify the prepared new-install database container") &&
+    switchScript.includes("could not classify the new-install database during finalization") &&
     !switchScript.includes('docker inspect "$app_container"') &&
     !switchScript.includes(
       'docker container inspect "$app_container" --format \'{{.State.Running}}\'',
@@ -1220,6 +1224,8 @@ expect(
     controllerScript.includes('finalContainerState == "absent"') &&
     controllerScript.includes('inspectRunning == null') &&
     controllerScript.includes('.stopExitCode | type == "number"') &&
+    controllerScript.includes('.stopAttempted == true') &&
+    controllerScript.includes('.initialContainerState == "absent"') &&
     sourceRecovery !== "" &&
     countLiteral(sourceRecovery, "stop_app_writer_for_recovery") === 2 &&
     !sourceRecovery.includes('if docker container inspect "$app_container"') &&
