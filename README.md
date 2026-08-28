@@ -102,14 +102,18 @@ OpenClaw users can install Noosphere and the OpenClaw plugin with the repository
 installer:
 
 ```bash
-# Installer commit: 5a94ef3530cd232265c53699ee15f37d9ec89e04
-# Expected SHA-256: 46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b
-installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5a94ef3530cd232265c53699ee15f37d9ec89e04/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b' "$installer" | sha256sum -c -
-bash "$installer" && rm -f "$installer"
-openclaw noosphere doctor
-openclaw noosphere status
+# Installer commit: bbeb076c618d0b50cc49de10a1c39388c2a7d6da
+# Expected SHA-256: 3234f9cb84079b421015e647e83fa833136738cba26057b5e64332a1e7e9316e
+(
+  set -e
+  installer="$(mktemp)"
+  trap 'rm -f "$installer"' EXIT
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/bbeb076c618d0b50cc49de10a1c39388c2a7d6da/install-openclaw.sh -o "$installer"
+  printf '%s  %s\n' '3234f9cb84079b421015e647e83fa833136738cba26057b5e64332a1e7e9316e' "$installer" | sha256sum -c -
+  bash "$installer"
+  openclaw noosphere doctor
+  openclaw noosphere status
+)
 ```
 
 The installer provisions Docker, Redis, Noosphere secrets, and the OpenClaw plugin

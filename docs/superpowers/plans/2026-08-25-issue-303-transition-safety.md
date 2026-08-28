@@ -238,7 +238,12 @@ suite (including its transient-systemd fixture) and the pinned-Docker
 `linux/amd64` interruption/recovery rehearsal under disposable persistent user
 managers. The PostgreSQL image policy owns the trigger paths, commands, pinned
 image pull, bootstrap Node installation, and user-manager setup/cleanup contract.
-Steps 1–4 remain open and continue to block the one-command installer rollout.
+Steps 1–4 are implemented on the isolated installer-integration branch with
+thirteen deterministic installer owners and 137 focused controller owners. PR #306
+is published and under changes-requested review; it remains open until the
+review-fix head passes its full local gate, exact-head hosted CI, and sequential
+review. Its regular merge must preserve the pinned intermediate commits.
+No production transition is authorized.
 
 The first hosted runs additionally established and closed three concrete runner
 portability gaps: Node was absent from the controller bootstrap path,

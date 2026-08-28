@@ -9,9 +9,9 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
-const immutableHelperRef = "4a7033214d8509419ff1d50ddcfa4e92fdfd9adc";
-const verifiedInstallerRef = "5a94ef3530cd232265c53699ee15f37d9ec89e04";
-const verifiedInstallerSha256 = "46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b";
+const immutableHelperRef = "d7d962e2643e6cc049e831561e1eb60d4333feed";
+const verifiedInstallerRef = "bbeb076c618d0b50cc49de10a1c39388c2a7d6da";
+const verifiedInstallerSha256 = "3234f9cb84079b421015e647e83fa833136738cba26057b5e64332a1e7e9316e";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
@@ -306,6 +306,12 @@ expect(
 );
 const helperArtifacts = [
   {
+    label: "PostgreSQL transition controller",
+    shaConstant: "POSTGRES_CONTROLLER_SCRIPT_SHA256",
+    urlConstant: "POSTGRES_CONTROLLER_SCRIPT_URL",
+    relativePath: "scripts/run-pgvector-transition-controller.sh",
+  },
+  {
     label: "PostgreSQL switch guard",
     shaConstant: "POSTGRES_SWITCH_SCRIPT_SHA256",
     urlConstant: "POSTGRES_SWITCH_SCRIPT_URL",
@@ -549,7 +555,7 @@ expect(
   "install-openclaw.sh must keep writers stopped until its guarded transaction finishes",
 );
 expect(
-  installer.includes("engine_id=$(docker info --format '{{.ID}}') || {") &&
+  installer.includes('engine_id=$(DOCKER_HOST="$docker_host" docker info --format') &&
     installer.includes("Docker engine ID is empty."),
   "install-openclaw.sh must fail closed when Docker engine identity is unavailable",
 );
@@ -565,17 +571,134 @@ const finalizeNewInstall = installer.indexOf('"$POSTGRES_SWITCH_SCRIPT" --record
 const authorizeWriter = installer.indexOf('"$POSTGRES_SWITCH_SCRIPT" --authorize-writer');
 const startApp = installer.indexOf("docker compose up -d app");
 const candidateGateTemplate = installer.indexOf("marker=/run/noosphere-pgvector/candidate-authorized");
-const existingSwitchBlock = installer.indexOf('if [[ "$existing_switch_required" == true ]]');
-const existingSwitchDefer = installer.indexOf("--defer-app-restart", existingSwitchBlock);
-const newInstallBlock = installer.indexOf('if [[ "$new_install_required" == true ]]', existingSwitchBlock);
+const transitionRouteMatch = installer.match(
+  /^route_postgres_install_transition\(\) \{([\s\S]*?)^}\n\n(?=reconcile_postgres_controller_before_configuration\(\))/m,
+);
+const transitionRoute = transitionRouteMatch?.[1] ?? "";
+const controllerReconciliationMatch = installer.match(
+  /^reconcile_postgres_controller_before_configuration\(\) \{([\s\S]*?)^}\n\n(?=acquire_postgres_operation_lock\(\))/m,
+);
+const controllerReconciliation = controllerReconciliationMatch?.[1] ?? "";
+const completeReconciliationStart = controllerReconciliation.indexOf("    complete)");
+const incidentReconciliationStart = controllerReconciliation.indexOf("    incident)");
+const completeReconciliation =
+  completeReconciliationStart >= 0 && incidentReconciliationStart > completeReconciliationStart
+    ? controllerReconciliation.slice(completeReconciliationStart, incidentReconciliationStart)
+    : "";
+const completeGuardClosure = completeReconciliation.indexOf('.mode == "switch" and .phase == "complete"');
+const completeLockReacquisition = completeReconciliation.indexOf(
+  "reacquire_postgres_operation_lock_from_manifest",
+);
+const completeControllerCompletion = completeReconciliation.indexOf(
+  "controller_transition_completed=true",
+);
+const existingSwitchBlock = transitionRoute.indexOf('if [[ "$existing_switch_required" == true ]]');
+const candidatePull = transitionRoute.indexOf('-f "$POSTGRES_CONTROLLER_CANDIDATE" pull');
+const controllerManifest = transitionRoute.indexOf("write_postgres_controller_manifest");
+const controllerExecution = transitionRoute.indexOf("run_existing_postgres_controller_transition");
+const installerLockReacquisition = transitionRoute.indexOf(
+  "reacquire_postgres_operation_lock_from_manifest",
+);
+const controllerCompletion = transitionRoute.indexOf("controller_transition_completed=true");
+const newInstallBlock = transitionRoute.indexOf('if [[ "$new_install_required" == true ]]');
 const recoveredSwitchResume = installer.indexOf('if [[ "$resume_recovered_switch" == true ]]');
-const composeTemplatePublish = installer.indexOf('cat > "$NOOSPHERE_HOME/docker-compose.yml"');
+const composeTemplatePublish = installer.indexOf('cat > "$compose_target"');
+expect(
+  transitionRouteMatch !== null &&
+    !transitionRoute.includes("reconcile_postgres_controller_before_configuration") &&
+    !transitionRoute.includes("acquire_postgres_operation_lock() {") &&
+    controllerExecution >= 0 &&
+    installerLockReacquisition > controllerExecution &&
+    controllerCompletion > installerLockReacquisition,
+  "installer route policy must be scoped to one function and reacquire the operation lock before post-controller completion",
+);
+expect(
+  controllerReconciliationMatch !== null &&
+    !controllerReconciliation.includes("acquire_postgres_operation_lock() {") &&
+    completeGuardClosure >= 0 &&
+    completeLockReacquisition > completeGuardClosure &&
+    completeControllerCompletion > completeLockReacquisition,
+  "complete controller reconciliation must bind the manifest operation lock after closure validation and before completion",
+);
+expect(
+  installer.includes("reacquire_postgres_operation_lock_from_manifest() {") &&
+    installer.includes("expected_docker_host=$(jq -er '.dockerEndpoint") &&
+    installer.includes("expected_engine_id=$(jq -er '.engineId") &&
+    installer.includes("expected_lock_root=$(jq -er '.lockRoot") &&
+    installer.includes(
+      'acquire_postgres_operation_lock "$expected_docker_host" "$expected_engine_id" "$expected_lock_root"',
+    ) &&
+    installer.includes('[[ -z "$expected_docker_host" || "$docker_host" == "$expected_docker_host" ]]') &&
+    installer.includes('[[ -z "$expected_engine_id" || "$engine_id" == "$expected_engine_id" ]]') &&
+    installer.includes(
+      '[[ $(realpath -m "$ambient_lock_root") == "$(realpath -m "$expected_lock_root")" ]]',
+    ) &&
+    installer.includes("Runtime lock directory changed while the PostgreSQL transition controller was active."),
+  "post-controller lock reacquisition must remain bound to the manifest Docker endpoint, engine identity, and lock root",
+);
+expect(
+  installer.includes(
+    "# Route only real source transitions through the controller. New installs keep\n" +
+      "# a direct guard claim; already-complete installations need neither pre-step.\n" +
+      "route_postgres_install_transition",
+  ),
+  "installer transition routing commentary must remain non-executable before the main route call",
+);
+const installerMain = installer.indexOf("\nmain() {");
+const earlyControllerReconciliation = installer.indexOf(
+  "\nreconcile_postgres_controller_before_configuration\n",
+  installerMain,
+);
+const firstRuntimeSecretWrite = installer.indexOf("ensure_runtime_env_secret ", installerMain);
+expect(
+  installer.includes("assert_installer_owned_regular_file \"$POSTGRES_CONTROLLER_STATE\"") &&
+    installer.includes(".guardJournalEvidence.sha256") &&
+    installer.includes('actual_guard_sha=$(sha256sum "$guard_evidence"') &&
+    installer.includes('[[ "$actual_guard_sha" == "$expected_guard_sha" ]]') &&
+    installer.includes('.mode == "switch" and .phase == "complete"') &&
+    installer.includes("controller_transition_completed=true") &&
+    earlyControllerReconciliation >= 0 &&
+    firstRuntimeSecretWrite > earlyControllerReconciliation,
+  "complete/nonterminal controller state must reconcile before installer runtime-secret writes",
+);
+expect(
+  installer.includes("sanitize_postgres_controller_environment() {") &&
+    installer.includes("postgres_controller_compose_version_signature() (") &&
+    installer.includes("postgres_controller_compose_model_signature() (") &&
+    installer.includes("DOCKER_*|COMPOSE_*) unset") &&
+    installer.includes("unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY") &&
+    installer.includes("unset NOOSPHERE_A2B_LOCK_FD NOOSPHERE_A2B_LOCK_PATH") &&
+    installer.includes("unset NOOSPHERE_CONTROLLER_TEST_INTERRUPT_AFTER_INTENT") &&
+    installer.includes("export COMPOSE_DISABLE_ENV_FILE=1") &&
+    installer.includes("compose_version_sha=$(postgres_controller_compose_version_signature") &&
+    installer.includes("effective_compose_sha=$(postgres_controller_compose_model_signature"),
+  "installer must hash the effective candidate Compose model under the controller's sanitized environment",
+);
+expect(
+  installer.includes('fsync_installer_path "$POSTGRES_CONTROLLER_SCRIPT"') &&
+    installer.includes('fsync_installer_path "$POSTGRES_SWITCH_SCRIPT"') &&
+    installer.includes('fsync_installer_path "$POSTGRES_VERIFY_SCRIPT"') &&
+    installer.includes('for bound_input in \\') &&
+    installer.includes('assert_installer_owned_regular_file "$bound_input"') &&
+    installer.includes('fsync_installer_path "$bound_input"'),
+  "installer must fsync every mutable controller-bound input before manifest preparation",
+);
+expect(
+  installer.includes('systemctl --user show "$unit" -p LoadState --value') &&
+    installer.includes('if [[ "$unit_load_state" != not-found ]]'),
+  "installer must distinguish an absent transient unit by LoadState=not-found rather than systemctl exit status",
+);
 expect(
   candidateGateTemplate >= 0 &&
-    existingSwitchBlock > candidateGateTemplate &&
-    existingSwitchDefer > existingSwitchBlock &&
-    newInstallBlock > existingSwitchDefer,
-  "install-openclaw.sh must publish the fail-closed candidate gate before switching an existing volume",
+    existingSwitchBlock >= 0 &&
+    candidatePull > existingSwitchBlock &&
+    controllerManifest > candidatePull &&
+    controllerExecution > controllerManifest &&
+    newInstallBlock > controllerExecution &&
+    transitionRoute.includes('controller_transition_completed=true') &&
+    installer.includes('compose_target="$POSTGRES_CONTROLLER_CANDIDATE"') &&
+    installer.includes('install -m 600 "$NOOSPHERE_HOME/docker-compose.yml" "$POSTGRES_CONTROLLER_SOURCE"'),
+  "install-openclaw.sh must preserve source Compose bytes and route existing volumes through candidate pull, manifest preparation, and the controller",
 );
 expect(
   recoveredSwitchResume >= 0 &&
@@ -593,7 +716,8 @@ expect(
   "install-openclaw.sh must authorize the writer under its inherited lock immediately before starting the app",
 );
 expect(
-  installer.includes('docker_host="unix://$(realpath -m "$docker_socket")"') &&
+  installer.includes("resolve_local_docker_endpoint() {") &&
+    installer.includes("printf 'unix://%s\\n' \"$(realpath -m \"$docker_socket\")\"") &&
     installer.includes("printf '%s\\0%s' \"$engine_id\" noosphere_postgres_data"),
   "install-openclaw.sh must canonicalize the local endpoint and lock by Docker engine identity plus volume",
 );
@@ -610,10 +734,13 @@ for (const relativePath of [
   expect(
     text.includes(verifiedInstallerRef) &&
       text.includes(verifiedInstallerSha256) &&
+      text.includes('"  set -e"') &&
+      text.includes(`trap \\'rm -f "$installer"\\' EXIT`) &&
       text.includes("sha256sum -c -") &&
       text.indexOf("curl -fsSL") < text.indexOf("sha256sum -c -") &&
-      text.indexOf("sha256sum -c -") < text.indexOf('bash "$installer"'),
-    `${relativePath} must route setup and upgrades through the immutable checksum-verified installer`,
+      text.indexOf("sha256sum -c -") < text.indexOf('bash "$installer"') &&
+      !text.includes('bash "$installer" && rm -f "$installer"'),
+    `${relativePath} must route setup and upgrades through a fail-fast, cleanup-safe immutable installer block`,
   );
   expect(
     !text.includes("noosphere/master/install-openclaw.sh") &&
@@ -634,11 +761,22 @@ for (const relativePath of [
   "docs/articles/noosphere-medium-article.md",
 ]) {
   const text = read(relativePath);
+  const checksumCount = countLiteral(text, "sha256sum -c -");
+  const safeInstallerBlocks = Array.from(
+    text.matchAll(
+      /^(\s*)\(\n\1  set -e\n\1  installer="\$\(mktemp\)"\n\1  trap 'rm -f "\$installer"' EXIT\n\1  curl -fsSL [^\n]+ -o "\$installer"\n\1  printf '[^\n]+' '[a-f0-9]{64}' "\$installer" \| sha256sum -c -\n\1  bash "\$installer"\n(?:\1  openclaw noosphere (?:doctor|status)\n)*\1\)$/gm,
+    ),
+  ).length;
   expect(
     text.includes(verifiedInstallerRef) &&
       text.includes(verifiedInstallerSha256) &&
-      text.includes("sha256sum -c -"),
-    `${relativePath} must document the immutable checksum-verified installer`,
+      checksumCount > 0 &&
+      safeInstallerBlocks === checksumCount,
+    `${relativePath} must gate every immutable installer execution on checksum success and trap cleanup`,
+  );
+  expect(
+    !/^\s*\)\n\s*openclaw noosphere (?:doctor|status)$/m.test(text),
+    `${relativePath} must keep immediate post-install checks inside the fail-fast installer subshell`,
   );
   expect(
     !text.includes("noosphere/master/install-openclaw.sh") &&
@@ -1034,9 +1172,45 @@ const dockerControllerJob = workflowJob(
   postgresRehearsalWorkflow,
   "rehearse-transition-controller",
 );
+const installerControllerFixture = read("scripts/test-install-openclaw-transition-controller.sh");
+const installerControllerDefinitions = Array.from(
+  installerControllerFixture.matchAll(/^(test_[A-Za-z0-9_]+)\(\) \(/gm),
+  (match) => match[1],
+);
+const installerControllerDispatches = Array.from(
+  installerControllerFixture.matchAll(/^  (test_[A-Za-z0-9_]+)$/gm),
+  (match) => match[1],
+);
+expect(
+  installerControllerDefinitions.length === 13 &&
+    installerControllerDispatches.length === 13 &&
+    new Set(installerControllerDispatches).size === 13 &&
+    JSON.stringify([...installerControllerDefinitions].sort()) ===
+      JSON.stringify([...installerControllerDispatches].sort()),
+  "the installer transition-controller fixture must define and dispatch exactly thirteen unique owners",
+);
+const focusedControllerFixture = read("scripts/test-pgvector-transition-controller.sh");
+const focusedControllerDefinitions = Array.from(
+  focusedControllerFixture.matchAll(/^(test_[A-Za-z0-9_]+)\(\) \(/gm),
+  (match) => match[1],
+);
+const focusedControllerDispatches = Array.from(
+  focusedControllerFixture.matchAll(/^  (test_[A-Za-z0-9_]+)$/gm),
+  (match) => match[1],
+);
+expect(
+  focusedControllerDefinitions.length === 137 &&
+    focusedControllerDispatches.length === 137 &&
+    new Set(focusedControllerDispatches).size === 137 &&
+    focusedControllerDefinitions.includes("test_verification_url_accepts_ipv4_loopback_range") &&
+    JSON.stringify([...focusedControllerDefinitions].sort()) ===
+      JSON.stringify([...focusedControllerDispatches].sort()),
+  "the focused transition-controller fixture must define and dispatch exactly 137 unique owners, including full IPv4 loopback coverage",
+);
 const controllerWorkflowTriggerPaths = [
   ".github/workflows/postgres-pgvector-rehearsal.yml",
   "scripts/run-pgvector-transition-controller.sh",
+  "scripts/test-install-openclaw-transition-controller.sh",
   "scripts/test-pgvector-transition-controller.sh",
   "scripts/test-pgvector-transition-controller-systemd.sh",
   "scripts/test-pgvector-transition-controller-docker.sh",
@@ -1051,6 +1225,10 @@ expect(
     countLiteral(
       focusedControllerJob,
       "run: scripts/test-pgvector-transition-controller.sh",
+    ) === 1 &&
+    countLiteral(
+      focusedControllerJob,
+      "run: scripts/test-install-openclaw-transition-controller.sh",
     ) === 1 &&
     countLiteral(
       dockerControllerJob,

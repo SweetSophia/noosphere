@@ -64,6 +64,49 @@ assert_trusted_fixed_path() {
   done
 }
 
+query_local_ipv4_addresses() {
+  ip -o -4 addr show | awk '{ address=$4; sub(/\/.*/, "", address); print address }'
+}
+
+assert_local_verification_url() {
+  local url=$1 host port octet assigned_address assigned=false
+  local -a octets=()
+  [[ "$url" =~ ^http://([0-9]{1,3}\.){3}[0-9]{1,3}:[1-9][0-9]{0,4}$ ]] || {
+    printf 'verification URL must be an explicit HTTP IPv4 address and port: %s\n' "$url" >&2
+    return 1
+  }
+  host=${url#http://}
+  host=${host%:*}
+  port=${url##*:}
+  ((port <= 65535)) || {
+    printf 'verification URL port is out of range: %s\n' "$url" >&2
+    return 1
+  }
+  IFS=. read -r -a octets <<< "$host"
+  ((${#octets[@]} == 4)) || return 1
+  for octet in "${octets[@]}"; do
+    [[ "$octet" =~ ^[0-9]+$ ]] && ((10#$octet <= 255)) || {
+      printf 'verification URL contains an invalid IPv4 address: %s\n' "$url" >&2
+      return 1
+    }
+  done
+  [[ "$host" != 0.0.0.0 ]] || {
+    printf 'verification URL cannot use a wildcard address: %s\n' "$url" >&2
+    return 1
+  }
+  ((10#${octets[0]} != 127)) || return 0
+  while IFS= read -r assigned_address; do
+    if [[ "$assigned_address" == "$host" ]]; then
+      assigned=true
+      break
+    fi
+  done < <(query_local_ipv4_addresses)
+  [[ "$assigned" == true ]] || {
+    printf 'verification URL address is not assigned to a local interface: %s\n' "$host" >&2
+    return 1
+  }
+}
+
 fsync_path() {
   node -e '
     const fs = require("node:fs");
@@ -1746,10 +1789,12 @@ validate_execution_manifest() {
     (.dbContainer | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9_.-]*$")) and
     (.appContainer | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9_.-]*$")) and
     (.authorizationVolume | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9_.-]*$")) and
-    (.appUrl | type == "string" and test("^http://127[.]0[.]0[.]1:[1-9][0-9]{0,4}$")) and
+    (.appUrl | type == "string" and test("^http://([0-9]{1,3}[.]){3}[0-9]{1,3}:[1-9][0-9]{0,4}$")) and
     ((.appUrl | split(":")[-1] | tonumber) <= 65535) and
     (.platform == "linux/amd64" or .platform == "linux/arm64")
   ' "$state" >/dev/null || die 'execution manifest is malformed'
+  assert_local_verification_url "$(jq -er '.appUrl' "$state")" ||
+    die 'application verification URL is not a current local interface target'
   assert_guard_journal_path "$state"
   validate_guard_arguments "$state"
 }

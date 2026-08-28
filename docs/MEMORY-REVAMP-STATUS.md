@@ -32,13 +32,14 @@ backfill, shadow evaluation, or hybrid serving.
   image. Feature-schema activation, provider/worker operation, backfill, and
   hybrid retrieval remain opt-in; retrieval defaults to
   `NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false`.
-- The guarded existing-volume transition and its execution controller are
-  implemented. Issue #303's production-safety subset is open as PR #305; its
-  public-review correction passes the focused and stateful rehearsal gates,
-  and updated CI/review is green with zero unresolved threads. The PR now carries
-  path-filtered focused/systemd and pinned-Docker controller jobs as the Task 7
-  Step 5 pre-rollout gate. It is not merged; Task 7 installer integration,
-  transition execution, and Phase D rollout remain explicit operator actions.
+- The guarded existing-volume transition and its execution controller were
+  merged in PR #305 with focused/systemd and pinned-Docker hosted gates green.
+  Task 7's one-command installer integration is published as PR #306 with
+  checksum-pinned private staging, controller-routed existing-volume upgrades,
+  durable rerun recovery, thirteen installer owners, and 137 focused controller
+  owners. The review-fix head still requires exact-head hosted CI and regular
+  merge so pinned intermediate commits remain reachable. Transition execution
+  and Phase D rollout remain explicit operator actions.
 
 ## Automatic capture and enrichment
 
@@ -65,7 +66,7 @@ The detailed privacy and lifecycle contract remains in
 | A3: optional feature storage | Implemented in PR #287 | Feature schema remains absent until explicit activation | Activate and validate against the target database |
 | B: provider, worker, consent, profile, and backfill tooling | Implemented in PR #288 | No serving profile or worker is required by the keyword-only runtime | Configure an approved provider, activate the worker layer, create a preparing profile, and backfill |
 | C: authorization-safe exact hybrid recall and RRF | Implemented in PR #289, with provider hardening in PR #291 | Disabled by `NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false`; lexical fallback remains authoritative | Complete Phase D gates before returning hybrid rankings |
-| Existing-volume execution controller | Base controller implemented in PR #300; issue #303 production-safety hardening locally verified and pending PR/CI | Does not run automatically | Merge the focused hardening only after its publication gates, then obtain explicit transition authorization |
+| Existing-volume execution controller | Base controller implemented in PR #300; issue #303 production-safety hardening merged in PR #305; one-command installer integration implemented locally | Does not run without invoking the checksum-pinned installer, and production transition is not authorized | Publish/review the installer integration, pass exact-head hosted gates, then obtain explicit transition authorization |
 | D: transition, coverage, shadow evaluation, quality acceptance, and serving | Not completed | Keyword-only recall remains the safe default | Transition the target database, activate layers, backfill to the coverage threshold, run opt-in shadow evaluation, and approve serving |
 
 Issue #261 remains open until the operator rollout and Phase D acceptance work is
@@ -85,11 +86,9 @@ own transition, activation, profile, coverage, and serving evidence.
 
 1. Keep this matrix and the linked ADRs synchronized as the source of status
    truth.
-2. Publish and merge issue #303's locally verified production-safety subset:
-   bound Compose interpolation, durable writer closure after post-authorization
-   failure, rejection of writable Compose parents regardless of owner,
-   descriptor/digest-bound publication, fresh-invocation writer closure, and
-   rollback-capable state/evidence publication.
+2. Complete PR #306 exact-head hosted CI and sequential review, then regular-
+   merge it so the checksum-pinned helper and installer commits remain reachable
+   from `master`. PR #305's production-safety subset is complete.
 3. Keep issue #303's remaining status-fidelity, portability, and unrelated
    hardening observations outside that bounded release floor unless a concrete
    safety reproducer promotes one.

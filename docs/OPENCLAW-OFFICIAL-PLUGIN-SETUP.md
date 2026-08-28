@@ -18,9 +18,13 @@ Install these on the machine running OpenClaw Gateway:
 - Docker
 - Docker Compose v2 (`docker compose`)
 - Node.js 22+
+- `iproute2` (`ip`) when binding Noosphere to a non-loopback IPv4 address
+- For an existing-volume upgrade, Node must also resolve from the root-trusted
+  system PATH (`/usr/sbin:/usr/bin:/sbin:/bin`); nvm-only Node is not admitted
+  inside the transient transition authority.
 - OpenClaw CLI
 - `curl`
-- `jq`, `sha256sum`, and `flock`
+- `jq`, `sha256sum`, `flock`, `systemd-run`, `systemctl`, and `loginctl`
 
 Verify:
 
@@ -40,12 +44,16 @@ flock --version
 Use the installer from the repository:
 
 ```bash
-# Installer commit: 5a94ef3530cd232265c53699ee15f37d9ec89e04
-# Expected SHA-256: 46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b
-installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5a94ef3530cd232265c53699ee15f37d9ec89e04/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b' "$installer" | sha256sum -c -
-bash "$installer" && rm -f "$installer"
+# Installer commit: bbeb076c618d0b50cc49de10a1c39388c2a7d6da
+# Expected SHA-256: 3234f9cb84079b421015e647e83fa833136738cba26057b5e64332a1e7e9316e
+(
+  set -e
+  installer="$(mktemp)"
+  trap 'rm -f "$installer"' EXIT
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/bbeb076c618d0b50cc49de10a1c39388c2a7d6da/install-openclaw.sh -o "$installer"
+  printf '%s  %s\n' '3234f9cb84079b421015e647e83fa833136738cba26057b5e64332a1e7e9316e' "$installer" | sha256sum -c -
+  bash "$installer"
+)
 ```
 
 The installer:
@@ -53,16 +61,18 @@ The installer:
 1. **Prompts for IP address selection** — detects available network interfaces (localhost, Tailscale, local network IPs) and lets you choose which address Noosphere will bind to. You can also select `0.0.0.0` (all interfaces) or enter a custom IP.
 2. Creates `~/.noosphere/`.
 3. Generates local secrets.
-4. For an existing install, takes an exclusive operation lock and writes a fail-closed candidate Compose gate while the source container keeps running unchanged.
-5. Runs the offline, restore-tested PostgreSQL image switch; candidate recreation remains blocked until the guard creates exact authorization.
-6. For a new database, durably claims the still-absent named volume, creates it with provenance labels, then starts PostgreSQL and Redis on the rehearsed candidate.
-7. Runs Prisma migrations through `docker/migrate-or-baseline.mjs`.
-8. Runs repeatable bootstrap through `docker/bootstrap.mjs` using the same generated admin/API credentials that are later written to `.env` and OpenClaw secrets.
-9. Finalizes new-install provenance before starting Noosphere (or validates completed switch evidence), then runs full deployment verification.
-10. Writes `~/.openclaw/secrets/noosphere-memory.json`.
-11. Installs or updates `noosphere-memory` in OpenClaw.
-12. Patches OpenClaw config with the Noosphere base URL, API key secret reference, and `hooks.allowPromptInjection: true`.
-13. Restarts OpenClaw Gateway when available.
+4. Installs the checksum-pinned transition controller, guard, and verifier privately with mode `0700`.
+5. For an existing install, keeps live Compose bytes unchanged, binds a private source snapshot, candidate, environment, Docker/Compose tooling, and verifier target, then prepares controller state under the inherited engine-plus-volume lock.
+   Caller `DOCKER_*`, `COMPOSE_*`, proxy, and shell-startup controls are removed while hashing the Compose version and effective model, matching controller revalidation exactly.
+6. Releases that lock descriptor and runs the existing-volume transition under a collected transient user-systemd unit. The controller owns the offline restore rehearsal, candidate publication, Compose `init` dependency, writer authorization, app activation, and full verification. If interrupted, rerunning the same installer command resumes the durable controller state before touching its bound inputs.
+7. For a new database, durably claims the still-absent named volume, creates it with provenance labels, then starts PostgreSQL and Redis on the rehearsed candidate.
+8. Runs Prisma migrations through `docker/migrate-or-baseline.mjs`.
+9. Runs repeatable bootstrap through `docker/bootstrap.mjs` using the same generated admin/API credentials that are later written to `.env` and OpenClaw secrets.
+10. Finalizes new-install provenance before starting Noosphere (or validates completed switch evidence), then runs full deployment verification.
+11. Writes `~/.openclaw/secrets/noosphere-memory.json`.
+12. Installs or updates `noosphere-memory` in OpenClaw.
+13. Patches OpenClaw config with the Noosphere base URL, API key secret reference, and `hooks.allowPromptInjection: true`.
+14. Restarts OpenClaw Gateway when available.
 
 > **Note:** The installer can still prompt when run through `curl | bash` by reading from `/dev/tty` if a controlling terminal is available. The interactive IP prompt is skipped when `APP_URL` is set, or when no interactive terminal is available (for example CI/cron/background automation). In non-interactive mode, the script auto-detects the best available IP (Tailscale > localhost). Set `APP_URL` beforehand to force a specific address in any mode.
 
@@ -417,13 +427,17 @@ curl -s https://<host>/api/memory/status \
 Use the guarded installer for upgrades as well as first-time setup:
 
 ```bash
-# Installer commit: 5a94ef3530cd232265c53699ee15f37d9ec89e04
-# Expected SHA-256: 46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b
-installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5a94ef3530cd232265c53699ee15f37d9ec89e04/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b' "$installer" | sha256sum -c -
-bash "$installer" && rm -f "$installer"
-openclaw noosphere doctor
+# Installer commit: bbeb076c618d0b50cc49de10a1c39388c2a7d6da
+# Expected SHA-256: 3234f9cb84079b421015e647e83fa833136738cba26057b5e64332a1e7e9316e
+(
+  set -e
+  installer="$(mktemp)"
+  trap 'rm -f "$installer"' EXIT
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/bbeb076c618d0b50cc49de10a1c39388c2a7d6da/install-openclaw.sh -o "$installer"
+  printf '%s  %s\n' '3234f9cb84079b421015e647e83fa833136738cba26057b5e64332a1e7e9316e' "$installer" | sha256sum -c -
+  bash "$installer"
+  openclaw noosphere doctor
+)
 ```
 
 Do not replace this with an unrestricted `docker compose pull && docker compose up`. The installer preserves the existing `.env`, proves backup restoration and exact source rollback with writers stopped, promotes the candidate database image only after invariants pass, then runs migration/bootstrap and deployment verification. Existing bootstrap admin accounts keep their current password unless `NOOSPHERE_ADMIN_PASSWORD_RESET=true`; `NOOSPHERE_FORCE_ADMIN=true` re-asserts the ADMIN role without rotating the password.
@@ -550,12 +564,16 @@ then the install did not complete. A healthy run must continue with `Bootstrap c
 First use the reviewed installer revision and verify its checksum before execution:
 
 ```bash
-# Installer commit: 5a94ef3530cd232265c53699ee15f37d9ec89e04
-# Expected SHA-256: 46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b
-installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5a94ef3530cd232265c53699ee15f37d9ec89e04/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b' "$installer" | sha256sum -c -
-bash "$installer" && rm -f "$installer"
+# Installer commit: bbeb076c618d0b50cc49de10a1c39388c2a7d6da
+# Expected SHA-256: 3234f9cb84079b421015e647e83fa833136738cba26057b5e64332a1e7e9316e
+(
+  set -e
+  installer="$(mktemp)"
+  trap 'rm -f "$installer"' EXIT
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/bbeb076c618d0b50cc49de10a1c39388c2a7d6da/install-openclaw.sh -o "$installer"
+  printf '%s  %s\n' '3234f9cb84079b421015e647e83fa833136738cba26057b5e64332a1e7e9316e' "$installer" | sha256sum -c -
+  bash "$installer"
+)
 ```
 
 The current installer protects `curl | bash` runs by redirecting the bootstrap container's stdin from `/dev/null`, so Docker Compose cannot consume the remaining installer script before app/plugin setup. If the issue persists, inspect the partial state before retrying:
