@@ -16,7 +16,7 @@ For the full local Noosphere + OpenClaw setup, use the guided immutable
 launcher:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/fe92b5c76a2ee5909cf314a8e95d6a7171df100c/install.sh \
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/bbcb19fd1cfd8e921e73f6c4bdda6ef0f53668ed/install.sh \
   | bash -s -- --with openclaw
 ```
 
