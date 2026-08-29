@@ -4,6 +4,16 @@ trap 'echo "Installer failed near line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 
 NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
 NOOSPHERE_PORT="${NOOSPHERE_PORT:-}"
+if [[ -n ${NOOSPHERE_VERSION:-} ]]; then
+  NOOSPHERE_VERSION_WAS_EXPLICIT=1
+else
+  NOOSPHERE_VERSION_WAS_EXPLICIT=0
+fi
+if [[ -n ${NOOSPHERE_IMAGE:-} ]]; then
+  NOOSPHERE_IMAGE_WAS_EXPLICIT=1
+else
+  NOOSPHERE_IMAGE_WAS_EXPLICIT=0
+fi
 NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-}"
 NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-}"
 APP_URL="${APP_URL:-}"
@@ -38,17 +48,17 @@ NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH="${NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH:-}"
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH="${NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH:-}"
 NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS="${NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS:-}"
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS="${NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS:-}"
-PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory}"
+PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.12.0}"
 SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$HOME/.openclaw/secrets}"
 SECRETS_FILE="${NOOSPHERE_SECRETS_FILE:-$SECRETS_DIR/noosphere-memory.json}"
 SECRET_PROVIDER_ID="${NOOSPHERE_SECRET_PROVIDER_ID:-noosphere-memory}"
 PLUGIN_ID="noosphere-memory"
-POSTGRES_CONTROLLER_SCRIPT_SHA256='f892e507c9ade7b843ce4183281f712f983f548dd2ea711a696c26d9bf651f27'
-POSTGRES_CONTROLLER_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/502038827f7ea4e1292afc83a21f213ce8bfccbf/scripts/run-pgvector-transition-controller.sh'
-POSTGRES_SWITCH_SCRIPT_SHA256='97b00b6df89d332ccf99a9560a9ff90d5ba6621e2a2685ce6d3de57fa91f8f49'
-POSTGRES_SWITCH_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/502038827f7ea4e1292afc83a21f213ce8bfccbf/scripts/switch-pgvector-compose.sh'
-POSTGRES_VERIFY_SCRIPT_SHA256='e6751d338f84e3c51cb2e5dd8691e372e704dbd20fb8cc9e960420e81d20b2fd'
-POSTGRES_VERIFY_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/502038827f7ea4e1292afc83a21f213ce8bfccbf/scripts/verify-deploy.sh'
+POSTGRES_CONTROLLER_SCRIPT_SHA256='996c7a96b4b3be91db3754d7fdef92a00f7943340316b124e6932abc505770aa'
+POSTGRES_CONTROLLER_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/9da4af0a7b2275aa91eecd102095e0e470bbb0e3/scripts/run-pgvector-transition-controller.sh'
+POSTGRES_SWITCH_SCRIPT_SHA256='aa364a1d3344905972d87d02c1c0b6954558b4fbd610474a02ebf730861fb479'
+POSTGRES_SWITCH_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/9da4af0a7b2275aa91eecd102095e0e470bbb0e3/scripts/switch-pgvector-compose.sh'
+POSTGRES_VERIFY_SCRIPT_SHA256='1f17bf84739a5d9d2c4c25b456d72a2e987b1a5ede3b22370e817160fb850134'
+POSTGRES_VERIFY_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/9da4af0a7b2275aa91eecd102095e0e470bbb0e3/scripts/verify-deploy.sh'
 EXPLICIT_POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
 EXPLICIT_POSTGRES_MIGRATION_PASSWORD="${POSTGRES_MIGRATION_PASSWORD:-}"
 EXPLICIT_POSTGRES_APP_PASSWORD="${POSTGRES_APP_PASSWORD:-}"
@@ -313,8 +323,15 @@ resolve_runtime_config() {
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-$(env_get "$runtime_env" NOOSPHERE_PORT)}"
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-$(env_get "$runtime_env" NOOSPHERE_VERSION)}"
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-latest}"
-  NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-$(env_get "$runtime_env" NOOSPHERE_IMAGE)}"
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.12.0}"
+  if ((NOOSPHERE_VERSION_WAS_EXPLICIT == 1 && NOOSPHERE_IMAGE_WAS_EXPLICIT == 0)); then
+    # A version-bound public upgrade must not inherit an installer-persisted
+    # image from the previous release. Operators retaining a custom registry or
+    # image must pass NOOSPHERE_IMAGE explicitly alongside the release version.
+    NOOSPHERE_IMAGE=''
+  else
+    NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-$(env_get "$runtime_env" NOOSPHERE_IMAGE)}"
+  fi
   APP_URL="${APP_URL:-$(env_get "$runtime_env" APP_URL)}"
   BIND_ADDRESS="${BIND_ADDRESS:-$(env_get "$runtime_env" BIND_ADDRESS)}"
   REDIS_URL="${REDIS_URL:-$(env_get "$runtime_env" REDIS_URL)}"
@@ -708,6 +725,7 @@ ensure_persistent_user_manager() {
 run_existing_postgres_controller_transition() {
   local phase unit_base unit unit_load_state systemd_status=0 property
   local -a systemd_args=()
+  release_postgres_operation_lock
   if [[ ! -e "$POSTGRES_CONTROLLER_STATE" ]]; then
     "$POSTGRES_CONTROLLER_SCRIPT" --prepare \
       --manifest "$POSTGRES_CONTROLLER_MANIFEST" \
@@ -720,7 +738,6 @@ run_existing_postgres_controller_transition() {
     return 1
   }
 
-  release_postgres_operation_lock
   ensure_persistent_user_manager
   unit_base="noosphere-pgvector-transition-$(date -u +%Y%m%dT%H%M%S)-$$"
   unit="$unit_base.service"
@@ -753,6 +770,45 @@ run_existing_postgres_controller_transition() {
   }
 }
 
+provision_existing_postgres_roles_for_controller() {
+  local docker_host=$1 docker_path=$2 provision_log provision_exit=0 db_network role_env
+  db_network=$(DOCKER_HOST="$docker_host" "$docker_path" inspect noosphere-openclaw-db |
+    jq -er '
+      .[0].NetworkSettings.Networks
+      | to_entries
+      | map(select((.value.Aliases // []) | index("db")))
+      | if length == 1 then .[0].key else error("database Compose network is ambiguous") end
+    ') || {
+    echo 'Could not identify the existing PostgreSQL Compose network for role provisioning.' >&2
+    return 1
+  }
+  role_env=$(mktemp)
+  provision_log=$(mktemp) || {
+    rm -f "$role_env"
+    return 1
+  }
+  chmod 0600 "$role_env" "$provision_log"
+  printf '%s\n' \
+    "NOOSPHERE_BOOTSTRAP_DATABASE_URL=postgresql://noosphere:${POSTGRES_PASSWORD}@db:5432/noosphere" \
+    "DATABASE_URL=postgresql://noosphere_migrator:${POSTGRES_MIGRATION_PASSWORD}@db:5432/noosphere" \
+    "NOOSPHERE_APP_DATABASE_URL=postgresql://noosphere_app:${POSTGRES_APP_PASSWORD}@db:5432/noosphere" \
+    > "$role_env"
+  DOCKER_HOST="$docker_host" "$docker_path" run --rm --pull never \
+    --network "$db_network" \
+    --env-file "$role_env" \
+    --entrypoint node \
+    "$NOOSPHERE_IMAGE" docker/provision-database-roles.mjs \
+    < /dev/null >"$provision_log" 2>&1 || provision_exit=$?
+  if ((provision_exit != 0)); then
+    echo "Database role provisioning for the existing PostgreSQL transition failed with exit code $provision_exit:" >&2
+    cat "$provision_log" >&2
+    rm -f "$role_env" "$provision_log"
+    return "$provision_exit"
+  fi
+  cat "$provision_log"
+  rm -f "$role_env" "$provision_log"
+}
+
 route_postgres_install_transition() {
   local docker_host docker_path
   if [[ "$existing_switch_required" == true ]]; then
@@ -763,6 +819,7 @@ route_postgres_install_transition() {
       --project-directory "$NOOSPHERE_HOME" \
       --env-file "$NOOSPHERE_HOME/.env" \
       -f "$POSTGRES_CONTROLLER_CANDIDATE" pull
+    provision_existing_postgres_roles_for_controller "$docker_host" "$docker_path"
     write_postgres_controller_manifest
     run_existing_postgres_controller_transition
     reacquire_postgres_operation_lock_from_manifest || return 1
@@ -1677,9 +1734,16 @@ fsync_installer_path "$(dirname "$compose_target")"
 # a direct guard claim; already-complete installations need neither pre-step.
 route_postgres_install_transition
 
-if [[ "$controller_transition_completed" != true ]]; then
-
+# Whether the PostgreSQL image was already current or the controller just
+# completed a real source transition, schema/bootstrap work still runs against
+# the candidate with the application stopped. This is what upgrades released
+# v1.11 data and is intentionally idempotent on rerun.
 cd "$NOOSPHERE_HOME"
+if docker inspect noosphere-openclaw-app >/dev/null 2>&1 &&
+   [[ "$(docker inspect noosphere-openclaw-app --format '{{.State.Running}}')" == true ]]; then
+  echo "Stopping Noosphere app before schema/bootstrap work..."
+  docker stop --time 60 noosphere-openclaw-app >/dev/null
+fi
 echo "Starting Noosphere at ${APP_URL}..."
 docker compose pull
 docker compose up -d db redis
@@ -1734,15 +1798,17 @@ docker compose up -d app
 wait_for_container_healthy noosphere-openclaw-app 30
 wait_for_http_health "$APP_URL" 60
 
+verify_min_articles=1
+if [[ "$new_install_required" == true ]]; then
+  verify_min_articles=0
+fi
 NOOSPHERE_APP_URL="$APP_URL" \
 NOOSPHERE_DB_CONTAINER=noosphere-openclaw-db \
 NOOSPHERE_EXPECTED_DB_VOLUME=noosphere_postgres_data \
 NOOSPHERE_EXPECTED_POSTGRES_IMAGE_MODE=candidate \
+NOOSPHERE_MIN_ARTICLES="$verify_min_articles" \
 NOOSPHERE_POSTGRES_EVIDENCE="$POSTGRES_BACKUP_DIR/noosphere_postgres_data.phase-a2b.json" \
   "$POSTGRES_VERIFY_SCRIPT"
-else
-  echo 'PostgreSQL transition controller completed bootstrap, authorization, activation, and verification.'
-fi
 
 install -m 600 /dev/null "$SECRETS_FILE"
 cat > "$SECRETS_FILE" <<JSON
@@ -1761,11 +1827,11 @@ cat > "$SECRETS_FILE" <<JSON
 JSON
 
 echo "Installing OpenClaw plugin: ${PLUGIN_SPEC}"
-if openclaw plugins inspect "$PLUGIN_ID" >/dev/null 2>&1; then
-  openclaw plugins update "$PLUGIN_ID" || openclaw plugins install "$PLUGIN_SPEC" --force
-else
-  openclaw plugins install "$PLUGIN_SPEC"
+PLUGIN_INSTALL_ARGS=(plugins install "$PLUGIN_SPEC" --force)
+if [[ "$PLUGIN_SPEC" == npm:* ]]; then
+  PLUGIN_INSTALL_ARGS+=(--pin)
 fi
+openclaw "${PLUGIN_INSTALL_ARGS[@]}"
 
 PATCH_FILE="$(mktemp)"
 cat > "$PATCH_FILE" <<JSON5

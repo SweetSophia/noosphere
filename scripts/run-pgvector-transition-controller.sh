@@ -1246,6 +1246,7 @@ run_source_verifier_hermetic() {
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     "NOOSPHERE_APP_URL=$app_url" \
+    NOOSPHERE_VERIFY_APP_HEALTH=false \
     NOOSPHERE_EXPECTED_POSTGRES_IMAGE_MODE=source \
     "NOOSPHERE_DB_CONTAINER=$(jq -er '.dbContainer' "$state")" \
     "NOOSPHERE_EXPECTED_DB_VOLUME=$(jq -er '.volume' "$state")" \

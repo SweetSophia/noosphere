@@ -40,6 +40,32 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+  hermes-provider:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate version metadata
+        run: npm run version:check
+
+      - name: Test Hermes provider
+        run: |
+          python3 -m unittest discover -s hermes-noosphere-memory/tests
+          python3 -m compileall -q hermes-noosphere-memory/plugins/memory/noosphere
+
+      - name: Verify deterministic Hermes release bundle
+        run: |
+          scripts/package-hermes-plugin.sh /tmp/hermes-bundle-first
+          scripts/package-hermes-plugin.sh /tmp/hermes-bundle-second
+          version=$(cat VERSION)
+          cmp \
+            "/tmp/hermes-bundle-first/hermes-noosphere-memory-${version}.tar.gz" \
+            "/tmp/hermes-bundle-second/hermes-noosphere-memory-${version}.tar.gz"
+          cmp \
+            "/tmp/hermes-bundle-first/hermes-noosphere-memory-${version}.tar.gz.sha256" \
+            "/tmp/hermes-bundle-second/hermes-noosphere-memory-${version}.tar.gz.sha256"
+
   test:
     runs-on: ubuntu-latest
     env:

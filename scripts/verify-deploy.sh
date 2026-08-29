@@ -23,6 +23,7 @@ MIN_ARTICLES="${NOOSPHERE_MIN_ARTICLES:-1}"
 MIN_API_KEYS="${NOOSPHERE_MIN_API_KEYS:-1}"
 HEALTH_RETRIES="${NOOSPHERE_HEALTH_RETRIES:-10}"
 HEALTH_RETRY_DELAY="${NOOSPHERE_HEALTH_RETRY_DELAY:-2}"
+VERIFY_APP_HEALTH="${NOOSPHERE_VERIFY_APP_HEALTH:-true}"
 
 fail() {
   printf 'Noosphere deploy verification failed: %s\n' "$1" >&2
@@ -46,6 +47,8 @@ require_non_negative_int "NOOSPHERE_MIN_API_KEYS" "$MIN_API_KEYS"
 require_non_negative_int "NOOSPHERE_HEALTH_RETRIES" "$HEALTH_RETRIES"
 require_non_negative_int "NOOSPHERE_HEALTH_RETRY_DELAY" "$HEALTH_RETRY_DELAY"
 (( HEALTH_RETRIES >= 1 )) || fail "NOOSPHERE_HEALTH_RETRIES must be at least 1, got '$HEALTH_RETRIES'"
+[[ "$VERIFY_APP_HEALTH" == true || "$VERIFY_APP_HEALTH" == false ]] ||
+  fail "NOOSPHERE_VERIFY_APP_HEALTH must be true or false, got '$VERIFY_APP_HEALTH'"
 
 validate_volume_and_evidence() {
   mounted_volume="$(
@@ -189,20 +192,24 @@ if [[ "$EXPECTED_IMAGE_MODE" == candidate ]]; then
   [[ "$template_installed" == 0 ]] || fail 'vector extension is installed in template0'
 fi
 
-# Retry health check to tolerate app startup race conditions.
-health_ok=false
-last_curl_err=0
-for ((i = 1; i <= HEALTH_RETRIES; i++)); do
-  if curl -fsS --connect-timeout 5 --max-time 10 "$APP_URL/api/health" >/dev/null 2>&1; then
-    health_ok=true
-    break
-  fi
-  last_curl_err=$?
-  if (( i < HEALTH_RETRIES )); then
-    sleep "$HEALTH_RETRY_DELAY"
-  fi
-done
-[[ "$health_ok" == "true" ]] || fail "health check failed at $APP_URL/api/health (last curl exit code: $last_curl_err)"
+health_status=skipped
+if [[ "$VERIFY_APP_HEALTH" == true ]]; then
+  # Retry health check to tolerate app startup race conditions.
+  health_ok=false
+  last_curl_err=0
+  for ((i = 1; i <= HEALTH_RETRIES; i++)); do
+    if curl -fsS --connect-timeout 5 --max-time 10 "$APP_URL/api/health" >/dev/null 2>&1; then
+      health_ok=true
+      break
+    fi
+    last_curl_err=$?
+    if (( i < HEALTH_RETRIES )); then
+      sleep "$HEALTH_RETRY_DELAY"
+    fi
+  done
+  [[ "$health_ok" == "true" ]] || fail "health check failed at $APP_URL/api/health (last curl exit code: $last_curl_err)"
+  health_status=ok
+fi
 
 counts="$(
   docker exec "$DB_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -Atc \
@@ -219,5 +226,5 @@ require_non_negative_int "API key count" "$api_keys"
 (( articles >= MIN_ARTICLES )) || fail "article count is $articles, expected at least $MIN_ARTICLES"
 (( api_keys >= MIN_API_KEYS )) || fail "API key count is $api_keys, expected at least $MIN_API_KEYS"
 
-printf 'Noosphere deploy verification passed: volume=%s health=ok topics=%s articles=%s apiKeys=%s\n' \
-  "$mounted_volume" "$topics" "$articles" "$api_keys"
+printf 'Noosphere deploy verification passed: volume=%s health=%s topics=%s articles=%s apiKeys=%s\n' \
+  "$mounted_volume" "$health_status" "$topics" "$articles" "$api_keys"

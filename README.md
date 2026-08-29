@@ -27,11 +27,11 @@ Use this path when you want the published Docker image and a local Noosphere
 instance.
 
 ```bash
-git clone https://github.com/SweetSophia/noosphere.git
+git clone --branch v1.12.0 --depth 1 https://github.com/SweetSophia/noosphere.git
 cd noosphere
 
 cp noosphere.env.example .env
-# Edit .env: POSTGRES_PASSWORD, POSTGRES_MIGRATION_PASSWORD,
+# Edit .env: NOOSPHERE_VERSION=1.12.0, POSTGRES_PASSWORD, POSTGRES_MIGRATION_PASSWORD,
 # POSTGRES_APP_PASSWORD, NEXTAUTH_SECRET, NOOSPHERE_ADMIN_PASSWORD, and
 # NOOSPHERE_BOOTSTRAP_API_KEY. Every PostgreSQL password must be distinct.
 # Generate strong values, for example:
@@ -72,7 +72,8 @@ to persist it in the `noosphere_uploads` volume. The file must live inside a
 dedicated bootstrap-secrets directory; paths directly under shared directories
 such as `/tmp` or `/app/uploads` are rejected.
 
-The production template uses `ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION:-latest}`,
+The production template uses `ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION:-latest}`
+with native `linux/amd64` and `linux/arm64` images,
 binds to `127.0.0.1:6578` by default, includes PostgreSQL and Redis, and runs a
 one-shot init service before the app starts.
 
@@ -102,15 +103,15 @@ OpenClaw users can install Noosphere and the OpenClaw plugin with the repository
 installer:
 
 ```bash
-# Installer commit: 66ab1f7d8a912fa79bf1cca8be6bf3cc947e9d1a
-# Expected SHA-256: 6d84b86ab71f04fcba17157f4a0197d773b78a2e919b15ebf4406ec8ac751e2c
+# Installer commit: 1bbc266283577c3a5c9fe285633955df45f6bcfd
+# Expected SHA-256: 28355163784403bf3445a0028863d8496b66d3fa70ea3492a6f4c7ba4c6af556
 (
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/66ab1f7d8a912fa79bf1cca8be6bf3cc947e9d1a/install-openclaw.sh -o "$installer"
-  printf '%s  %s\n' '6d84b86ab71f04fcba17157f4a0197d773b78a2e919b15ebf4406ec8ac751e2c' "$installer" | sha256sum -c -
-  bash "$installer"
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1bbc266283577c3a5c9fe285633955df45f6bcfd/install-openclaw.sh -o "$installer"
+  printf '%s  %s\n' '28355163784403bf3445a0028863d8496b66d3fa70ea3492a6f4c7ba4c6af556' "$installer" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.12.0}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.12.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.12.0}" bash "$installer"
   openclaw noosphere doctor
   openclaw noosphere status
 )

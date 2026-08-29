@@ -31,6 +31,8 @@ const policy = {
     packageName: "@sweetsophia/openclaw-noosphere-memory",
   },
   npmPublishWorkflow: ".github/workflows/npm-publish.yml",
+  dockerPublishWorkflow: ".github/workflows/docker-publish.yml",
+  hermesReleaseWorkflow: ".github/workflows/hermes-release.yml",
   forbiddenPublishSignals: ["injectedmemory", "noosphereinjectedmemory"],
 };
 
@@ -104,6 +106,28 @@ function stripYamlComment(line) {
   }
 
   return line;
+}
+
+function hasDockerRefTagEntry(lines) {
+  return lines.some((line) => {
+    const fields = new Map(
+      line.split(",").map((field) => {
+        const separator = field.indexOf("=");
+        return separator === -1
+          ? [field.trim(), ""]
+          : [field.slice(0, separator).trim(), field.slice(separator + 1).trim()];
+      }),
+    );
+    return fields.get("type") === "ref" && fields.get("event") === "tag";
+  });
+}
+
+function unpinnedActionUses(lines) {
+  return lines
+    .map(yamlKeyValue)
+    .filter((entry) => entry?.key === "uses")
+    .map((entry) => entry.value)
+    .filter((value) => !/@[0-9a-f]{40}$/.test(value));
 }
 
 function parseYamlScalar(value) {
@@ -218,14 +242,20 @@ const openclawPackage = readJson(`${policy.openclaw.dir}/package.json`);
 const openclawLock = readJson(`${policy.openclaw.dir}/package-lock.json`);
 const npmPublishWorkflow = readText(policy.npmPublishWorkflow);
 const npmPublishWorkflowLines = workflowLines(npmPublishWorkflow);
+const dockerPublishWorkflow = readText(policy.dockerPublishWorkflow);
+const dockerPublishWorkflowLines = workflowLines(dockerPublishWorkflow);
+const hermesReleaseWorkflow = readText(policy.hermesReleaseWorkflow);
+const hermesReleaseWorkflowLines = workflowLines(hermesReleaseWorkflow);
+const composeFile = readText("docker-compose.yml");
+const environmentExample = readText("noosphere.env.example");
 
 expect(
-  injectedPackage.private === true,
-  `${policy.helper.name} must stay private because it is an internal bundled helper, not an independently published npm package.`,
+  injectedPackage.private !== true,
+  `${policy.helper.name} must be publishable as a coordinated npm artifact.`,
 );
 expect(
-  !Object.hasOwn(injectedPackage, "publishConfig"),
-  `${policy.helper.name} must not define publishConfig while the policy is bundled-only.`,
+  injectedPackage.publishConfig?.access === "public",
+  `${policy.helper.name} must declare public npm access.`,
 );
 expect(
   rootPackage.dependencies?.[policy.helper.name] === policy.helper.rootDependency,
@@ -275,12 +305,59 @@ expect(
 );
 expect(
   !hasForbiddenHelperTag(npmPublishWorkflowLines, policy.forbiddenPublishSignals),
-  "The npm publish workflow must not define a release tag prefix for the bundled-only helper.",
+  "The bundled helper must publish through v-openclaw-$VERSION rather than a sixth release tag.",
 );
 expect(
   !hasWorkflowInput(npmPublishWorkflowLines, "publish_injected") &&
-    !hasForbiddenHelperPublishKey(npmPublishWorkflowLines, policy.forbiddenPublishSignals),
-  "The npm publish workflow must not expose a publish_injected* dispatch input/job for the bundled-only helper.",
+    npmPublishWorkflow.includes("  publish_helper:") &&
+    npmPublishWorkflow.indexOf("\n  publish_helper:\n") <
+      npmPublishWorkflow.indexOf("\n  publish_openclaw:\n") &&
+    npmPublishWorkflow.includes("needs: [package-check, publish_helper]") &&
+    npmPublishWorkflow.includes("npm pack --json") &&
+    npmPublishWorkflow.includes("dist.integrity") &&
+    npmPublishWorkflow.includes('npm publish "$TARBALL" --access public --provenance'),
+  "The v-openclaw publication must publish or exact-integrity-verify the helper before OpenClaw without adding an independent dispatch input.",
+);
+expect(
+  unpinnedActionUses(npmPublishWorkflowLines).length === 0,
+  `The authenticated npm publisher must pin every action to a full commit SHA; unpinned: ${unpinnedActionUses(npmPublishWorkflowLines).join(", ")}`,
+);
+expect(
+  environmentExample.includes(`NOOSPHERE_VERSION=${rootPackage.version}`) &&
+    !environmentExample.includes("NOOSPHERE_VERSION=latest"),
+  "The public environment example must pin the coordinated release version rather than latest.",
+);
+expect(
+  composeFile.includes('${OBSIDIAN_SYNC_HOST_VAULT_PATH:-./obsidian-vault}:/app/obsidian-vault:rw') &&
+    !/(?:\/home\/|\/Users\/)[^$\s/]+\//.test(composeFile) &&
+    !/APP_URL:-http:\/\/(?!127\.0\.0\.1|localhost)/.test(composeFile),
+  "The release Compose file must use a configurable Obsidian host path and must not contain personal home paths or non-loopback URL defaults.",
+);
+expect(
+  dockerPublishWorkflowLines.includes("type=semver,pattern={{version}}") &&
+    !hasDockerRefTagEntry(dockerPublishWorkflowLines),
+  "The Docker publish workflow must strip the release tag's v prefix so NOOSPHERE_VERSION resolves to a published image tag.",
+);
+expect(
+  dockerPublishWorkflow.includes('GITHUB_REF_NAME" != "v${version}"') &&
+    dockerPublishWorkflowLines.includes("flavor: latest=auto") &&
+    dockerPublishWorkflowLines.includes("if: github.ref_type == 'tag'") &&
+    dockerPublishWorkflowLines.includes("push: ${{ github.ref_type == 'tag' }}") &&
+    !dockerPublishWorkflow.includes("enable={{is_default_branch}}"),
+  "The Docker workflow must bind v$VERSION and publish latest only from the canonical application tag.",
+);
+expect(
+  unpinnedActionUses(dockerPublishWorkflowLines).length === 0,
+  `The authenticated Docker publisher must pin every action to a full commit SHA; unpinned: ${unpinnedActionUses(dockerPublishWorkflowLines).join(", ")}`,
+);
+expect(
+  hermesReleaseWorkflowLines.includes("contents: read") &&
+    hermesReleaseWorkflowLines.includes("persist-credentials: false") &&
+    hermesReleaseWorkflow.includes("actions/upload-artifact@") &&
+    hermesReleaseWorkflow.includes("Verify release bundle installation") &&
+    !hermesReleaseWorkflow.includes("GH_TOKEN") &&
+    !hermesReleaseWorkflow.includes("gh release upload"),
+  "The Hermes tag workflow must be secret-free, install-test its bundle, and publish only a read-only Actions artifact.",
 );
 
 if (failures.length > 0) {

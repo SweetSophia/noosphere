@@ -100,7 +100,7 @@ done
 
 bash -n "$DIGEST_HELPER_SCRIPT" || die 'digest helper script is not valid Bash'
 
-for helper in _digest_psql _digest_object_signature _assert_supported_data_objects _collect_data_inventory _decode_base64 \
+for helper in digest_role _digest_psql _digest_object_signature _assert_supported_data_objects _collect_data_inventory _decode_base64 \
   normalized_dump legacy_normalized_dump data_signature legacy_data_signature data_signature_for_version; do
   definition=$(extract_function "$helper")
   [[ -n "$definition" ]] || {
@@ -110,18 +110,24 @@ for helper in _digest_psql _digest_object_signature _assert_supported_data_objec
   eval "$definition"
 done
 
+digest_role_definition=$(extract_function digest_role)
 digest_psql_definition=$(extract_function _digest_psql)
 digest_object_signature_definition=$(extract_function _digest_object_signature)
 normalized_dump_definition=$(extract_function normalized_dump)
 legacy_dump_definition=$(extract_function legacy_normalized_dump)
-[[ "$digest_psql_definition" == *'-U noosphere_migrator '* ]] ||
-  record_failure 'digest SQL still authenticates as the bootstrap superuser'
+[[ "$digest_role_definition" == *'noosphere_migrator|noosphere'* ]] ||
+  record_failure 'digest role selection no longer owns candidate and released-v1.11 authority'
+[[ "$digest_psql_definition" == *'role=$(digest_role "$container")'* &&
+  "$digest_psql_definition" == *'-U "$role" '* ]] ||
+  record_failure 'digest SQL no longer authenticates through the validated digest role'
 [[ "$normalized_dump_definition" != *'SET ROLE pg_read_all_data'* ]] ||
   record_failure 'v2 digest still depends on bootstrap SET ROLE authority'
-[[ "$normalized_dump_definition" == *'pg_dump -U noosphere_migrator '* ]] ||
-  record_failure 'schema digest still authenticates as the bootstrap superuser'
-[[ "$legacy_dump_definition" == *'pg_dump -U noosphere_migrator '* ]] ||
-  record_failure 'legacy digest still authenticates as the bootstrap superuser'
+[[ "$normalized_dump_definition" == *'role=$(digest_role "$container")'* &&
+  "$normalized_dump_definition" == *'pg_dump -U "$role" '* ]] ||
+  record_failure 'schema digest no longer authenticates through the validated digest role'
+[[ "$legacy_dump_definition" == *'role=$(digest_role "$container")'* &&
+  "$legacy_dump_definition" == *'pg_dump -U "$role" '* ]] ||
+  record_failure 'legacy digest no longer authenticates through the validated digest role'
 [[ "$digest_object_signature_definition" == *'_digest_psql "$container" "$query" | sha256sum | awk'* ]] ||
   record_failure 'data-object signature no longer streams directly into SHA-256'
 [[ "$normalized_dump_definition" != *'=$(_digest_psql'* ]] ||

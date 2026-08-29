@@ -70,6 +70,23 @@ updateFile("hermes-noosphere-memory/plugins/memory/noosphere/plugin.yaml", (text
   text.replace(/^version:\s*.*$/m, `version: ${version}`),
 );
 
+updateFile("openclaw-noosphere-memory/src/cli.ts", (text) =>
+  text.replace(
+    /^const VERIFIED_NOOSPHERE_VERSION = ".*";$/m,
+    `const VERIFIED_NOOSPHERE_VERSION = "${version}";`,
+  ),
+);
+
+updateFile("install-openclaw.sh", (text) =>
+  text.replace(
+    /^PLUGIN_SPEC="\$\{NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia\/openclaw-noosphere-memory@.*\}"$/m,
+    `PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${version}}"`,
+  ).replace(
+    /^  NOOSPHERE_VERSION="\$\{NOOSPHERE_VERSION:-(?:latest|\d+\.\d+\.\d+)\}"$/m,
+    `  NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-${version}}"`,
+  ),
+);
+
 updateFile("docker-compose.yml", (text) =>
   text.replace(/\$\{NOOSPHERE_VERSION:-[^}]+}/g, `\${NOOSPHERE_VERSION:-${version}}`),
 );

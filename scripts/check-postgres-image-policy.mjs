@@ -9,9 +9,9 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
-const immutableHelperRef = "502038827f7ea4e1292afc83a21f213ce8bfccbf";
-const verifiedInstallerRef = "66ab1f7d8a912fa79bf1cca8be6bf3cc947e9d1a";
-const verifiedInstallerSha256 = "6d84b86ab71f04fcba17157f4a0197d773b78a2e919b15ebf4406ec8ac751e2c";
+const immutableHelperRef = "9da4af0a7b2275aa91eecd102095e0e470bbb0e3";
+const verifiedInstallerRef = "1bbc266283577c3a5c9fe285633955df45f6bcfd";
+const verifiedInstallerSha256 = "28355163784403bf3445a0028863d8496b66d3fa70ea3492a6f4c7ba4c6af556";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
@@ -48,6 +48,13 @@ function parseEnv(relativePath) {
 function expect(condition, message) {
   if (!condition) failures.push(message);
 }
+
+const releaseVersion = read("VERSION").trim();
+const versionBoundInstallerCommand =
+  `NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-${releaseVersion}}" ` +
+  `NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${releaseVersion}}" ` +
+  `NOOSPHERE_PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${releaseVersion}}" ` +
+  'bash "$installer"';
 
 function countLiteral(text, literal) {
   if (!literal) return 0;
@@ -350,6 +357,17 @@ expect(
       installer.indexOf('ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION}'),
   "install-openclaw.sh must persist and reload an explicit NOOSPHERE_IMAGE override",
 );
+expect(
+  installer.includes("NOOSPHERE_VERSION_WAS_EXPLICIT=1") &&
+    installer.includes("NOOSPHERE_IMAGE_WAS_EXPLICIT=1") &&
+    installer.includes("NOOSPHERE_VERSION_WAS_EXPLICIT == 1 && NOOSPHERE_IMAGE_WAS_EXPLICIT == 0") &&
+    installer.includes("NOOSPHERE_IMAGE=''") &&
+    installer.includes("Operators retaining a custom registry or") &&
+    read("scripts/test-install-openclaw-transition-controller.sh").includes(
+      "test_runtime_config_release_version_rebases_persisted_image",
+    ),
+  "an explicit release version must discard only a stale persisted image while preserving an explicit operator image override",
+);
 for (const [runtimeKey, secretKey] of [
   ["POSTGRES_PASSWORD", "postgresPassword"],
   ["POSTGRES_MIGRATION_PASSWORD", "postgresMigrationPassword"],
@@ -594,6 +612,9 @@ const completeControllerCompletion = completeReconciliation.indexOf(
 );
 const existingSwitchBlock = transitionRoute.indexOf('if [[ "$existing_switch_required" == true ]]');
 const candidatePull = transitionRoute.indexOf('-f "$POSTGRES_CONTROLLER_CANDIDATE" pull');
+const controllerRoleProvisioning = transitionRoute.indexOf(
+  'provision_existing_postgres_roles_for_controller "$docker_host" "$docker_path"',
+);
 const controllerManifest = transitionRoute.indexOf("write_postgres_controller_manifest");
 const controllerExecution = transitionRoute.indexOf("run_existing_postgres_controller_transition");
 const installerLockReacquisition = transitionRoute.indexOf(
@@ -692,13 +713,30 @@ expect(
   candidateGateTemplate >= 0 &&
     existingSwitchBlock >= 0 &&
     candidatePull > existingSwitchBlock &&
-    controllerManifest > candidatePull &&
+    controllerRoleProvisioning > candidatePull &&
+    controllerManifest > controllerRoleProvisioning &&
     controllerExecution > controllerManifest &&
     newInstallBlock > controllerExecution &&
     transitionRoute.includes('controller_transition_completed=true') &&
     installer.includes('compose_target="$POSTGRES_CONTROLLER_CANDIDATE"') &&
     installer.includes('install -m 600 "$NOOSPHERE_HOME/docker-compose.yml" "$POSTGRES_CONTROLLER_SOURCE"'),
-  "install-openclaw.sh must preserve source Compose bytes and route existing volumes through candidate pull, manifest preparation, and the controller",
+  "install-openclaw.sh must preserve source Compose bytes and route existing volumes through candidate pull, role provisioning, manifest preparation, and the controller",
+);
+expect(
+  installer.includes("provision_existing_postgres_roles_for_controller() {") &&
+    installer.includes('map(select((.value.Aliases // []) | index("db")))') &&
+    installer.includes('run --rm --pull never \\') &&
+    installer.includes('--network "$db_network"') &&
+    installer.includes('--env-file "$role_env"') &&
+    installer.includes('provision_log=$(mktemp) || {') &&
+    installer.includes('chmod 0600 "$role_env" "$provision_log"') &&
+    installer.includes('rm -f "$role_env" "$provision_log"') &&
+    installer.includes('NOOSPHERE_BOOTSTRAP_DATABASE_URL=postgresql://noosphere:${POSTGRES_PASSWORD}@db:5432/noosphere') &&
+    installer.includes('DATABASE_URL=postgresql://noosphere_migrator:${POSTGRES_MIGRATION_PASSWORD}@db:5432/noosphere') &&
+    installer.includes('NOOSPHERE_APP_DATABASE_URL=postgresql://noosphere_app:${POSTGRES_APP_PASSWORD}@db:5432/noosphere') &&
+    installer.includes('"$NOOSPHERE_IMAGE" docker/provision-database-roles.mjs') &&
+    installer.includes("Database role provisioning for the existing PostgreSQL transition failed"),
+  "existing-volume transitions must provision released v1.11 database roles with the candidate role-only helper before controller preparation",
 );
 expect(
   recoveredSwitchResume >= 0 &&
@@ -725,6 +763,57 @@ expect(
   countLiteral(installer, '"$POSTGRES_VERIFY_SCRIPT"') >= 2,
   "install-openclaw.sh must prepare and execute full deployment verification",
 );
+expect(
+  installer.includes(
+    `PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${releaseVersion}}"`,
+  ) &&
+    installer.includes(`NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-${releaseVersion}}"`) &&
+    installer.includes('PLUGIN_INSTALL_ARGS=(plugins install "$PLUGIN_SPEC" --force)') &&
+    installer.includes('if [[ "$PLUGIN_SPEC" == npm:* ]]') &&
+    installer.includes('PLUGIN_INSTALL_ARGS+=(--pin)') &&
+    installer.includes('openclaw "${PLUGIN_INSTALL_ARGS[@]}"') &&
+    !installer.includes('openclaw plugins update "$PLUGIN_ID"'),
+  "install-openclaw.sh must default app and plugin to one release, force deterministic reinstall, and pin npm specs",
+);
+expect(
+  installer.includes("verify_min_articles=1") &&
+    installer.includes('if [[ "$new_install_required" == true ]]') &&
+    installer.includes("verify_min_articles=0") &&
+    installer.includes('NOOSPHERE_MIN_ARTICLES="$verify_min_articles"'),
+  "install-openclaw.sh must allow zero articles only for a proven new install",
+);
+const mainTransitionRouteCall = installer.lastIndexOf("\nroute_postgres_install_transition\n");
+const mainStopBeforeBootstrap = installer.indexOf(
+  'echo "Stopping Noosphere app before schema/bootstrap work..."',
+  mainTransitionRouteCall,
+);
+const mainBootstrap = installer.indexOf(
+  'echo "Applying database schema and bootstrap data..."',
+  mainTransitionRouteCall,
+);
+expect(
+  mainTransitionRouteCall >= 0 &&
+    mainStopBeforeBootstrap > mainTransitionRouteCall &&
+    mainBootstrap > mainStopBeforeBootstrap &&
+    !installer.includes('if [[ "$controller_transition_completed" != true ]]'),
+  "controller completion must still stop the app and run idempotent schema/bootstrap work before final activation",
+);
+expect(
+  installer.includes(`if docker inspect noosphere-openclaw-app >/dev/null 2>&1 &&
+   [[ "$(docker inspect noosphere-openclaw-app --format '{{.State.Running}}')" == true ]]; then
+  echo "Stopping Noosphere app before schema/bootstrap work..."
+  docker stop --time 60 noosphere-openclaw-app >/dev/null
+fi
+echo "Starting Noosphere at \${APP_URL}..."`),
+  "install-openclaw.sh must stop a running app before direct schema/bootstrap work",
+);
+expect(
+  installer.includes(`local -a systemd_args=()
+  release_postgres_operation_lock
+  if [[ ! -e "$POSTGRES_CONTROLLER_STATE" ]]; then
+    "$POSTGRES_CONTROLLER_SCRIPT" --prepare`),
+  "install-openclaw.sh must release the parent operation lock before controller preparation",
+);
 
 for (const relativePath of [
   "openclaw-noosphere-memory/src/cli.ts",
@@ -734,6 +823,9 @@ for (const relativePath of [
   expect(
     text.includes(verifiedInstallerRef) &&
       text.includes(verifiedInstallerSha256) &&
+      text.includes("VERIFIED_NOOSPHERE_VERSION") &&
+      text.includes(releaseVersion) &&
+      text.includes("NOOSPHERE_VERSION") &&
       text.includes('"  set -e"') &&
       text.includes(`trap \\'rm -f "$installer"\\' EXIT`) &&
       text.includes("sha256sum -c -") &&
@@ -764,12 +856,13 @@ for (const relativePath of [
   const checksumCount = countLiteral(text, "sha256sum -c -");
   const safeInstallerBlocks = Array.from(
     text.matchAll(
-      /^(\s*)\(\n\1  set -e\n\1  installer="\$\(mktemp\)"\n\1  trap 'rm -f "\$installer"' EXIT\n\1  curl -fsSL [^\n]+ -o "\$installer"\n\1  printf '[^\n]+' '[a-f0-9]{64}' "\$installer" \| sha256sum -c -\n\1  bash "\$installer"\n(?:\1  openclaw noosphere (?:doctor|status)\n)*\1\)$/gm,
+      /^(\s*)\(\n\1  set -e\n\1  installer="\$\(mktemp\)"\n\1  trap 'rm -f "\$installer"' EXIT\n\1  curl -fsSL [^\n]+ -o "\$installer"\n\1  printf '[^\n]+' '[a-f0-9]{64}' "\$installer" \| sha256sum -c -\n\1  NOOSPHERE_VERSION="\$\{NOOSPHERE_VERSION:-[0-9]+\.[0-9]+\.[0-9]+\}" NOOSPHERE_IMAGE="\$\{NOOSPHERE_IMAGE:-ghcr\.io\/sweetsophia\/noosphere:[0-9]+\.[0-9]+\.[0-9]+\}" NOOSPHERE_PLUGIN_SPEC="\$\{NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia\/openclaw-noosphere-memory@[0-9]+\.[0-9]+\.[0-9]+\}" bash "\$installer"\n(?:\1  openclaw noosphere (?:doctor|status)\n)*\1\)$/gm,
     ),
   ).length;
   expect(
     text.includes(verifiedInstallerRef) &&
       text.includes(verifiedInstallerSha256) &&
+      text.includes(versionBoundInstallerCommand) &&
       checksumCount > 0 &&
       safeInstallerBlocks === checksumCount,
     `${relativePath} must gate every immutable installer execution on checksum success and trap cleanup`,
@@ -787,6 +880,21 @@ for (const relativePath of [
 
 const switchScript = read("scripts/switch-pgvector-compose.sh");
 const controllerScript = read("scripts/run-pgvector-transition-controller.sh");
+const verifyDeployScript = read("scripts/verify-deploy.sh");
+expect(
+  switchScript.includes("digest_role()") &&
+    switchScript.includes("noosphere_migrator|noosphere") &&
+    switchScript.includes("released v1.11 cluster does not have that role yet") &&
+    !switchScript.includes("pg_dump -U noosphere_migrator"),
+  "switch-pgvector-compose.sh must inspect released legacy clusters without assuming the 1.12 migration role already exists",
+);
+expect(
+  controllerScript.includes("NOOSPHERE_VERIFY_APP_HEALTH=false") &&
+    verifyDeployScript.includes('VERIFY_APP_HEALTH="${NOOSPHERE_VERIFY_APP_HEALTH:-true}"') &&
+    verifyDeployScript.includes("health_status=skipped") &&
+    verifyDeployScript.includes('if [[ "$VERIFY_APP_HEALTH" == true ]]'),
+  "deferred source recovery must verify database continuity without requiring the intentionally stopped app writer",
+);
 expect(
   !switchScript.includes("imagetools") && !switchScript.includes("docker buildx"),
   "switch-pgvector-compose.sh must verify guarded recovery from local immutable image evidence without registry lookups",
@@ -1056,39 +1164,47 @@ const logicalBackupFunction = shellFunction(
   switchScript,
   "create_logical_backup",
 );
+const digestRoleFunction = shellFunction(switchScript, "digest_role");
 const expectedDigestPsqlFunction = [
   "_digest_psql() {",
-  "  local container=$1 query=$2",
-  '  docker exec "$container" psql -XAtq -v ON_ERROR_STOP=1 -U noosphere_migrator -d noosphere -c "$query"',
+  "  local container=$1 query=$2 role",
+  '  role=$(digest_role "$container")',
+  '  docker exec "$container" psql -XAtq -v ON_ERROR_STOP=1 -U "$role" -d noosphere -c "$query"',
   "}",
   "",
 ].join("\n");
 expect(
-  digestPsqlFunction === expectedDigestPsqlFunction &&
+  digestRoleFunction.includes("noosphere_migrator|noosphere") &&
+    digestRoleFunction.includes("NOT rolsuper") &&
+    digestRoleFunction.includes("invalid-migrator") &&
+    digestPsqlFunction === expectedDigestPsqlFunction &&
     !normalizedDumpFunction.includes("SET ROLE pg_read_all_data") &&
-    normalizedDumpFunction.includes("pg_dump -U noosphere_migrator ") &&
-    legacyDumpFunction.includes("pg_dump -U noosphere_migrator ") &&
+    normalizedDumpFunction.includes('role=$(digest_role "$container")') &&
+    normalizedDumpFunction.includes('pg_dump -U "$role" ') &&
+    legacyDumpFunction.includes('role=$(digest_role "$container")') &&
+    legacyDumpFunction.includes('pg_dump -U "$role" ') &&
     digestObjectSignatureFunction.includes(
       '_digest_psql "$container" "$query" | sha256sum | awk',
     ) &&
     normalizedDumpFunction.includes("_digest_object_signature") &&
     !normalizedDumpFunction.includes("=$(_digest_psql"),
-  "digest generation must stream object data through a non-superuser production role without bootstrap SET ROLE authority",
+  "digest generation must prefer a non-superuser production role and permit only the released legacy-owner fallback",
 );
 expect(
-  migratorSqlFunction.includes("-U noosphere_migrator ") &&
-    !migratorSqlFunction.includes("-U noosphere ") &&
+  migratorSqlFunction.includes('role=$(digest_role "$container")') &&
+    migratorSqlFunction.includes('-U "$role" ') &&
     migrationSignatureFunction.includes('migrator_sql "$1" noosphere') &&
-    logicalBackupFunction.includes("pg_dump -U noosphere_migrator ") &&
-    !logicalBackupFunction.includes("pg_dump -U noosphere ") &&
+    logicalBackupFunction.includes('role=$(digest_role "$container")') &&
+    logicalBackupFunction.includes('pg_dump -U "$role" ') &&
     switchScript.includes(
       'create_logical_backup "$source_maintenance" "$backup_temp"',
     ) &&
     switchTestScript.includes("test_migrator_producer_authority") &&
+    switchTestScript.includes("for expected_role in noosphere_migrator noosphere") &&
     switchTestScript.includes(
-      "Digest or backup producer used bootstrap authority",
+      "Digest or backup producer used unexpected authority",
     ),
-  "migration signing and logical backup must use the non-superuser migrator role with direct behavioral coverage",
+  "migration signing and logical backup must cover both the preferred migrator and released legacy-owner authority paths",
 );
 
 const digestRuntimeStart = digestTestScript.indexOf("trap cleanup EXIT INT TERM");
@@ -1134,6 +1250,11 @@ expect(
     'DIGEST_HELPER_SCRIPT=${PGVECTOR_DIGEST_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}',
   ) &&
   digestTestScript.includes("OWNER_LABEL_KEY=io.noosphere.digest-test-owner") &&
+    digestTestScript.includes("for helper in digest_role _digest_psql") &&
+    digestTestScript.includes("digest_role_definition=$(extract_function digest_role)") &&
+    digestTestScript.includes("digest role selection no longer owns candidate and released-v1.11 authority") &&
+    digestTestScript.includes("schema digest no longer authenticates through the validated digest role") &&
+    !digestTestScript.includes("pg_dump -U noosphere_migrator") &&
     digestTestScript.includes('source_container_created=false') &&
     digestTestScript.includes('[[ "$source_container_created" == false ]] || remove_container') &&
     digestTestScript.includes("expected exactly one digest helper definition") &&
@@ -1186,12 +1307,12 @@ const installerControllerDispatches = Array.from(
   (match) => match[1],
 );
 expect(
-  installerControllerDefinitions.length === 13 &&
-    installerControllerDispatches.length === 13 &&
-    new Set(installerControllerDispatches).size === 13 &&
+  installerControllerDefinitions.length === 14 &&
+    installerControllerDispatches.length === 14 &&
+    new Set(installerControllerDispatches).size === 14 &&
     JSON.stringify([...installerControllerDefinitions].sort()) ===
       JSON.stringify([...installerControllerDispatches].sort()),
-  "the installer transition-controller fixture must define and dispatch exactly thirteen unique owners",
+  "the installer transition-controller fixture must define and dispatch exactly fourteen unique owners",
 );
 const focusedControllerFixture = read("scripts/test-pgvector-transition-controller.sh");
 const focusedControllerDefinitions = Array.from(

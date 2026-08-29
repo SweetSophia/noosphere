@@ -536,6 +536,7 @@ test_existing_upgrade_routes_through_controller() (
 
   assert_postgres_controller_bootstrap_node() { printf 'bootstrap\n' >> "$trace"; }
   resolve_local_docker_endpoint() { printf 'unix:///fixture/docker.sock\n'; }
+  provision_existing_postgres_roles_for_controller() { printf 'provision\n' >> "$trace"; }
   write_postgres_controller_manifest() {
     printf 'manifest\n' >> "$trace"
     jq -n --arg lockRoot "$XDG_RUNTIME_DIR" \
@@ -547,7 +548,7 @@ test_existing_upgrade_routes_through_controller() (
   route_postgres_install_transition
 
   [[ "$controller_transition_completed" == true ]]
-  [[ $(paste -sd, "$trace") == bootstrap,manifest,controller ]]
+  [[ $(paste -sd, "$trace") == bootstrap,provision,manifest,controller ]]
   grep -F -- "compose --project-directory $NOOSPHERE_HOME --env-file $NOOSPHERE_HOME/.env -f $POSTGRES_CONTROLLER_CANDIDATE pull" \
     "$fixture/docker.log" >/dev/null
 )
@@ -575,6 +576,7 @@ test_existing_upgrade_reacquires_operation_lock() (
 
   assert_postgres_controller_bootstrap_node() { :; }
   resolve_local_docker_endpoint() { printf 'unix:///fixture/docker.sock\n'; }
+  provision_existing_postgres_roles_for_controller() { :; }
   write_postgres_controller_manifest() {
     jq -n --arg lockRoot "$XDG_RUNTIME_DIR" \
       '{dockerEndpoint:"unix:///fixture/docker.sock",engineId:"fixture-engine",lockRoot:$lockRoot}' \
@@ -621,6 +623,7 @@ test_existing_upgrade_rejects_lock_identity_change() (
 
   assert_postgres_controller_bootstrap_node() { :; }
   resolve_local_docker_endpoint() { printf '%s\n' "$FIXTURE_DOCKER_ENDPOINT"; }
+  provision_existing_postgres_roles_for_controller() { :; }
   write_postgres_controller_manifest() {
     jq -n --arg lockRoot "$XDG_RUNTIME_DIR" \
       '{dockerEndpoint:"unix:///fixture/docker.sock",engineId:"fixture-engine",lockRoot:$lockRoot}' \
@@ -659,6 +662,42 @@ test_nonterminal_reconciliation_marks_controller_completion() (
   [[ "$controller_transition_completed" == true ]]
 )
 
+test_runtime_config_release_version_rebases_persisted_image() (
+  local fixture runtime_env
+  fixture=$(mktemp -d)
+  trap 'rm -rf "$fixture"' EXIT
+  NOOSPHERE_HOME="$fixture/home"
+  mkdir -p "$NOOSPHERE_HOME"
+  runtime_env="$NOOSPHERE_HOME/.env"
+  printf '%s\n' \
+    'NOOSPHERE_VERSION=1.11.0' \
+    'NOOSPHERE_IMAGE=ghcr.io/sweetsophia/noosphere:1.11.0' \
+    > "$runtime_env"
+
+  NOOSPHERE_VERSION=1.12.0
+  NOOSPHERE_IMAGE=''
+  NOOSPHERE_VERSION_WAS_EXPLICIT=1
+  NOOSPHERE_IMAGE_WAS_EXPLICIT=0
+  resolve_runtime_config
+  [[ "$NOOSPHERE_VERSION" == 1.12.0 ]]
+  [[ "$NOOSPHERE_IMAGE" == ghcr.io/sweetsophia/noosphere:1.12.0 ]]
+
+  NOOSPHERE_VERSION=1.12.0
+  NOOSPHERE_IMAGE=registry.example/noosphere:operator-candidate
+  NOOSPHERE_VERSION_WAS_EXPLICIT=1
+  NOOSPHERE_IMAGE_WAS_EXPLICIT=1
+  resolve_runtime_config
+  [[ "$NOOSPHERE_IMAGE" == registry.example/noosphere:operator-candidate ]]
+
+  NOOSPHERE_VERSION=''
+  NOOSPHERE_IMAGE=''
+  NOOSPHERE_VERSION_WAS_EXPLICIT=0
+  NOOSPHERE_IMAGE_WAS_EXPLICIT=0
+  resolve_runtime_config
+  [[ "$NOOSPHERE_VERSION" == 1.11.0 ]]
+  [[ "$NOOSPHERE_IMAGE" == ghcr.io/sweetsophia/noosphere:1.11.0 ]]
+)
+
 main() {
   test_controller_artifacts_are_checksum_pinned_and_private
   test_artifact_mismatch_preserves_existing_private_targets
@@ -673,6 +712,7 @@ main() {
   test_existing_upgrade_reacquires_operation_lock
   test_existing_upgrade_rejects_lock_identity_change
   test_nonterminal_reconciliation_marks_controller_completion
+  test_runtime_config_release_version_rebases_persisted_image
   printf 'OpenClaw installer transition-controller fixtures passed.\n'
 }
 

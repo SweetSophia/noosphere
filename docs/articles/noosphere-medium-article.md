@@ -353,15 +353,15 @@ It also supports automatic prompt-time recall through OpenClaw's before_prompt_b
 
 Quick install on the machine running OpenClaw Gateway:
 
-    # Installer commit: 66ab1f7d8a912fa79bf1cca8be6bf3cc947e9d1a
-    # Expected SHA-256: 6d84b86ab71f04fcba17157f4a0197d773b78a2e919b15ebf4406ec8ac751e2c
+    # Installer commit: 1bbc266283577c3a5c9fe285633955df45f6bcfd
+    # Expected SHA-256: 28355163784403bf3445a0028863d8496b66d3fa70ea3492a6f4c7ba4c6af556
     (
       set -e
       installer="$(mktemp)"
       trap 'rm -f "$installer"' EXIT
-      curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/66ab1f7d8a912fa79bf1cca8be6bf3cc947e9d1a/install-openclaw.sh -o "$installer"
-      printf '%s  %s\n' '6d84b86ab71f04fcba17157f4a0197d773b78a2e919b15ebf4406ec8ac751e2c' "$installer" | sha256sum -c -
-      bash "$installer"
+      curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1bbc266283577c3a5c9fe285633955df45f6bcfd/install-openclaw.sh -o "$installer"
+      printf '%s  %s\n' '28355163784403bf3445a0028863d8496b66d3fa70ea3492a6f4c7ba4c6af556' "$installer" | sha256sum -c -
+      NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.12.0}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.12.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.12.0}" bash "$installer"
       openclaw noosphere doctor
       openclaw noosphere status
     )
@@ -373,11 +373,14 @@ Default runtime locations:
     Noosphere runtime: ~/.noosphere
     OpenClaw secret file: ~/.openclaw/secrets/noosphere-memory.json
     Default app URL: http://127.0.0.1:6578
-    Docker image: ghcr.io/sweetsophia/noosphere:latest
+    Docker image: ghcr.io/sweetsophia/noosphere:1.12.0
 
-If you want a pinned image version:
+The direct installer defaults to the same coordinated release contract. To
+state that contract explicitly while preserving override support:
 
-    NOOSPHERE_VERSION=v1.5.5 \
+    NOOSPHERE_VERSION=1.12.0 \
+    NOOSPHERE_IMAGE=ghcr.io/sweetsophia/noosphere:1.12.0 \
+    NOOSPHERE_PLUGIN_SPEC=npm:@sweetsophia/openclaw-noosphere-memory@1.12.0 \
     NOOSPHERE_PORT=6578 \
     APP_URL=http://127.0.0.1:6578 \
     bash install-openclaw.sh

@@ -1,0 +1,66 @@
+name: Build Hermes plugin bundle
+
+on:
+  push:
+    tags: ["v-hermes-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  package-hermes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Validate release version metadata
+        run: |
+          npm run version:check
+          version=$(cat VERSION)
+          plugin_version=$(sed -n 's/^version:[[:space:]]*//p' hermes-noosphere-memory/plugins/memory/noosphere/plugin.yaml)
+          if [[ "$plugin_version" != "$version" ]]; then
+            printf 'Hermes plugin version %s does not match VERSION=%s\n' "$plugin_version" "$version" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/v-hermes-* && "$GITHUB_REF_NAME" != "v-hermes-${version}" ]]; then
+            printf 'Hermes release tag %s does not match VERSION=%s\n' "$GITHUB_REF_NAME" "$version" >&2
+            exit 1
+          fi
+
+      - name: Test Hermes provider
+        run: |
+          bash -n hermes-noosphere-memory/install-hermes.sh
+          python3 -m unittest discover -s hermes-noosphere-memory/tests
+          python3 -m compileall -q hermes-noosphere-memory/plugins/memory/noosphere
+
+      - name: Build deterministic Hermes bundle
+        run: |
+          scripts/package-hermes-plugin.sh dist
+          version=$(cat VERSION)
+          archive="dist/hermes-noosphere-memory-${version}.tar.gz"
+          sha256sum --check "${archive}.sha256"
+          tar -tzf "$archive" >/dev/null
+
+      - name: Verify release bundle installation
+        run: |
+          version=$(cat VERSION)
+          temp_root=$(mktemp -d)
+          trap 'rm -rf "$temp_root"' EXIT
+          tar -xzf "dist/hermes-noosphere-memory-${version}.tar.gz" -C "$temp_root"
+          HERMES_HOME="$temp_root/hermes-home" \
+            "$temp_root/hermes-noosphere-memory-${version}/install-hermes.sh"
+          installed_version=$(sed -n 's/^version:[[:space:]]*//p' \
+            "$temp_root/hermes-home/plugins/noosphere/plugin.yaml")
+          test "$installed_version" = "$version"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hermes-noosphere-memory-${{ github.ref_name }}
+          path: |
+            dist/hermes-noosphere-memory-*.tar.gz
+            dist/hermes-noosphere-memory-*.tar.gz.sha256
+          if-no-files-found: error
