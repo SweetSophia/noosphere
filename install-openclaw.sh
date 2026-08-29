@@ -187,6 +187,10 @@ validated_local_app_url() {
   '
 }
 
+local_no_proxy_curl() {
+  curl --disable --noproxy '*' "$@"
+}
+
 api_http_status_with_key() {
   local key=$1 endpoint=$2 config status base_url
   [[ "$key" =~ ^noo_[A-Za-z0-9_-]+$ ]] || {
@@ -200,7 +204,7 @@ api_http_status_with_key() {
   config=$(mktemp)
   chmod 600 "$config"
   printf 'silent\nshow-error\nheader = "Authorization: Bearer %s"\n' "$key" > "$config"
-  status=$(curl --config "$config" --output /dev/null --write-out '%{http_code}' \
+  status=$(local_no_proxy_curl --config "$config" --output /dev/null --write-out '%{http_code}' \
     "$base_url$endpoint" 2>/dev/null || true)
   rm -f "$config"
   printf '%s' "${status:-000}"
@@ -215,7 +219,7 @@ api_write_probe_status_with_key() {
   chmod 600 "$config" "$body"
   printf 'silent\nshow-error\nheader = "Authorization: Bearer %s"\n' "$key" > "$config"
   printf '{}\n' > "$body"
-  status=$(curl --config "$config" --request POST --header 'Content-Type: application/json' \
+  status=$(local_no_proxy_curl --config "$config" --request POST --header 'Content-Type: application/json' \
     --data-binary "@$body" --output /dev/null --write-out '%{http_code}' \
     "$base_url/api/articles" 2>/dev/null || true)
   rm -f "$config" "$body"
@@ -250,7 +254,7 @@ create_scoped_integration_key() {
   chmod 600 "$config" "$body" "$response"
   printf 'silent\nshow-error\nfail-with-body\nheader = "Authorization: Bearer %s"\n' "$API_KEY" > "$config"
   printf '{"name":"%s","permissions":"WRITE","allowedScopes":[]}\n' "$name" > "$body"
-  if ! curl --config "$config" --request POST --header 'Content-Type: application/json' \
+  if ! local_no_proxy_curl --config "$config" --request POST --header 'Content-Type: application/json' \
     --data-binary "@$body" --output "$response" "$base_url/api/keys"; then
     rm -f "$config" "$body" "$response"
     echo "Failed to create a scoped ${label} API key." >&2
@@ -1360,7 +1364,7 @@ wait_for_http_health() {
   local url="$1"
   local attempts="${2:-60}"
   for _ in $(seq 1 "$attempts"); do
-    if curl -fsS "$url/api/health" >/dev/null 2>&1; then
+    if local_no_proxy_curl -fsS "$url/api/health" >/dev/null 2>&1; then
       return 0
     fi
     sleep 2

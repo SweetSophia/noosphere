@@ -50,7 +50,7 @@ chmod 700 "$tmp/fake-bin/openclaw"
 cat > "$tmp/fake-bin/curl" <<'CURL'
 #!/usr/bin/env bash
 set -euo pipefail
-config='' output='' url='' method=GET
+config='' output='' url='' method=GET disable=false noproxy=false
 for arg in "$@"; do
   [[ "$arg" != *noo_* ]] || {
     echo 'secret appeared in curl argv' >&2
@@ -59,6 +59,8 @@ for arg in "$@"; do
 done
 while (($# > 0)); do
   case "$1" in
+    --disable) disable=true; shift ;;
+    --noproxy) [[ "$2" == '*' ]]; noproxy=true; shift 2 ;;
     --config) config=$2; shift 2 ;;
     --output) output=$2; shift 2 ;;
     --request) method=$2; shift 2 ;;
@@ -66,6 +68,7 @@ while (($# > 0)); do
     *) shift ;;
   esac
 done
+[[ "$disable" == true && "$noproxy" == true ]]
 [[ -f "$config" ]]
 grep -q 'header = "Authorization: Bearer noo_' "$config"
 printf '%s %s\n' "$method" "$url" >> "$FAKE_CURL_CALLS"
@@ -83,6 +86,9 @@ CURL
 chmod 700 "$tmp/fake-bin/curl"
 : > "$tmp/curl.calls"
 export FAKE_CURL_CALLS="$tmp/curl.calls"
+export http_proxy='http://proxy.invalid:8080' https_proxy='http://proxy.invalid:8080'
+export HTTP_PROXY='http://proxy.invalid:8080' HTTPS_PROXY='http://proxy.invalid:8080'
+export ALL_PROXY='socks5://proxy.invalid:1080' all_proxy='socks5://proxy.invalid:1080'
 safe_existing="noo_fixture_$(fixture_value)"
 selected=$(PATH="$tmp/fake-bin:$PATH" FAKE_CURL_MODE=reuse \
   select_scoped_integration_key "$safe_existing" default)
@@ -186,6 +192,21 @@ for file in "$tmp/user/credentials.json" "$tmp/runtime/noosphere-memory.json"; d
   test "$(stat -c '%a' "$file")" = 600
 done
 
+cp "$backend" "$tmp/proxy-sabotaged.sh"
+SABOTAGED_BACKEND="$tmp/proxy-sabotaged.sh" node <<'NODE'
+const fs = require("node:fs");
+const path = process.env.SABOTAGED_BACKEND;
+let source = fs.readFileSync(path, "utf8");
+const guarded = `curl --disable --noproxy '*' "$@"`;
+if (!source.includes(guarded)) throw new Error("cannot locate proxy sabotage target");
+source = source.replace(guarded, `curl "$@"`);
+fs.writeFileSync(path, source);
+NODE
+if "$0" "$tmp/proxy-sabotaged.sh" >/dev/null 2>&1; then
+  echo 'backend proxy-bypass sabotage unexpectedly passed' >&2
+  exit 1
+fi
+
 cp "$backend" "$tmp/sabotaged.sh"
 SABOTAGED_BACKEND="$tmp/sabotaged.sh" node <<'NODE'
 const fs = require("node:fs");
@@ -201,4 +222,4 @@ if "$0" "$tmp/sabotaged.sh" >/dev/null 2>&1; then
   exit 1
 fi
 
-printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 scoped_keys=yes read_key_rejected=yes transport_rotation=blocked local_bootstrap_destination=yes secret_argv=clean child_env=clean sabotage=red\n'
+printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 scoped_keys=yes read_key_rejected=yes transport_rotation=blocked local_bootstrap_destination=yes proxy_bypass=yes secret_argv=clean child_env=clean sabotage=red\n'
