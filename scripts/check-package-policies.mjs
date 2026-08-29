@@ -435,8 +435,8 @@ expect(
   "The coordinated release guide must attach/read back all checksum-owned installer assets before publication.",
 );
 expect(
-  installer.includes("BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/746d36a36327db19594aae7f80c49e09b522318e/install-openclaw.sh'") &&
-    installer.includes("BACKEND_SHA256='9e89de09319f58c25203ee242ce91ac7d0505af159f939506fd25e752165aca2'") &&
+  installer.includes("BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/624f8e93c57dfd0f048e9702a166b8b245e04008/install-openclaw.sh'") &&
+    installer.includes("BACKEND_SHA256='450c2b8a826a207aa927e79ff3926b57215fd0ad7b6f685b156d53ad16cdc174'") &&
     installer.includes("HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.13.0/hermes-noosphere-memory-1.13.0.tar.gz'") &&
     installer.includes("HERMES_BUNDLE_SHA256='a560bd8607b512123e71975c188f5b924d4325adaeb86bbbd1424933423c5fde'") &&
     installer.includes("Refusing Noosphere backend with an unexpected checksum") &&
@@ -466,6 +466,7 @@ expect(
     installerBackend.includes('"permissions":"WRITE"') &&
     installerBackendTest.includes("scoped_keys=yes") &&
     installerBackendTest.includes("read_key_rejected=yes") &&
+    installerBackendTest.includes("transport_rotation=blocked") &&
     installerBackendTest.includes("local_bootstrap_destination=yes") &&
     installerBackendTest.includes("secret_argv=clean") &&
     installerBackendTest.includes("child_env=clean") &&
@@ -493,6 +494,7 @@ expect(
     installerUxTest.includes("atomic_secret_rewrite=yes") &&
     installerUxTest.includes("scoped_tool_keys=yes") &&
     installerUxTest.includes("write_key_verified=yes") &&
+    installerUxTest.includes("transport_rotation=blocked") &&
     installerUxTest.includes("local_bootstrap_destination=yes") &&
     installerUxTest.includes("child_env=clean") &&
     installerUxTest.includes("bootstrap_tool_config=absent") &&

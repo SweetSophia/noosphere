@@ -3,8 +3,8 @@ set -euo pipefail
 trap 'printf "Installer failed near line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 RELEASE_VERSION='1.13.0'
-BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/746d36a36327db19594aae7f80c49e09b522318e/install-openclaw.sh'
-BACKEND_SHA256='9e89de09319f58c25203ee242ce91ac7d0505af159f939506fd25e752165aca2'
+BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/624f8e93c57dfd0f048e9702a166b8b245e04008/install-openclaw.sh'
+BACKEND_SHA256='450c2b8a826a207aa927e79ff3926b57215fd0ad7b6f685b156d53ad16cdc174'
 HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.13.0/hermes-noosphere-memory-1.13.0.tar.gz'
 HERMES_BUNDLE_SHA256='a560bd8607b512123e71975c188f5b924d4325adaeb86bbbd1424933423c5fde'
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
@@ -367,6 +367,9 @@ installer_key_is_scoped() {
   [[ -n "$key" ]] || return 1
   write_status=$(installer_write_probe_status_with_key "$key")
   admin_status=$(installer_api_status_with_key "$key" '/api/keys')
+  if [[ "$write_status" == 000 || "$admin_status" == 000 ]]; then
+    return 2
+  fi
   [[ "$write_status" == 400 && "$admin_status" == 403 ]]
 }
 
@@ -404,9 +407,16 @@ create_tool_api_key() {
 }
 
 ensure_tool_api_key() {
-  local integration=$1 key_file=$2 key
+  local integration=$1 key_file=$2 key status
   key=$(credential_field integrationApiKeys "$integration")
-  if ! installer_key_is_scoped "$key"; then
+  if installer_key_is_scoped "$key"; then
+    :
+  else
+    status=$?
+    if [[ "$status" == 2 ]]; then
+      echo "Could not verify the existing scoped ${integration} API key; refusing to rotate it after a transport failure." >&2
+      return 1
+    fi
     key=$(create_tool_api_key "$integration")
   fi
   INTEGRATION_KEY="$key" INTEGRATION_NAME="$integration" KEY_FILE="$key_file" \

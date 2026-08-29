@@ -12,6 +12,7 @@ fixture_hermes_key="noo_fixture_$(node -e 'process.stdout.write(require("node:cr
 fixture_opencode_key="noo_fixture_$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
 fixture_kilocode_key="noo_fixture_$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
 fixture_kilocode_rotated_key="noo_fixture_$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
+fixture_transport_key="noo_fixture_$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
 fixture_admin_password="fixture-$(node -e 'process.stdout.write(require("node:crypto").randomBytes(18).toString("hex"))')"
 
 cat > "$tmp/fake-backend.sh" <<'BACKEND'
@@ -54,15 +55,23 @@ while (($# > 0)); do
 done
 [[ -f "$config" && $(stat -c '%a' "$config") == 600 ]]
 grep -q 'header = "Authorization: Bearer noo_' "$config"
+printf '%s %s\n' "$method" "$url" >> "$INSTALLER_TEST_CURL_CALLS"
 case "$method:$url" in
   POST:*/api/articles)
-    if grep -Fq -- "$INSTALLER_TEST_READ_KEY" "$config"; then
+    if grep -Fq -- "$INSTALLER_TEST_TRANSPORT_KEY" "$config"; then
+      exit 91
+    elif grep -Fq -- "$INSTALLER_TEST_READ_KEY" "$config"; then
       printf '403'
     else
       printf '400'
     fi
     ;;
-  GET:*/api/keys) printf '403' ;;
+  GET:*/api/keys)
+    if grep -Fq -- "$INSTALLER_TEST_TRANSPORT_KEY" "$config"; then
+      exit 91
+    fi
+    printf '403'
+    ;;
   POST:*/api/keys)
     printf '{"key":"%s"}\n' "$INSTALLER_TEST_CREATED_KEY" > "$output"
     ;;
@@ -111,10 +120,13 @@ common_env=(
   NOOSPHERE_TEST_KILOCODE_KEY="$fixture_kilocode_key"
   INSTALLER_TEST_READ_KEY="$fixture_kilocode_key"
   INSTALLER_TEST_CREATED_KEY="$fixture_kilocode_rotated_key"
+  INSTALLER_TEST_TRANSPORT_KEY="$fixture_transport_key"
+  INSTALLER_TEST_CURL_CALLS="$tmp/curl.calls"
   NOOSPHERE_TEST_ADMIN_PASSWORD="$fixture_admin_password"
 )
 
 mkdir -p "$tmp/home/.hermes/plugins/noosphere" "$tmp/home/.hermes/skills/noosphere-memory-hermes"
+: > "$tmp/curl.calls"
 touch "$tmp/home/.hermes/plugins/noosphere/stale.py" "$tmp/home/.hermes/skills/noosphere-memory-hermes/stale.md"
 printf '%s\n' 'KEEP_ME=yes' > "$tmp/home/.hermes/.env"
 chmod 644 "$tmp/home/.hermes/.env"
@@ -188,6 +200,19 @@ test ! -e "$tmp/home/.hermes/plugins/noosphere/stale.py"
 test ! -e "$tmp/home/.hermes/skills/noosphere-memory-hermes/stale.md"
 grep -q "^version: ${version}$" "$tmp/home/.hermes/plugins/noosphere/plugin.yaml"
 grep -q '^config set memory.provider noosphere$' "$tmp/hermes.log"
+
+: > "$tmp/curl.calls"
+if env "${common_env[@]}" NOOSPHERE_TEST_HERMES_KEY="$fixture_transport_key" \
+  bash "$root/install.sh" --non-interactive --with hermes \
+  >"$tmp/transport.out" 2>"$tmp/transport.err"; then
+  echo 'launcher transport failure unexpectedly rotated or reused a scoped key' >&2
+  exit 1
+fi
+grep -q 'refusing to rotate it after a transport failure' "$tmp/transport.err"
+if grep -q '^POST .*/api/keys$' "$tmp/curl.calls"; then
+  echo 'launcher transport failure reached scoped-key creation' >&2
+  exit 1
+fi
 
 mkdir -p "$tmp/home/.hermes-symlink"
 printf '%s\n' 'SENTINEL=yes' > "$tmp/hermes-env-target"
@@ -372,4 +397,4 @@ env HOME="$tmp/modes/resume" NOOSPHERE_HOME="$tmp/modes/resume" PATH="$mode_path
   bash "$root/install.sh" --dry-run --core-only > "$tmp/mode-resume.out"
 grep -q 'Mode:      resume or verify interrupted installation' "$tmp/mode-resume.out"
 
-printf 'installer_ux_tests=GREEN core_mode=yes lifecycle_modes=5 no_tty_guard=yes integration_merge=yes unversioned_dedupe=yes scoped_tool_keys=yes write_key_verified=yes bootstrap_tool_config=absent randomized_credentials=yes local_bootstrap_destination=yes secret_argv=clean child_env=clean remote_hermes=yes stale_overlay=clean hermes_symlink=blocked hermes_home_symlink=blocked atomic_secret_rewrite=yes secret_output=clean guards=11\n'
+printf 'installer_ux_tests=GREEN core_mode=yes lifecycle_modes=5 no_tty_guard=yes integration_merge=yes unversioned_dedupe=yes scoped_tool_keys=yes write_key_verified=yes transport_rotation=blocked bootstrap_tool_config=absent randomized_credentials=yes local_bootstrap_destination=yes secret_argv=clean child_env=clean remote_hermes=yes stale_overlay=clean hermes_symlink=blocked hermes_home_symlink=blocked atomic_secret_rewrite=yes secret_output=clean guards=11\n'
