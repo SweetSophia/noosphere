@@ -105,10 +105,15 @@ json_get() {
 }
 
 write_credentials_json() {
-  local target=$1 include_runtime=${2:-false} parent temp
+  local target=$1 include_runtime=${2:-false} include_bootstrap=${3:-true} parent temp
   parent=$(dirname "$target")
   install -d -m 700 "$parent"
+  [[ ! -L "$target" ]] || {
+    echo "Refusing symlinked credential target: $target" >&2
+    return 1
+  }
   temp=$(mktemp "$parent/.credentials.XXXXXX")
+  CREDENTIALS_EXISTING_TARGET="$target" \
   CREDENTIALS_BASE_URL="$APP_URL" \
   CREDENTIALS_API_KEY="$INTEGRATION_API_KEY" \
   CREDENTIALS_BOOTSTRAP_API_KEY="$API_KEY" \
@@ -120,16 +125,30 @@ write_credentials_json() {
   CREDENTIALS_POSTGRES_HYBRID_WORKER_PASSWORD="$POSTGRES_HYBRID_WORKER_PASSWORD" \
   CREDENTIALS_NEXTAUTH_SECRET="$NEXTAUTH_SECRET" \
   CREDENTIALS_INCLUDE_RUNTIME="$include_runtime" \
+  CREDENTIALS_INCLUDE_BOOTSTRAP="$include_bootstrap" \
     node -e '
       const fs = require("node:fs");
       const target = process.argv[1];
+      let integrationApiKeys = {};
+      const existingTarget = process.env.CREDENTIALS_EXISTING_TARGET;
+      if (existingTarget && fs.existsSync(existingTarget)) {
+        const existing = JSON.parse(fs.readFileSync(existingTarget, "utf8"));
+        if (existing.integrationApiKeys && typeof existing.integrationApiKeys === "object" && !Array.isArray(existing.integrationApiKeys)) {
+          integrationApiKeys = Object.fromEntries(Object.entries(existing.integrationApiKeys).filter(
+            ([name, key]) => /^[a-z0-9-]+$/.test(name) && typeof key === "string" && /^noo_[A-Za-z0-9_-]+$/.test(key),
+          ));
+        }
+      }
       const data = {
         baseUrl: process.env.CREDENTIALS_BASE_URL,
         apiKey: process.env.CREDENTIALS_API_KEY,
-        bootstrapApiKey: process.env.CREDENTIALS_BOOTSTRAP_API_KEY,
+        integrationApiKeys,
         adminEmail: "admin@noosphere.local",
         adminPassword: process.env.CREDENTIALS_ADMIN_PASSWORD,
       };
+      if (process.env.CREDENTIALS_INCLUDE_BOOTSTRAP === "true") {
+        data.bootstrapApiKey = process.env.CREDENTIALS_BOOTSTRAP_API_KEY;
+      }
       if (process.env.CREDENTIALS_INCLUDE_RUNTIME === "true") {
         Object.assign(data, {
           postgresPassword: process.env.CREDENTIALS_POSTGRES_PASSWORD,
@@ -1950,7 +1969,7 @@ INTEGRATION_API_KEY=$(select_scoped_integration_key "$EXISTING_INTEGRATION_API_K
 write_credentials_json "$NOOSPHERE_CREDENTIALS_FILE"
 
 if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then
-  write_credentials_json "$SECRETS_FILE" true
+  write_credentials_json "$SECRETS_FILE" true false
 
   echo "Installing OpenClaw plugin: ${PLUGIN_SPEC}"
   PLUGIN_INSTALL_ARGS=(plugins install "$PLUGIN_SPEC" --force)

@@ -111,22 +111,33 @@ for secret_name in \
   fi
 done
 grep -q '^INSTALLER_SAFE_MARKER=preserved$' "$tmp/openclaw.env"
+preserved_key="noo_fixture_$(fixture_value)"
+mkdir -p "$tmp/user"
+PRESERVED_KEY="$preserved_key" CREDENTIALS_USER="$tmp/user/credentials.json" node -e '
+  require("node:fs").writeFileSync(process.env.CREDENTIALS_USER, JSON.stringify({
+    integrationApiKeys: { hermes: process.env.PRESERVED_KEY },
+  }));
+'
+chmod 600 "$tmp/user/credentials.json"
 write_credentials_json "$tmp/user/credentials.json"
-write_credentials_json "$tmp/runtime/noosphere-memory.json" true
+write_credentials_json "$tmp/runtime/noosphere-memory.json" true false
 
 CREDENTIALS_USER="$tmp/user/credentials.json" \
 CREDENTIALS_RUNTIME="$tmp/runtime/noosphere-memory.json" \
 EXPECTED_INTEGRATION_KEY="$INTEGRATION_API_KEY" \
 EXPECTED_BOOTSTRAP_KEY="$API_KEY" \
+EXPECTED_PRESERVED_KEY="$preserved_key" \
   node <<'NODE'
 const fs = require("node:fs");
 const user = JSON.parse(fs.readFileSync(process.env.CREDENTIALS_USER, "utf8"));
 const runtime = JSON.parse(fs.readFileSync(process.env.CREDENTIALS_RUNTIME, "utf8"));
-if (Object.keys(user).sort().join() !== "adminEmail,adminPassword,apiKey,baseUrl,bootstrapApiKey") process.exit(1);
+if (Object.keys(user).sort().join() !== "adminEmail,adminPassword,apiKey,baseUrl,bootstrapApiKey,integrationApiKeys") process.exit(1);
 if (user.apiKey !== process.env.EXPECTED_INTEGRATION_KEY) process.exit(3);
 if (user.bootstrapApiKey !== process.env.EXPECTED_BOOTSTRAP_KEY) process.exit(4);
 if (user.apiKey === user.bootstrapApiKey) process.exit(5);
+if (user.integrationApiKeys.hermes !== process.env.EXPECTED_PRESERVED_KEY) process.exit(6);
 if (!runtime.postgresPassword || !runtime.nextAuthSecret) process.exit(2);
+if (runtime.bootstrapApiKey !== undefined) process.exit(7);
 NODE
 for directory in "$tmp/user" "$tmp/runtime"; do
   test "$(stat -c '%a' "$directory")" = 700
