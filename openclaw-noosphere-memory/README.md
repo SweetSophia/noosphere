@@ -15,23 +15,16 @@ openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.13.0 --pin
 For the full local Noosphere + OpenClaw setup, first confirm that the
 coordinated [`v1.13.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.0)
 exists with all six installer assets. Source merge alone does not publish the
-image, package, or release assets. Then use the guided immutable launcher:
+image, package, or release assets. Then use the checksum-verifying download form
+below; it runs the guided `1.13.0` launcher non-interactively for OpenClaw.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/d139ea0d95c6e901ee3400e00a440a9810963ef8/install.sh \
-  | bash -s -- --with openclaw
-```
-
-It checksum-verifies the reviewed backend and configures OpenClaw through its
-protected file secret provider. For the full lifecycle and auditable download,
+It verifies the reviewed launcher and backend before configuring OpenClaw through
+its protected file secret provider. For the full lifecycle and auditable download,
 see [Installing Noosphere](../docs/INSTALLATION.md). Guided setup creates a
 separate OpenClaw WRITE key, never the bootstrap ADMIN key. The key is
 unrestricted across corpus scopes by default so ordinary saves without
 `restrictedTags` work; apply restricted scopes only together with matching
 integration tags.
-
-The checksum-verifying download form below runs the same guided `1.13.0`
-launcher non-interactively for OpenClaw:
 
 ```bash
 # Installer commit: d139ea0d95c6e901ee3400e00a440a9810963ef8

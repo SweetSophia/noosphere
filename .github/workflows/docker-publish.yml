@@ -251,9 +251,11 @@ jobs:
             printf 'expected two platform digests, found %s\n' "${#sources[@]}" >&2
             exit 1
           fi
-          docker buildx imagetools create \
-            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            "${sources[@]}"
+          tag_args=()
+          while IFS= read -r tag; do
+            tag_args+=(-t "$tag")
+          done < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          docker buildx imagetools create "${tag_args[@]}" "${sources[@]}"
           release_ref=$(jq -er '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           docker buildx imagetools inspect --raw "$release_ref" > /tmp/release-index.json
           jq -e '

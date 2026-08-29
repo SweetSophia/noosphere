@@ -22,8 +22,16 @@ You need two things before this plugin will do anything useful:
    image, package, or release assets.
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/d139ea0d95c6e901ee3400e00a440a9810963ef8/install.sh \
-     | bash -s -- --with kilocode
+   # Installer commit: d139ea0d95c6e901ee3400e00a440a9810963ef8
+   # Expected SHA-256: 3a3abf491210fb4115305d68b099cd4d4bac67cfadbe8fb310c616ba12272352
+   (
+     set -e
+     installer="$(mktemp)"
+     trap 'rm -f "$installer"' EXIT
+     curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/d139ea0d95c6e901ee3400e00a440a9810963ef8/install.sh -o "$installer"
+     printf '%s  %s\n' '3a3abf491210fb4115305d68b099cd4d4bac67cfadbe8fb310c616ba12272352' "$installer" | sha256sum -c -
+     bash "$installer" --non-interactive --with kilocode
+   )
    ```
 
    The immutable launcher checksum-verifies its backend, preserves existing

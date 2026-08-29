@@ -357,6 +357,7 @@ const installerUxTest = readText("scripts/test-installer-ux.sh");
 const installerPackageTest = readText("scripts/test-installer-package.sh");
 const postgresImagePolicy = readText("scripts/check-postgres-image-policy.mjs");
 const versionSyncScript = readText("scripts/sync-version.mjs");
+const releaseVersion = readText("VERSION").trim();
 const coordinatedReleaseGuide = readText("docs/COORDINATED-RELEASE.md");
 const composeFile = readText("docker-compose.yml");
 const environmentExample = readText("noosphere.env.example");
@@ -485,9 +486,10 @@ expect(
 );
 for (const { relativePath, text } of guidedCommandDocs) {
   expect(
-    text.includes("releases/tag/v1.13.0") &&
+    text.includes(`releases/tag/v${releaseVersion}`) &&
       text.includes("all six installer assets") &&
-      !text.includes('NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.13.0}"'),
+      text.includes("sha256sum -c -") &&
+      !text.includes(`NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${releaseVersion}}"`),
     `${relativePath} must gate pinned commands on the coordinated release and preserve persisted custom images.`,
   );
 }
@@ -562,6 +564,9 @@ expect(
     !workflowLines(dockerAssembleStep).some((line) => line.startsWith("if:")) &&
     dockerAssembleStep.includes("expected two platform digests") &&
     dockerAssembleStep.includes("docker buildx imagetools create") &&
+    dockerAssembleStep.includes('tag_args+=(-t "$tag")') &&
+    dockerAssembleStep.includes("jq -r '.tags[]'") &&
+    !dockerAssembleStep.includes("$(jq -cr") &&
     dockerAssembleStep.includes('sort == ["linux/amd64", "linux/arm64"]') &&
     yamlStepBlock(dockerPublishIndexJob, "Extract metadata").includes("flavor: latest=auto"),
   "The tag-only Docker index job must require both digest builds, assemble exactly two sources, and verify AMD64 plus ARM64 before success.",
