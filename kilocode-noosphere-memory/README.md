@@ -17,7 +17,7 @@ You need two things before this plugin will do anything useful:
    Kilo Code, run:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/63dfca2ccbccaf9bd44cc3503781c0ca4c909155/install.sh \
+   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/90415949695a854a687d8dcebbe247f4be56efab/install.sh \
      | bash -s -- --with kilocode
    ```
 

@@ -39,7 +39,7 @@ exists with all six installer assets; a merged commit alone is not a release.
 Run the guided installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/63dfca2ccbccaf9bd44cc3503781c0ca4c909155/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/90415949695a854a687d8dcebbe247f4be56efab/install.sh | bash
 ```
 
 The URL is pinned to an immutable Git commit—never `master` or `main`. The
@@ -72,7 +72,7 @@ Do not replace the guided upgrade with an unrestricted `docker compose pull &&
 docker compose up`. First inspect the plan without changing the machine:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/63dfca2ccbccaf9bd44cc3503781c0ca4c909155/install.sh \
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/90415949695a854a687d8dcebbe247f4be56efab/install.sh \
   | bash -s -- --dry-run --core-only
 ```
 

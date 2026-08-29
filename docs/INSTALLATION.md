@@ -29,7 +29,7 @@ This URL is pinned to an immutable Git commit. It does not execute a moving
 `master` or `main` branch:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/63dfca2ccbccaf9bd44cc3503781c0ca4c909155/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/90415949695a854a687d8dcebbe247f4be56efab/install.sh | bash
 ```
 
 The script can prompt through `/dev/tty`, even when it is piped to Bash. It:
@@ -93,11 +93,11 @@ Examples:
 
 ```bash
 # Show the plan without changing the machine.
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/63dfca2ccbccaf9bd44cc3503781c0ca4c909155/install.sh \
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/90415949695a854a687d8dcebbe247f4be56efab/install.sh \
   | bash -s -- --dry-run --core-only
 
 # Automation: local Noosphere plus Hermes, without prompts.
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/63dfca2ccbccaf9bd44cc3503781c0ca4c909155/install.sh \
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/90415949695a854a687d8dcebbe247f4be56efab/install.sh \
   | bash -s -- --non-interactive --with hermes
 ```
 
@@ -114,8 +114,8 @@ the advertised SHA-256:
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/63dfca2ccbccaf9bd44cc3503781c0ca4c909155/install.sh -o "$installer"
-  printf '%s  %s\n' '3ab452bde38bd7c59e8002efc2a73070f540d82c94fa51c272ced3513ae62c29' "$installer" | sha256sum -c -
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/90415949695a854a687d8dcebbe247f4be56efab/install.sh -o "$installer"
+  printf '%s  %s\n' 'd2213eb5c14e1408eb8e2dea6d1368ff306b4ea9ae7875352388de9fec195dd2' "$installer" | sha256sum -c -
   bash "$installer"
 )
 ```
