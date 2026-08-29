@@ -3,8 +3,8 @@ set -euo pipefail
 trap 'printf "Installer failed near line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 RELEASE_VERSION='1.13.0'
-BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/624f8e93c57dfd0f048e9702a166b8b245e04008/install-openclaw.sh'
-BACKEND_SHA256='450c2b8a826a207aa927e79ff3926b57215fd0ad7b6f685b156d53ad16cdc174'
+BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/3869147995ab1dcd86097e162cd07d6c480c2f12/install-openclaw.sh'
+BACKEND_SHA256='5cf0f4961fa4e9e3ac6773f66473d3b4d51615bc70138bde320a9ecb1623b055'
 HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.13.0/hermes-noosphere-memory-1.13.0.tar.gz'
 HERMES_BUNDLE_SHA256='a560bd8607b512123e71975c188f5b924d4325adaeb86bbbd1424933423c5fde'
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
@@ -387,6 +387,10 @@ installer_validated_local_base_url() {
   '
 }
 
+local_no_proxy_curl() {
+  curl --disable --noproxy '*' "$@"
+}
+
 installer_api_status_with_key() {
   local key=$1 endpoint=$2 config status base_url
   [[ "$key" =~ ^noo_[A-Za-z0-9_-]+$ ]] || { printf '000'; return 0; }
@@ -394,7 +398,7 @@ installer_api_status_with_key() {
   config=$(mktemp "$work_dir/curl-auth.XXXXXX")
   chmod 600 "$config"
   printf 'silent\nshow-error\nheader = "Authorization: Bearer %s"\n' "$key" > "$config"
-  status=$(curl --config "$config" --output /dev/null --write-out '%{http_code}' \
+  status=$(local_no_proxy_curl --config "$config" --output /dev/null --write-out '%{http_code}' \
     "$base_url$endpoint" 2>/dev/null || true)
   rm -f "$config"
   printf '%s' "${status:-000}"
@@ -409,7 +413,7 @@ installer_write_probe_status_with_key() {
   chmod 600 "$config" "$body"
   printf 'silent\nshow-error\nheader = "Authorization: Bearer %s"\n' "$key" > "$config"
   printf '{}\n' > "$body"
-  status=$(curl --config "$config" --request POST --header 'Content-Type: application/json' \
+  status=$(local_no_proxy_curl --config "$config" --request POST --header 'Content-Type: application/json' \
     --data-binary "@$body" --output /dev/null --write-out '%{http_code}' \
     "$base_url/api/articles" 2>/dev/null || true)
   rm -f "$config" "$body"
@@ -445,7 +449,7 @@ create_tool_api_key() {
   chmod 600 "$config" "$body" "$response"
   printf 'silent\nshow-error\nfail-with-body\nheader = "Authorization: Bearer %s"\n' "$bootstrap" > "$config"
   printf '{"name":"%s","permissions":"WRITE","allowedScopes":[]}\n' "$name" > "$body"
-  if ! curl --config "$config" --request POST --header 'Content-Type: application/json' \
+  if ! local_no_proxy_curl --config "$config" --request POST --header 'Content-Type: application/json' \
     --data-binary "@$body" --output "$response" "$base_url/api/keys"; then
     rm -f "$config" "$body" "$response"
     echo "Failed to create a scoped ${integration} API key." >&2

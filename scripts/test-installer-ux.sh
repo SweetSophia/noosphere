@@ -3,6 +3,7 @@ set -euo pipefail
 trap 'printf "installer UX test failed near line %s: %s\\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+launcher=${1:-$root/install.sh}
 version=$(tr -d '\r\n' < "$root/VERSION")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -46,12 +47,14 @@ chmod 700 "$tmp/fake-bin/hermes"
 cat > "$tmp/fake-bin/curl" <<'CURL'
 #!/usr/bin/env bash
 set -euo pipefail
-config='' output='' url='' method=GET
+config='' output='' url='' method=GET disable=false noproxy=false
 for arg in "$@"; do
   [[ "$arg" != *noo_* ]] || { echo 'secret appeared in curl argv' >&2; exit 90; }
 done
 while (($# > 0)); do
   case "$1" in
+    --disable) disable=true; shift ;;
+    --noproxy) [[ "$2" == '*' ]]; noproxy=true; shift 2 ;;
     --config) config=$2; shift 2 ;;
     --output) output=$2; shift 2 ;;
     --request) method=$2; shift 2 ;;
@@ -59,6 +62,7 @@ while (($# > 0)); do
     *) shift ;;
   esac
 done
+[[ "$disable" == true && "$noproxy" == true ]]
 [[ -f "$config" && $(stat -c '%a' "$config") == 600 ]]
 grep -q 'header = "Authorization: Bearer noo_' "$config"
 printf '%s %s\n' "$method" "$url" >> "$INSTALLER_TEST_CURL_CALLS"
@@ -129,6 +133,12 @@ common_env=(
   INSTALLER_TEST_CREATED_KEY="$fixture_kilocode_rotated_key"
   INSTALLER_TEST_TRANSPORT_KEY="$fixture_transport_key"
   INSTALLER_TEST_CURL_CALLS="$tmp/curl.calls"
+  http_proxy='http://proxy.invalid:8080'
+  https_proxy='http://proxy.invalid:8080'
+  HTTP_PROXY='http://proxy.invalid:8080'
+  HTTPS_PROXY='http://proxy.invalid:8080'
+  ALL_PROXY='socks5://proxy.invalid:1080'
+  all_proxy='socks5://proxy.invalid:1080'
   NOOSPHERE_TEST_ADMIN_PASSWORD="$fixture_admin_password"
 )
 
@@ -138,7 +148,7 @@ touch "$tmp/home/.hermes/plugins/noosphere/stale.py" "$tmp/home/.hermes/skills/n
 printf '%s\n' 'KEEP_ME=yes' > "$tmp/home/.hermes/.env"
 chmod 644 "$tmp/home/.hermes/.env"
 
-env "${common_env[@]}" bash "$root/install.sh" \
+env "${common_env[@]}" bash "$launcher" \
   --non-interactive --with hermes,opencode,kilocode > "$tmp/install.out"
 
 test "$(<"$tmp/backend-mode.txt")" = false
@@ -446,4 +456,22 @@ env HOME="$tmp/modes/resume" NOOSPHERE_HOME="$tmp/modes/resume" PATH="$mode_path
   bash "$root/install.sh" --dry-run --core-only > "$tmp/mode-resume.out"
 grep -q 'Mode:      resume or verify interrupted installation' "$tmp/mode-resume.out"
 
-printf 'installer_ux_tests=GREEN core_mode=yes lifecycle_modes=5 no_tty_guard=yes integration_merge=yes unversioned_dedupe=yes scoped_tool_keys=yes write_key_verified=yes transport_rotation=blocked bootstrap_tool_config=absent randomized_credentials=yes local_bootstrap_destination=yes port_binding=blocked custom_port=preserved secret_argv=clean child_env=clean remote_hermes=yes stale_overlay=clean hermes_symlink=blocked hermes_home_symlink=blocked hermes_parent_symlink=blocked atomic_secret_rewrite=yes secret_output=clean guards=12\n'
+sabotage_package="$tmp/proxy-sabotage-package"
+mkdir -p "$sabotage_package"
+cp "$root/VERSION" "$root/install-openclaw.sh" "$root/install.sh" "$sabotage_package/"
+ln -s "$root/hermes-noosphere-memory" "$sabotage_package/hermes-noosphere-memory"
+SABOTAGED_LAUNCHER="$sabotage_package/install.sh" node <<'NODE'
+const fs = require("node:fs");
+const path = process.env.SABOTAGED_LAUNCHER;
+let source = fs.readFileSync(path, "utf8");
+const guarded = `curl --disable --noproxy '*' "$@"`;
+if (!source.includes(guarded)) throw new Error("cannot locate launcher proxy sabotage target");
+source = source.replace(guarded, `curl "$@"`);
+fs.writeFileSync(path, source);
+NODE
+if "$0" "$sabotage_package/install.sh" >/dev/null 2>&1; then
+  echo 'launcher proxy-bypass sabotage unexpectedly passed' >&2
+  exit 1
+fi
+
+printf 'installer_ux_tests=GREEN core_mode=yes lifecycle_modes=5 no_tty_guard=yes integration_merge=yes unversioned_dedupe=yes scoped_tool_keys=yes write_key_verified=yes transport_rotation=blocked bootstrap_tool_config=absent randomized_credentials=yes local_bootstrap_destination=yes port_binding=blocked custom_port=preserved proxy_bypass=yes secret_argv=clean child_env=clean remote_hermes=yes stale_overlay=clean hermes_symlink=blocked hermes_home_symlink=blocked hermes_parent_symlink=blocked atomic_secret_rewrite=yes secret_output=clean guards=13\n'
