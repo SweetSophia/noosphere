@@ -217,9 +217,39 @@ if [[ "$SELECTION_EXPLICIT" == false ]]; then
   fi
 fi
 
+runtime_env_value() {
+  local key=$1 runtime_env="$NOOSPHERE_HOME/.env"
+  [[ -f "$runtime_env" ]] || return 0
+  [[ ! -L "$runtime_env" ]] || {
+    echo "Refusing symlinked Noosphere runtime environment: $runtime_env" >&2
+    return 1
+  }
+  RUNTIME_ENV="$runtime_env" RUNTIME_KEY="$key" node -e '
+    const fs = require("node:fs");
+    const key = process.env.RUNTIME_KEY;
+    let value = "";
+    for (const raw of fs.readFileSync(process.env.RUNTIME_ENV, "utf8").split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line || line.startsWith("#")) continue;
+      const separator = line.indexOf("=");
+      if (separator > 0 && line.slice(0, separator) === key) value = line.slice(separator + 1);
+    }
+    process.stdout.write(value);
+  '
+}
+
 if [[ "$NON_INTERACTIVE" == true ]]; then
-  export APP_URL="${APP_URL:-http://127.0.0.1:${NOOSPHERE_PORT:-6578}}"
-  export BIND_ADDRESS="${BIND_ADDRESS:-127.0.0.1}"
+  persisted_port=$(runtime_env_value NOOSPHERE_PORT)
+  effective_port="${NOOSPHERE_PORT:-${persisted_port:-6578}}"
+  [[ "$effective_port" =~ ^[0-9]+$ ]] && ((effective_port >= 1 && effective_port <= 65535)) || {
+    echo "Invalid Noosphere port: $effective_port" >&2
+    exit 1
+  }
+  persisted_app_url=$(runtime_env_value APP_URL)
+  persisted_bind_address=$(runtime_env_value BIND_ADDRESS)
+  export NOOSPHERE_PORT="$effective_port"
+  export APP_URL="${APP_URL:-${persisted_app_url:-http://127.0.0.1:${effective_port}}}"
+  export BIND_ADDRESS="${BIND_ADDRESS:-${persisted_bind_address:-127.0.0.1}}"
 fi
 
 lifecycle_mode=$(detect_lifecycle_mode)
@@ -562,6 +592,24 @@ configure_hermes() {
     echo 'Refusing to replace a symlinked Hermes plugin or skill target.' >&2
     exit 1
   }
+  HERMES_HOME="$hermes_home" PLUGIN_TARGET="$plugin_target" SKILL_TARGET="$skill_target" node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const assertNoSymlinkComponents = (target) => {
+      let current = path.resolve(target);
+      while (true) {
+        if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink()) {
+          throw new Error(`Refusing symlinked Hermes path component: ${current}`);
+        }
+        const parent = path.dirname(current);
+        if (parent === current) break;
+        current = parent;
+      }
+    };
+    for (const target of [process.env.HERMES_HOME, process.env.PLUGIN_TARGET, process.env.SKILL_TARGET]) {
+      assertNoSymlinkComponents(target);
+    }
+  '
   rm -rf -- "$plugin_target" "$skill_target"
   install -d -m 700 "$plugin_target" "$skill_target"
   tar -C "$plugin_source" -cf - . | tar -C "$plugin_target" -xf -

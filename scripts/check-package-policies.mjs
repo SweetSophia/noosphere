@@ -491,8 +491,10 @@ expect(
     installerUxTest.includes("stale_overlay=clean") &&
     installerUxTest.includes("unversioned_dedupe=yes") &&
     installer.includes("Refusing symlinked Hermes home") &&
+    installer.includes("Refusing symlinked Hermes path component") &&
     installerUxTest.includes("hermes_symlink=blocked") &&
     installerUxTest.includes("hermes_home_symlink=blocked") &&
+    installerUxTest.includes("hermes_parent_symlink=blocked") &&
     installerUxTest.includes("randomized_credentials=yes") &&
     !installerUxTest.includes("fixture-admin-password") &&
     installerUxTest.includes("atomic_secret_rewrite=yes") &&
@@ -501,6 +503,7 @@ expect(
     installerUxTest.includes("transport_rotation=blocked") &&
     installerUxTest.includes("local_bootstrap_destination=yes") &&
     installerUxTest.includes("port_binding=blocked") &&
+    installerUxTest.includes("custom_port=preserved") &&
     installerUxTest.includes("child_env=clean") &&
     installerUxTest.includes("bootstrap_tool_config=absent") &&
     installerUxTest.includes("secret_argv=clean") &&
