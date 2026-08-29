@@ -120,7 +120,7 @@ Set these environment variables before running the installer when you need non-d
 | --- | --- | --- |
 | `NOOSPHERE_HOME` | `~/.noosphere` | Runtime directory for Compose files and `.env`. |
 | `NOOSPHERE_PORT` | `6578` | Localhost port exposed by the app. |
-| `NOOSPHERE_VERSION` | `latest` | GHCR image tag. |
+| `NOOSPHERE_VERSION` | `1.13.0` (or persisted value on rerun) | GHCR image tag. |
 | `NOOSPHERE_IMAGE` | `ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION}` | Full image reference override. |
 | `REDIS_URL` | `redis://redis:6379` | Redis connection string used inside Compose. Leave default for the bundled Redis service. |
 | `PG_POOL_MAX` | `20` | Maximum application PostgreSQL pool size. |

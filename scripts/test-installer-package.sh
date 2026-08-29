@@ -92,6 +92,27 @@ grep -q 'unexpected checksum' "$tmp/remote-negative.out"
   node "$root/scripts/check-postgres-image-policy.mjs" --verify-release-files
 ) > "$tmp/release-files-positive.out"
 grep -q 'PostgreSQL image policy check passed' "$tmp/release-files-positive.out"
+
+cat > "$tmp/mock-release-fetch.mjs" <<'NODE'
+import { readFile } from "node:fs/promises";
+import { basename, resolve } from "node:path";
+
+const releaseRoot = resolve(process.env.RELEASE_FIXTURE_DIR);
+globalThis.fetch = async (input) => {
+  const name = basename(new URL(String(input)).pathname);
+  try {
+    return new Response(await readFile(resolve(releaseRoot, name)), { status: 200 });
+  } catch {
+    return new Response("missing", { status: 404 });
+  }
+};
+NODE
+RELEASE_FIXTURE_DIR="$first" \
+  node --import "$tmp/mock-release-fetch.mjs" \
+  "$root/scripts/check-postgres-image-policy.mjs" --verify-release-assets \
+  > "$tmp/release-assets-positive.out"
+grep -q 'PostgreSQL image policy check passed' "$tmp/release-assets-positive.out"
+
 cp -a "$first" "$tmp/tampered-release"
 printf '\n# tampered release backend\n' >> "$tmp/tampered-release/install-openclaw.sh"
 if (
@@ -182,4 +203,4 @@ if (cd "$tmp/aligned-hermes-release" && node "$root/scripts/check-postgres-image
 fi
 grep -q 'release launcher must pin the downloaded Hermes bundle bytes' "$tmp/aligned-hermes-release.out"
 
-printf 'installer_package_tests=GREEN assets=6 deterministic=yes piped_entrypoint=yes sibling_checksum_sensitive=yes remote_checksum_sensitive=yes release_set_verified=yes release_negative_controls=7\n'
+printf 'installer_package_tests=GREEN assets=6 deterministic=yes piped_entrypoint=yes sibling_checksum_sensitive=yes remote_checksum_sensitive=yes release_set_verified=yes release_public_fixture_verified=yes release_negative_controls=7\n'

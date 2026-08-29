@@ -19,8 +19,6 @@ on:
       - "docker-compose.yml"
       - "docker/**"
       - "!docker/postgres-pgvector/**"
-      - "scripts/check-package-policies.mjs"
-      - "scripts/sync-version.mjs"
       - "noosphere-injected-memory/**"
       - "openclaw-noosphere-memory/**"
   pull_request:
@@ -40,8 +38,6 @@ on:
       - "docker-compose.yml"
       - "docker/**"
       - "!docker/postgres-pgvector/**"
-      - "scripts/check-package-policies.mjs"
-      - "scripts/sync-version.mjs"
       - "noosphere-injected-memory/**"
       - "openclaw-noosphere-memory/**"
   workflow_dispatch:

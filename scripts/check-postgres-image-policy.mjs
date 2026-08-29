@@ -1597,11 +1597,27 @@ const checkedReleaseHermesSha = extractShellConstant(guidedInstaller, "HERMES_BU
 const checkedReleaseBase =
   `https://github.com/SweetSophia/noosphere/releases/download/v${checkedReleaseVersion}/`;
 const canonicalChecksum = (sha256, filename) => Buffer.from(`${sha256}  ${filename}\n`, "utf8");
+const packagedLauncherReplacements = [
+  [/^RELEASE_VERSION='[^']+'$/m, `RELEASE_VERSION='${checkedReleaseVersion}'`],
+  [/^BACKEND_URL='[^']+'$/m, `BACKEND_URL='${checkedReleaseBase}${checkedReleaseBackendName}'`],
+  [/^BACKEND_SHA256='[a-f0-9]{64}'$/m, `BACKEND_SHA256='${guidedBackendSha256}'`],
+  [/^HERMES_BUNDLE_URL='[^']+'$/m, `HERMES_BUNDLE_URL='${checkedReleaseBase}${checkedReleaseHermesName}'`],
+  [/^HERMES_BUNDLE_SHA256='[a-f0-9]{64}'$/m, `HERMES_BUNDLE_SHA256='${checkedReleaseHermesSha}'`],
+];
+let checkedPackagedLauncher = guidedInstaller;
+for (const [pattern, replacement] of packagedLauncherReplacements) {
+  const matches = checkedPackagedLauncher.match(
+    new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`),
+  ) ?? [];
+  expect(matches.length === 1, `${pattern} must match the source launcher exactly once`);
+  checkedPackagedLauncher = checkedPackagedLauncher.replace(pattern, replacement);
+}
+const checkedPackagedLauncherSha = sha256Bytes(Buffer.from(checkedPackagedLauncher, "utf8"));
 const releaseAssetExpectations = [
-  { filename: checkedReleaseLauncherName, sha256: guidedInstallerSha256 },
+  { filename: checkedReleaseLauncherName, sha256: checkedPackagedLauncherSha },
   {
     filename: `${checkedReleaseLauncherName}.sha256`,
-    sha256: sha256Bytes(canonicalChecksum(guidedInstallerSha256, checkedReleaseLauncherName)),
+    sha256: sha256Bytes(canonicalChecksum(checkedPackagedLauncherSha, checkedReleaseLauncherName)),
   },
   { filename: checkedReleaseBackendName, sha256: guidedBackendSha256 },
   {

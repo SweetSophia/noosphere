@@ -261,14 +261,6 @@ function hasExactNativeDockerMatrix(block) {
   ]);
 }
 
-function hasPluginTagExclusion(block, requireApplicationTag = true) {
-  const condition = yamlScalarLine(block, "if", 4);
-  return (!requireApplicationTag || condition.includes("github.ref_type == 'tag'")) &&
-    ["v-openclaw-", "v-opencode-", "v-kilocode-", "v-hermes-"].every((tag) =>
-      condition.includes(`refs/tags/${tag}`),
-    );
-}
-
 function normalizeSignal(value) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -325,6 +317,30 @@ const dockerPrBuildStep = yamlStepBlock(dockerPrPlatformJob, "Build target platf
 const dockerPublishBuildStep = yamlStepBlock(dockerPublishPlatformJob, "Build and push target platform by digest");
 const dockerAssembleStep = yamlStepBlock(dockerPublishIndexJob, "Assemble and verify multi-platform image");
 const dockerFinalStep = yamlStepBlock(dockerFinalJob, "Require every applicable Docker gate");
+const pluginTagExclusions = ["v-openclaw-", "v-opencode-", "v-kilocode-", "v-hermes-"]
+  .map((tag) => `!startsWith(github.ref, 'refs/tags/${tag}')`)
+  .join(" && ");
+const dockerValidateCondition = `if: "${pluginTagExclusions}"`;
+const dockerPublishCondition = `if: \${{ github.ref_type == 'tag' && ${pluginTagExclusions} }}`;
+const dockerFinalCondition = `if: \${{ always() && ${pluginTagExclusions} }}`;
+const dockerTriggerPaths = [
+  '- ".github/workflows/docker-publish.yml"',
+  '- "Dockerfile"',
+  '- "next.config.ts"',
+  '- "src/**"',
+  '- "prisma/**"',
+  '- "prisma.config.ts"',
+  '- "public/**"',
+  '- "scripts/**"',
+  '- "package.json"',
+  '- "package-lock.json"',
+  '- "VERSION"',
+  '- "docker-compose.yml"',
+  '- "docker/**"',
+  '- "!docker/postgres-pgvector/**"',
+  '- "noosphere-injected-memory/**"',
+  '- "openclaw-noosphere-memory/**"',
+];
 const dockerCheckoutCount = dockerPublishWorkflowLines.filter((line) => line.startsWith("uses: actions/checkout@")).length;
 const dockerCheckoutCredentialGuards = dockerPublishWorkflowLines.filter((line) => line === "persist-credentials: false").length;
 const hermesReleaseWorkflow = readText(policy.hermesReleaseWorkflow);
@@ -490,15 +506,20 @@ expect(
     ]) &&
     workflowLines(yamlStepBlock(dockerValidationJob, "Validate version metadata")).includes("id: version") &&
     exactBlockLines(yamlNamedBlock(dockerValidationJob, "permissions", 4), ["permissions:", "contents: read"]) &&
-    hasPluginTagExclusion(dockerValidationJob, false) &&
-    dockerPushTrigger.includes('- ".github/workflows/docker-publish.yml"') &&
-    dockerPushTrigger.includes('- "public/**"') &&
-    dockerPushTrigger.includes('- "prisma.config.ts"') &&
-    dockerPushTrigger.includes('- "scripts/**"') &&
-    dockerPullRequestTrigger.includes('- ".github/workflows/docker-publish.yml"') &&
-    dockerPullRequestTrigger.includes('- "public/**"') &&
-    dockerPullRequestTrigger.includes('- "prisma.config.ts"') &&
-    dockerPullRequestTrigger.includes('- "scripts/**"'),
+    yamlScalarLine(dockerValidationJob, "if", 4) === dockerValidateCondition &&
+    exactBlockLines(dockerPushTrigger, [
+      "push:",
+      "branches: [main, master]",
+      'tags: ["v*"]',
+      "paths:",
+      ...dockerTriggerPaths,
+    ]) &&
+    exactBlockLines(dockerPullRequestTrigger, [
+      "pull_request:",
+      "branches: [main, master]",
+      "paths:",
+      ...dockerTriggerPaths,
+    ]),
   "The Docker workflow and its owning policy must trigger their own native-platform gates.",
 );
 expect(
@@ -515,7 +536,7 @@ expect(
   "Pull-request Docker builds must run natively on both platforms, load and inspect each image, and receive no package-write authority.",
 );
 expect(
-  hasPluginTagExclusion(dockerPublishPlatformJob) &&
+  yamlScalarLine(dockerPublishPlatformJob, "if", 4) === dockerPublishCondition &&
     workflowLines(dockerPublishPlatformJob).includes("needs: validate") &&
     workflowLines(dockerPublishPlatformJob).includes("runs-on: ${{ matrix.runner }}") &&
     exactBlockLines(yamlNamedBlock(dockerPublishPlatformJob, "permissions", 4), [
@@ -531,7 +552,7 @@ expect(
   "Tag-only Docker jobs must build both platforms natively and publish each image only by digest.",
 );
 expect(
-  hasPluginTagExclusion(dockerPublishIndexJob) &&
+  yamlScalarLine(dockerPublishIndexJob, "if", 4) === dockerPublishCondition &&
     workflowLines(dockerPublishIndexJob).includes("needs: [validate, publish-platform]") &&
     exactBlockLines(yamlNamedBlock(dockerPublishIndexJob, "permissions", 4), [
       "permissions:",
@@ -550,15 +571,22 @@ expect(
     workflowLines(dockerFinalJob).includes(
       "needs: [validate, docker-platform, publish-platform, publish-index]",
     ) &&
-    yamlScalarLine(dockerFinalJob, "if", 4).includes("always()") &&
+    yamlScalarLine(dockerFinalJob, "if", 4) === dockerFinalCondition &&
     exactBlockLines(yamlNamedBlock(dockerFinalJob, "permissions", 4), ["permissions:", "contents: read"]) &&
-    workflowLines(dockerFinalStep).includes("test '${{ needs.validate.result }}' = success") &&
-    workflowLines(dockerFinalStep).includes("test '${{ needs['docker-platform'].result }}' = skipped") &&
-    workflowLines(dockerFinalStep).includes("test '${{ needs['publish-platform'].result }}' = success") &&
-    workflowLines(dockerFinalStep).includes("test '${{ needs['publish-index'].result }}' = success") &&
-    workflowLines(dockerFinalStep).includes("test '${{ needs['docker-platform'].result }}' = success") &&
-    workflowLines(dockerFinalStep).includes("test '${{ needs['publish-platform'].result }}' = skipped") &&
-    workflowLines(dockerFinalStep).includes("test '${{ needs['publish-index'].result }}' = skipped"),
+    exactBlockLines(dockerFinalStep, [
+      "- name: Require every applicable Docker gate",
+      "run: |",
+      "test '${{ needs.validate.result }}' = success",
+      'if [[ "$GITHUB_REF_TYPE" == tag ]]; then',
+      "test '${{ needs['docker-platform'].result }}' = skipped",
+      "test '${{ needs['publish-platform'].result }}' = success",
+      "test '${{ needs['publish-index'].result }}' = success",
+      "else",
+      "test '${{ needs['docker-platform'].result }}' = success",
+      "test '${{ needs['publish-platform'].result }}' = skipped",
+      "test '${{ needs['publish-index'].result }}' = skipped",
+      "fi",
+    ]),
   "The final docker check must aggregate validation, PR builds, tag digest builds, and index publication without bypassing a skipped or failed dependency.",
 );
 expect(
@@ -706,6 +734,7 @@ expect(
     installerPackageTest.includes("sibling_checksum_sensitive=yes") &&
     installerPackageTest.includes("piped_entrypoint=yes") &&
     installerPackageTest.includes("release_set_verified=yes") &&
+    installerPackageTest.includes("release_public_fixture_verified=yes") &&
     installerPackageTest.includes("release_negative_controls=7") &&
     installerPackageTest.includes("aligned tampered backend unexpectedly passed") &&
     installerPackageTest.includes("redirected launcher unexpectedly passed") &&
