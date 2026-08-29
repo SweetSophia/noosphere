@@ -404,17 +404,17 @@ test_rehearsal_cleanup_continues_after_failure
 [[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == rehearsal-cleanup ]] && exit 0
 
 test_migrator_producer_authority() (
-  local switch_script definition helper
+  local switch_script definition helper expected_role
   switch_script=${PGVECTOR_SWITCH_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}
 
-  for helper in migrator_sql migration_signature create_logical_backup; do
+  for helper in digest_role migrator_sql migration_signature create_logical_backup; do
     definition=$(awk -v signature="${helper}() {" '
       $0 == signature { emit = 1 }
       emit { print }
       emit && $0 == "}" { exit }
     ' "$switch_script")
     [[ -n "$definition" ]] || {
-      echo "Missing migrator-authority helper: $helper" >&2
+      echo "Missing digest-authority helper: $helper" >&2
       exit 1
     }
     eval "$definition"
@@ -427,8 +427,12 @@ test_migrator_producer_authority() (
 
   docker() {
     local invocation=" $* "
-    [[ "$invocation" == *" -U noosphere_migrator "* ]] || {
-      echo "Digest or backup producer used bootstrap authority: $*" >&2
+    if [[ "$invocation" == *"SELECT CASE"* ]]; then
+      printf '%s\n' "$expected_role"
+      return 0
+    fi
+    [[ "$invocation" == *" -U $expected_role "* ]] || {
+      echo "Digest or backup producer used unexpected authority: $*" >&2
       return 97
     }
     if [[ "$invocation" == *" psql "* ]]; then
@@ -438,8 +442,10 @@ test_migrator_producer_authority() (
     fi
   }
 
-  migration_signature fixture-container >/dev/null
-  create_logical_backup fixture-container /dev/null
+  for expected_role in noosphere_migrator noosphere; do
+    migration_signature fixture-container >/dev/null
+    create_logical_backup fixture-container /dev/null
+  done
 )
 
 test_migrator_producer_authority

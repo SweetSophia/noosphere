@@ -833,6 +833,21 @@ for (const relativePath of [
 
 const switchScript = read("scripts/switch-pgvector-compose.sh");
 const controllerScript = read("scripts/run-pgvector-transition-controller.sh");
+const verifyDeployScript = read("scripts/verify-deploy.sh");
+expect(
+  switchScript.includes("digest_role()") &&
+    switchScript.includes("noosphere_migrator|noosphere") &&
+    switchScript.includes("released v1.11 cluster does not have that role yet") &&
+    !switchScript.includes("pg_dump -U noosphere_migrator"),
+  "switch-pgvector-compose.sh must inspect released legacy clusters without assuming the 1.12 migration role already exists",
+);
+expect(
+  controllerScript.includes("NOOSPHERE_VERIFY_APP_HEALTH=false") &&
+    verifyDeployScript.includes('VERIFY_APP_HEALTH="${NOOSPHERE_VERIFY_APP_HEALTH:-true}"') &&
+    verifyDeployScript.includes("health_status=skipped") &&
+    verifyDeployScript.includes('if [[ "$VERIFY_APP_HEALTH" == true ]]'),
+  "deferred source recovery must verify database continuity without requiring the intentionally stopped app writer",
+);
 expect(
   !switchScript.includes("imagetools") && !switchScript.includes("docker buildx"),
   "switch-pgvector-compose.sh must verify guarded recovery from local immutable image evidence without registry lookups",
@@ -1102,39 +1117,47 @@ const logicalBackupFunction = shellFunction(
   switchScript,
   "create_logical_backup",
 );
+const digestRoleFunction = shellFunction(switchScript, "digest_role");
 const expectedDigestPsqlFunction = [
   "_digest_psql() {",
-  "  local container=$1 query=$2",
-  '  docker exec "$container" psql -XAtq -v ON_ERROR_STOP=1 -U noosphere_migrator -d noosphere -c "$query"',
+  "  local container=$1 query=$2 role",
+  '  role=$(digest_role "$container")',
+  '  docker exec "$container" psql -XAtq -v ON_ERROR_STOP=1 -U "$role" -d noosphere -c "$query"',
   "}",
   "",
 ].join("\n");
 expect(
-  digestPsqlFunction === expectedDigestPsqlFunction &&
+  digestRoleFunction.includes("noosphere_migrator|noosphere") &&
+    digestRoleFunction.includes("NOT rolsuper") &&
+    digestRoleFunction.includes("invalid-migrator") &&
+    digestPsqlFunction === expectedDigestPsqlFunction &&
     !normalizedDumpFunction.includes("SET ROLE pg_read_all_data") &&
-    normalizedDumpFunction.includes("pg_dump -U noosphere_migrator ") &&
-    legacyDumpFunction.includes("pg_dump -U noosphere_migrator ") &&
+    normalizedDumpFunction.includes('role=$(digest_role "$container")') &&
+    normalizedDumpFunction.includes('pg_dump -U "$role" ') &&
+    legacyDumpFunction.includes('role=$(digest_role "$container")') &&
+    legacyDumpFunction.includes('pg_dump -U "$role" ') &&
     digestObjectSignatureFunction.includes(
       '_digest_psql "$container" "$query" | sha256sum | awk',
     ) &&
     normalizedDumpFunction.includes("_digest_object_signature") &&
     !normalizedDumpFunction.includes("=$(_digest_psql"),
-  "digest generation must stream object data through a non-superuser production role without bootstrap SET ROLE authority",
+  "digest generation must prefer a non-superuser production role and permit only the released legacy-owner fallback",
 );
 expect(
-  migratorSqlFunction.includes("-U noosphere_migrator ") &&
-    !migratorSqlFunction.includes("-U noosphere ") &&
+  migratorSqlFunction.includes('role=$(digest_role "$container")') &&
+    migratorSqlFunction.includes('-U "$role" ') &&
     migrationSignatureFunction.includes('migrator_sql "$1" noosphere') &&
-    logicalBackupFunction.includes("pg_dump -U noosphere_migrator ") &&
-    !logicalBackupFunction.includes("pg_dump -U noosphere ") &&
+    logicalBackupFunction.includes('role=$(digest_role "$container")') &&
+    logicalBackupFunction.includes('pg_dump -U "$role" ') &&
     switchScript.includes(
       'create_logical_backup "$source_maintenance" "$backup_temp"',
     ) &&
     switchTestScript.includes("test_migrator_producer_authority") &&
+    switchTestScript.includes("for expected_role in noosphere_migrator noosphere") &&
     switchTestScript.includes(
-      "Digest or backup producer used bootstrap authority",
+      "Digest or backup producer used unexpected authority",
     ),
-  "migration signing and logical backup must use the non-superuser migrator role with direct behavioral coverage",
+  "migration signing and logical backup must cover both the preferred migrator and released legacy-owner authority paths",
 );
 
 const digestRuntimeStart = digestTestScript.indexOf("trap cleanup EXIT INT TERM");
