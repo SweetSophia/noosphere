@@ -1250,6 +1250,11 @@ expect(
     'DIGEST_HELPER_SCRIPT=${PGVECTOR_DIGEST_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}',
   ) &&
   digestTestScript.includes("OWNER_LABEL_KEY=io.noosphere.digest-test-owner") &&
+    digestTestScript.includes("for helper in digest_role _digest_psql") &&
+    digestTestScript.includes("digest_role_definition=$(extract_function digest_role)") &&
+    digestTestScript.includes("digest role selection no longer owns candidate and released-v1.11 authority") &&
+    digestTestScript.includes("schema digest no longer authenticates through the validated digest role") &&
+    !digestTestScript.includes("pg_dump -U noosphere_migrator") &&
     digestTestScript.includes('source_container_created=false') &&
     digestTestScript.includes('[[ "$source_container_created" == false ]] || remove_container') &&
     digestTestScript.includes("expected exactly one digest helper definition") &&
