@@ -576,8 +576,8 @@ expect(
   "The coordinated release guide must attach/read back all checksum-owned installer assets before publication.",
 );
 expect(
-  installer.includes("BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/3869147995ab1dcd86097e162cd07d6c480c2f12/install-openclaw.sh'") &&
-    installer.includes("BACKEND_SHA256='5cf0f4961fa4e9e3ac6773f66473d3b4d51615bc70138bde320a9ecb1623b055'") &&
+  installer.includes("BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/bf10dc9647eb5639e4293a84a4eda76221be2b42/install-openclaw.sh'") &&
+    installer.includes("BACKEND_SHA256='03a6056d690149e4020670add8da81faf5559e78948d646f581d3ab12924b533'") &&
     installer.includes("HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.13.0/hermes-noosphere-memory-1.13.0.tar.gz'") &&
     installer.includes("HERMES_BUNDLE_SHA256='a560bd8607b512123e71975c188f5b924d4325adaeb86bbbd1424933423c5fde'") &&
     installer.includes("Refusing Noosphere backend with an unexpected checksum") &&
@@ -645,7 +645,8 @@ expect(
     installerUxTest.includes("local_bootstrap_destination=yes") &&
     installerUxTest.includes("port_binding=blocked") &&
     installerUxTest.includes("custom_port=preserved") &&
-    installer.includes("curl --disable --noproxy '*' \"$@\"") &&
+    installerUxTest.includes("custom_image=preserved") &&
+    installer.includes("curl --disable --noproxy '*' --connect-timeout 5 --max-time 15 \"$@\"") &&
     installerUxTest.includes("proxy_bypass=yes") &&
     installerUxTest.includes("launcher proxy-bypass sabotage unexpectedly passed") &&
     installerUxTest.includes("child_env=clean") &&

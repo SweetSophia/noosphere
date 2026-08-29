@@ -3,8 +3,8 @@ set -euo pipefail
 trap 'printf "Installer failed near line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 RELEASE_VERSION='1.13.0'
-BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/3869147995ab1dcd86097e162cd07d6c480c2f12/install-openclaw.sh'
-BACKEND_SHA256='5cf0f4961fa4e9e3ac6773f66473d3b4d51615bc70138bde320a9ecb1623b055'
+BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/bf10dc9647eb5639e4293a84a4eda76221be2b42/install-openclaw.sh'
+BACKEND_SHA256='03a6056d690149e4020670add8da81faf5559e78948d646f581d3ab12924b533'
 HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.13.0/hermes-noosphere-memory-1.13.0.tar.gz'
 HERMES_BUNDLE_SHA256='a560bd8607b512123e71975c188f5b924d4325adaeb86bbbd1424933423c5fde'
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
@@ -252,10 +252,14 @@ if [[ "$NON_INTERACTIVE" == true ]]; then
   export BIND_ADDRESS="${BIND_ADDRESS:-${persisted_bind_address:-127.0.0.1}}"
 fi
 
+persisted_image=$(runtime_env_value NOOSPHERE_IMAGE)
+effective_image="${NOOSPHERE_IMAGE:-${persisted_image:-ghcr.io/sweetsophia/noosphere:$RELEASE_VERSION}}"
+
 lifecycle_mode=$(detect_lifecycle_mode)
 printf 'Install plan:\n'
 printf '  Noosphere: %s\n' "$RELEASE_VERSION"
 printf '  Runtime:   %s\n' "$NOOSPHERE_HOME"
+printf '  Image:     %s\n' "$effective_image"
 printf '  Mode:      %s\n' "$lifecycle_mode"
 printf '  Agents:    %s\n' "${INTEGRATIONS:-none}"
 printf '  Secrets:   %s\n' "$NOOSPHERE_CREDENTIALS_FILE"
@@ -316,7 +320,7 @@ NOOSPHERE_INSTALL_OPENCLAW="$install_openclaw" \
 NOOSPHERE_SHOW_CREDENTIALS="$SHOW_CREDENTIALS" \
 NOOSPHERE_CREDENTIALS_FILE="$NOOSPHERE_CREDENTIALS_FILE" \
 NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-$RELEASE_VERSION}" \
-NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:$RELEASE_VERSION}" \
+NOOSPHERE_IMAGE="$effective_image" \
 NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@$RELEASE_VERSION}" \
   bash "$backend"
 
@@ -388,7 +392,7 @@ installer_validated_local_base_url() {
 }
 
 local_no_proxy_curl() {
-  curl --disable --noproxy '*' "$@"
+  curl --disable --noproxy '*' --connect-timeout 5 --max-time 15 "$@"
 }
 
 installer_api_status_with_key() {

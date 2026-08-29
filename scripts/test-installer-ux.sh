@@ -26,6 +26,7 @@ set -euo pipefail
 printf '%s\n' "$NOOSPHERE_INSTALL_OPENCLAW" > "$INSTALLER_TEST_RECORD"
 [[ -z "${INSTALLER_TEST_APP_URL_CAPTURE:-}" ]] || printf '%s\n' "$APP_URL" > "$INSTALLER_TEST_APP_URL_CAPTURE"
 [[ -z "${INSTALLER_TEST_PORT_CAPTURE:-}" ]] || printf '%s\n' "$NOOSPHERE_PORT" > "$INSTALLER_TEST_PORT_CAPTURE"
+[[ -z "${INSTALLER_TEST_IMAGE_CAPTURE:-}" ]] || printf '%s\n' "$NOOSPHERE_IMAGE" > "$INSTALLER_TEST_IMAGE_CAPTURE"
 install -d -m 700 "$(dirname "$NOOSPHERE_CREDENTIALS_FILE")"
 install -m 600 /dev/null "$NOOSPHERE_CREDENTIALS_FILE"
 printf '{\n  "baseUrl": "%s",\n  "apiKey": "%s",\n  "bootstrapApiKey": "%s",\n  "integrationApiKeys": {\n    "hermes": "%s",\n    "opencode": "%s",\n    "kilocode": "%s"\n  },\n  "adminEmail": "admin@noosphere.local",\n  "adminPassword": "%s"\n}\n' \
@@ -47,7 +48,7 @@ chmod 700 "$tmp/fake-bin/hermes"
 cat > "$tmp/fake-bin/curl" <<'CURL'
 #!/usr/bin/env bash
 set -euo pipefail
-config='' output='' url='' method=GET disable=false noproxy=false
+config='' output='' url='' method=GET disable=false noproxy=false connect_timeout='' max_time=''
 for arg in "$@"; do
   [[ "$arg" != *noo_* ]] || { echo 'secret appeared in curl argv' >&2; exit 90; }
 done
@@ -55,6 +56,8 @@ while (($# > 0)); do
   case "$1" in
     --disable) disable=true; shift ;;
     --noproxy) [[ "$2" == '*' ]]; noproxy=true; shift 2 ;;
+    --connect-timeout) connect_timeout=$2; shift 2 ;;
+    --max-time) max_time=$2; shift 2 ;;
     --config) config=$2; shift 2 ;;
     --output) output=$2; shift 2 ;;
     --request) method=$2; shift 2 ;;
@@ -63,6 +66,7 @@ while (($# > 0)); do
   esac
 done
 [[ "$disable" == true && "$noproxy" == true ]]
+[[ "$connect_timeout" == 5 && "$max_time" == 15 ]]
 [[ -f "$config" && $(stat -c '%a' "$config") == 600 ]]
 grep -q 'header = "Authorization: Bearer noo_' "$config"
 printf '%s %s\n' "$method" "$url" >> "$INSTALLER_TEST_CURL_CALLS"
@@ -220,19 +224,21 @@ grep -q '^config set memory.provider noosphere$' "$tmp/hermes.log"
 
 custom_home="$tmp/custom-port-home"
 mkdir -p "$custom_home/.noosphere" "$custom_home/.hermes"
-printf 'NOOSPHERE_PORT=7777\nAPP_URL=http://127.0.0.1:7777\nBIND_ADDRESS=127.0.0.1\n' \
+printf 'NOOSPHERE_PORT=7777\nAPP_URL=http://127.0.0.1:7777\nBIND_ADDRESS=127.0.0.1\nNOOSPHERE_IMAGE=registry.example/noosphere-custom:validated\n' \
   > "$custom_home/.noosphere/.env"
 env "${common_env[@]}" \
   HOME="$custom_home" \
   HERMES_HOME="$custom_home/.hermes" \
   NOOSPHERE_HOME="$custom_home/.noosphere" \
   NOOSPHERE_CREDENTIALS_FILE="$custom_home/.noosphere/credentials.json" \
-  NOOSPHERE_PORT= APP_URL= BIND_ADDRESS= \
+  NOOSPHERE_PORT= APP_URL= BIND_ADDRESS= NOOSPHERE_IMAGE= \
   INSTALLER_TEST_APP_URL_CAPTURE="$tmp/custom-port-app-url.txt" \
   INSTALLER_TEST_PORT_CAPTURE="$tmp/custom-port.txt" \
+  INSTALLER_TEST_IMAGE_CAPTURE="$tmp/custom-image.txt" \
   bash "$root/install.sh" --non-interactive --with hermes > "$tmp/custom-port.out"
 test "$(<"$tmp/custom-port-app-url.txt")" = 'http://127.0.0.1:7777'
 test "$(<"$tmp/custom-port.txt")" = 7777
+test "$(<"$tmp/custom-image.txt")" = 'registry.example/noosphere-custom:validated'
 grep -q 'Hermes Agent configured' "$tmp/custom-port.out"
 
 : > "$tmp/curl.calls"
@@ -464,7 +470,7 @@ SABOTAGED_LAUNCHER="$sabotage_package/install.sh" node <<'NODE'
 const fs = require("node:fs");
 const path = process.env.SABOTAGED_LAUNCHER;
 let source = fs.readFileSync(path, "utf8");
-const guarded = `curl --disable --noproxy '*' "$@"`;
+const guarded = `curl --disable --noproxy '*' --connect-timeout 5 --max-time 15 "$@"`;
 if (!source.includes(guarded)) throw new Error("cannot locate launcher proxy sabotage target");
 source = source.replace(guarded, `curl "$@"`);
 fs.writeFileSync(path, source);
@@ -474,4 +480,4 @@ if "$0" "$sabotage_package/install.sh" >/dev/null 2>&1; then
   exit 1
 fi
 
-printf 'installer_ux_tests=GREEN core_mode=yes lifecycle_modes=5 no_tty_guard=yes integration_merge=yes unversioned_dedupe=yes scoped_tool_keys=yes write_key_verified=yes transport_rotation=blocked bootstrap_tool_config=absent randomized_credentials=yes local_bootstrap_destination=yes port_binding=blocked custom_port=preserved proxy_bypass=yes secret_argv=clean child_env=clean remote_hermes=yes stale_overlay=clean hermes_symlink=blocked hermes_home_symlink=blocked hermes_parent_symlink=blocked atomic_secret_rewrite=yes secret_output=clean guards=13\n'
+printf 'installer_ux_tests=GREEN core_mode=yes lifecycle_modes=5 no_tty_guard=yes integration_merge=yes unversioned_dedupe=yes scoped_tool_keys=yes write_key_verified=yes transport_rotation=blocked bootstrap_tool_config=absent randomized_credentials=yes local_bootstrap_destination=yes port_binding=blocked custom_port=preserved custom_image=preserved proxy_bypass=yes secret_argv=clean child_env=clean remote_hermes=yes stale_overlay=clean hermes_symlink=blocked hermes_home_symlink=blocked hermes_parent_symlink=blocked atomic_secret_rewrite=yes secret_output=clean guards=13\n'
