@@ -26,14 +26,14 @@ openclaw noosphere setup
 or:
 
 ```bash
-# Installer commit: f599129515eb8f70006bf68077e22a258633e5e1
-# Expected SHA-256: 24e15da38f8ff210cd2c99802edd1ee8a7f00a7df546c75b2a746d9e801b96e1
+# Installer commit: 0e2c89ee69eb5fefe0250d026df6c496dd5791d2
+# Expected SHA-256: a5323e7dff6214bbb393f4dd79505f3d93457461e6c5e15b8060aae1f354790f
 (
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/f599129515eb8f70006bf68077e22a258633e5e1/install.sh -o "$installer"
-  printf '%s  %s\n' '24e15da38f8ff210cd2c99802edd1ee8a7f00a7df546c75b2a746d9e801b96e1' "$installer" | sha256sum -c -
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/0e2c89ee69eb5fefe0250d026df6c496dd5791d2/install.sh -o "$installer"
+  printf '%s  %s\n' 'a5323e7dff6214bbb393f4dd79505f3d93457461e6c5e15b8060aae1f354790f' "$installer" | sha256sum -c -
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.0}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.13.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.0}" bash "$installer" --non-interactive --with openclaw
 )
 ```
