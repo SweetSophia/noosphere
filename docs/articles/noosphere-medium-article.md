@@ -353,14 +353,14 @@ It also supports automatic prompt-time recall through OpenClaw's before_prompt_b
 
 Quick install on the machine running OpenClaw Gateway:
 
-    # Installer commit: e43a4fb481bf90c1ca3981fdeab9fc1d0592b008
-    # Expected SHA-256: b1ff25ada3c1660d309c68d4c1acc292451823e6054f86559a768ad84b54f477
+    # Installer commit: 4c506b6382a1432503a834b417227d6d9513b968
+    # Expected SHA-256: e04c189c4e0a0143d0d4211efcde28ecc03d6e511a10899f488950f0cc30c054
     (
       set -e
       installer="$(mktemp)"
       trap 'rm -f "$installer"' EXIT
-      curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/e43a4fb481bf90c1ca3981fdeab9fc1d0592b008/install-openclaw.sh -o "$installer"
-      printf '%s  %s\n' 'b1ff25ada3c1660d309c68d4c1acc292451823e6054f86559a768ad84b54f477' "$installer" | sha256sum -c -
+      curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/4c506b6382a1432503a834b417227d6d9513b968/install-openclaw.sh -o "$installer"
+      printf '%s  %s\n' 'e04c189c4e0a0143d0d4211efcde28ecc03d6e511a10899f488950f0cc30c054' "$installer" | sha256sum -c -
       NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.12.0}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.12.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.12.0}" bash "$installer"
       openclaw noosphere doctor
       openclaw noosphere status
