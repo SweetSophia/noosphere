@@ -31,6 +31,7 @@ fixture_value() {
 }
 APP_URL=http://127.0.0.1:6578
 API_KEY="noo_fixture_$(fixture_value)"
+INTEGRATION_API_KEY="noo_fixture_$(fixture_value)"
 ADMIN_PASSWORD="fixture-$(fixture_value)"
 POSTGRES_PASSWORD="fixture-$(fixture_value)"
 POSTGRES_MIGRATION_PASSWORD="fixture-$(fixture_value)"
@@ -45,6 +46,51 @@ set -euo pipefail
 env | sort > "$OPENCLAW_ENV_CAPTURE"
 OPENCLAW
 chmod 700 "$tmp/fake-bin/openclaw"
+cat > "$tmp/fake-bin/curl" <<'CURL'
+#!/usr/bin/env bash
+set -euo pipefail
+config='' output='' url=''
+for arg in "$@"; do
+  [[ "$arg" != *noo_* ]] || {
+    echo 'secret appeared in curl argv' >&2
+    exit 90
+  }
+done
+while (($# > 0)); do
+  case "$1" in
+    --config) config=$2; shift 2 ;;
+    --output) output=$2; shift 2 ;;
+    http://*|https://*) url=$1; shift ;;
+    *) shift ;;
+  esac
+done
+[[ -f "$config" ]]
+grep -q 'header = "Authorization: Bearer noo_' "$config"
+printf '%s\n' "$url" >> "$FAKE_CURL_CALLS"
+case "$FAKE_CURL_MODE:$url" in
+  reuse:*/api/articles*) printf '200' ;;
+  reuse:*/api/keys) printf '403' ;;
+  create:*/api/keys)
+    printf '{"key":"%s"}\n' "$FAKE_CREATED_KEY" > "$output"
+    ;;
+  *) exit 91 ;;
+esac
+CURL
+chmod 700 "$tmp/fake-bin/curl"
+: > "$tmp/curl.calls"
+export FAKE_CURL_CALLS="$tmp/curl.calls"
+safe_existing="noo_fixture_$(fixture_value)"
+selected=$(PATH="$tmp/fake-bin:$PATH" FAKE_CURL_MODE=reuse \
+  select_scoped_integration_key "$safe_existing" default)
+[[ "$selected" == "$safe_existing" ]]
+created_key="noo_fixture_$(fixture_value)"
+selected=$(PATH="$tmp/fake-bin:$PATH" FAKE_CURL_MODE=create FAKE_CREATED_KEY="$created_key" \
+  select_scoped_integration_key '' opencode)
+[[ "$selected" == "$created_key" ]]
+if grep -q 'noo_' "$tmp/curl.calls"; then
+  echo 'secret appeared in captured curl URLs' >&2
+  exit 1
+fi
 export POSTGRES_PASSWORD POSTGRES_MIGRATION_PASSWORD POSTGRES_APP_PASSWORD
 export POSTGRES_HYBRID_ADMIN_PASSWORD POSTGRES_HYBRID_WORKER_PASSWORD
 export NEXTAUTH_SECRET NOOSPHERE_ADMIN_PASSWORD="$ADMIN_PASSWORD"
@@ -70,11 +116,16 @@ write_credentials_json "$tmp/runtime/noosphere-memory.json" true
 
 CREDENTIALS_USER="$tmp/user/credentials.json" \
 CREDENTIALS_RUNTIME="$tmp/runtime/noosphere-memory.json" \
+EXPECTED_INTEGRATION_KEY="$INTEGRATION_API_KEY" \
+EXPECTED_BOOTSTRAP_KEY="$API_KEY" \
   node <<'NODE'
 const fs = require("node:fs");
 const user = JSON.parse(fs.readFileSync(process.env.CREDENTIALS_USER, "utf8"));
 const runtime = JSON.parse(fs.readFileSync(process.env.CREDENTIALS_RUNTIME, "utf8"));
-if (Object.keys(user).sort().join() !== "adminEmail,adminPassword,apiKey,baseUrl") process.exit(1);
+if (Object.keys(user).sort().join() !== "adminEmail,adminPassword,apiKey,baseUrl,bootstrapApiKey") process.exit(1);
+if (user.apiKey !== process.env.EXPECTED_INTEGRATION_KEY) process.exit(3);
+if (user.bootstrapApiKey !== process.env.EXPECTED_BOOTSTRAP_KEY) process.exit(4);
+if (user.apiKey === user.bootstrapApiKey) process.exit(5);
 if (!runtime.postgresPassword || !runtime.nextAuthSecret) process.exit(2);
 NODE
 for directory in "$tmp/user" "$tmp/runtime"; do
@@ -99,4 +150,4 @@ if "$0" "$tmp/sabotaged.sh" >/dev/null 2>&1; then
   exit 1
 fi
 
-printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 child_env=clean sabotage=red\n'
+printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 scoped_keys=yes secret_argv=clean child_env=clean sabotage=red\n'

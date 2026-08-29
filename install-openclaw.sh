@@ -110,7 +110,8 @@ write_credentials_json() {
   install -d -m 700 "$parent"
   temp=$(mktemp "$parent/.credentials.XXXXXX")
   CREDENTIALS_BASE_URL="$APP_URL" \
-  CREDENTIALS_API_KEY="$API_KEY" \
+  CREDENTIALS_API_KEY="$INTEGRATION_API_KEY" \
+  CREDENTIALS_BOOTSTRAP_API_KEY="$API_KEY" \
   CREDENTIALS_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
   CREDENTIALS_POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
   CREDENTIALS_POSTGRES_MIGRATION_PASSWORD="$POSTGRES_MIGRATION_PASSWORD" \
@@ -125,6 +126,7 @@ write_credentials_json() {
       const data = {
         baseUrl: process.env.CREDENTIALS_BASE_URL,
         apiKey: process.env.CREDENTIALS_API_KEY,
+        bootstrapApiKey: process.env.CREDENTIALS_BOOTSTRAP_API_KEY,
         adminEmail: "admin@noosphere.local",
         adminPassword: process.env.CREDENTIALS_ADMIN_PASSWORD,
       };
@@ -142,6 +144,66 @@ write_credentials_json() {
     ' "$temp"
   chmod 600 "$temp"
   mv "$temp" "$target"
+}
+
+api_http_status_with_key() {
+  local key=$1 endpoint=$2 config status
+  [[ "$key" =~ ^noo_[A-Za-z0-9_-]+$ ]] || {
+    printf '000'
+    return 0
+  }
+  config=$(mktemp)
+  chmod 600 "$config"
+  printf 'silent\nshow-error\nheader = "Authorization: Bearer %s"\n' "$key" > "$config"
+  status=$(curl --config "$config" --output /dev/null --write-out '%{http_code}' \
+    "$APP_URL$endpoint" 2>/dev/null || true)
+  rm -f "$config"
+  printf '%s' "${status:-000}"
+}
+
+integration_key_is_safe() {
+  local key=$1 read_status admin_status
+  [[ -n "$key" ]] || return 1
+  read_status=$(api_http_status_with_key "$key" '/api/articles?limit=1')
+  admin_status=$(api_http_status_with_key "$key" '/api/keys')
+  [[ "$read_status" =~ ^2[0-9][0-9]$ && "$admin_status" == 403 ]]
+}
+
+create_scoped_integration_key() {
+  local label=$1 config body response name raw
+  [[ "$API_KEY" =~ ^noo_[A-Za-z0-9_-]+$ ]] || {
+    echo 'Bootstrap API key has an unexpected format.' >&2
+    return 1
+  }
+  name="guided-${label}-$(date +%s)-${RANDOM}"
+  config=$(mktemp)
+  body=$(mktemp)
+  response=$(mktemp)
+  chmod 600 "$config" "$body" "$response"
+  printf 'silent\nshow-error\nfail-with-body\nheader = "Authorization: Bearer %s"\n' "$API_KEY" > "$config"
+  printf '{"name":"%s","permissions":"WRITE","allowedScopes":[]}\n' "$name" > "$body"
+  if ! curl --config "$config" --request POST --header 'Content-Type: application/json' \
+    --data-binary "@$body" --output "$response" "$APP_URL/api/keys"; then
+    rm -f "$config" "$body" "$response"
+    echo "Failed to create a scoped ${label} API key." >&2
+    return 1
+  fi
+  raw=$(json_get "$response" key)
+  rm -f "$config" "$body" "$response"
+  [[ "$raw" =~ ^noo_[A-Za-z0-9_-]+$ ]] || {
+    echo "Noosphere returned an invalid scoped ${label} API key." >&2
+    return 1
+  }
+  printf '%s' "$raw"
+}
+
+select_scoped_integration_key() {
+  local existing=$1 label=$2
+  if integration_key_is_safe "$existing"; then
+    printf '%s' "$existing"
+    return 0
+  fi
+  create_scoped_integration_key "$label"
 }
 
 env_get() {
@@ -1343,6 +1405,8 @@ POSTGRES_HYBRID_WORKER_PASSWORD="${POSTGRES_HYBRID_WORKER_PASSWORD:-$(env_get_se
 NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(env_get_secret "$NOOSPHERE_HOME/.env" NEXTAUTH_SECRET)}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_ADMIN_PASSWORD)}"
 API_KEY="${API_KEY:-$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_API_KEY)}"
+EXISTING_INTEGRATION_API_KEY="$(json_get "$NOOSPHERE_CREDENTIALS_FILE" apiKey)"
+INTEGRATION_API_KEY=""
 NOOSPHERE_BOOTSTRAP_SECRETS_FILE="${NOOSPHERE_BOOTSTRAP_SECRETS_FILE:-$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_SECRETS_FILE)}"
 
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(json_get "$SECRETS_FILE" postgresPassword)}"
@@ -1882,6 +1946,7 @@ NOOSPHERE_MIN_ARTICLES="$verify_min_articles" \
 NOOSPHERE_POSTGRES_EVIDENCE="$POSTGRES_BACKUP_DIR/noosphere_postgres_data.phase-a2b.json" \
   "$POSTGRES_VERIFY_SCRIPT"
 
+INTEGRATION_API_KEY=$(select_scoped_integration_key "$EXISTING_INTEGRATION_API_KEY" default)
 write_credentials_json "$NOOSPHERE_CREDENTIALS_FILE"
 
 if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then
@@ -1961,7 +2026,8 @@ if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then
   printf '  openclaw plugins inspect %s --runtime --json\n\n' "$PLUGIN_ID"
 fi
 if [[ "$NOOSPHERE_SHOW_CREDENTIALS" == true ]]; then
-  printf 'Admin password: %s\nAPI key: %s\n\n' "$ADMIN_PASSWORD" "$API_KEY"
+  printf 'Admin password: %s\nDefault WRITE API key: %s\nBootstrap ADMIN API key: %s\n\n' \
+    "$ADMIN_PASSWORD" "$INTEGRATION_API_KEY" "$API_KEY"
 else
   printf 'Credentials were not printed. Read the mode-0600 file above when needed.\n\n'
 fi
