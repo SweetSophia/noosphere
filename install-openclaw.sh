@@ -51,7 +51,7 @@ NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH="${NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH:-}"
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH="${NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH:-}"
 NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS="${NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS:-}"
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS="${NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS:-}"
-PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.12.0}"
+PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.0}"
 SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$HOME/.openclaw/secrets}"
 SECRETS_FILE="${NOOSPHERE_SECRETS_FILE:-$SECRETS_DIR/noosphere-memory.json}"
 SECRET_PROVIDER_ID="${NOOSPHERE_SECRET_PROVIDER_ID:-noosphere-memory}"
@@ -89,7 +89,9 @@ run_openclaw() {
     -u REDIS_URL \
     -u NOOSPHERE_ADMIN_PASSWORD \
     -u NOOSPHERE_BOOTSTRAP_API_KEY \
+    -u NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON \
     -u NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 \
+    -u NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON \
     -u NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64 \
     openclaw "$@"
 }
@@ -165,9 +167,33 @@ write_credentials_json() {
   mv "$temp" "$target"
 }
 
+validated_local_app_url() {
+  APP_URL_INPUT=$1 EXPECTED_PORT=$NOOSPHERE_PORT node -e '
+    const os = require("node:os");
+    const input = process.env.APP_URL_INPUT;
+    const expectedPort = String(process.env.EXPECTED_PORT || "");
+    const url = new URL(input);
+    const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    const local = new Set(["localhost", "127.0.0.1", "::1"]);
+    for (const entries of Object.values(os.networkInterfaces())) {
+      for (const entry of entries || []) local.add(String(entry.address).toLowerCase());
+    }
+    if (url.protocol !== "http:" || url.username || url.password ||
+        url.pathname !== "/" || url.search || url.hash || !url.port ||
+        url.port !== expectedPort || !local.has(host)) {
+      throw new Error("Noosphere application URL is not the expected local endpoint");
+    }
+    process.stdout.write(url.origin);
+  '
+}
+
 api_http_status_with_key() {
-  local key=$1 endpoint=$2 config status
+  local key=$1 endpoint=$2 config status base_url
   [[ "$key" =~ ^noo_[A-Za-z0-9_-]+$ ]] || {
+    printf '000'
+    return 0
+  }
+  base_url=$(validated_local_app_url "$APP_URL") || {
     printf '000'
     return 0
   }
@@ -175,26 +201,46 @@ api_http_status_with_key() {
   chmod 600 "$config"
   printf 'silent\nshow-error\nheader = "Authorization: Bearer %s"\n' "$key" > "$config"
   status=$(curl --config "$config" --output /dev/null --write-out '%{http_code}' \
-    "$APP_URL$endpoint" 2>/dev/null || true)
+    "$base_url$endpoint" 2>/dev/null || true)
   rm -f "$config"
   printf '%s' "${status:-000}"
 }
 
+api_write_probe_status_with_key() {
+  local key=$1 config body status base_url
+  [[ "$key" =~ ^noo_[A-Za-z0-9_-]+$ ]] || { printf '000'; return 0; }
+  base_url=$(validated_local_app_url "$APP_URL") || { printf '000'; return 0; }
+  config=$(mktemp)
+  body=$(mktemp)
+  chmod 600 "$config" "$body"
+  printf 'silent\nshow-error\nheader = "Authorization: Bearer %s"\n' "$key" > "$config"
+  printf '{}\n' > "$body"
+  status=$(curl --config "$config" --request POST --header 'Content-Type: application/json' \
+    --data-binary "@$body" --output /dev/null --write-out '%{http_code}' \
+    "$base_url/api/articles" 2>/dev/null || true)
+  rm -f "$config" "$body"
+  printf '%s' "${status:-000}"
+}
+
 integration_key_is_safe() {
-  local key=$1 read_status admin_status
+  local key=$1 write_status admin_status
   [[ -n "$key" ]] || return 1
-  read_status=$(api_http_status_with_key "$key" '/api/articles?limit=1')
+  write_status=$(api_write_probe_status_with_key "$key")
   admin_status=$(api_http_status_with_key "$key" '/api/keys')
-  [[ "$read_status" =~ ^2[0-9][0-9]$ && "$admin_status" == 403 ]]
+  [[ "$write_status" == 400 && "$admin_status" == 403 ]]
 }
 
 create_scoped_integration_key() {
-  local label=$1 config body response name raw
+  local label=$1 config body response name raw base_url
   [[ "$API_KEY" =~ ^noo_[A-Za-z0-9_-]+$ ]] || {
     echo 'Bootstrap API key has an unexpected format.' >&2
     return 1
   }
   name="guided-${label}-$(date +%s)-${RANDOM}"
+  base_url=$(validated_local_app_url "$APP_URL") || {
+    echo 'Refusing to send the bootstrap API key to a non-local Noosphere URL.' >&2
+    return 1
+  }
   config=$(mktemp)
   body=$(mktemp)
   response=$(mktemp)
@@ -202,7 +248,7 @@ create_scoped_integration_key() {
   printf 'silent\nshow-error\nfail-with-body\nheader = "Authorization: Bearer %s"\n' "$API_KEY" > "$config"
   printf '{"name":"%s","permissions":"WRITE","allowedScopes":[]}\n' "$name" > "$body"
   if ! curl --config "$config" --request POST --header 'Content-Type: application/json' \
-    --data-binary "@$body" --output "$response" "$APP_URL/api/keys"; then
+    --data-binary "@$body" --output "$response" "$base_url/api/keys"; then
     rm -f "$config" "$body" "$response"
     echo "Failed to create a scoped ${label} API key." >&2
     return 1
@@ -463,7 +509,7 @@ resolve_runtime_config() {
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-$(env_get "$runtime_env" NOOSPHERE_PORT)}"
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-$(env_get "$runtime_env" NOOSPHERE_VERSION)}"
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.12.0}"
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.0}"
   if ((NOOSPHERE_VERSION_WAS_EXPLICIT == 1 && NOOSPHERE_IMAGE_WAS_EXPLICIT == 0)); then
     # A version-bound public upgrade must not inherit an installer-persisted
     # image from the previous release. Operators retaining a custom registry or

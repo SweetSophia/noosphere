@@ -158,14 +158,14 @@ Noosphere into another deployment system. It is intentionally more detailed
 than the guided Quick Start.
 
 ```bash
-git clone --branch v1.12.0 --depth 1 https://github.com/SweetSophia/noosphere.git
+git clone --branch v1.13.0 --depth 1 https://github.com/SweetSophia/noosphere.git
 cd noosphere
 cp noosphere.env.example .env
 ```
 
 Edit `.env` and set at least:
 
-- `NOOSPHERE_VERSION=1.12.0`
+- `NOOSPHERE_VERSION=1.13.0`
 - distinct `POSTGRES_PASSWORD`, `POSTGRES_MIGRATION_PASSWORD`, and
   `POSTGRES_APP_PASSWORD` values
 - `NEXTAUTH_SECRET`

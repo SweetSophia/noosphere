@@ -50,7 +50,7 @@ npm plugins from this config:
 ```json
 {
   "plugin": [
-    "@sweetsophia/opencode-noosphere-memory@1.12.0"
+    "@sweetsophia/opencode-noosphere-memory@1.13.0"
   ]
 }
 ```
@@ -58,7 +58,7 @@ npm plugins from this config:
 Or install the package globally first if you prefer explicit local installs:
 
 ```bash
-npm install -g @sweetsophia/opencode-noosphere-memory@1.12.0
+npm install -g @sweetsophia/opencode-noosphere-memory@1.13.0
 ```
 
 ### oh-my-opencode-slim
@@ -70,7 +70,7 @@ need a separate fork. Install both plugins and keep both entries in
 ```bash
 npx oh-my-opencode-slim@latest install
 # Optional: Opencode can also auto-install npm plugins from opencode.json.
-npm install -g @sweetsophia/opencode-noosphere-memory@1.12.0
+npm install -g @sweetsophia/opencode-noosphere-memory@1.13.0
 export OPENCODE_NOOSPHERE_API_KEY="noo_..."
 ```
 
@@ -78,7 +78,7 @@ export OPENCODE_NOOSPHERE_API_KEY="noo_..."
 {
   "plugin": [
     "oh-my-opencode-slim",
-    "@sweetsophia/opencode-noosphere-memory@1.12.0"
+    "@sweetsophia/opencode-noosphere-memory@1.13.0"
   ]
 }
 ```
@@ -95,7 +95,7 @@ Or configure it with explicit options:
 {
   "plugin": [
     [
-      "@sweetsophia/opencode-noosphere-memory@1.12.0",
+      "@sweetsophia/opencode-noosphere-memory@1.13.0",
       {
         "baseUrl": "http://127.0.0.1:6578",
         "autoRecall": true,

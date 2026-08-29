@@ -30,6 +30,7 @@ fixture_value() {
   node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))'
 }
 APP_URL=http://127.0.0.1:6578
+NOOSPHERE_PORT=6578
 API_KEY="noo_fixture_$(fixture_value)"
 INTEGRATION_API_KEY="noo_fixture_$(fixture_value)"
 ADMIN_PASSWORD="fixture-$(fixture_value)"
@@ -49,7 +50,7 @@ chmod 700 "$tmp/fake-bin/openclaw"
 cat > "$tmp/fake-bin/curl" <<'CURL'
 #!/usr/bin/env bash
 set -euo pipefail
-config='' output='' url=''
+config='' output='' url='' method=GET
 for arg in "$@"; do
   [[ "$arg" != *noo_* ]] || {
     echo 'secret appeared in curl argv' >&2
@@ -60,6 +61,7 @@ while (($# > 0)); do
   case "$1" in
     --config) config=$2; shift 2 ;;
     --output) output=$2; shift 2 ;;
+    --request) method=$2; shift 2 ;;
     http://*|https://*) url=$1; shift ;;
     *) shift ;;
   esac
@@ -67,12 +69,14 @@ done
 [[ -f "$config" ]]
 grep -q 'header = "Authorization: Bearer noo_' "$config"
 printf '%s\n' "$url" >> "$FAKE_CURL_CALLS"
-case "$FAKE_CURL_MODE:$url" in
-  reuse:*/api/articles*) printf '200' ;;
-  reuse:*/api/keys) printf '403' ;;
-  create:*/api/keys)
+case "$FAKE_CURL_MODE:$method:$url" in
+  reuse:POST:*/api/articles) printf '400' ;;
+  reuse:GET:*/api/keys) printf '403' ;;
+  create:POST:*/api/keys|read:POST:*/api/keys)
     printf '{"key":"%s"}\n' "$FAKE_CREATED_KEY" > "$output"
     ;;
+  read:POST:*/api/articles) printf '403' ;;
+  read:GET:*/api/keys) printf '403' ;;
   *) exit 91 ;;
 esac
 CURL
@@ -87,6 +91,23 @@ created_key="noo_fixture_$(fixture_value)"
 selected=$(PATH="$tmp/fake-bin:$PATH" FAKE_CURL_MODE=create FAKE_CREATED_KEY="$created_key" \
   select_scoped_integration_key '' opencode)
 [[ "$selected" == "$created_key" ]]
+read_only="noo_fixture_$(fixture_value)"
+rotated_key="noo_fixture_$(fixture_value)"
+selected=$(PATH="$tmp/fake-bin:$PATH" FAKE_CURL_MODE=read FAKE_CREATED_KEY="$rotated_key" \
+  select_scoped_integration_key "$read_only" kilocode)
+[[ "$selected" == "$rotated_key" && "$selected" != "$read_only" ]]
+original_app_url=$APP_URL
+APP_URL=https://attacker.invalid:6578
+if PATH="$tmp/fake-bin:$PATH" FAKE_CURL_MODE=create FAKE_CREATED_KEY="$created_key" \
+  create_scoped_integration_key redirected >/dev/null 2>&1; then
+  echo 'non-local bootstrap-key destination unexpectedly passed' >&2
+  exit 1
+fi
+APP_URL=$original_app_url
+if grep -q 'attacker.invalid' "$tmp/curl.calls"; then
+  echo 'bootstrap key provisioning reached a non-local URL' >&2
+  exit 1
+fi
 if grep -q 'noo_' "$tmp/curl.calls"; then
   echo 'secret appeared in captured curl URLs' >&2
   exit 1
@@ -96,7 +117,9 @@ export POSTGRES_HYBRID_ADMIN_PASSWORD POSTGRES_HYBRID_WORKER_PASSWORD
 export NEXTAUTH_SECRET NOOSPHERE_ADMIN_PASSWORD="$ADMIN_PASSWORD"
 export NOOSPHERE_BOOTSTRAP_API_KEY="$API_KEY"
 export REDIS_URL="redis://fixture.invalid"
+export NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON='[{"apiKey":"fixture-json-provider"}]'
 export NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64="fixture-provider-config"
+export NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON='{"v1":"fixture-json-hmac"}'
 export NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64="fixture-cache-keys"
 export OPENCLAW_ENV_CAPTURE="$tmp/openclaw.env" INSTALLER_SAFE_MARKER=preserved
 PATH="$tmp/fake-bin:$PATH" run_openclaw gateway status
@@ -104,7 +127,8 @@ for secret_name in \
   POSTGRES_PASSWORD POSTGRES_MIGRATION_PASSWORD POSTGRES_APP_PASSWORD \
   POSTGRES_HYBRID_ADMIN_PASSWORD POSTGRES_HYBRID_WORKER_PASSWORD NEXTAUTH_SECRET \
   REDIS_URL NOOSPHERE_ADMIN_PASSWORD NOOSPHERE_BOOTSTRAP_API_KEY \
-  NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64; do
+  NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 \
+  NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64; do
   if grep -q "^${secret_name}=" "$tmp/openclaw.env"; then
     echo "OpenClaw child inherited secret variable: ${secret_name}" >&2
     exit 1
@@ -161,4 +185,4 @@ if "$0" "$tmp/sabotaged.sh" >/dev/null 2>&1; then
   exit 1
 fi
 
-printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 scoped_keys=yes secret_argv=clean child_env=clean sabotage=red\n'
+printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 scoped_keys=yes read_key_rejected=yes local_bootstrap_destination=yes secret_argv=clean child_env=clean sabotage=red\n'

@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-08-29
+
+Minor release adding the beginner-oriented, checksum-pinned installer and its
+coordinated six-file release bundle. The guided flow keeps the stateful
+OpenClaw controller authoritative, distinguishes fresh/existing/resume plans,
+and optionally configures OpenClaw, Hermes, OpenCode, and Kilo with separate
+persisted WRITE keys. Credential handling now rejects READ/ADMIN substitutions,
+non-local bootstrap destinations, symlinked configuration targets, and secret
+inheritance by host integration processes.
+
 ## [1.12.0] - 2026-08-29
 
 Minor release adding the default-off automatic-memory Phase A foundation,
@@ -339,7 +349,8 @@ changes.
   backfill pipeline, and the memory provider refactor. Refer to the commit
   history (`git log v1.8.0..v1.9.0`) for the full set of changes.
 
-[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.12.0...HEAD
+[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.13.0...HEAD
+[1.13.0]: https://github.com/SweetSophia/noosphere/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/SweetSophia/noosphere/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/SweetSophia/noosphere/compare/v1.10.3...v1.11.0
 [1.10.3]: https://github.com/SweetSophia/noosphere/compare/v1.10.2...v1.10.3

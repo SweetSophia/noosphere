@@ -47,7 +47,7 @@ You need two things before this plugin will do anything useful:
 ## Install
 
 ```bash
-npm install -g @sweetsophia/kilocode-noosphere-memory@1.12.0
+npm install -g @sweetsophia/kilocode-noosphere-memory@1.13.0
 ```
 
 Add it to `~/.config/kilo/kilo.json`:
@@ -55,7 +55,7 @@ Add it to `~/.config/kilo/kilo.json`:
 ```json
 {
   "plugin": [
-    "@sweetsophia/kilocode-noosphere-memory@1.12.0"
+    "@sweetsophia/kilocode-noosphere-memory@1.13.0"
   ]
 }
 ```
@@ -63,7 +63,7 @@ Add it to `~/.config/kilo/kilo.json`:
 You can also install it with Kilo's plugin command:
 
 ```bash
-kilo plugin @sweetsophia/kilocode-noosphere-memory@1.12.0 --global
+kilo plugin @sweetsophia/kilocode-noosphere-memory@1.13.0 --global
 ```
 
 Or configure it with explicit options:
@@ -72,7 +72,7 @@ Or configure it with explicit options:
 {
   "plugin": [
     [
-      "@sweetsophia/kilocode-noosphere-memory@1.12.0",
+      "@sweetsophia/kilocode-noosphere-memory@1.13.0",
       {
         "baseUrl": "http://127.0.0.1:6578",
         "autoRecall": true,
