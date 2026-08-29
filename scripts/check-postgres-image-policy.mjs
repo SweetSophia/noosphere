@@ -751,6 +751,15 @@ expect(
     installer.includes('NOOSPHERE_MIN_ARTICLES="$verify_min_articles"'),
   "install-openclaw.sh must allow zero articles only for a proven new install",
 );
+expect(
+  installer.includes(`if docker inspect noosphere-openclaw-app >/dev/null 2>&1 &&
+   [[ "$(docker inspect noosphere-openclaw-app --format '{{.State.Running}}')" == true ]]; then
+  echo "Stopping Noosphere app before schema/bootstrap work..."
+  docker stop --time 60 noosphere-openclaw-app >/dev/null
+fi
+echo "Starting Noosphere at \${APP_URL}..."`),
+  "install-openclaw.sh must stop a running app before direct schema/bootstrap work",
+);
 
 for (const relativePath of [
   "openclaw-noosphere-memory/src/cli.ts",

@@ -1680,6 +1680,11 @@ route_postgres_install_transition
 if [[ "$controller_transition_completed" != true ]]; then
 
 cd "$NOOSPHERE_HOME"
+if docker inspect noosphere-openclaw-app >/dev/null 2>&1 &&
+   [[ "$(docker inspect noosphere-openclaw-app --format '{{.State.Running}}')" == true ]]; then
+  echo "Stopping Noosphere app before schema/bootstrap work..."
+  docker stop --time 60 noosphere-openclaw-app >/dev/null
+fi
 echo "Starting Noosphere at ${APP_URL}..."
 docker compose pull
 docker compose up -d db redis
