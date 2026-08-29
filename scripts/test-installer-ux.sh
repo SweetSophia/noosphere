@@ -24,6 +24,7 @@ NODE
 chmod 600 "$NOOSPHERE_CREDENTIALS_FILE"
 BACKEND
 chmod 700 "$tmp/fake-backend.sh"
+fake_backend_sha=$(sha256sum "$tmp/fake-backend.sh" | awk '{print $1}')
 
 cat > "$tmp/fake-bin/hermes" <<'HERMES'
 #!/usr/bin/env bash
@@ -36,6 +37,7 @@ cat > "$tmp/home/.config/opencode/opencode.json" <<'JSON'
 {
   "plugin": [
     "other-opencode-plugin",
+    "@sweetsophia/opencode-noosphere-memory",
     "@sweetsophia/opencode-noosphere-memory@0.4.0"
   ]
 }
@@ -44,6 +46,7 @@ cat > "$tmp/home/.config/kilo/kilo.json" <<'JSON'
 {
   "plugin": [
     "other-kilo-plugin",
+    "@sweetsophia/kilocode-noosphere-memory",
     ["@sweetsophia/kilocode-noosphere-memory@0.4.0", {"autoRecall": false}]
   ]
 }
@@ -55,6 +58,7 @@ common_env=(
   PATH="$tmp/fake-bin:$PATH"
   NOOSPHERE_HOME="$tmp/home/.noosphere"
   NOOSPHERE_BACKEND_PATH="$tmp/fake-backend.sh"
+  NOOSPHERE_BACKEND_OVERRIDE_SHA256="$fake_backend_sha"
   INSTALLER_TEST_RECORD="$tmp/backend-mode.txt"
   INSTALLER_TEST_HERMES_LOG="$tmp/hermes.log"
   NOOSPHERE_TEST_API_KEY="$fixture_api_key"
@@ -62,6 +66,8 @@ common_env=(
 
 mkdir -p "$tmp/home/.hermes/plugins/noosphere" "$tmp/home/.hermes/skills/noosphere-memory-hermes"
 touch "$tmp/home/.hermes/plugins/noosphere/stale.py" "$tmp/home/.hermes/skills/noosphere-memory-hermes/stale.md"
+printf '%s\n' 'KEEP_ME=yes' > "$tmp/home/.hermes/.env"
+chmod 644 "$tmp/home/.hermes/.env"
 
 env "${common_env[@]}" bash "$root/install.sh" \
   --non-interactive --with hermes,opencode,kilocode > "$tmp/install.out"
@@ -93,6 +99,7 @@ if (opencodeEntries[0][1].apiKey !== process.env.NOOSPHERE_TEST_API_KEY) process
 if (kiloEntries[0][1].apiKey !== process.env.NOOSPHERE_TEST_API_KEY) process.exit(5);
 const hermesEnv = fs.readFileSync(process.env.HERMES_ENV, "utf8");
 if (!hermesEnv.includes(`HERMES_NOOSPHERE_API_KEY=${process.env.NOOSPHERE_TEST_API_KEY}`)) process.exit(6);
+if (!hermesEnv.includes("KEEP_ME=yes")) process.exit(8);
 const hermes = JSON.parse(fs.readFileSync(process.env.HERMES_CONFIG, "utf8"));
 if (hermes.base_url !== "http://127.0.0.1:6578") process.exit(7);
 NODE
@@ -111,6 +118,20 @@ test ! -e "$tmp/home/.hermes/plugins/noosphere/stale.py"
 test ! -e "$tmp/home/.hermes/skills/noosphere-memory-hermes/stale.md"
 grep -q '^version: 1.12.0$' "$tmp/home/.hermes/plugins/noosphere/plugin.yaml"
 grep -q '^config set memory.provider noosphere$' "$tmp/hermes.log"
+
+mkdir -p "$tmp/home/.hermes-symlink"
+printf '%s\n' 'SENTINEL=yes' > "$tmp/hermes-env-target"
+chmod 644 "$tmp/hermes-env-target"
+ln -s "$tmp/hermes-env-target" "$tmp/home/.hermes-symlink/.env"
+if env "${common_env[@]}" HERMES_HOME="$tmp/home/.hermes-symlink" \
+  bash "$root/install.sh" --non-interactive --with hermes > "$tmp/hermes-symlink.out" 2>&1; then
+  echo 'symlinked Hermes environment unexpectedly passed' >&2
+  exit 1
+fi
+test -L "$tmp/home/.hermes-symlink/.env"
+test "$(stat -c '%a' "$tmp/hermes-env-target")" = 644
+grep -q '^SENTINEL=yes$' "$tmp/hermes-env-target"
+! grep -q 'HERMES_NOOSPHERE_API_KEY' "$tmp/hermes-env-target"
 
 # Exercise the single-file launcher path with a checksum-owned Hermes archive.
 mkdir -p "$tmp/hermes-release" "$tmp/remote-launcher"
@@ -216,4 +237,4 @@ env HOME="$tmp/modes/resume" NOOSPHERE_HOME="$tmp/modes/resume" PATH="$mode_path
   bash "$root/install.sh" --dry-run --core-only > "$tmp/mode-resume.out"
 grep -q 'Mode:      resume or verify interrupted installation' "$tmp/mode-resume.out"
 
-printf 'installer_ux_tests=GREEN core_mode=yes lifecycle_modes=3 no_tty_guard=yes integration_merge=yes remote_hermes=yes stale_overlay=clean secret_output=clean guards=7\n'
+printf 'installer_ux_tests=GREEN core_mode=yes lifecycle_modes=3 no_tty_guard=yes integration_merge=yes unversioned_dedupe=yes remote_hermes=yes stale_overlay=clean hermes_symlink=blocked atomic_secret_rewrite=yes secret_output=clean guards=8\n'

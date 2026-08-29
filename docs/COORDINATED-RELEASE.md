@@ -24,7 +24,8 @@ any tag is created.
 1. Merge the release PR normally after exact-head local and hosted gates pass.
 2. Verify all five proposed tags are absent locally and remotely.
 3. Build every npm tarball with `npm pack --dry-run` and inspect its file list.
-4. Build the Hermes bundle twice and require byte-identical archives.
+4. Build the Hermes bundle and six-file installer asset set twice; require
+   byte-identical archives, launchers, backends, and checksum files.
 5. Build and smoke-test the application for `linux/amd64` and `linux/arm64`.
 6. Exercise an isolated fresh install and installer rerun/upgrade path. Verify
    health, doctor/status, save, recall, and cleanup with no production identity
@@ -43,22 +44,30 @@ publish registry tags. Only the canonical application release tag may move
 2. Create and push annotated `vX.Y.Z` at the exact reviewed merge commit. Wait
    for the canonical Docker publication and record its digest.
 3. Create the four annotated plugin tags at that same commit, preferably one at
-   a time, and wait for each npm/Hermes workflow. The Hermes workflow produces a
-   read-only Actions artifact; it does not mutate a GitHub Release.
-4. Verify every registry artifact independently. Unknown, interrupted,
-   cancelled, or timed-out runs are failures, not passes.
-5. Create a **draft** GitHub Release with `--verify-tag`, attach the downloaded
-   Hermes archive and checksum, and read the draft back.
-6. Publish that draft only after every artifact and tag target is verified. This
-   is the final coordinated public promotion.
-7. Never move, overwrite, or force-push a published release tag.
+   a time, and wait for each npm/Hermes workflow. The Hermes and installer
+   workflows produce read-only Actions artifacts; neither mutates a GitHub
+   Release.
+4. Verify every registry and workflow artifact independently. Require the
+   Hermes archive/checksum from both workflows to be byte-identical. Unknown,
+   interrupted, cancelled, or timed-out runs are failures, not passes.
+5. Create a **draft** GitHub Release with `--verify-tag`, attach the complete
+   six-file installer artifact, and read every asset back:
+   - `install.sh` and `install.sh.sha256`;
+   - `install-openclaw.sh` and `install-openclaw.sh.sha256`;
+   - `hermes-noosphere-memory-X.Y.Z.tar.gz` and its checksum.
+6. From a directory containing only the downloaded `install.sh`, resolve and
+   verify its release backend and Hermes URLs before publishing the draft.
+7. Publish that draft only after every artifact, URL, checksum, and tag target
+   is verified. This is the final coordinated public promotion.
+8. Never move, overwrite, or force-push a published release tag or replace a
+   published release asset.
 
 ## Public readback
 
 Verify independently of workflow exit status:
 
-- GitHub release target commit, notes, Hermes archive, checksum file, and archive
-  checksum;
+- GitHub release target commit, notes, all six installer assets, asset names,
+  launcher/backend/Hermes checksum files, and independently recomputed hashes;
 - npm registry versions, provenance, tarball URLs, downloaded tarball manifests,
   and version-bound public commands for injected memory, OpenClaw, Opencode,
   and Kilo Code;

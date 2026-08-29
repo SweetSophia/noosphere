@@ -252,8 +252,10 @@ const installerReleaseWorkflowLines = workflowLines(installerReleaseWorkflow);
 const installer = readText("install.sh");
 const installerBackend = readText("install-openclaw.sh");
 const installerPackager = readText("scripts/package-installer.sh");
+const installerBackendTest = readText("scripts/test-installer-backend-mode.sh");
 const installerUxTest = readText("scripts/test-installer-ux.sh");
 const installerPackageTest = readText("scripts/test-installer-package.sh");
+const coordinatedReleaseGuide = readText("docs/COORDINATED-RELEASE.md");
 const composeFile = readText("docker-compose.yml");
 const environmentExample = readText("noosphere.env.example");
 
@@ -385,8 +387,16 @@ expect(
   "The application tag must build and test checksum-owned installer assets using only pinned, read-only Actions steps.",
 );
 expect(
-  installer.includes("BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/81dc9d68ddd72ec0142b6ce0bcea611fcc7ba597/install-openclaw.sh'") &&
-    installer.includes("BACKEND_SHA256='23879652c3724c8932656c259a0852c9f1fa7aed5273b68fa557b8d594d08a62'") &&
+  coordinatedReleaseGuide.includes("attach the complete\n   six-file installer artifact") &&
+    coordinatedReleaseGuide.includes("install.sh` and `install.sh.sha256") &&
+    coordinatedReleaseGuide.includes("install-openclaw.sh` and `install-openclaw.sh.sha256") &&
+    coordinatedReleaseGuide.includes("From a directory containing only the downloaded `install.sh`") &&
+    coordinatedReleaseGuide.includes("Never move, overwrite, or force-push a published release tag or replace a\n   published release asset"),
+  "The coordinated release guide must attach/read back all checksum-owned installer assets before publication.",
+);
+expect(
+  installer.includes("BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/9bb57771983f50b41f055e9d1b5d2dd2961109fe/install-openclaw.sh'") &&
+    installer.includes("BACKEND_SHA256='9594c4bf3af358c417e1d489fd22f85e0cc99c6f8b438c6ac09c9df8042abfc7'") &&
     installer.includes("HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.12.0/hermes-noosphere-memory-1.12.0.tar.gz'") &&
     installer.includes("HERMES_BUNDLE_SHA256='1fc5f938887832b0f9bb273cb78a90a4da0f12b11d9fd2eeef79f923445e4f17'") &&
     installer.includes("Refusing Noosphere backend with an unexpected checksum") &&
@@ -403,6 +413,11 @@ expect(
     installerBackend.includes('if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then\n  need openclaw\nfi') &&
     installerBackend.includes('write_credentials_json "$NOOSPHERE_CREDENTIALS_FILE"') &&
     installerBackend.includes('Credentials were not printed. Read the mode-0600 file above when needed.') &&
+    installerBackend.includes("run_openclaw()") &&
+    installerBackend.includes("-u POSTGRES_PASSWORD") &&
+    installerBackend.includes("-u NOOSPHERE_BOOTSTRAP_API_KEY") &&
+    installerBackendTest.includes("child_env=clean") &&
+    installerBackendTest.includes("OpenClaw child inherited secret variable") &&
     !installerBackend.includes("API KEY (save this - it will not be shown again)"),
   "The reviewed backend must preserve OpenClaw-by-default compatibility while supporting core-only mode and non-disclosing credentials.",
 );
@@ -417,7 +432,12 @@ expect(
     installerUxTest.includes("lifecycle_modes=3") &&
     installerUxTest.includes("no_tty_guard=yes") &&
     installerUxTest.includes("stale_overlay=clean") &&
+    installerUxTest.includes("unversioned_dedupe=yes") &&
+    installerUxTest.includes("hermes_symlink=blocked") &&
+    installerUxTest.includes("atomic_secret_rewrite=yes") &&
     installerPackageTest.includes("tampered backend unexpectedly passed") &&
+    installerPackageTest.includes("tampered sibling backend unexpectedly passed") &&
+    installerPackageTest.includes("sibling_checksum_sensitive=yes") &&
     installerPackageTest.includes("piped_entrypoint=yes") &&
     installerPackageTest.includes("deterministic=yes"),
   "Installer packaging and tests must own deterministic bytes, checksums, credential non-disclosure, and a tampered-backend negative control.",

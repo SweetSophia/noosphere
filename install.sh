@@ -3,8 +3,8 @@ set -euo pipefail
 trap 'printf "Installer failed near line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 RELEASE_VERSION='1.12.0'
-BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/81dc9d68ddd72ec0142b6ce0bcea611fcc7ba597/install-openclaw.sh'
-BACKEND_SHA256='23879652c3724c8932656c259a0852c9f1fa7aed5273b68fa557b8d594d08a62'
+BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/9bb57771983f50b41f055e9d1b5d2dd2961109fe/install-openclaw.sh'
+BACKEND_SHA256='9594c4bf3af358c417e1d489fd22f85e0cc99c6f8b438c6ac09c9df8042abfc7'
 HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.12.0/hermes-noosphere-memory-1.12.0.tar.gz'
 HERMES_BUNDLE_SHA256='1fc5f938887832b0f9bb273cb78a90a4da0f12b11d9fd2eeef79f923445e4f17'
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
@@ -237,28 +237,34 @@ fi
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
 backend=''
+expected_backend_sha=$BACKEND_SHA256
 if [[ -n "${NOOSPHERE_BACKEND_PATH:-}" ]]; then
   backend=$NOOSPHERE_BACKEND_PATH
+  expected_backend_sha="${NOOSPHERE_BACKEND_OVERRIDE_SHA256:-}"
   [[ -f "$backend" && ! -L "$backend" ]] || {
     echo "NOOSPHERE_BACKEND_PATH is not a regular file: $backend" >&2
+    exit 1
+  }
+  [[ "$expected_backend_sha" =~ ^[a-f0-9]{64}$ ]] || {
+    echo 'NOOSPHERE_BACKEND_PATH requires NOOSPHERE_BACKEND_OVERRIDE_SHA256.' >&2
     exit 1
   }
 elif [[ -f "$SCRIPT_DIR/install-openclaw.sh" ]]; then
   backend="$SCRIPT_DIR/install-openclaw.sh"
 else
-  [[ "$BACKEND_SHA256" =~ ^[a-f0-9]{64}$ ]] || {
-    echo 'Packaged installer is missing its backend checksum.' >&2
-    exit 1
-  }
   backend="$work_dir/install-openclaw.sh"
   curl -fsSL "$BACKEND_URL" -o "$backend"
-  actual_backend_sha=$(sha256sum "$backend" | awk '{print $1}')
-  [[ "$actual_backend_sha" == "$BACKEND_SHA256" ]] || {
-    echo 'Refusing Noosphere backend with an unexpected checksum.' >&2
-    exit 1
-  }
-  chmod 700 "$backend"
 fi
+[[ "$expected_backend_sha" =~ ^[a-f0-9]{64}$ ]] || {
+  echo 'Packaged installer is missing its backend checksum.' >&2
+  exit 1
+}
+actual_backend_sha=$(sha256sum "$backend" | awk '{print $1}')
+[[ "$actual_backend_sha" == "$expected_backend_sha" ]] || {
+  echo 'Refusing Noosphere backend with an unexpected checksum.' >&2
+  exit 1
+}
+chmod 700 "$backend"
 
 if [[ "${NOOSPHERE_INSTALLER_TEST_MODE:-}" == resolve-backend ]]; then
   printf 'resolved_backend_sha256=%s\n' "$(sha256sum "$backend" | awk '{print $1}')"
@@ -299,15 +305,23 @@ const path = require("node:path");
 const credentials = JSON.parse(fs.readFileSync(process.env.CREDENTIALS_FILE, "utf8"));
 const configFile = process.env.CONFIG_FILE;
 const packageName = process.env.PACKAGE_NAME;
+if (fs.existsSync(configFile) && fs.lstatSync(configFile).isSymbolicLink()) {
+  throw new Error(`Refusing symlinked integration config: ${configFile}`);
+}
 let config = {};
 if (fs.existsSync(configFile)) {
   config = JSON.parse(fs.readFileSync(configFile, "utf8"));
 }
+const packageIdentity = (spec) => {
+  if (typeof spec !== "string") return "";
+  const versionSeparator = spec.lastIndexOf("@");
+  return versionSeparator > 0 ? spec.slice(0, versionSeparator) : spec;
+};
 const entries = Array.isArray(config.plugin) ? config.plugin : [];
-const packageBase = packageName.replace(/@[0-9].*$/, "");
+const packageBase = packageIdentity(packageName);
 config.plugin = entries.filter((entry) => {
   const spec = Array.isArray(entry) ? entry[0] : entry;
-  return typeof spec !== "string" || !spec.startsWith(`${packageBase}@`);
+  return packageIdentity(spec) !== packageBase;
 });
 config.plugin.push([
   packageName,
@@ -319,8 +333,14 @@ config.plugin.push([
     autoSave: false,
   },
 ]);
-const temp = `${configFile}.tmp-${process.pid}`;
-fs.writeFileSync(temp, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+const temp = `${configFile}.tmp-${process.pid}-${require("node:crypto").randomBytes(6).toString("hex")}`;
+const fd = fs.openSync(temp, "wx", 0o600);
+try {
+  fs.writeFileSync(fd, `${JSON.stringify(config, null, 2)}\n`);
+  fs.fsyncSync(fd);
+} finally {
+  fs.closeSync(fd);
+}
 fs.renameSync(temp, configFile);
 fs.chmodSync(configFile, 0o600);
 NODE
@@ -372,17 +392,37 @@ configure_hermes() {
   CREDENTIALS_FILE="$NOOSPHERE_CREDENTIALS_FILE" HERMES_HOME="$hermes_home" node <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
 const home = process.env.HERMES_HOME;
 const credentials = JSON.parse(fs.readFileSync(process.env.CREDENTIALS_FILE, "utf8"));
 fs.mkdirSync(home, { recursive: true, mode: 0o700 });
+fs.chmodSync(home, 0o700);
+const assertNotSymlink = (target) => {
+  if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) {
+    throw new Error(`Refusing symlinked Hermes configuration: ${target}`);
+  }
+};
+const atomicWriteProtected = (target, content) => {
+  const temp = `${target}.tmp-${process.pid}-${crypto.randomBytes(6).toString("hex")}`;
+  const fd = fs.openSync(temp, "wx", 0o600);
+  try {
+    fs.writeFileSync(fd, content);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(temp, target);
+  fs.chmodSync(target, 0o600);
+};
 const envPath = path.join(home, ".env");
+assertNotSymlink(envPath);
 const lines = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8").split(/\r?\n/) : [];
 const retained = lines.filter((line) => !line.startsWith("HERMES_NOOSPHERE_API_KEY="));
 while (retained.at(-1) === "") retained.pop();
 retained.push(`HERMES_NOOSPHERE_API_KEY=${credentials.apiKey}`);
-fs.writeFileSync(envPath, `${retained.join("\n")}\n`, { mode: 0o600 });
-fs.chmodSync(envPath, 0o600);
+atomicWriteProtected(envPath, `${retained.join("\n")}\n`);
 const configPath = path.join(home, "noosphere.json");
+assertNotSymlink(configPath);
 let config = {};
 if (fs.existsSync(configPath)) config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 config = {
@@ -399,10 +439,7 @@ config = {
   ...config,
   base_url: credentials.baseUrl,
 };
-const temp = `${configPath}.tmp-${process.pid}`;
-fs.writeFileSync(temp, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-fs.renameSync(temp, configPath);
-fs.chmodSync(configPath, 0o600);
+atomicWriteProtected(configPath, `${JSON.stringify(config, null, 2)}\n`);
 NODE
   if command -v hermes >/dev/null 2>&1; then
     hermes config set memory.provider noosphere

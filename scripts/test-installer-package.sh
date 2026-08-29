@@ -33,6 +33,19 @@ hermes_sha=$(sha256sum "$first/hermes-noosphere-memory-${version}.tar.gz" | awk 
 grep -q "^BACKEND_SHA256='$backend_sha'$" "$first/install.sh"
 grep -q "^HERMES_BUNDLE_SHA256='$hermes_sha'$" "$first/install.sh"
 
+NOOSPHERE_INSTALLER_TEST_MODE=resolve-backend \
+  bash "$first/install.sh" --core-only > "$tmp/sibling-positive.out"
+grep -q "resolved_backend_sha256=$backend_sha" "$tmp/sibling-positive.out"
+mkdir -p "$tmp/tampered-package"
+cp "$first/install.sh" "$first/install-openclaw.sh" "$tmp/tampered-package/"
+printf '\n# tampered sibling\n' >> "$tmp/tampered-package/install-openclaw.sh"
+if NOOSPHERE_INSTALLER_TEST_MODE=resolve-backend \
+  bash "$tmp/tampered-package/install.sh" --core-only > "$tmp/sibling-negative.out" 2>&1; then
+  echo 'tampered sibling backend unexpectedly passed' >&2
+  exit 1
+fi
+grep -q 'unexpected checksum' "$tmp/sibling-negative.out"
+
 mkdir -p "$tmp/remote" "$tmp/fake-bin"
 cp "$first/install.sh" "$tmp/remote/install.sh"
 cat > "$tmp/fake-bin/curl" <<'CURL'
@@ -74,4 +87,4 @@ if PATH="$tmp/fake-bin:$PATH" \
 fi
 grep -q 'unexpected checksum' "$tmp/remote-negative.out"
 
-printf 'installer_package_tests=GREEN assets=6 deterministic=yes piped_entrypoint=yes remote_checksum_sensitive=yes\n'
+printf 'installer_package_tests=GREEN assets=6 deterministic=yes piped_entrypoint=yes sibling_checksum_sensitive=yes remote_checksum_sensitive=yes\n'

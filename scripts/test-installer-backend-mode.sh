@@ -59,7 +59,10 @@ for secret_name in \
   POSTGRES_HYBRID_ADMIN_PASSWORD POSTGRES_HYBRID_WORKER_PASSWORD NEXTAUTH_SECRET \
   REDIS_URL NOOSPHERE_ADMIN_PASSWORD NOOSPHERE_BOOTSTRAP_API_KEY \
   NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64; do
-  ! grep -q "^${secret_name}=" "$tmp/openclaw.env"
+  if grep -q "^${secret_name}=" "$tmp/openclaw.env"; then
+    echo "OpenClaw child inherited secret variable: ${secret_name}" >&2
+    exit 1
+  fi
 done
 grep -q '^INSTALLER_SAFE_MARKER=preserved$' "$tmp/openclaw.env"
 write_credentials_json "$tmp/user/credentials.json"
