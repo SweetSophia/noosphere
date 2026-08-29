@@ -12,10 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Minor release adding the default-off automatic-memory Phase A foundation,
 optional hybrid pgvector/RRF retrieval, coordinated 1.12.0 integrations for
-OpenClaw, Hermes Agent, Opencode, and Kilo Code, and interruption-safe database
-image transitions. The application API remains backward compatible. Prisma
-migrations add the Phase A persistence schema; hybrid retrieval remains opt-in,
-and keyword-only retrieval remains the default until separately activated.
+OpenClaw, its shared injected-memory helper, Hermes Agent, Opencode, and Kilo
+Code, and interruption-safe database image transitions. The application API
+remains backward compatible. Prisma migrations add the Phase A persistence
+schema; hybrid retrieval remains opt-in, and keyword-only retrieval remains the
+default until separately activated.
 
 ### Added
 
@@ -34,7 +35,7 @@ and keyword-only retrieval remains the default until separately activated.
   rollback-to-keyword-only tooling.
 - **Coordinated Hermes release artifact**: the Hermes `MemoryProvider` now ships
   as a deterministic, checksum-verified GitHub release bundle alongside the
-  three provenance-enabled npm plugins.
+  four provenance-enabled npm packages.
 - **Native application images for AMD64 and ARM64**: the main GHCR image now
   publishes a multi-platform index for `linux/amd64` and `linux/arm64`.
 

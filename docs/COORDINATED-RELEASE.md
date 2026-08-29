@@ -9,7 +9,8 @@ release.
 For version `X.Y.Z`, all of these must identify the same merge commit:
 
 - `vX.Y.Z` — GitHub release and multi-platform application image
-- `v-openclaw-X.Y.Z` — `@sweetsophia/openclaw-noosphere-memory`
+- `v-openclaw-X.Y.Z` — first `@sweetsophia/noosphere-injected-memory`,
+  then `@sweetsophia/openclaw-noosphere-memory` after exact-integrity readback
 - `v-opencode-X.Y.Z` — `@sweetsophia/opencode-noosphere-memory`
 - `v-kilocode-X.Y.Z` — `@sweetsophia/kilocode-noosphere-memory`
 - `v-hermes-X.Y.Z` — deterministic Hermes provider bundle attached to `vX.Y.Z`
@@ -59,7 +60,8 @@ Verify independently of workflow exit status:
 - GitHub release target commit, notes, Hermes archive, checksum file, and archive
   checksum;
 - npm registry versions, provenance, tarball URLs, downloaded tarball manifests,
-  and version-bound public commands for OpenClaw, Opencode, and Kilo Code;
+  and version-bound public commands for injected memory, OpenClaw, Opencode,
+  and Kilo Code;
 - GHCR `X.Y.Z` and `latest` index digest, both `linux/amd64` and `linux/arm64`
   manifests, OCI version label, and an AMD64 runtime health smoke test;
 - all five tag object targets equal the reviewed release commit;
