@@ -87,4 +87,21 @@ if PATH="$tmp/fake-bin:$PATH" \
 fi
 grep -q 'unexpected checksum' "$tmp/remote-negative.out"
 
-printf 'installer_package_tests=GREEN assets=6 deterministic=yes piped_entrypoint=yes sibling_checksum_sensitive=yes remote_checksum_sensitive=yes\n'
+(
+  cd "$first"
+  node "$root/scripts/check-postgres-image-policy.mjs" --verify-release-files
+) > "$tmp/release-files-positive.out"
+grep -q 'PostgreSQL image policy check passed' "$tmp/release-files-positive.out"
+cp -a "$first" "$tmp/tampered-release"
+printf '\n# tampered release backend\n' >> "$tmp/tampered-release/install-openclaw.sh"
+if (
+  cd "$tmp/tampered-release"
+  node "$root/scripts/check-postgres-image-policy.mjs" --verify-release-files
+) > "$tmp/release-files-negative.out" 2>&1; then
+  echo 'tampered six-file release set unexpectedly passed' >&2
+  exit 1
+fi
+grep -q 'release install-openclaw.sh checksum must match downloaded bytes' \
+  "$tmp/release-files-negative.out"
+
+printf 'installer_package_tests=GREEN assets=6 deterministic=yes piped_entrypoint=yes sibling_checksum_sensitive=yes remote_checksum_sensitive=yes release_set_verified=yes\n'

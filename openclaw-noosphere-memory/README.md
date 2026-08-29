@@ -153,7 +153,9 @@ not trigger each other's publish jobs:
 - `v-openclaw-1.13.0` publishes `@sweetsophia/openclaw-noosphere-memory@1.13.0`
 - `v-opencode-1.13.0` publishes `@sweetsophia/opencode-noosphere-memory@1.13.0`
 - `v-kilocode-1.13.0` publishes `@sweetsophia/kilocode-noosphere-memory@1.13.0`
-- `v-hermes-1.13.0` attaches the deterministic Hermes bundle to release `v1.13.0`
+- `v-hermes-1.13.0` produces the deterministic Hermes workflow artifact; the
+  trusted release publisher attaches that archive and checksum to `v1.13.0`
+  after independent readback
 
 New plugin packages should add their own `v-{package}-*` tag prefix in CI before
 they are published.

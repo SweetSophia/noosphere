@@ -430,7 +430,8 @@ expect(
   coordinatedReleaseGuide.includes("attach the complete\n   six-file installer artifact") &&
     coordinatedReleaseGuide.includes("install.sh` and `install.sh.sha256") &&
     coordinatedReleaseGuide.includes("install-openclaw.sh` and `install-openclaw.sh.sha256") &&
-    coordinatedReleaseGuide.includes("From a directory containing only the downloaded `install.sh`") &&
+    coordinatedReleaseGuide.includes("--verify-release-files") &&
+    coordinatedReleaseGuide.includes("Download all six assets again from the **public** release") &&
     coordinatedReleaseGuide.includes("--verify-release-assets") &&
     coordinatedReleaseGuide.includes("Never move, overwrite, or force-push a published release tag or replace a\n   published release asset"),
   "The coordinated release guide must attach/read back all checksum-owned installer assets before publication.",
@@ -506,6 +507,8 @@ expect(
     installerPackageTest.includes("tampered sibling backend unexpectedly passed") &&
     installerPackageTest.includes("sibling_checksum_sensitive=yes") &&
     installerPackageTest.includes("piped_entrypoint=yes") &&
+    installerPackageTest.includes("release_set_verified=yes") &&
+    installerPackageTest.includes("--verify-release-files") &&
     installerPackageTest.includes("deterministic=yes"),
   "Installer packaging and tests must own deterministic bytes, checksums, credential non-disclosure, and a tampered-backend negative control.",
 );

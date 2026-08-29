@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -10,6 +10,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
 const verifyReleaseArtifacts = process.argv.includes("--verify-release-assets");
+const verifyReleaseFiles =
+  verifyReleaseArtifacts || process.argv.includes("--verify-release-files");
+const releaseRoot = resolve(process.cwd());
 const immutableHelperRef = "9da4af0a7b2275aa91eecd102095e0e470bbb0e3";
 const guidedInstallerRef = "eb9c1b65f4615e6bbb1ff14d1f5bb988ff40e34a";
 const guidedInstallerSha256 = "95c3ceff34284ac2719c54a9870bd88174f83c337bd331b4d111283f6c757a88";
@@ -102,6 +105,32 @@ function expectExactDbImage(relativePath, image, authorizationKey) {
 
 function sha256(relativePath) {
   return createHash("sha256").update(read(relativePath)).digest("hex");
+}
+
+function sha256Bytes(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function readReleaseBytes(filename) {
+  try {
+    return readFileSync(resolve(releaseRoot, filename));
+  } catch (error) {
+    failures.push(`Failed to read release file ${filename}: ${error.message}`);
+    return Buffer.alloc(0);
+  }
+}
+
+function readReleaseText(filename) {
+  return readReleaseBytes(filename).toString("utf8");
+}
+
+function expectedChecksum(checksumText, filename) {
+  const match = checksumText.match(/^([a-f0-9]{64})  ([^\r\n]+)\r?\n?$/);
+  if (!match || match[2] !== filename) {
+    failures.push(`${filename}.sha256 must contain exactly a SHA-256 and ${filename}`);
+    return "";
+  }
+  return match[1];
 }
 
 function isExecutable(relativePath) {
@@ -1561,13 +1590,90 @@ if (verifyRemoteArtifacts) {
   }
 }
 
-if (verifyReleaseArtifacts) {
-  await verifyRemoteArtifact(
-    "guided Hermes bundle",
-    extractShellStringConstant(read("install.sh"), "HERMES_BUNDLE_URL"),
-    extractShellConstant(read("install.sh"), "HERMES_BUNDLE_SHA256"),
-    { followRedirects: true },
+let releaseAssetExpectations = [];
+if (verifyReleaseFiles) {
+  const releaseLauncherName = "install.sh";
+  const releaseBackendName = "install-openclaw.sh";
+  const releaseLauncher = readReleaseText(releaseLauncherName);
+  const releaseVersion = extractShellStringConstant(releaseLauncher, "RELEASE_VERSION");
+  const hermesName = `hermes-noosphere-memory-${releaseVersion}.tar.gz`;
+  const expectedNames = [
+    releaseLauncherName,
+    `${releaseLauncherName}.sha256`,
+    releaseBackendName,
+    `${releaseBackendName}.sha256`,
+    hermesName,
+    `${hermesName}.sha256`,
+  ].sort();
+  try {
+    const actualNames = readdirSync(releaseRoot).sort();
+    expect(
+      JSON.stringify(actualNames) === JSON.stringify(expectedNames),
+      `release verification directory must contain exactly: ${expectedNames.join(", ")}`,
+    );
+  } catch (error) {
+    failures.push(`Failed to enumerate release verification directory: ${error.message}`);
+  }
+
+  const releaseBackend = readReleaseBytes(releaseBackendName);
+  const releaseHermes = readReleaseBytes(hermesName);
+  const releaseLauncherBytes = Buffer.from(releaseLauncher, "utf8");
+  const releaseLauncherSha = sha256Bytes(releaseLauncherBytes);
+  const releaseBackendSha = sha256Bytes(releaseBackend);
+  const releaseHermesSha = sha256Bytes(releaseHermes);
+  const declaredLauncherSha = expectedChecksum(
+    readReleaseText(`${releaseLauncherName}.sha256`),
+    releaseLauncherName,
   );
+  const declaredBackendSha = expectedChecksum(
+    readReleaseText(`${releaseBackendName}.sha256`),
+    releaseBackendName,
+  );
+  const declaredHermesSha = expectedChecksum(
+    readReleaseText(`${hermesName}.sha256`),
+    hermesName,
+  );
+  expect(declaredLauncherSha === releaseLauncherSha, "release install.sh checksum must match downloaded bytes");
+  expect(declaredBackendSha === releaseBackendSha, "release install-openclaw.sh checksum must match downloaded bytes");
+  expect(declaredHermesSha === releaseHermesSha, "release Hermes checksum must match downloaded bytes");
+  expect(
+    extractShellConstant(releaseLauncher, "BACKEND_SHA256") === releaseBackendSha,
+    "release launcher must pin the downloaded backend bytes",
+  );
+  expect(
+    extractShellConstant(releaseLauncher, "HERMES_BUNDLE_SHA256") === releaseHermesSha,
+    "release launcher must pin the downloaded Hermes bundle bytes",
+  );
+
+  const expectedReleaseBase =
+    `https://github.com/SweetSophia/noosphere/releases/download/v${releaseVersion}/`;
+  const releaseBackendUrl = extractShellStringConstant(releaseLauncher, "BACKEND_URL");
+  const releaseHermesUrl = extractShellStringConstant(releaseLauncher, "HERMES_BUNDLE_URL");
+  expect(
+    releaseBackendUrl === `${expectedReleaseBase}${releaseBackendName}`,
+    "release launcher backend URL must target its coordinated release asset",
+  );
+  expect(
+    releaseHermesUrl === `${expectedReleaseBase}${hermesName}`,
+    "release launcher Hermes URL must target its coordinated release asset",
+  );
+
+  releaseAssetExpectations = expectedNames.map((filename) => ({
+    filename,
+    sha256: sha256Bytes(readReleaseBytes(filename)),
+    url: `${expectedReleaseBase}${filename}`,
+  }));
+}
+
+if (verifyReleaseArtifacts) {
+  for (const asset of releaseAssetExpectations) {
+    await verifyRemoteArtifact(
+      `published release asset ${asset.filename}`,
+      asset.url,
+      asset.sha256,
+      { followRedirects: true },
+    );
+  }
 }
 
 if (failures.length > 0) {

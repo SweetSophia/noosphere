@@ -48,24 +48,28 @@ publish registry tags. Only the canonical application release tag may move
    workflows produce read-only Actions artifacts; neither mutates a GitHub
    Release.
 4. Verify every registry and workflow artifact independently. Require the
-   Hermes archive/checksum from both workflows to be byte-identical. Unknown,
-   interrupted, cancelled, or timed-out runs are failures, not passes.
+   Hermes archive/checksum from both workflows to be byte-identical. Place the
+   six installer files in an otherwise empty directory and run
+   `node /absolute/path/to/noosphere/scripts/check-postgres-image-policy.mjs
+   --verify-release-files` from that directory. Unknown, interrupted, cancelled,
+   timed-out, or locally inconsistent artifacts are failures, not passes.
 5. Create a **draft** GitHub Release with `--verify-tag`, attach the complete
-   six-file installer artifact, and read every asset back:
+   six-file installer artifact, and read every draft asset back through the
+   authenticated GitHub API:
    - `install.sh` and `install.sh.sha256`;
    - `install-openclaw.sh` and `install-openclaw.sh.sha256`;
    - `hermes-noosphere-memory-X.Y.Z.tar.gz` and its checksum.
-6. From a directory containing only the downloaded `install.sh`, resolve and
-   verify its release backend and Hermes URLs before publishing the draft. Keep
-   that download directory as the working directory and invoke the policy script
-   by its absolute repository path, for example:
-   `repo_root=$(git rev-parse --show-toplevel); release_dir=/path/to/downloaded-assets;
+6. Publish that draft only after every artifact, checksum, tag target, registry
+   digest, and authenticated readback is verified. This is the coordinated
+   public promotion.
+7. Download all six assets again from the **public** release into an otherwise
+   empty directory. Keep that directory as the working directory and invoke the
+   policy script by its absolute repository path, for example:
+   `repo_root=$(git rev-parse --show-toplevel); release_dir=/path/to/public-assets;
    (cd "$release_dir" && node "$repo_root/scripts/check-postgres-image-policy.mjs"
-   --verify-remote --verify-release-assets)`. The first flag verifies immutable
-   Git-hosted bytes; the second is intentionally post-upload and must fail before
-   the release asset exists.
-7. Publish that draft only after every artifact, URL, checksum, and tag target
-   is verified. This is the final coordinated public promotion.
+   --verify-remote --verify-release-assets)`. This final gate verifies the local
+   checksum set, launcher/backend/Hermes ownership, and public bytes for all six
+   release assets.
 8. Never move, overwrite, or force-push a published release tag or replace a
    published release asset.
 
