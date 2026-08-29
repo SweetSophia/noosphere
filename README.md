@@ -175,10 +175,10 @@ Base URL:
 http://localhost:6578/api
 ```
 
-Authentication:
+Authentication (replace `<api_key>` with a scoped Noosphere API key):
 
 ```text
-Authorization: Bearer ***
+Authorization: Bearer <api_key>
 ```
 
 Common endpoints:

@@ -3,8 +3,8 @@ set -euo pipefail
 trap 'printf "Installer failed near line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 RELEASE_VERSION='1.12.0'
-BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/9bb57771983f50b41f055e9d1b5d2dd2961109fe/install-openclaw.sh'
-BACKEND_SHA256='9594c4bf3af358c417e1d489fd22f85e0cc99c6f8b438c6ac09c9df8042abfc7'
+BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/aac14248a7e6f52fba1ea5728cd495a232fcb218/install-openclaw.sh'
+BACKEND_SHA256='bd48b25d4a41e7100d3a23e6343742fa999bf5b2666768048d2779526e20f86e'
 HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.12.0/hermes-noosphere-memory-1.12.0.tar.gz'
 HERMES_BUNDLE_SHA256='1fc5f938887832b0f9bb273cb78a90a4da0f12b11d9fd2eeef79f923445e4f17'
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
@@ -293,16 +293,105 @@ NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosph
   exit 1
 }
 
+credential_field() {
+  local field=$1 integration=${2:-}
+  CREDENTIALS_FILE="$NOOSPHERE_CREDENTIALS_FILE" CREDENTIAL_FIELD="$field" CREDENTIAL_INTEGRATION="$integration" \
+    node -e 'try { const fs=require("node:fs"); const d=JSON.parse(fs.readFileSync(process.env.CREDENTIALS_FILE,"utf8")); const v=process.env.CREDENTIAL_INTEGRATION ? d[process.env.CREDENTIAL_FIELD]?.[process.env.CREDENTIAL_INTEGRATION] : d[process.env.CREDENTIAL_FIELD]; if (typeof v === "string") process.stdout.write(v); } catch { process.exit(0); }'
+}
+
+installer_api_status_with_key() {
+  local key=$1 endpoint=$2 config status
+  [[ "$key" =~ ^noo_[A-Za-z0-9_-]+$ ]] || { printf '000'; return 0; }
+  config=$(mktemp "$work_dir/curl-auth.XXXXXX")
+  chmod 600 "$config"
+  printf 'silent\nshow-error\nheader = "Authorization: Bearer %s"\n' "$key" > "$config"
+  status=$(curl --config "$config" --output /dev/null --write-out '%{http_code}' \
+    "$(credential_field baseUrl)$endpoint" 2>/dev/null || true)
+  rm -f "$config"
+  printf '%s' "${status:-000}"
+}
+
+installer_key_is_scoped() {
+  local key=$1 read_status admin_status
+  [[ -n "$key" ]] || return 1
+  read_status=$(installer_api_status_with_key "$key" '/api/articles?limit=1')
+  admin_status=$(installer_api_status_with_key "$key" '/api/keys')
+  [[ "$read_status" =~ ^2[0-9][0-9]$ && "$admin_status" == 403 ]]
+}
+
+create_tool_api_key() {
+  local integration=$1 bootstrap config body response name raw base_url
+  bootstrap=$(credential_field bootstrapApiKey)
+  base_url=$(credential_field baseUrl)
+  [[ "$bootstrap" =~ ^noo_[A-Za-z0-9_-]+$ ]] || {
+    echo 'Protected credentials do not contain a valid bootstrap API key.' >&2
+    return 1
+  }
+  name="guided-${integration}-$(date +%s)-${RANDOM}"
+  config=$(mktemp "$work_dir/curl-auth.XXXXXX")
+  body=$(mktemp "$work_dir/key-request.XXXXXX")
+  response=$(mktemp "$work_dir/key-response.XXXXXX")
+  chmod 600 "$config" "$body" "$response"
+  printf 'silent\nshow-error\nfail-with-body\nheader = "Authorization: Bearer %s"\n' "$bootstrap" > "$config"
+  printf '{"name":"%s","permissions":"WRITE","allowedScopes":[]}\n' "$name" > "$body"
+  if ! curl --config "$config" --request POST --header 'Content-Type: application/json' \
+    --data-binary "@$body" --output "$response" "$base_url/api/keys"; then
+    rm -f "$config" "$body" "$response"
+    echo "Failed to create a scoped ${integration} API key." >&2
+    return 1
+  fi
+  raw=$(CREDENTIALS_FILE="$response" node -e 'try { const d=JSON.parse(require("node:fs").readFileSync(process.env.CREDENTIALS_FILE,"utf8")); if (typeof d.key === "string") process.stdout.write(d.key); } catch { process.exit(0); }')
+  rm -f "$config" "$body" "$response"
+  [[ "$raw" =~ ^noo_[A-Za-z0-9_-]+$ ]] || {
+    echo "Noosphere returned an invalid scoped ${integration} API key." >&2
+    return 1
+  }
+  printf '%s' "$raw"
+}
+
+ensure_tool_api_key() {
+  local integration=$1 key_file=$2 key
+  key=$(credential_field integrationApiKeys "$integration")
+  if ! installer_key_is_scoped "$key"; then
+    key=$(create_tool_api_key "$integration")
+  fi
+  INTEGRATION_KEY="$key" INTEGRATION_NAME="$integration" KEY_FILE="$key_file" \
+  CREDENTIALS_FILE="$NOOSPHERE_CREDENTIALS_FILE" node <<'NODE'
+const fs = require("node:fs");
+const crypto = require("node:crypto");
+const credentialsFile = process.env.CREDENTIALS_FILE;
+const keyFile = process.env.KEY_FILE;
+if (fs.lstatSync(credentialsFile).isSymbolicLink()) throw new Error("Refusing symlinked credentials");
+const credentials = JSON.parse(fs.readFileSync(credentialsFile, "utf8"));
+credentials.integrationApiKeys = credentials.integrationApiKeys && typeof credentials.integrationApiKeys === "object"
+  ? credentials.integrationApiKeys : {};
+credentials.integrationApiKeys[process.env.INTEGRATION_NAME] = process.env.INTEGRATION_KEY;
+const atomicWrite = (target, content) => {
+  if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) throw new Error(`Refusing symlinked key target: ${target}`);
+  const temp = `${target}.tmp-${process.pid}-${crypto.randomBytes(6).toString("hex")}`;
+  const fd = fs.openSync(temp, "wx", 0o600);
+  try { fs.writeFileSync(fd, content); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  fs.renameSync(temp, target);
+  fs.chmodSync(target, 0o600);
+};
+atomicWrite(credentialsFile, `${JSON.stringify(credentials, null, 2)}\n`);
+atomicWrite(keyFile, `${process.env.INTEGRATION_KEY}\n`);
+NODE
+}
+
 configure_json_plugin() {
-  local config_file=$1 package_name=$2
+  local config_file=$1 package_name=$2 key_file=$3
   install -d -m 700 "$(dirname "$config_file")"
   CREDENTIALS_FILE="$NOOSPHERE_CREDENTIALS_FILE" \
   CONFIG_FILE="$config_file" \
   PACKAGE_NAME="$package_name" \
+  KEY_FILE="$key_file" \
     node <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const credentials = JSON.parse(fs.readFileSync(process.env.CREDENTIALS_FILE, "utf8"));
+const integrationKey = fs.readFileSync(process.env.KEY_FILE, "utf8").trim();
+if (!/^noo_[A-Za-z0-9_-]+$/.test(integrationKey)) throw new Error("Invalid scoped integration key");
 const configFile = process.env.CONFIG_FILE;
 const packageName = process.env.PACKAGE_NAME;
 if (fs.existsSync(configFile) && fs.lstatSync(configFile).isSymbolicLink()) {
@@ -327,7 +416,7 @@ config.plugin.push([
   packageName,
   {
     baseUrl: credentials.baseUrl,
-    apiKey: credentials.apiKey,
+    apiKey: integrationKey,
     autoRecall: true,
     autoRecallInjectOn: "first",
     autoSave: false,
@@ -347,7 +436,7 @@ NODE
 }
 
 configure_hermes() {
-  local bundle_root source_root plugin_source skill_source plugin_target skill_target hermes_home
+  local key_file=$1 bundle_root source_root plugin_source skill_source plugin_target skill_target hermes_home
   hermes_home="${HERMES_HOME:-$HOME/.hermes}"
   if [[ "$SOURCE_CHECKOUT" == true ]]; then
     source_root="$SCRIPT_DIR/hermes-noosphere-memory"
@@ -389,12 +478,14 @@ configure_hermes() {
     python3 -m compileall -q "$plugin_target"
   fi
 
-  CREDENTIALS_FILE="$NOOSPHERE_CREDENTIALS_FILE" HERMES_HOME="$hermes_home" node <<'NODE'
+  CREDENTIALS_FILE="$NOOSPHERE_CREDENTIALS_FILE" HERMES_HOME="$hermes_home" KEY_FILE="$key_file" node <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const home = process.env.HERMES_HOME;
 const credentials = JSON.parse(fs.readFileSync(process.env.CREDENTIALS_FILE, "utf8"));
+const integrationKey = fs.readFileSync(process.env.KEY_FILE, "utf8").trim();
+if (!/^noo_[A-Za-z0-9_-]+$/.test(integrationKey)) throw new Error("Invalid scoped Hermes key");
 fs.mkdirSync(home, { recursive: true, mode: 0o700 });
 fs.chmodSync(home, 0o700);
 const assertNotSymlink = (target) => {
@@ -419,7 +510,7 @@ assertNotSymlink(envPath);
 const lines = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8").split(/\r?\n/) : [];
 const retained = lines.filter((line) => !line.startsWith("HERMES_NOOSPHERE_API_KEY="));
 while (retained.at(-1) === "") retained.pop();
-retained.push(`HERMES_NOOSPHERE_API_KEY=${credentials.apiKey}`);
+retained.push(`HERMES_NOOSPHERE_API_KEY=${integrationKey}`);
 atomicWriteProtected(envPath, `${retained.join("\n")}\n`);
 const configPath = path.join(home, "noosphere.json");
 assertNotSymlink(configPath);
@@ -450,24 +541,32 @@ NODE
 }
 
 if has_integration hermes; then
-  configure_hermes
+  hermes_key_file="$work_dir/hermes.key"
+  ensure_tool_api_key hermes "$hermes_key_file"
+  configure_hermes "$hermes_key_file"
 fi
 if has_integration opencode; then
+  opencode_key_file="$work_dir/opencode.key"
+  ensure_tool_api_key opencode "$opencode_key_file"
   configure_json_plugin \
     "${OPENCODE_CONFIG_FILE:-$HOME/.config/opencode/opencode.json}" \
-    "@sweetsophia/opencode-noosphere-memory@$RELEASE_VERSION"
-  printf '✓ OpenCode configured\n'
+    "@sweetsophia/opencode-noosphere-memory@$RELEASE_VERSION" \
+    "$opencode_key_file"
+  printf '✓ OpenCode configured with a scoped WRITE key\n'
 fi
 if has_integration kilocode; then
+  kilocode_key_file="$work_dir/kilocode.key"
+  ensure_tool_api_key kilocode "$kilocode_key_file"
   configure_json_plugin \
     "${KILOCODE_CONFIG_FILE:-$HOME/.config/kilo/kilo.json}" \
-    "@sweetsophia/kilocode-noosphere-memory@$RELEASE_VERSION"
-  printf '✓ Kilo Code configured\n'
+    "@sweetsophia/kilocode-noosphere-memory@$RELEASE_VERSION" \
+    "$kilocode_key_file"
+  printf '✓ Kilo Code configured with a scoped WRITE key\n'
 fi
 
 printf '\nNoosphere installation finished.\n'
 printf 'Open: %s/wiki\n' "$(node -e 'const fs=require("fs"); const c=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(c.baseUrl)' "$NOOSPHERE_CREDENTIALS_FILE")"
 printf 'Credentials: %s (mode 0600)\n' "$NOOSPHERE_CREDENTIALS_FILE"
-if has_integration opencode || has_integration kilocode; then
-  printf 'OpenCode/Kilo keep the initial key in their mode-0600 user config. Replace it with a tool-scoped key from /wiki/admin/keys when convenient.\n'
+if has_integration openclaw || has_integration hermes || has_integration opencode || has_integration kilocode; then
+  printf 'Each selected tool uses its own persisted WRITE key; the bootstrap ADMIN key is not written to tool config.\n'
 fi

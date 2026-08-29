@@ -45,6 +45,9 @@ jobs:
           (cd dist && sha256sum --check "hermes-noosphere-memory-${version}.tar.gz.sha256")
           bash -n dist/install.sh dist/install-openclaw.sh
 
+      # This workflow is intentionally read-only. The trusted publisher attaches
+      # all six files to a draft release and reads them back by following
+      # docs/COORDINATED-RELEASE.md before public promotion.
       - name: Upload workflow artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

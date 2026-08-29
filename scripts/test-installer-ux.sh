@@ -2,10 +2,15 @@
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+version=$(tr -d '\r\n' < "$root/VERSION")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/fake-bin" "$tmp/home/.config/opencode" "$tmp/home/.config/kilo"
 fixture_api_key="noo_fixture_$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
+fixture_bootstrap_key="noo_fixture_$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
+fixture_hermes_key="noo_fixture_$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
+fixture_opencode_key="noo_fixture_$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
+fixture_kilocode_key="noo_fixture_$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
 
 cat > "$tmp/fake-backend.sh" <<'BACKEND'
 #!/usr/bin/env bash
@@ -13,8 +18,10 @@ set -euo pipefail
 printf '%s\n' "$NOOSPHERE_INSTALL_OPENCLAW" > "$INSTALLER_TEST_RECORD"
 install -d -m 700 "$(dirname "$NOOSPHERE_CREDENTIALS_FILE")"
 install -m 600 /dev/null "$NOOSPHERE_CREDENTIALS_FILE"
-printf '{\n  "baseUrl": "http://127.0.0.1:6578",\n  "apiKey": "%s",\n  "adminEmail": "admin@noosphere.local",\n  "adminPassword": "fixture-admin-password"\n}\n' \
-  "$NOOSPHERE_TEST_API_KEY" > "$NOOSPHERE_CREDENTIALS_FILE"
+printf '{\n  "baseUrl": "http://127.0.0.1:6578",\n  "apiKey": "%s",\n  "bootstrapApiKey": "%s",\n  "integrationApiKeys": {\n    "hermes": "%s",\n    "opencode": "%s",\n    "kilocode": "%s"\n  },\n  "adminEmail": "admin@noosphere.local",\n  "adminPassword": "fixture-admin-password"\n}\n' \
+  "$NOOSPHERE_TEST_API_KEY" "$NOOSPHERE_TEST_BOOTSTRAP_KEY" \
+  "$NOOSPHERE_TEST_HERMES_KEY" "$NOOSPHERE_TEST_OPENCODE_KEY" "$NOOSPHERE_TEST_KILOCODE_KEY" \
+  > "$NOOSPHERE_CREDENTIALS_FILE"
 BACKEND
 chmod 700 "$tmp/fake-backend.sh"
 fake_backend_sha=$(sha256sum "$tmp/fake-backend.sh" | awk '{print $1}')
@@ -25,6 +32,30 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$INSTALLER_TEST_HERMES_LOG"
 HERMES
 chmod 700 "$tmp/fake-bin/hermes"
+
+cat > "$tmp/fake-bin/curl" <<'CURL'
+#!/usr/bin/env bash
+set -euo pipefail
+config='' url=''
+for arg in "$@"; do
+  [[ "$arg" != *noo_* ]] || { echo 'secret appeared in curl argv' >&2; exit 90; }
+done
+while (($# > 0)); do
+  case "$1" in
+    --config) config=$2; shift 2 ;;
+    http://*|https://*) url=$1; shift ;;
+    *) shift ;;
+  esac
+done
+[[ -f "$config" && $(stat -c '%a' "$config") == 600 ]]
+grep -q 'header = "Authorization: Bearer noo_' "$config"
+case "$url" in
+  */api/articles*) printf '200' ;;
+  */api/keys) printf '403' ;;
+  *) exit 91 ;;
+esac
+CURL
+chmod 700 "$tmp/fake-bin/curl"
 
 cat > "$tmp/home/.config/opencode/opencode.json" <<'JSON'
 {
@@ -55,6 +86,10 @@ common_env=(
   INSTALLER_TEST_RECORD="$tmp/backend-mode.txt"
   INSTALLER_TEST_HERMES_LOG="$tmp/hermes.log"
   NOOSPHERE_TEST_API_KEY="$fixture_api_key"
+  NOOSPHERE_TEST_BOOTSTRAP_KEY="$fixture_bootstrap_key"
+  NOOSPHERE_TEST_HERMES_KEY="$fixture_hermes_key"
+  NOOSPHERE_TEST_OPENCODE_KEY="$fixture_opencode_key"
+  NOOSPHERE_TEST_KILOCODE_KEY="$fixture_kilocode_key"
 )
 
 mkdir -p "$tmp/home/.hermes/plugins/noosphere" "$tmp/home/.hermes/skills/noosphere-memory-hermes"
@@ -66,8 +101,13 @@ env "${common_env[@]}" bash "$root/install.sh" \
   --non-interactive --with hermes,opencode,kilocode > "$tmp/install.out"
 
 test "$(<"$tmp/backend-mode.txt")" = false
-! grep -q "$fixture_api_key" "$tmp/install.out"
-! grep -q 'fixture-admin-password' "$tmp/install.out"
+for secret_value in "$fixture_api_key" "$fixture_bootstrap_key" "$fixture_hermes_key" \
+  "$fixture_opencode_key" "$fixture_kilocode_key" 'fixture-admin-password'; do
+  if grep -Fq "$secret_value" "$tmp/install.out"; then
+    echo 'installer output exposed a credential fixture' >&2
+    exit 1
+  fi
+done
 
 env \
   OPENCODE_CONFIG="$tmp/home/.config/opencode/opencode.json" \
@@ -75,6 +115,10 @@ env \
   HERMES_ENV="$tmp/home/.hermes/.env" \
   HERMES_CONFIG="$tmp/home/.hermes/noosphere.json" \
   NOOSPHERE_TEST_API_KEY="$fixture_api_key" \
+  NOOSPHERE_TEST_BOOTSTRAP_KEY="$fixture_bootstrap_key" \
+  NOOSPHERE_TEST_HERMES_KEY="$fixture_hermes_key" \
+  NOOSPHERE_TEST_OPENCODE_KEY="$fixture_opencode_key" \
+  NOOSPHERE_TEST_KILOCODE_KEY="$fixture_kilocode_key" \
   node <<'NODE'
 const fs = require("node:fs");
 const opencode = JSON.parse(fs.readFileSync(process.env.OPENCODE_CONFIG, "utf8"));
@@ -88,10 +132,13 @@ const kiloEntries = find(kilo.plugin, "@sweetsophia/kilocode-noosphere-memory@")
 if (opencodeEntries.length !== 1 || opencodeEntries[0][0] !== "@sweetsophia/opencode-noosphere-memory@1.12.0") process.exit(1);
 if (kiloEntries.length !== 1 || kiloEntries[0][0] !== "@sweetsophia/kilocode-noosphere-memory@1.12.0") process.exit(2);
 if (!opencode.plugin.includes("other-opencode-plugin") || !kilo.plugin.includes("other-kilo-plugin")) process.exit(3);
-if (opencodeEntries[0][1].apiKey !== process.env.NOOSPHERE_TEST_API_KEY) process.exit(4);
-if (kiloEntries[0][1].apiKey !== process.env.NOOSPHERE_TEST_API_KEY) process.exit(5);
+if (opencodeEntries[0][1].apiKey !== process.env.NOOSPHERE_TEST_OPENCODE_KEY) process.exit(4);
+if (kiloEntries[0][1].apiKey !== process.env.NOOSPHERE_TEST_KILOCODE_KEY) process.exit(5);
+if (opencodeEntries[0][1].apiKey === process.env.NOOSPHERE_TEST_BOOTSTRAP_KEY) process.exit(9);
+if (kiloEntries[0][1].apiKey === process.env.NOOSPHERE_TEST_BOOTSTRAP_KEY) process.exit(10);
 const hermesEnv = fs.readFileSync(process.env.HERMES_ENV, "utf8");
-if (!hermesEnv.includes(`HERMES_NOOSPHERE_API_KEY=${process.env.NOOSPHERE_TEST_API_KEY}`)) process.exit(6);
+if (!hermesEnv.includes(`HERMES_NOOSPHERE_API_KEY=${process.env.NOOSPHERE_TEST_HERMES_KEY}`)) process.exit(6);
+if (hermesEnv.includes(process.env.NOOSPHERE_TEST_BOOTSTRAP_KEY)) process.exit(11);
 if (!hermesEnv.includes("KEEP_ME=yes")) process.exit(8);
 const hermes = JSON.parse(fs.readFileSync(process.env.HERMES_CONFIG, "utf8"));
 if (hermes.base_url !== "http://127.0.0.1:6578") process.exit(7);
@@ -124,12 +171,15 @@ fi
 test -L "$tmp/home/.hermes-symlink/.env"
 test "$(stat -c '%a' "$tmp/hermes-env-target")" = 644
 grep -q '^SENTINEL=yes$' "$tmp/hermes-env-target"
-! grep -q 'HERMES_NOOSPHERE_API_KEY' "$tmp/hermes-env-target"
+if grep -q 'HERMES_NOOSPHERE_API_KEY' "$tmp/hermes-env-target"; then
+  echo 'symlink target received a Hermes key' >&2
+  exit 1
+fi
 
 # Exercise the single-file launcher path with a checksum-owned Hermes archive.
 mkdir -p "$tmp/hermes-release" "$tmp/remote-launcher"
 "$root/scripts/package-hermes-plugin.sh" "$tmp/hermes-release" >/dev/null
-hermes_archive="$tmp/hermes-release/hermes-noosphere-memory-1.12.0.tar.gz"
+hermes_archive="$tmp/hermes-release/hermes-noosphere-memory-${version}.tar.gz"
 hermes_sha=$(sha256sum "$hermes_archive" | awk '{print $1}')
 cp "$root/install.sh" "$tmp/remote-launcher/install.sh"
 REMOTE_LAUNCHER="$tmp/remote-launcher/install.sh" HERMES_FIXTURE_SHA="$hermes_sha" node <<'NODE'
@@ -143,15 +193,29 @@ NODE
 cat > "$tmp/fake-bin/curl" <<'CURL'
 #!/usr/bin/env bash
 set -euo pipefail
-target=''
+target='' config='' url=''
+for arg in "$@"; do
+  [[ "$arg" != *noo_* ]] || { echo 'secret appeared in curl argv' >&2; exit 90; }
+done
 while (($# > 0)); do
   case "$1" in
-    -o) target=$2; shift 2 ;;
+    -o|--output) target=$2; shift 2 ;;
+    --config) config=$2; shift 2 ;;
+    http://*|https://*) url=$1; shift ;;
     *) shift ;;
   esac
 done
-[[ -n "$target" ]]
-cp "$INSTALLER_TEST_HERMES_ARCHIVE" "$target"
+if [[ -n "$config" ]]; then
+  [[ -f "$config" && $(stat -c '%a' "$config") == 600 ]]
+  case "$url" in
+    */api/articles*) printf '200' ;;
+    */api/keys) printf '403' ;;
+    *) exit 91 ;;
+  esac
+else
+  [[ -n "$target" ]]
+  cp "$INSTALLER_TEST_HERMES_ARCHIVE" "$target"
+fi
 CURL
 chmod 700 "$tmp/fake-bin/curl"
 : > "$tmp/hermes.log"
@@ -162,13 +226,22 @@ env "${common_env[@]}" \
 test -f "$tmp/home/.hermes-remote/plugins/noosphere/plugin.yaml"
 test -f "$tmp/home/.hermes-remote/skills/noosphere-memory-hermes/SKILL.md"
 grep -q '^config set memory.provider noosphere$' "$tmp/hermes.log"
-! grep -q 'memory setup' "$tmp/hermes.log"
-! grep -q "$fixture_api_key" "$tmp/hermes-remote.out"
+if grep -q 'memory setup' "$tmp/hermes.log"; then
+  echo 'nested Hermes setup unexpectedly ran' >&2
+  exit 1
+fi
+for secret_value in "$fixture_api_key" "$fixture_bootstrap_key" "$fixture_hermes_key"; do
+  if grep -Fq "$secret_value" "$tmp/hermes-remote.out"; then
+    echo 'remote Hermes output exposed a credential fixture' >&2
+    exit 1
+  fi
+done
 
 mkdir -p "$tmp/no-hermes-bin"
 cp "$tmp/fake-bin/curl" "$tmp/no-hermes-bin/curl"
+node_bin_dir=$(dirname "$(command -v node)")
 env "${common_env[@]}" \
-  PATH="$tmp/no-hermes-bin:/usr/bin:/bin" \
+  PATH="$tmp/no-hermes-bin:$node_bin_dir:/usr/bin:/bin" \
   HERMES_HOME="$tmp/home/.hermes-without-cli" \
   INSTALLER_TEST_HERMES_ARCHIVE="$hermes_archive" \
   bash "$tmp/remote-launcher/install.sh" --non-interactive --with hermes > "$tmp/hermes-without-cli.out"
@@ -230,4 +303,4 @@ env HOME="$tmp/modes/resume" NOOSPHERE_HOME="$tmp/modes/resume" PATH="$mode_path
   bash "$root/install.sh" --dry-run --core-only > "$tmp/mode-resume.out"
 grep -q 'Mode:      resume or verify interrupted installation' "$tmp/mode-resume.out"
 
-printf 'installer_ux_tests=GREEN core_mode=yes lifecycle_modes=3 no_tty_guard=yes integration_merge=yes unversioned_dedupe=yes remote_hermes=yes stale_overlay=clean hermes_symlink=blocked atomic_secret_rewrite=yes secret_output=clean guards=8\n'
+printf 'installer_ux_tests=GREEN core_mode=yes lifecycle_modes=3 no_tty_guard=yes integration_merge=yes unversioned_dedupe=yes scoped_tool_keys=yes bootstrap_tool_config=absent secret_argv=clean remote_hermes=yes stale_overlay=clean hermes_symlink=blocked atomic_secret_rewrite=yes secret_output=clean guards=8\n'

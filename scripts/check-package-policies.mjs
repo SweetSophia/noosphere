@@ -249,6 +249,7 @@ const hermesReleaseWorkflow = readText(policy.hermesReleaseWorkflow);
 const hermesReleaseWorkflowLines = workflowLines(hermesReleaseWorkflow);
 const installerReleaseWorkflow = readText(policy.installerReleaseWorkflow);
 const installerReleaseWorkflowLines = workflowLines(installerReleaseWorkflow);
+const ciWorkflow = readText(".github/workflows/ci.yml");
 const installer = readText("install.sh");
 const installerBackend = readText("install-openclaw.sh");
 const installerPackager = readText("scripts/package-installer.sh");
@@ -381,10 +382,20 @@ expect(
     installerReleaseWorkflow.includes("actions/upload-artifact@") &&
     installerReleaseWorkflow.includes("dist/install.sh.sha256") &&
     installerReleaseWorkflow.includes("dist/install-openclaw.sh.sha256") &&
+    installerReleaseWorkflow.includes("docs/COORDINATED-RELEASE.md") &&
+    installerReleaseWorkflow.includes("all six files to a draft release") &&
     unpinnedActionUses(installerReleaseWorkflowLines).length === 0 &&
     !installerReleaseWorkflow.includes("GH_TOKEN") &&
     !installerReleaseWorkflow.includes("gh release upload"),
   "The application tag must build and test checksum-owned installer assets using only pinned, read-only Actions steps.",
+);
+expect(
+  ciWorkflow.includes("installer:\n    runs-on: ubuntu-latest") &&
+    ciWorkflow.includes("actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10") &&
+    ciWorkflow.includes("persist-credentials: false") &&
+    ciWorkflow.includes("actions/setup-node@1e60f620b9541d401f9173298e0e86b0b68b2a1a") &&
+    ciWorkflow.includes("npm run installer:check"),
+  "The hosted installer gate must use pinned Actions and disable checkout credential persistence.",
 );
 expect(
   coordinatedReleaseGuide.includes("attach the complete\n   six-file installer artifact") &&
@@ -395,8 +406,8 @@ expect(
   "The coordinated release guide must attach/read back all checksum-owned installer assets before publication.",
 );
 expect(
-  installer.includes("BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/9bb57771983f50b41f055e9d1b5d2dd2961109fe/install-openclaw.sh'") &&
-    installer.includes("BACKEND_SHA256='9594c4bf3af358c417e1d489fd22f85e0cc99c6f8b438c6ac09c9df8042abfc7'") &&
+  installer.includes("BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/aac14248a7e6f52fba1ea5728cd495a232fcb218/install-openclaw.sh'") &&
+    installer.includes("BACKEND_SHA256='bd48b25d4a41e7100d3a23e6343742fa999bf5b2666768048d2779526e20f86e'") &&
     installer.includes("HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.12.0/hermes-noosphere-memory-1.12.0.tar.gz'") &&
     installer.includes("HERMES_BUNDLE_SHA256='1fc5f938887832b0f9bb273cb78a90a4da0f12b11d9fd2eeef79f923445e4f17'") &&
     installer.includes("Refusing Noosphere backend with an unexpected checksum") &&
@@ -416,6 +427,12 @@ expect(
     installerBackend.includes("run_openclaw()") &&
     installerBackend.includes("-u POSTGRES_PASSWORD") &&
     installerBackend.includes("-u NOOSPHERE_BOOTSTRAP_API_KEY") &&
+    installerBackend.includes("create_scoped_integration_key()") &&
+    installerBackend.includes("select_scoped_integration_key") &&
+    installerBackend.includes("write_credentials_json \"$SECRETS_FILE\" true false") &&
+    installerBackend.includes('"permissions":"WRITE"') &&
+    installerBackendTest.includes("scoped_keys=yes") &&
+    installerBackendTest.includes("secret_argv=clean") &&
     installerBackendTest.includes("child_env=clean") &&
     installerBackendTest.includes("OpenClaw child inherited secret variable") &&
     !installerBackend.includes("API KEY (save this - it will not be shown again)"),
@@ -435,6 +452,9 @@ expect(
     installerUxTest.includes("unversioned_dedupe=yes") &&
     installerUxTest.includes("hermes_symlink=blocked") &&
     installerUxTest.includes("atomic_secret_rewrite=yes") &&
+    installerUxTest.includes("scoped_tool_keys=yes") &&
+    installerUxTest.includes("bootstrap_tool_config=absent") &&
+    installerUxTest.includes("secret_argv=clean") &&
     installerPackageTest.includes("tampered backend unexpectedly passed") &&
     installerPackageTest.includes("tampered sibling backend unexpectedly passed") &&
     installerPackageTest.includes("sibling_checksum_sensitive=yes") &&

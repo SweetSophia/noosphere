@@ -22,7 +22,9 @@ You need two things before this plugin will do anything useful:
    ```
 
    The immutable launcher checksum-verifies its backend, preserves existing
-   database state, and stores generated credentials without printing them. See
+   database state, and stores generated credentials without printing them. It
+   creates and persists a Kilo-specific WRITE key; the bootstrap ADMIN key is
+   not written to Kilo configuration. See
    [Installing Noosphere](../docs/INSTALLATION.md) for the auditable download,
    upgrade behavior, and manual Compose path.
 

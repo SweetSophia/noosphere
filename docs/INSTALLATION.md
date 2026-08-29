@@ -62,10 +62,12 @@ less ~/.noosphere/credentials.json
 ```
 
 Runtime database and application secrets remain in `~/.noosphere/.env`, also
-with mode `0600`. OpenClaw uses its own protected secret-provider file. Hermes
-uses `~/.hermes/.env`. OpenCode and Kilo Code initially receive the bootstrap
-key in their mode-`0600` user configuration; replace that initial key with a
-separate tool-scoped key from `/wiki/admin/keys` when practical.
+with mode `0600`. The protected credential file separates the bootstrap ADMIN
+key from the default WRITE key and the persisted per-tool WRITE keys. OpenClaw,
+Hermes, OpenCode, and Kilo Code receive only their scoped key; the bootstrap key
+is never written to tool configuration. OpenClaw's secret-provider file also
+excludes the bootstrap key. Use `/wiki/admin/keys` later if you want to narrow a
+tool further with restricted scopes.
 
 Use `--show-credentials` only when deliberate terminal display is acceptable.
 It is never enabled by default.
@@ -213,7 +215,7 @@ This restriction is intentional and is not weakened by the guided installer.
 
 ## Source development
 
-For a source checkout, use `.env.example`, `docker-compose.yml`, and the guarded
+For a source checkout, use `noosphere.env.example`, `docker-compose.yml`, and the guarded
 new-volume or existing-volume procedure above. The local-development commands
 remain in the repository [README](../README.md#local-development).
 
