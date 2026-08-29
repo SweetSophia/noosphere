@@ -357,6 +357,17 @@ expect(
       installer.indexOf('ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION}'),
   "install-openclaw.sh must persist and reload an explicit NOOSPHERE_IMAGE override",
 );
+expect(
+  installer.includes("NOOSPHERE_VERSION_WAS_EXPLICIT=1") &&
+    installer.includes("NOOSPHERE_IMAGE_WAS_EXPLICIT=1") &&
+    installer.includes("NOOSPHERE_VERSION_WAS_EXPLICIT == 1 && NOOSPHERE_IMAGE_WAS_EXPLICIT == 0") &&
+    installer.includes("NOOSPHERE_IMAGE=''") &&
+    installer.includes("Operators retaining a custom registry or") &&
+    read("scripts/test-install-openclaw-transition-controller.sh").includes(
+      "test_runtime_config_release_version_rebases_persisted_image",
+    ),
+  "an explicit release version must discard only a stale persisted image while preserving an explicit operator image override",
+);
 for (const [runtimeKey, secretKey] of [
   ["POSTGRES_PASSWORD", "postgresPassword"],
   ["POSTGRES_MIGRATION_PASSWORD", "postgresMigrationPassword"],
@@ -1291,12 +1302,12 @@ const installerControllerDispatches = Array.from(
   (match) => match[1],
 );
 expect(
-  installerControllerDefinitions.length === 13 &&
-    installerControllerDispatches.length === 13 &&
-    new Set(installerControllerDispatches).size === 13 &&
+  installerControllerDefinitions.length === 14 &&
+    installerControllerDispatches.length === 14 &&
+    new Set(installerControllerDispatches).size === 14 &&
     JSON.stringify([...installerControllerDefinitions].sort()) ===
       JSON.stringify([...installerControllerDispatches].sort()),
-  "the installer transition-controller fixture must define and dispatch exactly thirteen unique owners",
+  "the installer transition-controller fixture must define and dispatch exactly fourteen unique owners",
 );
 const focusedControllerFixture = read("scripts/test-pgvector-transition-controller.sh");
 const focusedControllerDefinitions = Array.from(

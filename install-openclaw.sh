@@ -4,6 +4,16 @@ trap 'echo "Installer failed near line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 
 NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
 NOOSPHERE_PORT="${NOOSPHERE_PORT:-}"
+if [[ -n ${NOOSPHERE_VERSION:-} ]]; then
+  NOOSPHERE_VERSION_WAS_EXPLICIT=1
+else
+  NOOSPHERE_VERSION_WAS_EXPLICIT=0
+fi
+if [[ -n ${NOOSPHERE_IMAGE:-} ]]; then
+  NOOSPHERE_IMAGE_WAS_EXPLICIT=1
+else
+  NOOSPHERE_IMAGE_WAS_EXPLICIT=0
+fi
 NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-}"
 NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-}"
 APP_URL="${APP_URL:-}"
@@ -314,7 +324,14 @@ resolve_runtime_config() {
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-$(env_get "$runtime_env" NOOSPHERE_VERSION)}"
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.12.0}"
-  NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-$(env_get "$runtime_env" NOOSPHERE_IMAGE)}"
+  if ((NOOSPHERE_VERSION_WAS_EXPLICIT == 1 && NOOSPHERE_IMAGE_WAS_EXPLICIT == 0)); then
+    # A version-bound public upgrade must not inherit an installer-persisted
+    # image from the previous release. Operators retaining a custom registry or
+    # image must pass NOOSPHERE_IMAGE explicitly alongside the release version.
+    NOOSPHERE_IMAGE=''
+  else
+    NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-$(env_get "$runtime_env" NOOSPHERE_IMAGE)}"
+  fi
   APP_URL="${APP_URL:-$(env_get "$runtime_env" APP_URL)}"
   BIND_ADDRESS="${BIND_ADDRESS:-$(env_get "$runtime_env" BIND_ADDRESS)}"
   REDIS_URL="${REDIS_URL:-$(env_get "$runtime_env" REDIS_URL)}"
