@@ -7,7 +7,12 @@ BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/81dc9d68ddd
 BACKEND_SHA256='23879652c3724c8932656c259a0852c9f1fa7aed5273b68fa557b8d594d08a62'
 HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.12.0/hermes-noosphere-memory-1.12.0.tar.gz'
 HERMES_BUNDLE_SHA256='1fc5f938887832b0f9bb273cb78a90a4da0f12b11d9fd2eeef79f923445e4f17'
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_PATH="${BASH_SOURCE[0]:-}"
+if [[ -n "$SCRIPT_PATH" ]]; then
+  SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"
+else
+  SCRIPT_DIR=''
+fi
 NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
 NOOSPHERE_CREDENTIALS_FILE="${NOOSPHERE_CREDENTIALS_FILE:-$NOOSPHERE_HOME/credentials.json}"
 INTEGRATIONS=''
@@ -147,7 +152,7 @@ while (($# > 0)); do
   esac
 done
 
-if [[ -f "$SCRIPT_DIR/VERSION" && -f "$SCRIPT_DIR/install-openclaw.sh" ]]; then
+if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/VERSION" && -f "$SCRIPT_DIR/install-openclaw.sh" ]]; then
   SOURCE_CHECKOUT=true
 else
   SOURCE_CHECKOUT=false

@@ -415,6 +415,7 @@ expect(
     installerPackager.includes("sha256sum install-openclaw.sh > install-openclaw.sh.sha256") &&
     installerUxTest.includes("secret_output=clean") &&
     installerPackageTest.includes("tampered backend unexpectedly passed") &&
+    installerPackageTest.includes("piped_entrypoint=yes") &&
     installerPackageTest.includes("deterministic=yes"),
   "Installer packaging and tests must own deterministic bytes, checksums, credential non-disclosure, and a tampered-backend negative control.",
 );

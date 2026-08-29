@@ -56,6 +56,13 @@ NOOSPHERE_INSTALLER_TEST_MODE=resolve-backend \
   bash "$tmp/remote/install.sh" --core-only > "$tmp/remote-positive.out"
 grep -q "resolved_backend_sha256=$backend_sha" "$tmp/remote-positive.out"
 
+cat "$tmp/remote/install.sh" | \
+  PATH="$tmp/fake-bin:$PATH" \
+  FAKE_CURL_SOURCE="$first/install-openclaw.sh" \
+  NOOSPHERE_INSTALLER_TEST_MODE=resolve-backend \
+    bash -s -- --core-only > "$tmp/piped-positive.out"
+grep -q "resolved_backend_sha256=$backend_sha" "$tmp/piped-positive.out"
+
 cp "$first/install-openclaw.sh" "$tmp/tampered-backend.sh"
 printf '\n# tampered\n' >> "$tmp/tampered-backend.sh"
 if PATH="$tmp/fake-bin:$PATH" \
@@ -67,4 +74,4 @@ if PATH="$tmp/fake-bin:$PATH" \
 fi
 grep -q 'unexpected checksum' "$tmp/remote-negative.out"
 
-printf 'installer_package_tests=GREEN assets=6 deterministic=yes remote_checksum_sensitive=yes\n'
+printf 'installer_package_tests=GREEN assets=6 deterministic=yes piped_entrypoint=yes remote_checksum_sensitive=yes\n'
