@@ -414,6 +414,9 @@ expect(
     installerPackager.includes("sha256sum install.sh > install.sh.sha256") &&
     installerPackager.includes("sha256sum install-openclaw.sh > install-openclaw.sh.sha256") &&
     installerUxTest.includes("secret_output=clean") &&
+    installerUxTest.includes("lifecycle_modes=3") &&
+    installerUxTest.includes("no_tty_guard=yes") &&
+    installerUxTest.includes("stale_overlay=clean") &&
     installerPackageTest.includes("tampered backend unexpectedly passed") &&
     installerPackageTest.includes("piped_entrypoint=yes") &&
     installerPackageTest.includes("deterministic=yes"),

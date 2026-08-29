@@ -26,15 +26,18 @@ if (source.includes("API KEY (save this - it will not be shown again)")) {
 NODE
 
 source "$backend"
+fixture_value() {
+  node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))'
+}
 APP_URL=http://127.0.0.1:6578
-API_KEY=noo_fixture_backend_key
-ADMIN_PASSWORD=fixture-admin
-POSTGRES_PASSWORD=fixture-postgres
-POSTGRES_MIGRATION_PASSWORD=fixture-migration
-POSTGRES_APP_PASSWORD=fixture-app
-POSTGRES_HYBRID_ADMIN_PASSWORD=fixture-hybrid-admin
-POSTGRES_HYBRID_WORKER_PASSWORD=fixture-hybrid-worker
-NEXTAUTH_SECRET=fixture-nextauth
+API_KEY="noo_fixture_$(fixture_value)"
+ADMIN_PASSWORD="fixture-$(fixture_value)"
+POSTGRES_PASSWORD="fixture-$(fixture_value)"
+POSTGRES_MIGRATION_PASSWORD="fixture-$(fixture_value)"
+POSTGRES_APP_PASSWORD="fixture-$(fixture_value)"
+POSTGRES_HYBRID_ADMIN_PASSWORD="fixture-$(fixture_value)"
+POSTGRES_HYBRID_WORKER_PASSWORD="fixture-$(fixture_value)"
+NEXTAUTH_SECRET="fixture-$(fixture_value)"
 write_credentials_json "$tmp/user/credentials.json"
 write_credentials_json "$tmp/runtime/noosphere-memory.json" true
 

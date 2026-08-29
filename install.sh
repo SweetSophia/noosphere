@@ -83,6 +83,10 @@ normalize_integrations() {
       *) printf 'Unknown integration: %s\n' "$item" >&2; exit 2 ;;
     esac
   done
+  [[ -n "$INTEGRATIONS" ]] || {
+    echo '--with requires at least one supported integration: openclaw, hermes, opencode, or kilocode.' >&2
+    exit 2
+  }
 }
 
 has_integration() {
@@ -105,9 +109,44 @@ prompt_detected_integrations() {
 OpenClaw|openclaw|openclaw
 Hermes Agent|hermes|hermes
 OpenCode|opencode|opencode
-Kilo Code|kilo|kilocode
-Kilo Code|kilocode|kilocode
 EOF
+
+  if command -v kilo >/dev/null 2>&1 || command -v kilocode >/dev/null 2>&1; then
+    answer=''
+    read_prompt 'Configure Noosphere for detected Kilo Code? [Y/n]: ' answer || answer='n'
+    case "${answer:-Y}" in
+      Y|y|yes|YES) append_integration kilocode ;;
+    esac
+  fi
+}
+
+detect_lifecycle_mode() {
+  local journal="$NOOSPHERE_HOME/backups/postgres-pgvector/noosphere_postgres_data.phase-a2b.json"
+  local controller_state="$NOOSPHERE_HOME/postgres-transition-controller/state.json"
+  local phase=''
+
+  for state_file in "$journal" "$controller_state"; do
+    [[ -f "$state_file" ]] || continue
+    if command -v node >/dev/null 2>&1; then
+      phase=$(STATE_FILE="$state_file" node -e 'try { const s=JSON.parse(require("node:fs").readFileSync(process.env.STATE_FILE,"utf8")); process.stdout.write(typeof s.phase === "string" ? s.phase : ""); } catch {}' || true)
+      if [[ -n "$phase" && "$phase" != complete ]]; then
+        printf '%s\n' 'resume or verify interrupted installation'
+        return 0
+      fi
+    fi
+    printf '%s\n' 'upgrade or verify existing installation'
+    return 0
+  done
+
+  if command -v docker >/dev/null 2>&1 &&
+     { docker inspect noosphere-openclaw-db >/dev/null 2>&1 ||
+       docker volume inspect noosphere_postgres_data >/dev/null 2>&1; }; then
+    printf '%s\n' 'upgrade or verify existing installation'
+  elif [[ -f "$NOOSPHERE_HOME/.env" || -f "$NOOSPHERE_HOME/docker-compose.yml" ]]; then
+    printf '%s\n' 'upgrade or verify existing installation'
+  else
+    printf '%s\n' 'fresh installation'
+  fi
 }
 
 while (($# > 0)); do
@@ -166,6 +205,9 @@ if [[ "$SELECTION_EXPLICIT" == false ]]; then
   if can_prompt; then
     printf 'Noosphere %s installer\n\n' "$RELEASE_VERSION"
     prompt_detected_integrations
+  else
+    echo 'No interactive terminal detected. Re-run with --with <list> or --core-only.' >&2
+    exit 2
   fi
 fi
 
@@ -174,10 +216,11 @@ if [[ "$NON_INTERACTIVE" == true ]]; then
   export BIND_ADDRESS="${BIND_ADDRESS:-127.0.0.1}"
 fi
 
+lifecycle_mode=$(detect_lifecycle_mode)
 printf 'Install plan:\n'
 printf '  Noosphere: %s\n' "$RELEASE_VERSION"
 printf '  Runtime:   %s\n' "$NOOSPHERE_HOME"
-printf '  Mode:      install, upgrade, or resume as detected\n'
+printf '  Mode:      %s\n' "$lifecycle_mode"
 printf '  Agents:    %s\n' "${INTEGRATIONS:-none}"
 printf '  Secrets:   %s\n' "$NOOSPHERE_CREDENTIALS_FILE"
 
@@ -318,6 +361,7 @@ configure_hermes() {
     echo 'Refusing to replace a symlinked Hermes plugin or skill target.' >&2
     exit 1
   }
+  rm -rf -- "$plugin_target" "$skill_target"
   install -d -m 700 "$plugin_target" "$skill_target"
   tar -C "$plugin_source" -cf - . | tar -C "$plugin_target" -xf -
   tar -C "$skill_source" -cf - . | tar -C "$skill_target" -xf -
@@ -362,8 +406,10 @@ fs.chmodSync(configPath, 0o600);
 NODE
   if command -v hermes >/dev/null 2>&1; then
     hermes config set memory.provider noosphere
+    printf '✓ Hermes Agent configured\n'
+  else
+    printf '✓ Hermes Agent plugin installed (run `hermes config set memory.provider noosphere` after installing the Hermes CLI)\n'
   fi
-  printf '✓ Hermes Agent configured\n'
 }
 
 if has_integration hermes; then
