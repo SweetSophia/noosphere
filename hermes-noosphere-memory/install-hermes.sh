@@ -69,7 +69,9 @@ fi
 echo ""
 
 if command -v hermes >/dev/null 2>&1; then
-  if can_prompt; then
+  if [[ "${HERMES_NOOSPHERE_NON_INTERACTIVE:-false}" == true ]]; then
+    echo "Hermes CLI detected. Setup will be completed by the calling installer."
+  elif can_prompt; then
     answer=""
     read_prompt "Run 'hermes memory setup' now? [Y/n]: " answer || answer=""
     answer="${answer:-Y}"
