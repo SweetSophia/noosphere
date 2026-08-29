@@ -103,14 +103,14 @@ OpenClaw users can install Noosphere and the OpenClaw plugin with the repository
 installer:
 
 ```bash
-# Installer commit: a2a7ec7a1b9c2df7bd717282f980d52a8396977f
-# Expected SHA-256: 155af3791f4ed633a4aa45276dc93a04c3b3e9bc3e34d29b6944ef17277b6b79
+# Installer commit: e90a73b28723ff8bf7f3143c4f72d6fb6b7eceda
+# Expected SHA-256: 91c26e153973fd27b0c6e0d5550e69c1962d43b1115d0f5d5c52ae81a250d35a
 (
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/a2a7ec7a1b9c2df7bd717282f980d52a8396977f/install-openclaw.sh -o "$installer"
-  printf '%s  %s\n' '155af3791f4ed633a4aa45276dc93a04c3b3e9bc3e34d29b6944ef17277b6b79' "$installer" | sha256sum -c -
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/e90a73b28723ff8bf7f3143c4f72d6fb6b7eceda/install-openclaw.sh -o "$installer"
+  printf '%s  %s\n' '91c26e153973fd27b0c6e0d5550e69c1962d43b1115d0f5d5c52ae81a250d35a' "$installer" | sha256sum -c -
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.12.0}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.12.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.12.0}" bash "$installer"
   openclaw noosphere doctor
   openclaw noosphere status
