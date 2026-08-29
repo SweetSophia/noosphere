@@ -78,6 +78,22 @@ need() {
   fi
 }
 
+run_openclaw() {
+  env \
+    -u POSTGRES_PASSWORD \
+    -u POSTGRES_MIGRATION_PASSWORD \
+    -u POSTGRES_APP_PASSWORD \
+    -u POSTGRES_HYBRID_ADMIN_PASSWORD \
+    -u POSTGRES_HYBRID_WORKER_PASSWORD \
+    -u NEXTAUTH_SECRET \
+    -u REDIS_URL \
+    -u NOOSPHERE_ADMIN_PASSWORD \
+    -u NOOSPHERE_BOOTSTRAP_API_KEY \
+    -u NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 \
+    -u NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64 \
+    openclaw "$@"
+}
+
 random_secret() {
   node -e "console.log(require('crypto').randomBytes(Number(process.argv[1])).toString('base64url'))" "$1"
 }
@@ -1876,7 +1892,7 @@ if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then
   if [[ "$PLUGIN_SPEC" == npm:* ]]; then
     PLUGIN_INSTALL_ARGS+=(--pin)
   fi
-  openclaw "${PLUGIN_INSTALL_ARGS[@]}"
+  run_openclaw "${PLUGIN_INSTALL_ARGS[@]}"
 
   PATCH_FILE="$(mktemp)"
   cat > "$PATCH_FILE" <<JSON5
@@ -1913,12 +1929,12 @@ if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then
 }
 JSON5
 
-  openclaw config patch --file "$PATCH_FILE"
+  run_openclaw config patch --file "$PATCH_FILE"
   rm -f "$PATCH_FILE"
 
-  if openclaw gateway status >/dev/null 2>&1; then
+  if run_openclaw gateway status >/dev/null 2>&1; then
     echo "Restarting OpenClaw Gateway..."
-    openclaw gateway restart
+    run_openclaw gateway restart
   else
     echo "OpenClaw Gateway is not running or status is unavailable; start/restart it when ready."
   fi

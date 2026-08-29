@@ -38,6 +38,30 @@ POSTGRES_APP_PASSWORD="fixture-$(fixture_value)"
 POSTGRES_HYBRID_ADMIN_PASSWORD="fixture-$(fixture_value)"
 POSTGRES_HYBRID_WORKER_PASSWORD="fixture-$(fixture_value)"
 NEXTAUTH_SECRET="fixture-$(fixture_value)"
+mkdir -p "$tmp/fake-bin"
+cat > "$tmp/fake-bin/openclaw" <<'OPENCLAW'
+#!/usr/bin/env bash
+set -euo pipefail
+env | sort > "$OPENCLAW_ENV_CAPTURE"
+OPENCLAW
+chmod 700 "$tmp/fake-bin/openclaw"
+export POSTGRES_PASSWORD POSTGRES_MIGRATION_PASSWORD POSTGRES_APP_PASSWORD
+export POSTGRES_HYBRID_ADMIN_PASSWORD POSTGRES_HYBRID_WORKER_PASSWORD
+export NEXTAUTH_SECRET NOOSPHERE_ADMIN_PASSWORD="$ADMIN_PASSWORD"
+export NOOSPHERE_BOOTSTRAP_API_KEY="$API_KEY"
+export REDIS_URL="redis://fixture.invalid"
+export NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64="fixture-provider-config"
+export NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64="fixture-cache-keys"
+export OPENCLAW_ENV_CAPTURE="$tmp/openclaw.env" INSTALLER_SAFE_MARKER=preserved
+PATH="$tmp/fake-bin:$PATH" run_openclaw gateway status
+for secret_name in \
+  POSTGRES_PASSWORD POSTGRES_MIGRATION_PASSWORD POSTGRES_APP_PASSWORD \
+  POSTGRES_HYBRID_ADMIN_PASSWORD POSTGRES_HYBRID_WORKER_PASSWORD NEXTAUTH_SECRET \
+  REDIS_URL NOOSPHERE_ADMIN_PASSWORD NOOSPHERE_BOOTSTRAP_API_KEY \
+  NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64; do
+  ! grep -q "^${secret_name}=" "$tmp/openclaw.env"
+done
+grep -q '^INSTALLER_SAFE_MARKER=preserved$' "$tmp/openclaw.env"
 write_credentials_json "$tmp/user/credentials.json"
 write_credentials_json "$tmp/runtime/noosphere-memory.json" true
 
@@ -72,4 +96,4 @@ if "$0" "$tmp/sabotaged.sh" >/dev/null 2>&1; then
   exit 1
 fi
 
-printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 sabotage=red\n'
+printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 child_env=clean sabotage=red\n'
