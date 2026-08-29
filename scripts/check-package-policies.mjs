@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import yaml from "js-yaml";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
@@ -49,6 +50,15 @@ function readText(relativePath) {
 function readJson(relativePath) {
   try {
     return JSON.parse(readText(relativePath));
+  } catch (error) {
+    failures.push(`Failed to parse ${relativePath}: ${error.message}`);
+    return {};
+  }
+}
+
+function readYaml(relativePath) {
+  try {
+    return yaml.load(readText(relativePath)) ?? {};
   } catch (error) {
     failures.push(`Failed to parse ${relativePath}: ${error.message}`);
     return {};
@@ -201,6 +211,29 @@ function hasWorkflowInput(lines, inputName) {
   });
 }
 
+function hasNativeDockerMatrix(job) {
+  const include = job.strategy?.matrix?.include;
+  if (!Array.isArray(include) || include.length !== 2) return false;
+  return [
+    { platform: "linux/amd64", slug: "amd64", runner: "ubuntu-latest" },
+    { platform: "linux/arm64", slug: "arm64", runner: "ubuntu-24.04-arm" },
+  ].every((expected) =>
+    include.some((entry) =>
+      Object.entries(expected).every(([key, value]) => entry?.[key] === value),
+    ),
+  );
+}
+
+function workflowStep(job, name) {
+  return Array.isArray(job.steps) ? job.steps.find((step) => step?.name === name) : undefined;
+}
+
+function exactStringSet(value, expected) {
+  return Array.isArray(value) &&
+    value.length === expected.length &&
+    expected.every((entry) => value.includes(entry));
+}
+
 function normalizeSignal(value) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -245,6 +278,18 @@ const npmPublishWorkflow = readText(policy.npmPublishWorkflow);
 const npmPublishWorkflowLines = workflowLines(npmPublishWorkflow);
 const dockerPublishWorkflow = readText(policy.dockerPublishWorkflow);
 const dockerPublishWorkflowLines = workflowLines(dockerPublishWorkflow);
+const dockerPublishDocument = readYaml(policy.dockerPublishWorkflow);
+const dockerJobs = dockerPublishDocument.jobs ?? {};
+const dockerValidationJob = dockerJobs.validate ?? {};
+const dockerPrPlatformJob = dockerJobs["docker-platform"] ?? {};
+const dockerPublishPlatformJob = dockerJobs["publish-platform"] ?? {};
+const dockerPublishIndexJob = dockerJobs["publish-index"] ?? {};
+const dockerFinalJob = dockerJobs.docker ?? {};
+const dockerPrBuildStep = workflowStep(dockerPrPlatformJob, "Build target platform for validation") ?? {};
+const dockerPublishBuildStep = workflowStep(dockerPublishPlatformJob, "Build and push target platform by digest") ?? {};
+const dockerAssembleStep = workflowStep(dockerPublishIndexJob, "Assemble and verify multi-platform image") ?? {};
+const dockerFinalStep = workflowStep(dockerFinalJob, "Require every applicable Docker gate") ?? {};
+const dockerTriggers = dockerPublishDocument.on ?? {};
 const hermesReleaseWorkflow = readText(policy.hermesReleaseWorkflow);
 const hermesReleaseWorkflowLines = workflowLines(hermesReleaseWorkflow);
 const installerReleaseWorkflow = readText(policy.installerReleaseWorkflow);
@@ -257,6 +302,7 @@ const installerPackager = readText("scripts/package-installer.sh");
 const installerBackendTest = readText("scripts/test-installer-backend-mode.sh");
 const installerUxTest = readText("scripts/test-installer-ux.sh");
 const installerPackageTest = readText("scripts/test-installer-package.sh");
+const versionSyncScript = readText("scripts/sync-version.mjs");
 const coordinatedReleaseGuide = readText("docs/COORDINATED-RELEASE.md");
 const composeFile = readText("docker-compose.yml");
 const environmentExample = readText("noosphere.env.example");
@@ -360,6 +406,10 @@ expect(
   `The authenticated npm publisher must pin every action to a full commit SHA; unpinned: ${unpinnedActionUses(npmPublishWorkflowLines).join(", ")}`,
 );
 expect(
+  versionSyncScript.includes("VERSION build metadata is unsupported because coordinated Docker tags cannot preserve it"),
+  "The coordinated version policy must reject build metadata that cannot round-trip through Docker tags.",
+);
+expect(
   environmentExample.includes(`NOOSPHERE_VERSION=${rootPackage.version}`) &&
     !environmentExample.includes("NOOSPHERE_VERSION=latest"),
   "The public environment example must pin the coordinated release version rather than latest.",
@@ -377,12 +427,71 @@ expect(
 );
 expect(
   dockerPublishWorkflow.includes('GITHUB_REF_NAME" != "v${version}"') &&
-    dockerPublishWorkflow.includes("QEMU_IMAGE: tonistiigi/binfmt:qemu-v10.0.4@sha256:8f58e6214f4cc9dc83ce8f5acad1ece508eb6b20e696a8c1e9f274481982c541") &&
-    dockerPublishWorkflowLines.includes("flavor: latest=auto") &&
-    dockerPublishWorkflowLines.includes("if: github.ref_type == 'tag'") &&
-    dockerPublishWorkflowLines.includes("push: ${{ github.ref_type == 'tag' }}") &&
+    dockerValidationJob["runs-on"] === "ubuntu-latest" &&
+    dockerValidationJob.outputs?.version === "${{ steps.version.outputs.version }}" &&
+    workflowStep(dockerValidationJob, "Validate version metadata")?.id === "version" &&
+    dockerTriggers.push?.paths?.includes(".github/workflows/docker-publish.yml") &&
+    dockerTriggers.push?.paths?.includes("scripts/check-package-policies.mjs") &&
+    dockerTriggers.pull_request?.paths?.includes(".github/workflows/docker-publish.yml") &&
+    dockerTriggers.pull_request?.paths?.includes("scripts/check-package-policies.mjs"),
+  "The Docker workflow and its owning policy must trigger their own native-platform gates.",
+);
+expect(
+  dockerPrPlatformJob.if === "github.ref_type != 'tag'" &&
+    dockerPrPlatformJob.needs === "validate" &&
+    dockerPrPlatformJob["runs-on"] === "${{ matrix.runner }}" &&
+    dockerPrPlatformJob.permissions?.contents === "read" &&
+    dockerPrPlatformJob.permissions?.packages === undefined &&
+    hasNativeDockerMatrix(dockerPrPlatformJob) &&
+    dockerPrBuildStep.with?.platforms === "${{ matrix.platform }}" &&
+    dockerPrBuildStep.with?.load === true &&
+    dockerPrBuildStep.with?.push === false &&
+    workflowStep(dockerPrPlatformJob, "Verify local image architecture") !== undefined &&
+    workflowStep(dockerPrPlatformJob, "Log in to GitHub Container Registry") === undefined,
+  "Pull-request Docker builds must run natively on both platforms, load and inspect each image, and receive no package-write authority.",
+);
+expect(
+  dockerPublishPlatformJob.if === "github.ref_type == 'tag'" &&
+    dockerPublishPlatformJob.needs === "validate" &&
+    dockerPublishPlatformJob["runs-on"] === "${{ matrix.runner }}" &&
+    dockerPublishPlatformJob.permissions?.contents === "read" &&
+    dockerPublishPlatformJob.permissions?.packages === "write" &&
+    hasNativeDockerMatrix(dockerPublishPlatformJob) &&
+    dockerPublishBuildStep.with?.platforms === "${{ matrix.platform }}" &&
+    dockerPublishBuildStep.with?.outputs?.includes("push-by-digest=true") &&
+    workflowStep(dockerPublishPlatformJob, "Log in to GitHub Container Registry") !== undefined &&
+    workflowStep(dockerPublishPlatformJob, "Upload platform digest") !== undefined,
+  "Tag-only Docker jobs must build both platforms natively and publish each image only by digest.",
+);
+expect(
+  dockerPublishIndexJob.if === "github.ref_type == 'tag'" &&
+    exactStringSet(dockerPublishIndexJob.needs, ["validate", "publish-platform"]) &&
+    dockerPublishIndexJob.permissions?.packages === "write" &&
+    dockerAssembleStep.if === undefined &&
+    dockerAssembleStep.run?.includes("expected two platform digests") &&
+    dockerAssembleStep.run?.includes("docker buildx imagetools create") &&
+    dockerAssembleStep.run?.includes('sort == ["linux/amd64", "linux/arm64"]') &&
+    workflowStep(dockerPublishIndexJob, "Extract metadata")?.with?.flavor === "latest=auto",
+  "The tag-only Docker index job must require both digest builds, assemble exactly two sources, and verify AMD64 plus ARM64 before success.",
+);
+expect(
+  dockerFinalJob.name === "docker" &&
+    exactStringSet(dockerFinalJob.needs, ["validate", "docker-platform", "publish-platform", "publish-index"]) &&
+    dockerFinalJob.if?.includes("always()") &&
+    dockerFinalStep.run?.includes("needs['docker-platform'].result") &&
+    dockerFinalStep.run?.includes("needs['publish-platform'].result") &&
+    dockerFinalStep.run?.includes("needs['publish-index'].result"),
+  "The final docker check must aggregate validation, PR builds, tag digest builds, and index publication without bypassing a skipped or failed dependency.",
+);
+expect(
+  dockerPublishDocument.permissions?.contents === "read" &&
+    dockerPublishDocument.permissions?.packages === undefined &&
+    Object.values(dockerJobs).flatMap((job) => job.steps ?? [])
+      .filter((step) => step.uses?.startsWith("actions/checkout@"))
+      .every((step) => step.with?.["persist-credentials"] === false) &&
+    !dockerPublishWorkflow.includes("docker/setup-qemu-action@") &&
     !dockerPublishWorkflow.includes("enable={{is_default_branch}}"),
-  "The Docker workflow must bind v$VERSION and publish latest only from the canonical application tag.",
+  "The Docker workflow must keep global permissions read-only, disable checkout credentials, and never reintroduce emulated Node builds or default-branch latest publication.",
 );
 expect(
   unpinnedActionUses(dockerPublishWorkflowLines).length === 0,

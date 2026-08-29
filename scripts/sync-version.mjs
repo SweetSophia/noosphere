@@ -12,6 +12,9 @@ const version = readFileSync(resolve(root, "VERSION"), "utf8").trim();
 if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
   throw new Error(`VERSION must be a semver-like value, got ${JSON.stringify(version)}`);
 }
+if (version.includes("+")) {
+  throw new Error("VERSION build metadata is unsupported because coordinated Docker tags cannot preserve it");
+}
 
 const ignoredDirs = new Set([".git", ".next", "coverage", "node_modules"]);
 const packageJsonFiles = discoverPackageJsonFiles(root);
