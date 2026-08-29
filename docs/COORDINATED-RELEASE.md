@@ -67,9 +67,9 @@ publish registry tags. Only the canonical application release tag may move
    policy script by its absolute repository path, for example:
    `repo_root=$(git rev-parse --show-toplevel); release_dir=/path/to/public-assets;
    (cd "$release_dir" && node "$repo_root/scripts/check-postgres-image-policy.mjs"
-   --verify-remote --verify-release-assets)`. This final gate verifies the local
-   checksum set, launcher/backend/Hermes ownership, and public bytes for all six
-   release assets.
+   --verify-remote --verify-release-files --verify-release-assets)`. This final
+   gate verifies the local checksum set, launcher/backend/Hermes ownership, and
+   public bytes for all six release assets.
 8. Never move, overwrite, or force-push a published release tag or replace a
    published release asset.
 

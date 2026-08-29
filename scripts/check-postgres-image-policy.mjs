@@ -10,12 +10,11 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
 const verifyReleaseArtifacts = process.argv.includes("--verify-release-assets");
-const verifyReleaseFiles =
-  verifyReleaseArtifacts || process.argv.includes("--verify-release-files");
+const verifyReleaseFiles = process.argv.includes("--verify-release-files");
 const releaseRoot = resolve(process.cwd());
 const immutableHelperRef = "9da4af0a7b2275aa91eecd102095e0e470bbb0e3";
-const guidedInstallerRef = "90415949695a854a687d8dcebbe247f4be56efab";
-const guidedInstallerSha256 = "d2213eb5c14e1408eb8e2dea6d1368ff306b4ea9ae7875352388de9fec195dd2";
+const guidedInstallerRef = "d139ea0d95c6e901ee3400e00a440a9810963ef8";
+const guidedInstallerSha256 = "3a3abf491210fb4115305d68b099cd4d4bac67cfadbe8fb310c616ba12272352";
 const guidedBackendRef = "bf10dc9647eb5639e4293a84a4eda76221be2b42";
 const guidedBackendSha256 = "03a6056d690149e4020670add8da81faf5559e78948d646f581d3ab12924b533";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
@@ -58,7 +57,6 @@ function expect(condition, message) {
 const releaseVersion = read("VERSION").trim();
 const versionBoundInstallerCommand =
   `NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-${releaseVersion}}" ` +
-  `NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${releaseVersion}}" ` +
   `NOOSPHERE_PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${releaseVersion}}" ` +
   'bash "$installer" --non-interactive --with openclaw';
 
@@ -216,6 +214,7 @@ expectExactDbImage("docker-compose.noosphere.yml", candidateImage, "noosphere_po
 expectExactDbImage("install-openclaw.sh", candidateImage, "noosphere_postgres_authorization");
 
 const installer = read("install-openclaw.sh");
+const guidedInstaller = read("install.sh");
 const publishedImageEnv = read("noosphere.env.example");
 const installerValidationEnv = {
   ...process.env,
@@ -892,7 +891,7 @@ for (const relativePath of [
   const checksumCount = countLiteral(text, "sha256sum -c -");
   const safeInstallerBlocks = Array.from(
     text.matchAll(
-      /^(\s*)\(\n\1  set -e\n\1  installer="\$\(mktemp\)"\n\1  trap 'rm -f "\$installer"' EXIT\n\1  curl -fsSL [^\n]+ -o "\$installer"\n\1  printf '[^\n]+' '[a-f0-9]{64}' "\$installer" \| sha256sum -c -\n\1  NOOSPHERE_VERSION="\$\{NOOSPHERE_VERSION:-[0-9]+\.[0-9]+\.[0-9]+\}" NOOSPHERE_IMAGE="\$\{NOOSPHERE_IMAGE:-ghcr\.io\/sweetsophia\/noosphere:[0-9]+\.[0-9]+\.[0-9]+\}" NOOSPHERE_PLUGIN_SPEC="\$\{NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia\/openclaw-noosphere-memory@[0-9]+\.[0-9]+\.[0-9]+\}" bash "\$installer" --non-interactive --with openclaw\n(?:\1  openclaw noosphere (?:doctor|status)\n)*\1\)$/gm,
+      /^(\s*)\(\n\1  set -e\n\1  installer="\$\(mktemp\)"\n\1  trap 'rm -f "\$installer"' EXIT\n\1  curl -fsSL [^\n]+ -o "\$installer"\n\1  printf '[^\n]+' '[a-f0-9]{64}' "\$installer" \| sha256sum -c -\n\1  NOOSPHERE_VERSION="\$\{NOOSPHERE_VERSION:-[0-9]+\.[0-9]+\.[0-9]+\}" NOOSPHERE_PLUGIN_SPEC="\$\{NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia\/openclaw-noosphere-memory@[0-9]+\.[0-9]+\.[0-9]+\}" bash "\$installer" --non-interactive --with openclaw\n(?:\1  openclaw noosphere (?:doctor|status)\n)*\1\)$/gm,
     ),
   ).length;
   expect(
@@ -1590,7 +1589,31 @@ if (verifyRemoteArtifacts) {
   }
 }
 
-let releaseAssetExpectations = [];
+const checkedReleaseVersion = extractShellStringConstant(guidedInstaller, "RELEASE_VERSION");
+const checkedReleaseBackendName = "install-openclaw.sh";
+const checkedReleaseLauncherName = "install.sh";
+const checkedReleaseHermesName = `hermes-noosphere-memory-${checkedReleaseVersion}.tar.gz`;
+const checkedReleaseHermesSha = extractShellConstant(guidedInstaller, "HERMES_BUNDLE_SHA256");
+const checkedReleaseBase =
+  `https://github.com/SweetSophia/noosphere/releases/download/v${checkedReleaseVersion}/`;
+const canonicalChecksum = (sha256, filename) => Buffer.from(`${sha256}  ${filename}\n`, "utf8");
+const releaseAssetExpectations = [
+  { filename: checkedReleaseLauncherName, sha256: guidedInstallerSha256 },
+  {
+    filename: `${checkedReleaseLauncherName}.sha256`,
+    sha256: sha256Bytes(canonicalChecksum(guidedInstallerSha256, checkedReleaseLauncherName)),
+  },
+  { filename: checkedReleaseBackendName, sha256: guidedBackendSha256 },
+  {
+    filename: `${checkedReleaseBackendName}.sha256`,
+    sha256: sha256Bytes(canonicalChecksum(guidedBackendSha256, checkedReleaseBackendName)),
+  },
+  { filename: checkedReleaseHermesName, sha256: checkedReleaseHermesSha },
+  {
+    filename: `${checkedReleaseHermesName}.sha256`,
+    sha256: sha256Bytes(canonicalChecksum(checkedReleaseHermesSha, checkedReleaseHermesName)),
+  },
+].map((asset) => ({ ...asset, url: `${checkedReleaseBase}${asset.filename}` }));
 if (verifyReleaseFiles) {
   const releaseLauncherName = "install.sh";
   const releaseBackendName = "install-openclaw.sh";
@@ -1657,12 +1680,6 @@ if (verifyReleaseFiles) {
     releaseHermesUrl === `${expectedReleaseBase}${hermesName}`,
     "release launcher Hermes URL must target its coordinated release asset",
   );
-
-  releaseAssetExpectations = expectedNames.map((filename) => ({
-    filename,
-    sha256: sha256Bytes(readReleaseBytes(filename)),
-    url: `${expectedReleaseBase}${filename}`,
-  }));
 }
 
 if (verifyReleaseArtifacts) {

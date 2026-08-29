@@ -351,17 +351,19 @@ The plugin provides explicit tools:
 
 It also supports automatic prompt-time recall through OpenClaw's before_prompt_build hook.
 
-Quick install on the machine running OpenClaw Gateway:
+Quick install on the machine running OpenClaw Gateway—after confirming that the
+coordinated [v1.13.0 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.0)
+exists with all six installer assets (source merge alone does not publish them):
 
-    # Installer commit: 90415949695a854a687d8dcebbe247f4be56efab
-    # Expected SHA-256: d2213eb5c14e1408eb8e2dea6d1368ff306b4ea9ae7875352388de9fec195dd2
+    # Installer commit: d139ea0d95c6e901ee3400e00a440a9810963ef8
+    # Expected SHA-256: 3a3abf491210fb4115305d68b099cd4d4bac67cfadbe8fb310c616ba12272352
     (
       set -e
       installer="$(mktemp)"
       trap 'rm -f "$installer"' EXIT
-      curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/90415949695a854a687d8dcebbe247f4be56efab/install.sh -o "$installer"
-      printf '%s  %s\n' 'd2213eb5c14e1408eb8e2dea6d1368ff306b4ea9ae7875352388de9fec195dd2' "$installer" | sha256sum -c -
-      NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.0}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.13.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.0}" bash "$installer" --non-interactive --with openclaw
+      curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/d139ea0d95c6e901ee3400e00a440a9810963ef8/install.sh -o "$installer"
+      printf '%s  %s\n' '3a3abf491210fb4115305d68b099cd4d4bac67cfadbe8fb310c616ba12272352' "$installer" | sha256sum -c -
+      NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.0}" bash "$installer" --non-interactive --with openclaw
       openclaw noosphere doctor
       openclaw noosphere status
     )
@@ -379,7 +381,6 @@ The direct installer defaults to the same coordinated release contract. To
 state that contract explicitly while preserving override support:
 
     NOOSPHERE_VERSION=1.13.0 \
-    NOOSPHERE_IMAGE=ghcr.io/sweetsophia/noosphere:1.13.0 \
     NOOSPHERE_PLUGIN_SPEC=npm:@sweetsophia/openclaw-noosphere-memory@1.13.0 \
     NOOSPHERE_PORT=6578 \
     APP_URL=http://127.0.0.1:6578 \

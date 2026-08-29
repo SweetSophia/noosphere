@@ -23,18 +23,20 @@ openclaw plugins install clawhub:noosphere-memory
 openclaw noosphere setup
 ```
 
-or:
+or, after confirming the coordinated
+[`v1.13.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.0)
+exists with all six installer assets (source merge alone does not publish them):
 
 ```bash
-# Installer commit: 90415949695a854a687d8dcebbe247f4be56efab
-# Expected SHA-256: d2213eb5c14e1408eb8e2dea6d1368ff306b4ea9ae7875352388de9fec195dd2
+# Installer commit: d139ea0d95c6e901ee3400e00a440a9810963ef8
+# Expected SHA-256: 3a3abf491210fb4115305d68b099cd4d4bac67cfadbe8fb310c616ba12272352
 (
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/90415949695a854a687d8dcebbe247f4be56efab/install.sh -o "$installer"
-  printf '%s  %s\n' 'd2213eb5c14e1408eb8e2dea6d1368ff306b4ea9ae7875352388de9fec195dd2' "$installer" | sha256sum -c -
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.0}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.13.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.0}" bash "$installer" --non-interactive --with openclaw
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/d139ea0d95c6e901ee3400e00a440a9810963ef8/install.sh -o "$installer"
+  printf '%s  %s\n' '3a3abf491210fb4115305d68b099cd4d4bac67cfadbe8fb310c616ba12272352' "$installer" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.0}" bash "$installer" --non-interactive --with openclaw
 )
 ```
 

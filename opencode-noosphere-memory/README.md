@@ -16,8 +16,13 @@ You need two things before this plugin will do anything useful:
    `http://127.0.0.1:6578`. For a guided local install that also configures
    OpenCode, run:
 
+   Before running this pinned `1.13.0` command, confirm that the coordinated
+   [`v1.13.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.0)
+   exists with all six installer assets. Source merge alone does not publish the
+   image, package, or release assets.
+
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/90415949695a854a687d8dcebbe247f4be56efab/install.sh \
+   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/d139ea0d95c6e901ee3400e00a440a9810963ef8/install.sh \
      | bash -s -- --with opencode
    ```
 
@@ -30,7 +35,7 @@ You need two things before this plugin will do anything useful:
    (see [Configuration](#configuration)).
 
 2. **A Noosphere API key for this tool.** The plugin will refuse to start
-   without one. Create a **tool-scoped** key (named after the tool, e.g.
+   without one. Create a **tool-specific WRITE key** (named after the tool, e.g.
    `opencode`) in the Noosphere admin UI at:
 
    ```text
@@ -40,7 +45,10 @@ You need two things before this plugin will do anything useful:
    Admin login is required. The local Docker Compose install creates an
    `admin@noosphere.local` admin account whose password is in `.env` as
    `NOOSPHERE_ADMIN_PASSWORD`. See [Secrets](#secrets) below for which
-   permissions the key needs and where to put it.
+   permissions the key needs and where to put it. “Tool-specific” means the
+   credential is isolated from ADMIN and other integrations; guided setup leaves
+   corpus scopes unrestricted so saves without `restrictedTags` continue to
+   work. Apply a restricted scope only together with matching integration tags.
 
 ## Install
 

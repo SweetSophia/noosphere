@@ -244,6 +244,14 @@ function exactBlockLines(block, expected) {
   return lines.length === expected.length && expected.every((line, index) => lines[index] === line);
 }
 
+function hasPluginTagExclusion(block) {
+  const condition = workflowLines(block).find((line) => line.startsWith("if:")) ?? "";
+  return condition.includes("github.ref_type == 'tag'") &&
+    ["v-openclaw-", "v-opencode-", "v-kilocode-", "v-hermes-"].every((tag) =>
+      condition.includes(`refs/tags/${tag}`),
+    );
+}
+
 function normalizeSignal(value) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -322,10 +330,20 @@ const installerPackager = readText("scripts/package-installer.sh");
 const installerBackendTest = readText("scripts/test-installer-backend-mode.sh");
 const installerUxTest = readText("scripts/test-installer-ux.sh");
 const installerPackageTest = readText("scripts/test-installer-package.sh");
+const postgresImagePolicy = readText("scripts/check-postgres-image-policy.mjs");
 const versionSyncScript = readText("scripts/sync-version.mjs");
 const coordinatedReleaseGuide = readText("docs/COORDINATED-RELEASE.md");
 const composeFile = readText("docker-compose.yml");
 const environmentExample = readText("noosphere.env.example");
+const guidedCommandDocs = [
+  "docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md",
+  "docs/OPENCLAW-OFFICIAL-PLUGIN-DEVELOPMENT-PLAN.md",
+  "docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md",
+  "docs/articles/noosphere-medium-article.md",
+  "openclaw-noosphere-memory/README.md",
+  "opencode-noosphere-memory/README.md",
+  "kilocode-noosphere-memory/README.md",
+].map((relativePath) => ({ relativePath, text: readText(relativePath) }));
 const workflowPolicyPaths = [
   ".github/workflows/ci.yml",
   ".github/workflows/installer-release.yml",
@@ -440,8 +458,17 @@ expect(
     !/APP_URL:-http:\/\/(?!127\.0\.0\.1|localhost)/.test(composeFile),
   "The release Compose file must use a configurable Obsidian host path and must not contain personal home paths or non-loopback URL defaults.",
 );
+for (const { relativePath, text } of guidedCommandDocs) {
+  expect(
+    text.includes("releases/tag/v1.13.0") &&
+      text.includes("all six installer assets") &&
+      !text.includes('NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.13.0}"'),
+    `${relativePath} must gate pinned commands on the coordinated release and preserve persisted custom images.`,
+  );
+}
 expect(
   dockerPublishWorkflowLines.includes("type=semver,pattern={{version}}") &&
+    dockerPublishWorkflowLines.includes("type=sha,prefix=sha-") &&
     !hasDockerRefTagEntry(dockerPublishWorkflowLines),
   "The Docker publish workflow must strip the release tag's v prefix so NOOSPHERE_VERSION resolves to a published image tag.",
 );
@@ -453,10 +480,15 @@ expect(
       "version: ${{ steps.version.outputs.version }}",
     ]) &&
     workflowLines(yamlStepBlock(dockerValidationJob, "Validate version metadata")).includes("id: version") &&
+    exactBlockLines(yamlNamedBlock(dockerValidationJob, "permissions", 4), ["permissions:", "contents: read"]) &&
     dockerPushTrigger.includes('- ".github/workflows/docker-publish.yml"') &&
-    dockerPushTrigger.includes('- "scripts/check-package-policies.mjs"') &&
+    dockerPushTrigger.includes('- "public/**"') &&
+    dockerPushTrigger.includes('- "prisma.config.ts"') &&
+    dockerPushTrigger.includes('- "scripts/**"') &&
     dockerPullRequestTrigger.includes('- ".github/workflows/docker-publish.yml"') &&
-    dockerPullRequestTrigger.includes('- "scripts/check-package-policies.mjs"'),
+    dockerPullRequestTrigger.includes('- "public/**"') &&
+    dockerPullRequestTrigger.includes('- "prisma.config.ts"') &&
+    dockerPullRequestTrigger.includes('- "scripts/**"'),
   "The Docker workflow and its owning policy must trigger their own native-platform gates.",
 );
 expect(
@@ -473,7 +505,7 @@ expect(
   "Pull-request Docker builds must run natively on both platforms, load and inspect each image, and receive no package-write authority.",
 );
 expect(
-  workflowLines(dockerPublishPlatformJob).includes("if: github.ref_type == 'tag'") &&
+  hasPluginTagExclusion(dockerPublishPlatformJob) &&
     workflowLines(dockerPublishPlatformJob).includes("needs: validate") &&
     workflowLines(dockerPublishPlatformJob).includes("runs-on: ${{ matrix.runner }}") &&
     exactBlockLines(yamlNamedBlock(dockerPublishPlatformJob, "permissions", 4), [
@@ -489,7 +521,7 @@ expect(
   "Tag-only Docker jobs must build both platforms natively and publish each image only by digest.",
 );
 expect(
-  workflowLines(dockerPublishIndexJob).includes("if: github.ref_type == 'tag'") &&
+  hasPluginTagExclusion(dockerPublishIndexJob) &&
     workflowLines(dockerPublishIndexJob).includes("needs: [validate, publish-platform]") &&
     exactBlockLines(yamlNamedBlock(dockerPublishIndexJob, "permissions", 4), [
       "permissions:",
@@ -509,9 +541,14 @@ expect(
       "needs: [validate, docker-platform, publish-platform, publish-index]",
     ) &&
     workflowLines(dockerFinalJob).some((line) => line.startsWith("if:") && line.includes("always()")) &&
-    dockerFinalStep.includes("needs['docker-platform'].result") &&
-    dockerFinalStep.includes("needs['publish-platform'].result") &&
-    dockerFinalStep.includes("needs['publish-index'].result"),
+    exactBlockLines(yamlNamedBlock(dockerFinalJob, "permissions", 4), ["permissions:", "contents: read"]) &&
+    workflowLines(dockerFinalStep).includes("test '${{ needs.validate.result }}' = success") &&
+    workflowLines(dockerFinalStep).includes("test '${{ needs['docker-platform'].result }}' = skipped") &&
+    workflowLines(dockerFinalStep).includes("test '${{ needs['publish-platform'].result }}' = success") &&
+    workflowLines(dockerFinalStep).includes("test '${{ needs['publish-index'].result }}' = success") &&
+    workflowLines(dockerFinalStep).includes("test '${{ needs['docker-platform'].result }}' = success") &&
+    workflowLines(dockerFinalStep).includes("test '${{ needs['publish-platform'].result }}' = skipped") &&
+    workflowLines(dockerFinalStep).includes("test '${{ needs['publish-index'].result }}' = skipped"),
   "The final docker check must aggregate validation, PR builds, tag digest builds, and index publication without bypassing a skipped or failed dependency.",
 );
 expect(
@@ -571,7 +608,9 @@ expect(
     coordinatedReleaseGuide.includes("install-openclaw.sh` and `install-openclaw.sh.sha256") &&
     coordinatedReleaseGuide.includes("--verify-release-files") &&
     coordinatedReleaseGuide.includes("Download all six assets again from the **public** release") &&
-    coordinatedReleaseGuide.includes("--verify-release-assets") &&
+    coordinatedReleaseGuide.includes("--verify-release-files --verify-release-assets") &&
+    postgresImagePolicy.includes('const verifyReleaseFiles = process.argv.includes("--verify-release-files")') &&
+    !postgresImagePolicy.includes("verifyReleaseArtifacts ||") &&
     coordinatedReleaseGuide.includes("Never move, overwrite, or force-push a published release tag or replace a\n   published release asset"),
   "The coordinated release guide must attach/read back all checksum-owned installer assets before publication.",
 );
@@ -657,6 +696,13 @@ expect(
     installerPackageTest.includes("sibling_checksum_sensitive=yes") &&
     installerPackageTest.includes("piped_entrypoint=yes") &&
     installerPackageTest.includes("release_set_verified=yes") &&
+    installerPackageTest.includes("release_negative_controls=7") &&
+    installerPackageTest.includes("aligned tampered backend unexpectedly passed") &&
+    installerPackageTest.includes("redirected launcher unexpectedly passed") &&
+    installerPackageTest.includes("aligned tampered Hermes bundle unexpectedly passed") &&
+    installerPackageTest.includes("missing release asset unexpectedly passed") &&
+    installerPackageTest.includes("extra release asset unexpectedly passed") &&
+    installerPackageTest.includes("malformed release checksum unexpectedly passed") &&
     installerPackageTest.includes("--verify-release-files") &&
     installerPackageTest.includes("deterministic=yes"),
   "Installer packaging and tests must own deterministic bytes, checksums, credential non-disclosure, and a tampered-backend negative control.",

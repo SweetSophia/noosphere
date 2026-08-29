@@ -10,6 +10,9 @@ on:
       - "next.config.ts"
       - "src/**"
       - "prisma/**"
+      - "prisma.config.ts"
+      - "public/**"
+      - "scripts/**"
       - "package.json"
       - "package-lock.json"
       - "VERSION"
@@ -28,6 +31,9 @@ on:
       - "next.config.ts"
       - "src/**"
       - "prisma/**"
+      - "prisma.config.ts"
+      - "public/**"
+      - "scripts/**"
       - "package.json"
       - "package-lock.json"
       - "VERSION"
@@ -50,6 +56,8 @@ jobs:
   validate:
     name: docker-validate
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     # The coordinated application tag publishes the image. Plugin tags publish
     # their own artifacts and must not trigger redundant image builds.
     if: "!startsWith(github.ref, 'refs/tags/v-openclaw-') && !startsWith(github.ref, 'refs/tags/v-opencode-') && !startsWith(github.ref, 'refs/tags/v-kilocode-') && !startsWith(github.ref, 'refs/tags/v-hermes-')"
@@ -139,7 +147,7 @@ jobs:
 
   publish-platform:
     name: docker-publish-platform (${{ matrix.slug }})
-    if: github.ref_type == 'tag'
+    if: ${{ github.ref_type == 'tag' && !startsWith(github.ref, 'refs/tags/v-openclaw-') && !startsWith(github.ref, 'refs/tags/v-opencode-') && !startsWith(github.ref, 'refs/tags/v-kilocode-') && !startsWith(github.ref, 'refs/tags/v-hermes-') }}
     needs: validate
     runs-on: ${{ matrix.runner }}
     permissions:
@@ -203,7 +211,7 @@ jobs:
 
   publish-index:
     name: docker-publish-index
-    if: github.ref_type == 'tag'
+    if: ${{ github.ref_type == 'tag' && !startsWith(github.ref, 'refs/tags/v-openclaw-') && !startsWith(github.ref, 'refs/tags/v-opencode-') && !startsWith(github.ref, 'refs/tags/v-kilocode-') && !startsWith(github.ref, 'refs/tags/v-hermes-') }}
     needs: [validate, publish-platform]
     runs-on: ubuntu-latest
     permissions:

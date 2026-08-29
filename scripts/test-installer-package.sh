@@ -104,4 +104,82 @@ fi
 grep -q 'release install-openclaw.sh checksum must match downloaded bytes' \
   "$tmp/release-files-negative.out"
 
-printf 'installer_package_tests=GREEN assets=6 deterministic=yes piped_entrypoint=yes sibling_checksum_sensitive=yes remote_checksum_sensitive=yes release_set_verified=yes\n'
+cp -a "$first" "$tmp/missing-release"
+rm "$tmp/missing-release/install.sh.sha256"
+if (cd "$tmp/missing-release" && node "$root/scripts/check-postgres-image-policy.mjs" --verify-release-files) \
+  > "$tmp/missing-release.out" 2>&1; then
+  echo 'missing release asset unexpectedly passed' >&2
+  exit 1
+fi
+grep -q 'release verification directory must contain exactly' "$tmp/missing-release.out"
+
+cp -a "$first" "$tmp/extra-release"
+printf 'unexpected\n' > "$tmp/extra-release/extra.txt"
+if (cd "$tmp/extra-release" && node "$root/scripts/check-postgres-image-policy.mjs" --verify-release-files) \
+  > "$tmp/extra-release.out" 2>&1; then
+  echo 'extra release asset unexpectedly passed' >&2
+  exit 1
+fi
+grep -q 'release verification directory must contain exactly' "$tmp/extra-release.out"
+
+cp -a "$first" "$tmp/malformed-release"
+printf '%s %s\n' "$backend_sha" install-openclaw.sh > "$tmp/malformed-release/install-openclaw.sh.sha256"
+if (cd "$tmp/malformed-release" && node "$root/scripts/check-postgres-image-policy.mjs" --verify-release-files) \
+  > "$tmp/malformed-release.out" 2>&1; then
+  echo 'malformed release checksum unexpectedly passed' >&2
+  exit 1
+fi
+grep -q 'install-openclaw.sh.sha256 must contain exactly a SHA-256 and install-openclaw.sh' \
+  "$tmp/malformed-release.out"
+
+cp -a "$first" "$tmp/aligned-backend-release"
+printf '\n# aligned tamper\n' >> "$tmp/aligned-backend-release/install-openclaw.sh"
+(
+  cd "$tmp/aligned-backend-release"
+  sha256sum install-openclaw.sh > install-openclaw.sh.sha256
+)
+if (cd "$tmp/aligned-backend-release" && node "$root/scripts/check-postgres-image-policy.mjs" --verify-release-files) \
+  > "$tmp/aligned-backend-release.out" 2>&1; then
+  echo 'aligned tampered backend unexpectedly passed' >&2
+  exit 1
+fi
+grep -q 'release launcher must pin the downloaded backend bytes' "$tmp/aligned-backend-release.out"
+
+cp -a "$first" "$tmp/redirected-launcher-release"
+TARGET="$tmp/redirected-launcher-release/install.sh" node <<'NODE'
+const fs = require("node:fs");
+const target = process.env.TARGET;
+let source = fs.readFileSync(target, "utf8");
+source = source.replace(
+  /^BACKEND_URL=.*$/m,
+  "BACKEND_URL='https://attacker.invalid/install-openclaw.sh'",
+);
+fs.writeFileSync(target, source);
+NODE
+(
+  cd "$tmp/redirected-launcher-release"
+  sha256sum install.sh > install.sh.sha256
+)
+if (cd "$tmp/redirected-launcher-release" && node "$root/scripts/check-postgres-image-policy.mjs" --verify-release-files) \
+  > "$tmp/redirected-launcher-release.out" 2>&1; then
+  echo 'redirected launcher unexpectedly passed' >&2
+  exit 1
+fi
+grep -q 'release launcher backend URL must target its coordinated release asset' \
+  "$tmp/redirected-launcher-release.out"
+
+cp -a "$first" "$tmp/aligned-hermes-release"
+printf '\naligned Hermes tamper\n' >> "$tmp/aligned-hermes-release/hermes-noosphere-memory-${version}.tar.gz"
+(
+  cd "$tmp/aligned-hermes-release"
+  sha256sum "hermes-noosphere-memory-${version}.tar.gz" \
+    > "hermes-noosphere-memory-${version}.tar.gz.sha256"
+)
+if (cd "$tmp/aligned-hermes-release" && node "$root/scripts/check-postgres-image-policy.mjs" --verify-release-files) \
+  > "$tmp/aligned-hermes-release.out" 2>&1; then
+  echo 'aligned tampered Hermes bundle unexpectedly passed' >&2
+  exit 1
+fi
+grep -q 'release launcher must pin the downloaded Hermes bundle bytes' "$tmp/aligned-hermes-release.out"
+
+printf 'installer_package_tests=GREEN assets=6 deterministic=yes piped_entrypoint=yes sibling_checksum_sensitive=yes remote_checksum_sensitive=yes release_set_verified=yes release_negative_controls=7\n'

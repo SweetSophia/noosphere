@@ -5,8 +5,8 @@ import { NoosphereMemoryClient } from "./client.js";
 const PLUGIN_ID = "noosphere-memory";
 const DEFAULT_COMPOSE_FILE = "~/.noosphere/docker-compose.yml";
 const DEFAULT_LOG_TAIL = 80;
-const VERIFIED_INSTALLER_REF = "90415949695a854a687d8dcebbe247f4be56efab";
-const VERIFIED_INSTALLER_SHA256 = "d2213eb5c14e1408eb8e2dea6d1368ff306b4ea9ae7875352388de9fec195dd2";
+const VERIFIED_INSTALLER_REF = "d139ea0d95c6e901ee3400e00a440a9810963ef8";
+const VERIFIED_INSTALLER_SHA256 = "3a3abf491210fb4115305d68b099cd4d4bac67cfadbe8fb310c616ba12272352";
 const VERIFIED_NOOSPHERE_VERSION = "1.13.0";
 const VERIFIED_INSTALLER_URL = `https://raw.githubusercontent.com/SweetSophia/noosphere/${VERIFIED_INSTALLER_REF}/install.sh`;
 export function getVerifiedInstallerCommands() {
