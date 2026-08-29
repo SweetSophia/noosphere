@@ -260,6 +260,30 @@ const installerPackageTest = readText("scripts/test-installer-package.sh");
 const coordinatedReleaseGuide = readText("docs/COORDINATED-RELEASE.md");
 const composeFile = readText("docker-compose.yml");
 const environmentExample = readText("noosphere.env.example");
+const workflowPolicyPaths = [
+  ".github/workflows/ci.yml",
+  ".github/workflows/installer-release.yml",
+  ".github/workflows/postgres-pgvector-image.yml",
+  ".github/workflows/npm-publish.yml",
+  ".github/workflows/hermes-release.yml",
+  ".github/workflows/docker-publish.yml",
+  ".github/workflows/hybrid-storage.yml",
+  ".github/workflows/postgres-pgvector-rehearsal.yml",
+  ".github/workflows/autoreview.yml",
+];
+for (const relativePath of workflowPolicyPaths) {
+  const workflow = readText(relativePath);
+  const lines = workflowLines(workflow);
+  expect(
+    unpinnedActionUses(lines).length === 0,
+    `${relativePath} must pin every third-party Action to a full commit SHA.`,
+  );
+  expect(
+    (workflow.match(/actions\/checkout@/g)?.length ?? 0) ===
+      (workflow.match(/persist-credentials: false/g)?.length ?? 0),
+    `${relativePath} must disable persisted checkout credentials for every checkout step.`,
+  );
+}
 
 expect(
   injectedPackage.private !== true,

@@ -31,10 +31,15 @@ machine.
 
 ### Install
 
+This launcher is coupled to the coordinated `v1.13.0` image, packages, and
+Hermes archive. Before running it, confirm that the
+[`v1.13.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.0)
+exists with all six installer assets; a merged commit alone is not a release.
+
 Run the guided installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/bbcb19fd1cfd8e921e73f6c4bdda6ef0f53668ed/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/f599129515eb8f70006bf68077e22a258633e5e1/install.sh | bash
 ```
 
 The URL is pinned to an immutable Git commit—never `master` or `main`. The
@@ -67,7 +72,7 @@ Do not replace the guided upgrade with an unrestricted `docker compose pull &&
 docker compose up`. First inspect the plan without changing the machine:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/bbcb19fd1cfd8e921e73f6c4bdda6ef0f53668ed/install.sh \
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/f599129515eb8f70006bf68077e22a258633e5e1/install.sh \
   | bash -s -- --dry-run --core-only
 ```
 

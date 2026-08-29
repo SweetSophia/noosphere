@@ -10,10 +10,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
 const immutableHelperRef = "9da4af0a7b2275aa91eecd102095e0e470bbb0e3";
-const verifiedInstallerRef = "1bbc266283577c3a5c9fe285633955df45f6bcfd";
-const verifiedInstallerSha256 = "28355163784403bf3445a0028863d8496b66d3fa70ea3492a6f4c7ba4c6af556";
-const guidedInstallerRef = "bbcb19fd1cfd8e921e73f6c4bdda6ef0f53668ed";
-const guidedInstallerSha256 = "ba0f75d310708c2a32fd92f544ce89bd81ec4ca543def67438a25df3319513d4";
+const guidedInstallerRef = "f599129515eb8f70006bf68077e22a258633e5e1";
+const guidedInstallerSha256 = "24e15da38f8ff210cd2c99802edd1ee8a7f00a7df546c75b2a746d9e801b96e1";
 const guidedBackendRef = "746d36a36327db19594aae7f80c49e09b522318e";
 const guidedBackendSha256 = "9e89de09319f58c25203ee242ce91ac7d0505af159f939506fd25e752165aca2";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
@@ -58,7 +56,7 @@ const versionBoundInstallerCommand =
   `NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-${releaseVersion}}" ` +
   `NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${releaseVersion}}" ` +
   `NOOSPHERE_PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${releaseVersion}}" ` +
-  'bash "$installer"';
+  'bash "$installer" --non-interactive --with openclaw';
 
 function countLiteral(text, literal) {
   if (!literal) return 0;
@@ -830,8 +828,8 @@ for (const relativePath of [
 ]) {
   const text = read(relativePath);
   expect(
-    text.includes(verifiedInstallerRef) &&
-      text.includes(verifiedInstallerSha256) &&
+    text.includes(guidedInstallerRef) &&
+      text.includes(guidedInstallerSha256) &&
       text.includes("VERIFIED_NOOSPHERE_VERSION") &&
       text.includes(releaseVersion) &&
       text.includes("NOOSPHERE_VERSION") &&
@@ -864,12 +862,12 @@ for (const relativePath of [
   const checksumCount = countLiteral(text, "sha256sum -c -");
   const safeInstallerBlocks = Array.from(
     text.matchAll(
-      /^(\s*)\(\n\1  set -e\n\1  installer="\$\(mktemp\)"\n\1  trap 'rm -f "\$installer"' EXIT\n\1  curl -fsSL [^\n]+ -o "\$installer"\n\1  printf '[^\n]+' '[a-f0-9]{64}' "\$installer" \| sha256sum -c -\n\1  NOOSPHERE_VERSION="\$\{NOOSPHERE_VERSION:-[0-9]+\.[0-9]+\.[0-9]+\}" NOOSPHERE_IMAGE="\$\{NOOSPHERE_IMAGE:-ghcr\.io\/sweetsophia\/noosphere:[0-9]+\.[0-9]+\.[0-9]+\}" NOOSPHERE_PLUGIN_SPEC="\$\{NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia\/openclaw-noosphere-memory@[0-9]+\.[0-9]+\.[0-9]+\}" bash "\$installer"\n(?:\1  openclaw noosphere (?:doctor|status)\n)*\1\)$/gm,
+      /^(\s*)\(\n\1  set -e\n\1  installer="\$\(mktemp\)"\n\1  trap 'rm -f "\$installer"' EXIT\n\1  curl -fsSL [^\n]+ -o "\$installer"\n\1  printf '[^\n]+' '[a-f0-9]{64}' "\$installer" \| sha256sum -c -\n\1  NOOSPHERE_VERSION="\$\{NOOSPHERE_VERSION:-[0-9]+\.[0-9]+\.[0-9]+\}" NOOSPHERE_IMAGE="\$\{NOOSPHERE_IMAGE:-ghcr\.io\/sweetsophia\/noosphere:[0-9]+\.[0-9]+\.[0-9]+\}" NOOSPHERE_PLUGIN_SPEC="\$\{NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia\/openclaw-noosphere-memory@[0-9]+\.[0-9]+\.[0-9]+\}" bash "\$installer" --non-interactive --with openclaw\n(?:\1  openclaw noosphere (?:doctor|status)\n)*\1\)$/gm,
     ),
   ).length;
   expect(
-    text.includes(verifiedInstallerRef) &&
-      text.includes(verifiedInstallerSha256) &&
+    text.includes(guidedInstallerRef) &&
+      text.includes(guidedInstallerSha256) &&
       text.includes(versionBoundInstallerCommand) &&
       checksumCount > 0 &&
       safeInstallerBlocks === checksumCount,
@@ -888,6 +886,29 @@ for (const relativePath of [
 
 const readme = read("README.md");
 const installationGuide = read("docs/INSTALLATION.md");
+const guidedLauncherDocs = [
+  "README.md",
+  "docs/INSTALLATION.md",
+  "docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md",
+  "openclaw-noosphere-memory/README.md",
+  "opencode-noosphere-memory/README.md",
+  "kilocode-noosphere-memory/README.md",
+];
+for (const relativePath of guidedLauncherDocs) {
+  const text = read(relativePath);
+  expect(
+    text.includes(`${rawRepositoryUrl}/${guidedInstallerRef}/install.sh`) &&
+      !text.includes("/master/install.sh") &&
+      !text.includes("/main/install.sh"),
+    `${relativePath} must pin the reviewed guided launcher without a moving-branch fallback`,
+  );
+}
+const hermesBundleReadme = read("hermes-noosphere-memory/README.md");
+expect(
+  !hermesBundleReadme.includes("raw.githubusercontent.com/SweetSophia/noosphere/") &&
+    hermesBundleReadme.includes("avoids a circular bundle-to-launcher pin"),
+  "The bundled Hermes README must delegate guided launcher ownership without embedding a circular launcher pin",
+);
 const guidedOneLiner =
   `curl -fsSL ${rawRepositoryUrl}/${guidedInstallerRef}/install.sh | bash`;
 expect(
@@ -908,8 +929,11 @@ expect(
     readme.includes("~/.noosphere/credentials.json") &&
     readme.includes("--dry-run --core-only") &&
     readme.includes("noosphere_postgres_data") &&
-    readme.includes("docs/INSTALLATION.md"),
-  "README.md must keep the novice Quick Start, protected credential handoff, dry-run upgrade warning, and installation reference synchronized",
+    readme.includes("docs/INSTALLATION.md") &&
+    readme.includes("a merged commit alone is not a release") &&
+    installationGuide.includes("Merging the installer source does not by") &&
+    installationGuide.includes("all six installer assets"),
+  "README.md and docs/INSTALLATION.md must keep novice guidance, protected state, and the pre-release artifact boundary synchronized",
 );
 expect(
   installationGuide.includes("## Fresh install versus upgrade") &&
@@ -1532,11 +1556,6 @@ if (verifyRemoteArtifacts) {
     extractShellStringConstant(read("install.sh"), "HERMES_BUNDLE_URL"),
     extractShellConstant(read("install.sh"), "HERMES_BUNDLE_SHA256"),
     { followRedirects: true },
-  );
-  await verifyRemoteArtifact(
-    "public installer",
-    `${rawRepositoryUrl}/${verifiedInstallerRef}/install-openclaw.sh`,
-    verifiedInstallerSha256,
   );
   for (const { label, shaConstant, urlConstant } of helperArtifacts) {
     await verifyRemoteArtifact(

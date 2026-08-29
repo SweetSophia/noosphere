@@ -412,15 +412,15 @@ For the full setup, operations, troubleshooting, upgrade, and uninstall guide, s
 On the machine running OpenClaw Gateway:
 
 ```bash
-# Installer commit: 1bbc266283577c3a5c9fe285633955df45f6bcfd
-# Expected SHA-256: 28355163784403bf3445a0028863d8496b66d3fa70ea3492a6f4c7ba4c6af556
+# Installer commit: f599129515eb8f70006bf68077e22a258633e5e1
+# Expected SHA-256: 24e15da38f8ff210cd2c99802edd1ee8a7f00a7df546c75b2a746d9e801b96e1
 (
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1bbc266283577c3a5c9fe285633955df45f6bcfd/install-openclaw.sh -o "$installer"
-  printf '%s  %s\n' '28355163784403bf3445a0028863d8496b66d3fa70ea3492a6f4c7ba4c6af556' "$installer" | sha256sum -c -
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.12.0}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.12.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.12.0}" bash "$installer"
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/f599129515eb8f70006bf68077e22a258633e5e1/install.sh -o "$installer"
+  printf '%s  %s\n' '24e15da38f8ff210cd2c99802edd1ee8a7f00a7df546c75b2a746d9e801b96e1' "$installer" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.0}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.13.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.0}" bash "$installer" --non-interactive --with openclaw
   openclaw noosphere doctor
   openclaw noosphere status
 )
@@ -590,7 +590,7 @@ scoped npm plugins from this config:
 ```json
 {
   "plugin": [
-    "@sweetsophia/opencode-noosphere-memory@1.12.0"
+    "@sweetsophia/opencode-noosphere-memory@1.13.0"
   ]
 }
 ```
@@ -598,7 +598,7 @@ scoped npm plugins from this config:
 Optional explicit global install:
 
 ```bash
-npm install -g @sweetsophia/opencode-noosphere-memory@1.12.0
+npm install -g @sweetsophia/opencode-noosphere-memory@1.13.0
 export OPENCODE_NOOSPHERE_API_KEY="noo_..."
 ```
 
@@ -609,7 +609,7 @@ install it normally and keep both Opencode plugins registered:
 {
   "plugin": [
     "oh-my-opencode-slim",
-    "@sweetsophia/opencode-noosphere-memory@1.12.0"
+    "@sweetsophia/opencode-noosphere-memory@1.13.0"
   ]
 }
 ```
@@ -640,7 +640,7 @@ Noosphere ships a Kilo Code plugin at `kilocode-noosphere-memory/`.
 ### Quick install
 
 ```bash
-npm install -g @sweetsophia/kilocode-noosphere-memory@1.12.0
+npm install -g @sweetsophia/kilocode-noosphere-memory@1.13.0
 export KILOCODE_NOOSPHERE_API_KEY="noo_..."
 ```
 
@@ -649,7 +649,7 @@ Add the package to `~/.config/kilo/kilo.json`:
 ```json
 {
   "plugin": [
-    "@sweetsophia/kilocode-noosphere-memory@1.12.0"
+    "@sweetsophia/kilocode-noosphere-memory@1.13.0"
   ]
 }
 ```
@@ -657,7 +657,7 @@ Add the package to `~/.config/kilo/kilo.json`:
 Or install it through Kilo:
 
 ```bash
-kilo plugin @sweetsophia/kilocode-noosphere-memory@1.12.0 --global
+kilo plugin @sweetsophia/kilocode-noosphere-memory@1.13.0 --global
 ```
 
 ### Kilo Code capabilities

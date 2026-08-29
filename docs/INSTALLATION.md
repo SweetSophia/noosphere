@@ -19,11 +19,17 @@ The installer checks its prerequisites before changing the machine.
 
 ### Run the installer
 
+The launcher is coupled to the coordinated `v1.13.0` image, packages, and
+Hermes archive. Before running it, confirm that the
+[`v1.13.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.0)
+exists with all six installer assets. Merging the installer source does not by
+itself publish those artifacts.
+
 This URL is pinned to an immutable Git commit. It does not execute a moving
 `master` or `main` branch:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/bbcb19fd1cfd8e921e73f6c4bdda6ef0f53668ed/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/f599129515eb8f70006bf68077e22a258633e5e1/install.sh | bash
 ```
 
 The script can prompt through `/dev/tty`, even when it is piped to Bash. It:
@@ -87,11 +93,11 @@ Examples:
 
 ```bash
 # Show the plan without changing the machine.
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/bbcb19fd1cfd8e921e73f6c4bdda6ef0f53668ed/install.sh \
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/f599129515eb8f70006bf68077e22a258633e5e1/install.sh \
   | bash -s -- --dry-run --core-only
 
 # Automation: local Noosphere plus Hermes, without prompts.
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/bbcb19fd1cfd8e921e73f6c4bdda6ef0f53668ed/install.sh \
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/f599129515eb8f70006bf68077e22a258633e5e1/install.sh \
   | bash -s -- --non-interactive --with hermes
 ```
 
@@ -108,8 +114,8 @@ the advertised SHA-256:
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/bbcb19fd1cfd8e921e73f6c4bdda6ef0f53668ed/install.sh -o "$installer"
-  printf '%s  %s\n' 'ba0f75d310708c2a32fd92f544ce89bd81ec4ca543def67438a25df3319513d4' "$installer" | sha256sum -c -
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/f599129515eb8f70006bf68077e22a258633e5e1/install.sh -o "$installer"
+  printf '%s  %s\n' '24e15da38f8ff210cd2c99802edd1ee8a7f00a7df546c75b2a746d9e801b96e1' "$installer" | sha256sum -c -
   bash "$installer"
 )
 ```
