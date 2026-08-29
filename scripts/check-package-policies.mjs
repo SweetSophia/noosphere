@@ -33,6 +33,7 @@ const policy = {
   npmPublishWorkflow: ".github/workflows/npm-publish.yml",
   dockerPublishWorkflow: ".github/workflows/docker-publish.yml",
   hermesReleaseWorkflow: ".github/workflows/hermes-release.yml",
+  installerReleaseWorkflow: ".github/workflows/installer-release.yml",
   forbiddenPublishSignals: ["injectedmemory", "noosphereinjectedmemory"],
 };
 
@@ -246,6 +247,13 @@ const dockerPublishWorkflow = readText(policy.dockerPublishWorkflow);
 const dockerPublishWorkflowLines = workflowLines(dockerPublishWorkflow);
 const hermesReleaseWorkflow = readText(policy.hermesReleaseWorkflow);
 const hermesReleaseWorkflowLines = workflowLines(hermesReleaseWorkflow);
+const installerReleaseWorkflow = readText(policy.installerReleaseWorkflow);
+const installerReleaseWorkflowLines = workflowLines(installerReleaseWorkflow);
+const installer = readText("install.sh");
+const installerBackend = readText("install-openclaw.sh");
+const installerPackager = readText("scripts/package-installer.sh");
+const installerUxTest = readText("scripts/test-installer-ux.sh");
+const installerPackageTest = readText("scripts/test-installer-package.sh");
 const composeFile = readText("docker-compose.yml");
 const environmentExample = readText("noosphere.env.example");
 
@@ -362,6 +370,53 @@ expect(
     !hermesReleaseWorkflow.includes("GH_TOKEN") &&
     !hermesReleaseWorkflow.includes("gh release upload"),
   "The Hermes tag workflow must verify checksums from dist, remain secret-free, install-test its bundle, and publish only a read-only Actions artifact.",
+);
+expect(
+  installerReleaseWorkflowLines.includes("contents: read") &&
+    installerReleaseWorkflowLines.includes("persist-credentials: false") &&
+    installerReleaseWorkflow.includes("npm run installer:check") &&
+    installerReleaseWorkflow.includes("scripts/package-installer.sh dist") &&
+    installerReleaseWorkflow.includes("actions/upload-artifact@") &&
+    installerReleaseWorkflow.includes("dist/install.sh.sha256") &&
+    installerReleaseWorkflow.includes("dist/install-openclaw.sh.sha256") &&
+    unpinnedActionUses(installerReleaseWorkflowLines).length === 0 &&
+    !installerReleaseWorkflow.includes("GH_TOKEN") &&
+    !installerReleaseWorkflow.includes("gh release upload"),
+  "The application tag must build and test checksum-owned installer assets using only pinned, read-only Actions steps.",
+);
+expect(
+  installer.includes("BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/81dc9d68ddd72ec0142b6ce0bcea611fcc7ba597/install-openclaw.sh'") &&
+    installer.includes("BACKEND_SHA256='23879652c3724c8932656c259a0852c9f1fa7aed5273b68fa557b8d594d08a62'") &&
+    installer.includes("HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.12.0/hermes-noosphere-memory-1.12.0.tar.gz'") &&
+    installer.includes("HERMES_BUNDLE_SHA256='1fc5f938887832b0f9bb273cb78a90a4da0f12b11d9fd2eeef79f923445e4f17'") &&
+    installer.includes("Refusing Noosphere backend with an unexpected checksum") &&
+    installer.includes("Refusing Hermes bundle with an unexpected checksum") &&
+    installer.includes("--core-only") &&
+    installer.includes("--non-interactive") &&
+    installer.includes("--dry-run") &&
+    !installer.includes("/master/") &&
+    !installer.includes("/main/"),
+  "The general installer must support guided/core/automation modes and fetch only checksum-owned versioned release assets.",
+);
+expect(
+  installerBackend.includes('NOOSPHERE_INSTALL_OPENCLAW="${NOOSPHERE_INSTALL_OPENCLAW:-true}"') &&
+    installerBackend.includes('if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then\n  need openclaw\nfi') &&
+    installerBackend.includes('write_credentials_json "$NOOSPHERE_CREDENTIALS_FILE"') &&
+    installerBackend.includes('Credentials were not printed. Read the mode-0600 file above when needed.') &&
+    !installerBackend.includes("API KEY (save this - it will not be shown again)"),
+  "The reviewed backend must preserve OpenClaw-by-default compatibility while supporting core-only mode and non-disclosing credentials.",
+);
+expect(
+  installerPackager.includes("INSTALLER_BACKEND_URL=") &&
+    installerPackager.includes("INSTALLER_HERMES_URL=") &&
+    installerPackager.includes("INSTALLER_BACKEND_SHA256=") &&
+    installerPackager.includes("INSTALLER_HERMES_SHA256=") &&
+    installerPackager.includes("sha256sum install.sh > install.sh.sha256") &&
+    installerPackager.includes("sha256sum install-openclaw.sh > install-openclaw.sh.sha256") &&
+    installerUxTest.includes("secret_output=clean") &&
+    installerPackageTest.includes("tampered backend unexpectedly passed") &&
+    installerPackageTest.includes("deterministic=yes"),
+  "Installer packaging and tests must own deterministic bytes, checksums, credential non-disclosure, and a tampered-backend negative control.",
 );
 
 if (failures.length > 0) {

@@ -1,0 +1,59 @@
+name: Build Noosphere installer assets
+
+on:
+  push:
+    tags: ["v[0-9]*.[0-9]*.[0-9]*"]
+
+permissions:
+  contents: read
+
+jobs:
+  package-installer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@1e60f620b9541d401f9173298e0e86b0b68b2a1a # v6
+        with:
+          node-version: 22
+
+      - name: Validate release version metadata
+        run: |
+          npm run version:check
+          version=$(cat VERSION)
+          if [[ "$GITHUB_REF_NAME" != "v${version}" ]]; then
+            printf 'Installer release tag %s does not match VERSION=%s\n' "$GITHUB_REF_NAME" "$version" >&2
+            exit 1
+          fi
+
+      - name: Test installer UX and policy
+        run: |
+          npm run installer:check
+          npm run package-policy:check
+          npm run postgres-image:check
+
+      - name: Build deterministic installer assets
+        run: |
+          scripts/package-installer.sh dist
+          version=$(cat VERSION)
+          (cd dist && sha256sum --check install.sh.sha256)
+          (cd dist && sha256sum --check install-openclaw.sh.sha256)
+          (cd dist && sha256sum --check "hermes-noosphere-memory-${version}.tar.gz.sha256")
+          bash -n dist/install.sh dist/install-openclaw.sh
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: noosphere-installer-${{ github.ref_name }}
+          path: |
+            dist/install.sh
+            dist/install.sh.sha256
+            dist/install-openclaw.sh
+            dist/install-openclaw.sh.sha256
+            dist/hermes-noosphere-memory-*.tar.gz
+            dist/hermes-noosphere-memory-*.tar.gz.sha256
+          if-no-files-found: error
