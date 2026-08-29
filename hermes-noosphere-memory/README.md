@@ -48,6 +48,21 @@ Not implemented yet:
 
 Those are intentionally left for later PRs so each step stays reviewable.
 
+## Guided Noosphere + Hermes Setup
+
+To install Noosphere and configure a detected Hermes Agent profile in one guided
+flow:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/cd2f509a737a55c2cd53f027cf90e1be8865d30d/install.sh \
+  | bash -s -- --with hermes
+```
+
+The immutable launcher verifies its backend and Hermes bundle, writes the API
+key to the mode-`0600` Hermes environment file, and configures the provider.
+See [Installing Noosphere](../docs/INSTALLATION.md) for the auditable download
+and upgrade behavior.
+
 ## Install the 1.12.0 Release Bundle
 
 The coordinated Noosphere release attaches a deterministic Hermes provider

@@ -41,7 +41,19 @@ flock --version
 
 ## Quick install
 
-Use the installer from the repository:
+Use the guided launcher, selecting OpenClaw explicitly:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/cd2f509a737a55c2cd53f027cf90e1be8865d30d/install.sh \
+  | bash -s -- --with openclaw
+```
+
+The launcher stores generated credentials in protected files and reports only
+their paths. For a download-first checksum verification, see
+[Installing Noosphere](INSTALLATION.md#auditable-download).
+
+The original `1.12.0` release-snapshot controller remains available as an
+operator-facing compatibility path:
 
 ```bash
 # Installer commit: 1bbc266283577c3a5c9fe285633955df45f6bcfd

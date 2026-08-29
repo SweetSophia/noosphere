@@ -12,7 +12,20 @@ Use OpenClaw's plugin installer:
 openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.12.0 --pin
 ```
 
-For the full local Noosphere + OpenClaw setup, use the repository installer:
+For the full local Noosphere + OpenClaw setup, use the guided immutable
+launcher:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/cd2f509a737a55c2cd53f027cf90e1be8865d30d/install.sh \
+  | bash -s -- --with openclaw
+```
+
+It checksum-verifies the reviewed backend and configures OpenClaw through its
+protected file secret provider. For the full lifecycle and auditable download,
+see [Installing Noosphere](../docs/INSTALLATION.md).
+
+The direct `1.12.0` OpenClaw controller remains available for operators who need
+the original release-snapshot entry point:
 
 ```bash
 # Installer commit: 1bbc266283577c3a5c9fe285633955df45f6bcfd

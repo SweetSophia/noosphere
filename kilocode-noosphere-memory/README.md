@@ -13,28 +13,21 @@ It provides:
 You need two things before this plugin will do anything useful:
 
 1. **A reachable Noosphere instance.** The plugin defaults to
-   `http://127.0.0.1:6578`. For a local install, use the repository's guarded
-   [1.12.0 Quick Start](https://github.com/SweetSophia/noosphere/blob/v1.12.0/README.md#quick-start). It provisions Noosphere without
-   installing any agent plugin. For the 1.12.0 release snapshot:
+   `http://127.0.0.1:6578`. For a guided local install that also configures
+   Kilo Code, run:
 
    ```bash
-   git clone --branch v1.12.0 --depth 1 https://github.com/SweetSophia/noosphere.git
-   cd noosphere
-   cp noosphere.env.example .env
-   # Set NOOSPHERE_VERSION=1.12.0, then follow the guarded Quick Start.
+   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/cd2f509a737a55c2cd53f027cf90e1be8865d30d/install.sh \
+     | bash -s -- --with kilocode
    ```
 
-   Do not replace the guarded prepare/init/record sequence with an unrestricted
-   `docker compose up`; the database service intentionally refuses startup
-   without transition evidence.
+   The immutable launcher checksum-verifies its backend, preserves existing
+   database state, and stores generated credentials without printing them. See
+   [Installing Noosphere](../docs/INSTALLATION.md) for the auditable download,
+   upgrade behavior, and manual Compose path.
 
-   The bootstrap key is whatever you put in `NOOSPHERE_BOOTSTRAP_API_KEY` and
-   has full `ADMIN` scope. To point at an existing Noosphere instead, set
-   `baseUrl` in the plugin options (see [Configuration](#configuration)).
-
-   > **Note:** the repository also ships `install-openclaw.sh`, a one-shot
-   > installer that provisions Noosphere *plus* the OpenClaw plugin. Use it
-   > if you intend to run both tools; skip it if you only want Kilo Code.
+   To point at an existing Noosphere instead, set `baseUrl` in the plugin options
+   (see [Configuration](#configuration)).
 
 2. **A Noosphere API key for this tool.** The plugin will refuse to start
    without one. Create a **tool-scoped** key (named after the tool, e.g.

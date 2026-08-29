@@ -12,6 +12,10 @@ const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
 const immutableHelperRef = "9da4af0a7b2275aa91eecd102095e0e470bbb0e3";
 const verifiedInstallerRef = "1bbc266283577c3a5c9fe285633955df45f6bcfd";
 const verifiedInstallerSha256 = "28355163784403bf3445a0028863d8496b66d3fa70ea3492a6f4c7ba4c6af556";
+const guidedInstallerRef = "cd2f509a737a55c2cd53f027cf90e1be8865d30d";
+const guidedInstallerSha256 = "4fb73323c30e8de0ccbef473329285ad8b6952b62e097bf27dfbdaba3ca9d575";
+const guidedBackendRef = "81dc9d68ddd72ec0142b6ce0bcea611fcc7ba597";
+const guidedBackendSha256 = "23879652c3724c8932656c259a0852c9f1fa7aed5273b68fa557b8d594d08a62";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
@@ -118,10 +122,15 @@ function extractShellStringConstant(text, name) {
   return text.match(new RegExp(`^${name}='([^']+)'$`, "m"))?.[1] ?? "";
 }
 
-async function verifyRemoteArtifact(label, url, expectedSha256) {
+async function verifyRemoteArtifact(
+  label,
+  url,
+  expectedSha256,
+  { followRedirects = false } = {},
+) {
   try {
     const response = await fetch(url, {
-      redirect: "error",
+      redirect: followRedirects ? "follow" : "error",
       signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) {
@@ -844,7 +853,6 @@ for (const relativePath of [
 }
 
 for (const relativePath of [
-  "README.md",
   "README-legacy.md",
   "openclaw-noosphere-memory/README.md",
   "docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md",
@@ -877,6 +885,43 @@ for (const relativePath of [
     `${relativePath} must not recommend executing a moving-branch installer`,
   );
 }
+
+const readme = read("README.md");
+const installationGuide = read("docs/INSTALLATION.md");
+const guidedOneLiner =
+  `curl -fsSL ${rawRepositoryUrl}/${guidedInstallerRef}/install.sh | bash`;
+expect(
+  readme.includes(guidedInstallerRef) &&
+    !readme.includes("/master/install.sh") &&
+    !readme.includes("/main/install.sh"),
+  "README.md must pin the guided launcher commit without a moving-branch fallback",
+);
+expect(
+  installationGuide.includes(guidedInstallerRef) &&
+    installationGuide.includes(guidedInstallerSha256) &&
+    !installationGuide.includes("/master/install.sh") &&
+    !installationGuide.includes("/main/install.sh"),
+  "docs/INSTALLATION.md must pin the guided launcher commit and checksum without a moving-branch fallback",
+);
+expect(
+  readme.includes(guidedOneLiner) &&
+    readme.includes("~/.noosphere/credentials.json") &&
+    readme.includes("--dry-run --core-only") &&
+    readme.includes("noosphere_postgres_data") &&
+    readme.includes("docs/INSTALLATION.md"),
+  "README.md must keep the novice Quick Start, protected credential handoff, dry-run upgrade warning, and installation reference synchronized",
+);
+expect(
+  installationGuide.includes("## Fresh install versus upgrade") &&
+    installationGuide.includes("## Manual Docker Compose installation") &&
+    installationGuide.includes("### Bootstrap credential file rules") &&
+    installationGuide.includes("NOOSPHERE_BOOTSTRAP_SECRETS_FILE=/app/uploads/bootstrap-secrets/secrets.json") &&
+    installationGuide.includes("mode `0600`") &&
+    installationGuide.includes("mode `0700`") &&
+    installationGuide.includes("directly under shared directories") &&
+    installationGuide.includes("sha256sum -c -"),
+  "docs/INSTALLATION.md must preserve advanced bootstrap-secret protections, manual deployment, upgrade separation, and the auditable launcher path",
+);
 
 const switchScript = read("scripts/switch-pgvector-compose.sh");
 const controllerScript = read("scripts/run-pgvector-transition-controller.sh");
@@ -1463,11 +1508,31 @@ for (const relativePath of [
 }
 
 expect(
-  sha256("install-openclaw.sh") === verifiedInstallerSha256,
-  "the checked-in installer bytes must match the checksum advertised by public immutable-install guidance",
+  sha256("install-openclaw.sh") === guidedBackendSha256,
+  "the checked-in backend bytes must match the checksum pinned by the guided launcher",
+);
+expect(
+  sha256("install.sh") === guidedInstallerSha256,
+  "the checked-in guided launcher bytes must match the checksum advertised by public immutable-install guidance",
 );
 
 if (verifyRemoteArtifacts) {
+  await verifyRemoteArtifact(
+    "guided installer",
+    `${rawRepositoryUrl}/${guidedInstallerRef}/install.sh`,
+    guidedInstallerSha256,
+  );
+  await verifyRemoteArtifact(
+    "guided installer backend",
+    `${rawRepositoryUrl}/${guidedBackendRef}/install-openclaw.sh`,
+    guidedBackendSha256,
+  );
+  await verifyRemoteArtifact(
+    "guided Hermes bundle",
+    extractShellStringConstant(read("install.sh"), "HERMES_BUNDLE_URL"),
+    extractShellConstant(read("install.sh"), "HERMES_BUNDLE_SHA256"),
+    { followRedirects: true },
+  );
   await verifyRemoteArtifact(
     "public installer",
     `${rawRepositoryUrl}/${verifiedInstallerRef}/install-openclaw.sh`,
