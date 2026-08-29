@@ -12,16 +12,9 @@ cat > "$tmp/fake-backend.sh" <<'BACKEND'
 set -euo pipefail
 printf '%s\n' "$NOOSPHERE_INSTALL_OPENCLAW" > "$INSTALLER_TEST_RECORD"
 install -d -m 700 "$(dirname "$NOOSPHERE_CREDENTIALS_FILE")"
-CREDENTIALS_FILE="$NOOSPHERE_CREDENTIALS_FILE" node <<'NODE'
-const fs = require("node:fs");
-fs.writeFileSync(process.env.CREDENTIALS_FILE, `${JSON.stringify({
-  baseUrl: "http://127.0.0.1:6578",
-  apiKey: process.env.NOOSPHERE_TEST_API_KEY,
-  adminEmail: "admin@noosphere.local",
-  adminPassword: "fixture-admin-password",
-}, null, 2)}\n`, { mode: 0o600 });
-NODE
-chmod 600 "$NOOSPHERE_CREDENTIALS_FILE"
+install -m 600 /dev/null "$NOOSPHERE_CREDENTIALS_FILE"
+printf '{\n  "baseUrl": "http://127.0.0.1:6578",\n  "apiKey": "%s",\n  "adminEmail": "admin@noosphere.local",\n  "adminPassword": "fixture-admin-password"\n}\n' \
+  "$NOOSPHERE_TEST_API_KEY" > "$NOOSPHERE_CREDENTIALS_FILE"
 BACKEND
 chmod 700 "$tmp/fake-backend.sh"
 fake_backend_sha=$(sha256sum "$tmp/fake-backend.sh" | awk '{print $1}')
