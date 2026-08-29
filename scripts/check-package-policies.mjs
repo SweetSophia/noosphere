@@ -377,6 +377,7 @@ expect(
 );
 expect(
   dockerPublishWorkflow.includes('GITHUB_REF_NAME" != "v${version}"') &&
+    dockerPublishWorkflow.includes("QEMU_IMAGE: tonistiigi/binfmt:qemu-v10.0.4@sha256:8f58e6214f4cc9dc83ce8f5acad1ece508eb6b20e696a8c1e9f274481982c541") &&
     dockerPublishWorkflowLines.includes("flavor: latest=auto") &&
     dockerPublishWorkflowLines.includes("if: github.ref_type == 'tag'") &&
     dockerPublishWorkflowLines.includes("push: ${{ github.ref_type == 'tag' }}") &&
