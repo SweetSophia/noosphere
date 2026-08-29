@@ -50,7 +50,7 @@ chmod 700 "$tmp/fake-bin/openclaw"
 cat > "$tmp/fake-bin/curl" <<'CURL'
 #!/usr/bin/env bash
 set -euo pipefail
-config='' output='' url='' method=GET disable=false noproxy=false
+config='' output='' url='' method=GET disable=false noproxy=false connect_timeout='' max_time=''
 for arg in "$@"; do
   [[ "$arg" != *noo_* ]] || {
     echo 'secret appeared in curl argv' >&2
@@ -61,6 +61,8 @@ while (($# > 0)); do
   case "$1" in
     --disable) disable=true; shift ;;
     --noproxy) [[ "$2" == '*' ]]; noproxy=true; shift 2 ;;
+    --connect-timeout) connect_timeout=$2; shift 2 ;;
+    --max-time) max_time=$2; shift 2 ;;
     --config) config=$2; shift 2 ;;
     --output) output=$2; shift 2 ;;
     --request) method=$2; shift 2 ;;
@@ -69,6 +71,7 @@ while (($# > 0)); do
   esac
 done
 [[ "$disable" == true && "$noproxy" == true ]]
+[[ "$connect_timeout" == 5 && "$max_time" == 15 ]]
 [[ -f "$config" ]]
 grep -q 'header = "Authorization: Bearer noo_' "$config"
 printf '%s %s\n' "$method" "$url" >> "$FAKE_CURL_CALLS"
@@ -197,7 +200,7 @@ SABOTAGED_BACKEND="$tmp/proxy-sabotaged.sh" node <<'NODE'
 const fs = require("node:fs");
 const path = process.env.SABOTAGED_BACKEND;
 let source = fs.readFileSync(path, "utf8");
-const guarded = `curl --disable --noproxy '*' "$@"`;
+const guarded = `curl --disable --noproxy '*' --connect-timeout 5 --max-time 15 "$@"`;
 if (!source.includes(guarded)) throw new Error("cannot locate proxy sabotage target");
 source = source.replace(guarded, `curl "$@"`);
 fs.writeFileSync(path, source);

@@ -609,7 +609,7 @@ expect(
     installerBackendTest.includes("read_key_rejected=yes") &&
     installerBackendTest.includes("transport_rotation=blocked") &&
     installerBackendTest.includes("local_bootstrap_destination=yes") &&
-    installerBackend.includes("curl --disable --noproxy '*' \"$@\"") &&
+    installerBackend.includes("curl --disable --noproxy '*' --connect-timeout 5 --max-time 15 \"$@\"") &&
     installerBackendTest.includes("proxy_bypass=yes") &&
     installerBackendTest.includes("backend proxy-bypass sabotage unexpectedly passed") &&
     installerBackendTest.includes("secret_argv=clean") &&

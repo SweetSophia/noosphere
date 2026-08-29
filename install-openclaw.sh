@@ -188,7 +188,7 @@ validated_local_app_url() {
 }
 
 local_no_proxy_curl() {
-  curl --disable --noproxy '*' "$@"
+  curl --disable --noproxy '*' --connect-timeout 5 --max-time 15 "$@"
 }
 
 api_http_status_with_key() {
