@@ -17,7 +17,7 @@ You need two things before this plugin will do anything useful:
    OpenCode, run:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/cd2f509a737a55c2cd53f027cf90e1be8865d30d/install.sh \
+   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/fe92b5c76a2ee5909cf314a8e95d6a7171df100c/install.sh \
      | bash -s -- --with opencode
    ```
 

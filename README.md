@@ -34,7 +34,7 @@ machine.
 Run the guided installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/cd2f509a737a55c2cd53f027cf90e1be8865d30d/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/fe92b5c76a2ee5909cf314a8e95d6a7171df100c/install.sh | bash
 ```
 
 The URL is pinned to an immutable Git commit—never `master` or `main`. The
@@ -67,7 +67,7 @@ Do not replace the guided upgrade with an unrestricted `docker compose pull &&
 docker compose up`. First inspect the plan without changing the machine:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/cd2f509a737a55c2cd53f027cf90e1be8865d30d/install.sh \
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/fe92b5c76a2ee5909cf314a8e95d6a7171df100c/install.sh \
   | bash -s -- --dry-run --core-only
 ```
 
