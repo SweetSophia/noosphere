@@ -708,6 +708,7 @@ ensure_persistent_user_manager() {
 run_existing_postgres_controller_transition() {
   local phase unit_base unit unit_load_state systemd_status=0 property
   local -a systemd_args=()
+  release_postgres_operation_lock
   if [[ ! -e "$POSTGRES_CONTROLLER_STATE" ]]; then
     "$POSTGRES_CONTROLLER_SCRIPT" --prepare \
       --manifest "$POSTGRES_CONTROLLER_MANIFEST" \
@@ -720,7 +721,6 @@ run_existing_postgres_controller_transition() {
     return 1
   }
 
-  release_postgres_operation_lock
   ensure_persistent_user_manager
   unit_base="noosphere-pgvector-transition-$(date -u +%Y%m%dT%H%M%S)-$$"
   unit="$unit_base.service"

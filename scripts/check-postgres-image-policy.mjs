@@ -760,6 +760,13 @@ fi
 echo "Starting Noosphere at \${APP_URL}..."`),
   "install-openclaw.sh must stop a running app before direct schema/bootstrap work",
 );
+expect(
+  installer.includes(`local -a systemd_args=()
+  release_postgres_operation_lock
+  if [[ ! -e "$POSTGRES_CONTROLLER_STATE" ]]; then
+    "$POSTGRES_CONTROLLER_SCRIPT" --prepare`),
+  "install-openclaw.sh must release the parent operation lock before controller preparation",
+);
 
 for (const relativePath of [
   "openclaw-noosphere-memory/src/cli.ts",
