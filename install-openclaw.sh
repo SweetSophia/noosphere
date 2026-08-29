@@ -227,6 +227,9 @@ integration_key_is_safe() {
   [[ -n "$key" ]] || return 1
   write_status=$(api_write_probe_status_with_key "$key")
   admin_status=$(api_http_status_with_key "$key" '/api/keys')
+  if [[ "$write_status" == 000 || "$admin_status" == 000 ]]; then
+    return 2
+  fi
   [[ "$write_status" == 400 && "$admin_status" == 403 ]]
 }
 
@@ -263,10 +266,16 @@ create_scoped_integration_key() {
 }
 
 select_scoped_integration_key() {
-  local existing=$1 label=$2
+  local existing=$1 label=$2 status
   if integration_key_is_safe "$existing"; then
     printf '%s' "$existing"
     return 0
+  else
+    status=$?
+  fi
+  if [[ "$status" == 2 ]]; then
+    echo "Could not verify the existing scoped ${label} API key; refusing to rotate it after a transport failure." >&2
+    return 1
   fi
   create_scoped_integration_key "$label"
 }

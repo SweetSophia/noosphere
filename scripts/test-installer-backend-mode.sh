@@ -68,7 +68,7 @@ while (($# > 0)); do
 done
 [[ -f "$config" ]]
 grep -q 'header = "Authorization: Bearer noo_' "$config"
-printf '%s\n' "$url" >> "$FAKE_CURL_CALLS"
+printf '%s %s\n' "$method" "$url" >> "$FAKE_CURL_CALLS"
 case "$FAKE_CURL_MODE:$method:$url" in
   reuse:POST:*/api/articles) printf '400' ;;
   reuse:GET:*/api/keys) printf '403' ;;
@@ -96,6 +96,18 @@ rotated_key="noo_fixture_$(fixture_value)"
 selected=$(PATH="$tmp/fake-bin:$PATH" FAKE_CURL_MODE=read FAKE_CREATED_KEY="$rotated_key" \
   select_scoped_integration_key "$read_only" kilocode)
 [[ "$selected" == "$rotated_key" && "$selected" != "$read_only" ]]
+: > "$tmp/curl.calls"
+transport_key="noo_fixture_$(fixture_value)"
+if PATH="$tmp/fake-bin:$PATH" FAKE_CURL_MODE=transport \
+  select_scoped_integration_key "$transport_key" hermes >"$tmp/transport.out" 2>"$tmp/transport.err"; then
+  echo 'transport failure unexpectedly rotated or reused a scoped key' >&2
+  exit 1
+fi
+grep -q 'refusing to rotate it after a transport failure' "$tmp/transport.err"
+if grep -q '^POST .*/api/keys$' "$tmp/curl.calls"; then
+  echo 'transport failure reached scoped-key creation' >&2
+  exit 1
+fi
 original_app_url=$APP_URL
 APP_URL=https://attacker.invalid:6578
 if PATH="$tmp/fake-bin:$PATH" FAKE_CURL_MODE=create FAKE_CREATED_KEY="$created_key" \
@@ -185,4 +197,4 @@ if "$0" "$tmp/sabotaged.sh" >/dev/null 2>&1; then
   exit 1
 fi
 
-printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 scoped_keys=yes read_key_rejected=yes local_bootstrap_destination=yes secret_argv=clean child_env=clean sabotage=red\n'
+printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 scoped_keys=yes read_key_rejected=yes transport_rotation=blocked local_bootstrap_destination=yes secret_argv=clean child_env=clean sabotage=red\n'
