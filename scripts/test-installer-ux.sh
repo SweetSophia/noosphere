@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'printf "installer UX test failed near line %s: %s\\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 version=$(tr -d '\r\n' < "$root/VERSION")
@@ -390,7 +391,8 @@ cat > "$tmp/mode-bin/docker" <<'DOCKER'
 exit 1
 DOCKER
 chmod 700 "$tmp/mode-bin/docker"
-mode_path="$tmp/mode-bin:/usr/bin:/bin"
+node_bin_dir=$(dirname "$(command -v node)")
+mode_path="$tmp/mode-bin:$node_bin_dir:/usr/bin:/bin"
 env HOME="$tmp/modes/fresh" NOOSPHERE_HOME="$tmp/modes/fresh/.noosphere" PATH="$mode_path" \
   bash "$root/install.sh" --dry-run --core-only > "$tmp/mode-fresh.out"
 grep -q 'Mode:      fresh installation' "$tmp/mode-fresh.out"

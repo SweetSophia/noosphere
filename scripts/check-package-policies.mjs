@@ -483,6 +483,7 @@ expect(
     installerPackager.includes("sha256sum install-openclaw.sh > install-openclaw.sh.sha256") &&
     installerUxTest.includes("secret_output=clean") &&
     installerUxTest.includes("lifecycle_modes=5") &&
+    installerUxTest.includes('node_bin_dir=$(dirname "$(command -v node)")') &&
     installerUxTest.includes("no_tty_guard=yes") &&
     installerUxTest.includes("stale_overlay=clean") &&
     installerUxTest.includes("unversioned_dedupe=yes") &&
