@@ -244,9 +244,26 @@ function exactBlockLines(block, expected) {
   return lines.length === expected.length && expected.every((line, index) => lines[index] === line);
 }
 
-function hasPluginTagExclusion(block) {
-  const condition = workflowLines(block).find((line) => line.startsWith("if:")) ?? "";
-  return condition.includes("github.ref_type == 'tag'") &&
+function yamlScalarLine(block, name, indent) {
+  const prefix = `${" ".repeat(indent)}${name}:`;
+  return block.split("\n").find((line) => line.startsWith(prefix))?.trim() ?? "";
+}
+
+function hasExactNativeDockerMatrix(block) {
+  return exactBlockLines(yamlNamedBlock(block, "include", 8), [
+    "include:",
+    "- platform: linux/amd64",
+    "slug: amd64",
+    "runner: ubuntu-latest",
+    "- platform: linux/arm64",
+    "slug: arm64",
+    "runner: ubuntu-24.04-arm",
+  ]);
+}
+
+function hasPluginTagExclusion(block, requireApplicationTag = true) {
+  const condition = yamlScalarLine(block, "if", 4);
+  return (!requireApplicationTag || condition.includes("github.ref_type == 'tag'")) &&
     ["v-openclaw-", "v-opencode-", "v-kilocode-", "v-hermes-"].every((tag) =>
       condition.includes(`refs/tags/${tag}`),
     );
@@ -308,14 +325,6 @@ const dockerPrBuildStep = yamlStepBlock(dockerPrPlatformJob, "Build target platf
 const dockerPublishBuildStep = yamlStepBlock(dockerPublishPlatformJob, "Build and push target platform by digest");
 const dockerAssembleStep = yamlStepBlock(dockerPublishIndexJob, "Assemble and verify multi-platform image");
 const dockerFinalStep = yamlStepBlock(dockerFinalJob, "Require every applicable Docker gate");
-const nativeDockerMatrix = `matrix:
-include:
-- platform: linux/amd64
-slug: amd64
-runner: ubuntu-latest
-- platform: linux/arm64
-slug: arm64
-runner: ubuntu-24.04-arm`;
 const dockerCheckoutCount = dockerPublishWorkflowLines.filter((line) => line.startsWith("uses: actions/checkout@")).length;
 const dockerCheckoutCredentialGuards = dockerPublishWorkflowLines.filter((line) => line === "persist-credentials: false").length;
 const hermesReleaseWorkflow = readText(policy.hermesReleaseWorkflow);
@@ -481,6 +490,7 @@ expect(
     ]) &&
     workflowLines(yamlStepBlock(dockerValidationJob, "Validate version metadata")).includes("id: version") &&
     exactBlockLines(yamlNamedBlock(dockerValidationJob, "permissions", 4), ["permissions:", "contents: read"]) &&
+    hasPluginTagExclusion(dockerValidationJob, false) &&
     dockerPushTrigger.includes('- ".github/workflows/docker-publish.yml"') &&
     dockerPushTrigger.includes('- "public/**"') &&
     dockerPushTrigger.includes('- "prisma.config.ts"') &&
@@ -492,11 +502,11 @@ expect(
   "The Docker workflow and its owning policy must trigger their own native-platform gates.",
 );
 expect(
-  workflowLines(dockerPrPlatformJob).includes("if: github.ref_type != 'tag'") &&
+  yamlScalarLine(dockerPrPlatformJob, "if", 4) === "if: github.ref_type != 'tag'" &&
     workflowLines(dockerPrPlatformJob).includes("needs: validate") &&
     workflowLines(dockerPrPlatformJob).includes("runs-on: ${{ matrix.runner }}") &&
     exactBlockLines(yamlNamedBlock(dockerPrPlatformJob, "permissions", 4), ["permissions:", "contents: read"]) &&
-    workflowLines(dockerPrPlatformJob).join("\n").includes(nativeDockerMatrix) &&
+    hasExactNativeDockerMatrix(dockerPrPlatformJob) &&
     workflowLines(dockerPrBuildStep).includes("platforms: ${{ matrix.platform }}") &&
     workflowLines(dockerPrBuildStep).includes("load: true") &&
     workflowLines(dockerPrBuildStep).includes("push: false") &&
@@ -513,7 +523,7 @@ expect(
       "contents: read",
       "packages: write",
     ]) &&
-    workflowLines(dockerPublishPlatformJob).join("\n").includes(nativeDockerMatrix) &&
+    hasExactNativeDockerMatrix(dockerPublishPlatformJob) &&
     workflowLines(dockerPublishBuildStep).includes("platforms: ${{ matrix.platform }}") &&
     dockerPublishBuildStep.includes("push-by-digest=true") &&
     yamlStepBlock(dockerPublishPlatformJob, "Log in to GitHub Container Registry") !== "" &&
@@ -540,7 +550,7 @@ expect(
     workflowLines(dockerFinalJob).includes(
       "needs: [validate, docker-platform, publish-platform, publish-index]",
     ) &&
-    workflowLines(dockerFinalJob).some((line) => line.startsWith("if:") && line.includes("always()")) &&
+    yamlScalarLine(dockerFinalJob, "if", 4).includes("always()") &&
     exactBlockLines(yamlNamedBlock(dockerFinalJob, "permissions", 4), ["permissions:", "contents: read"]) &&
     workflowLines(dockerFinalStep).includes("test '${{ needs.validate.result }}' = success") &&
     workflowLines(dockerFinalStep).includes("test '${{ needs['docker-platform'].result }}' = skipped") &&
