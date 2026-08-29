@@ -348,7 +348,10 @@ env "${common_env[@]}" \
   INSTALLER_TEST_HERMES_ARCHIVE="$hermes_archive" \
   bash "$tmp/remote-launcher/install.sh" --non-interactive --with hermes > "$tmp/hermes-without-cli.out"
 grep -q 'Hermes Agent plugin installed' "$tmp/hermes-without-cli.out"
-! grep -q 'Hermes Agent configured' "$tmp/hermes-without-cli.out"
+if grep -q 'Hermes Agent configured' "$tmp/hermes-without-cli.out"; then
+  echo 'Hermes Agent was reported configured without an available Hermes CLI.' >&2
+  exit 1
+fi
 
 env "${common_env[@]}" bash "$root/install.sh" \
   --non-interactive --with openclaw > "$tmp/openclaw.out"

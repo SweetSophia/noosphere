@@ -56,11 +56,14 @@ publish registry tags. Only the canonical application release tag may move
    - `install-openclaw.sh` and `install-openclaw.sh.sha256`;
    - `hermes-noosphere-memory-X.Y.Z.tar.gz` and its checksum.
 6. From a directory containing only the downloaded `install.sh`, resolve and
-   verify its release backend and Hermes URLs before publishing the draft:
-   `node scripts/check-postgres-image-policy.mjs --verify-remote
-   --verify-release-assets`. The first flag verifies immutable Git-hosted bytes;
-   the second is intentionally post-upload and must fail before the release
-   asset exists.
+   verify its release backend and Hermes URLs before publishing the draft. Keep
+   that download directory as the working directory and invoke the policy script
+   by its absolute repository path, for example:
+   `repo_root=$(git rev-parse --show-toplevel); release_dir=/path/to/downloaded-assets;
+   (cd "$release_dir" && node "$repo_root/scripts/check-postgres-image-policy.mjs"
+   --verify-remote --verify-release-assets)`. The first flag verifies immutable
+   Git-hosted bytes; the second is intentionally post-upload and must fail before
+   the release asset exists.
 7. Publish that draft only after every artifact, URL, checksum, and tag target
    is verified. This is the final coordinated public promotion.
 8. Never move, overwrite, or force-push a published release tag or replace a

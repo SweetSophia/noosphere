@@ -278,9 +278,10 @@ for (const relativePath of workflowPolicyPaths) {
     unpinnedActionUses(lines).length === 0,
     `${relativePath} must pin every third-party Action to a full commit SHA.`,
   );
+  const normalizedWorkflow = lines.join("\n");
   expect(
-    (workflow.match(/actions\/checkout@/g)?.length ?? 0) ===
-      (workflow.match(/persist-credentials: false/g)?.length ?? 0),
+    (normalizedWorkflow.match(/actions\/checkout@/g)?.length ?? 0) ===
+      (normalizedWorkflow.match(/persist-credentials: false/g)?.length ?? 0),
     `${relativePath} must disable persisted checkout credentials for every checkout step.`,
   );
 }
