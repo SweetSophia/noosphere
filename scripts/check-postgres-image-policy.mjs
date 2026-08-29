@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -214,7 +215,6 @@ expectExactDbImage("docker-compose.noosphere.yml", candidateImage, "noosphere_po
 expectExactDbImage("install-openclaw.sh", candidateImage, "noosphere_postgres_authorization");
 
 const installer = read("install-openclaw.sh");
-const guidedInstaller = read("install.sh");
 const publishedImageEnv = read("noosphere.env.example");
 const installerValidationEnv = {
   ...process.env,
@@ -1589,47 +1589,41 @@ if (verifyRemoteArtifacts) {
   }
 }
 
-const checkedReleaseVersion = extractShellStringConstant(guidedInstaller, "RELEASE_VERSION");
-const checkedReleaseBackendName = "install-openclaw.sh";
-const checkedReleaseLauncherName = "install.sh";
-const checkedReleaseHermesName = `hermes-noosphere-memory-${checkedReleaseVersion}.tar.gz`;
-const checkedReleaseHermesSha = extractShellConstant(guidedInstaller, "HERMES_BUNDLE_SHA256");
-const checkedReleaseBase =
-  `https://github.com/SweetSophia/noosphere/releases/download/v${checkedReleaseVersion}/`;
-const canonicalChecksum = (sha256, filename) => Buffer.from(`${sha256}  ${filename}\n`, "utf8");
-const packagedLauncherReplacements = [
-  [/^RELEASE_VERSION='[^']+'$/m, `RELEASE_VERSION='${checkedReleaseVersion}'`],
-  [/^BACKEND_URL='[^']+'$/m, `BACKEND_URL='${checkedReleaseBase}${checkedReleaseBackendName}'`],
-  [/^BACKEND_SHA256='[a-f0-9]{64}'$/m, `BACKEND_SHA256='${guidedBackendSha256}'`],
-  [/^HERMES_BUNDLE_URL='[^']+'$/m, `HERMES_BUNDLE_URL='${checkedReleaseBase}${checkedReleaseHermesName}'`],
-  [/^HERMES_BUNDLE_SHA256='[a-f0-9]{64}'$/m, `HERMES_BUNDLE_SHA256='${checkedReleaseHermesSha}'`],
-];
-let checkedPackagedLauncher = guidedInstaller;
-for (const [pattern, replacement] of packagedLauncherReplacements) {
-  const matches = checkedPackagedLauncher.match(
-    new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`),
-  ) ?? [];
-  expect(matches.length === 1, `${pattern} must match the source launcher exactly once`);
-  checkedPackagedLauncher = checkedPackagedLauncher.replace(pattern, replacement);
+let releaseAssetExpectations = [];
+if (verifyReleaseArtifacts) {
+  const expectedReleaseDir = mkdtempSync(join(tmpdir(), "noosphere-release-assets-"));
+  try {
+    const packageResult = spawnSync(
+      "bash",
+      [resolve(root, "scripts/package-installer.sh"), expectedReleaseDir],
+      { cwd: root, encoding: "utf8", env: { ...process.env } },
+    );
+    expect(
+      packageResult.status === 0,
+      `failed to build deterministic release expectations: ${packageResult.stderr || packageResult.stdout}`,
+    );
+    if (packageResult.status === 0) {
+      const hermesName = `hermes-noosphere-memory-${releaseVersion}.tar.gz`;
+      const expectedNames = [
+        "install.sh",
+        "install.sh.sha256",
+        "install-openclaw.sh",
+        "install-openclaw.sh.sha256",
+        hermesName,
+        `${hermesName}.sha256`,
+      ];
+      const expectedReleaseBase =
+        `https://github.com/SweetSophia/noosphere/releases/download/v${releaseVersion}/`;
+      releaseAssetExpectations = expectedNames.map((filename) => ({
+        filename,
+        sha256: sha256Bytes(readFileSync(resolve(expectedReleaseDir, filename))),
+        url: `${expectedReleaseBase}${filename}`,
+      }));
+    }
+  } finally {
+    rmSync(expectedReleaseDir, { recursive: true, force: true });
+  }
 }
-const checkedPackagedLauncherSha = sha256Bytes(Buffer.from(checkedPackagedLauncher, "utf8"));
-const releaseAssetExpectations = [
-  { filename: checkedReleaseLauncherName, sha256: checkedPackagedLauncherSha },
-  {
-    filename: `${checkedReleaseLauncherName}.sha256`,
-    sha256: sha256Bytes(canonicalChecksum(checkedPackagedLauncherSha, checkedReleaseLauncherName)),
-  },
-  { filename: checkedReleaseBackendName, sha256: guidedBackendSha256 },
-  {
-    filename: `${checkedReleaseBackendName}.sha256`,
-    sha256: sha256Bytes(canonicalChecksum(guidedBackendSha256, checkedReleaseBackendName)),
-  },
-  { filename: checkedReleaseHermesName, sha256: checkedReleaseHermesSha },
-  {
-    filename: `${checkedReleaseHermesName}.sha256`,
-    sha256: sha256Bytes(canonicalChecksum(checkedReleaseHermesSha, checkedReleaseHermesName)),
-  },
-].map((asset) => ({ ...asset, url: `${checkedReleaseBase}${asset.filename}` }));
 if (verifyReleaseFiles) {
   const releaseLauncherName = "install.sh";
   const releaseBackendName = "install-openclaw.sh";

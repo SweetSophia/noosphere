@@ -648,6 +648,8 @@ expect(
     coordinatedReleaseGuide.includes("Download all six assets again from the **public** release") &&
     coordinatedReleaseGuide.includes("--verify-release-files --verify-release-assets") &&
     postgresImagePolicy.includes('const verifyReleaseFiles = process.argv.includes("--verify-release-files")') &&
+    postgresImagePolicy.includes('resolve(root, "scripts/package-installer.sh")') &&
+    postgresImagePolicy.includes('mkdtempSync(join(tmpdir(), "noosphere-release-assets-"))') &&
     !postgresImagePolicy.includes("verifyReleaseArtifacts ||") &&
     coordinatedReleaseGuide.includes("Never move, overwrite, or force-push a published release tag or replace a\n   published release asset"),
   "The coordinated release guide must attach/read back all checksum-owned installer assets before publication.",
