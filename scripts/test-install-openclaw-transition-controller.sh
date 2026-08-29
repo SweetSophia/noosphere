@@ -576,6 +576,7 @@ test_existing_upgrade_reacquires_operation_lock() (
 
   assert_postgres_controller_bootstrap_node() { :; }
   resolve_local_docker_endpoint() { printf 'unix:///fixture/docker.sock\n'; }
+  provision_existing_postgres_roles_for_controller() { :; }
   write_postgres_controller_manifest() {
     jq -n --arg lockRoot "$XDG_RUNTIME_DIR" \
       '{dockerEndpoint:"unix:///fixture/docker.sock",engineId:"fixture-engine",lockRoot:$lockRoot}' \
@@ -622,6 +623,7 @@ test_existing_upgrade_rejects_lock_identity_change() (
 
   assert_postgres_controller_bootstrap_node() { :; }
   resolve_local_docker_endpoint() { printf '%s\n' "$FIXTURE_DOCKER_ENDPOINT"; }
+  provision_existing_postgres_roles_for_controller() { :; }
   write_postgres_controller_manifest() {
     jq -n --arg lockRoot "$XDG_RUNTIME_DIR" \
       '{dockerEndpoint:"unix:///fixture/docker.sock",engineId:"fixture-engine",lockRoot:$lockRoot}' \

@@ -713,8 +713,17 @@ expect(
 );
 expect(
   installer.includes("provision_existing_postgres_roles_for_controller() {") &&
-    installer.includes("run --rm -T --no-deps --entrypoint node init") &&
-    installer.includes("docker/provision-database-roles.mjs < /dev/null") &&
+    installer.includes('map(select((.value.Aliases // []) | index("db")))') &&
+    installer.includes('run --rm --pull never \\') &&
+    installer.includes('--network "$db_network"') &&
+    installer.includes('--env-file "$role_env"') &&
+    installer.includes('provision_log=$(mktemp) || {') &&
+    installer.includes('chmod 0600 "$role_env" "$provision_log"') &&
+    installer.includes('rm -f "$role_env" "$provision_log"') &&
+    installer.includes('NOOSPHERE_BOOTSTRAP_DATABASE_URL=postgresql://noosphere:${POSTGRES_PASSWORD}@db:5432/noosphere') &&
+    installer.includes('DATABASE_URL=postgresql://noosphere_migrator:${POSTGRES_MIGRATION_PASSWORD}@db:5432/noosphere') &&
+    installer.includes('NOOSPHERE_APP_DATABASE_URL=postgresql://noosphere_app:${POSTGRES_APP_PASSWORD}@db:5432/noosphere') &&
+    installer.includes('"$NOOSPHERE_IMAGE" docker/provision-database-roles.mjs') &&
     installer.includes("Database role provisioning for the existing PostgreSQL transition failed"),
   "existing-volume transitions must provision released v1.11 database roles with the candidate role-only helper before controller preparation",
 );

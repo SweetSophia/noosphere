@@ -754,23 +754,42 @@ run_existing_postgres_controller_transition() {
 }
 
 provision_existing_postgres_roles_for_controller() {
-  local docker_host=$1 docker_path=$2 provision_log provision_exit=0
-  provision_log=$(mktemp)
-  DOCKER_HOST="$docker_host" "$docker_path" compose \
-    --project-directory "$NOOSPHERE_HOME" \
-    --env-file "$NOOSPHERE_HOME/.env" \
-    -f "$POSTGRES_CONTROLLER_CANDIDATE" \
-    run --rm -T --no-deps --entrypoint node init \
-    docker/provision-database-roles.mjs < /dev/null >"$provision_log" 2>&1 ||
-    provision_exit=$?
+  local docker_host=$1 docker_path=$2 provision_log provision_exit=0 db_network role_env
+  db_network=$(DOCKER_HOST="$docker_host" "$docker_path" inspect noosphere-openclaw-db |
+    jq -er '
+      .[0].NetworkSettings.Networks
+      | to_entries
+      | map(select((.value.Aliases // []) | index("db")))
+      | if length == 1 then .[0].key else error("database Compose network is ambiguous") end
+    ') || {
+    echo 'Could not identify the existing PostgreSQL Compose network for role provisioning.' >&2
+    return 1
+  }
+  role_env=$(mktemp)
+  provision_log=$(mktemp) || {
+    rm -f "$role_env"
+    return 1
+  }
+  chmod 0600 "$role_env" "$provision_log"
+  printf '%s\n' \
+    "NOOSPHERE_BOOTSTRAP_DATABASE_URL=postgresql://noosphere:${POSTGRES_PASSWORD}@db:5432/noosphere" \
+    "DATABASE_URL=postgresql://noosphere_migrator:${POSTGRES_MIGRATION_PASSWORD}@db:5432/noosphere" \
+    "NOOSPHERE_APP_DATABASE_URL=postgresql://noosphere_app:${POSTGRES_APP_PASSWORD}@db:5432/noosphere" \
+    > "$role_env"
+  DOCKER_HOST="$docker_host" "$docker_path" run --rm --pull never \
+    --network "$db_network" \
+    --env-file "$role_env" \
+    --entrypoint node \
+    "$NOOSPHERE_IMAGE" docker/provision-database-roles.mjs \
+    < /dev/null >"$provision_log" 2>&1 || provision_exit=$?
   if ((provision_exit != 0)); then
     echo "Database role provisioning for the existing PostgreSQL transition failed with exit code $provision_exit:" >&2
     cat "$provision_log" >&2
-    rm -f "$provision_log"
+    rm -f "$role_env" "$provision_log"
     return "$provision_exit"
   fi
   cat "$provision_log"
-  rm -f "$provision_log"
+  rm -f "$role_env" "$provision_log"
 }
 
 route_postgres_install_transition() {
