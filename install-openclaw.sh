@@ -753,6 +753,26 @@ run_existing_postgres_controller_transition() {
   }
 }
 
+provision_existing_postgres_roles_for_controller() {
+  local docker_host=$1 docker_path=$2 provision_log provision_exit=0
+  provision_log=$(mktemp)
+  DOCKER_HOST="$docker_host" "$docker_path" compose \
+    --project-directory "$NOOSPHERE_HOME" \
+    --env-file "$NOOSPHERE_HOME/.env" \
+    -f "$POSTGRES_CONTROLLER_CANDIDATE" \
+    run --rm -T --no-deps --entrypoint node init \
+    docker/provision-database-roles.mjs < /dev/null >"$provision_log" 2>&1 ||
+    provision_exit=$?
+  if ((provision_exit != 0)); then
+    echo "Database role provisioning for the existing PostgreSQL transition failed with exit code $provision_exit:" >&2
+    cat "$provision_log" >&2
+    rm -f "$provision_log"
+    return "$provision_exit"
+  fi
+  cat "$provision_log"
+  rm -f "$provision_log"
+}
+
 route_postgres_install_transition() {
   local docker_host docker_path
   if [[ "$existing_switch_required" == true ]]; then
@@ -763,6 +783,7 @@ route_postgres_install_transition() {
       --project-directory "$NOOSPHERE_HOME" \
       --env-file "$NOOSPHERE_HOME/.env" \
       -f "$POSTGRES_CONTROLLER_CANDIDATE" pull
+    provision_existing_postgres_roles_for_controller "$docker_host" "$docker_path"
     write_postgres_controller_manifest
     run_existing_postgres_controller_transition
     reacquire_postgres_operation_lock_from_manifest || return 1
@@ -1677,8 +1698,10 @@ fsync_installer_path "$(dirname "$compose_target")"
 # a direct guard claim; already-complete installations need neither pre-step.
 route_postgres_install_transition
 
-if [[ "$controller_transition_completed" != true ]]; then
-
+# Whether the PostgreSQL image was already current or the controller just
+# completed a real source transition, schema/bootstrap work still runs against
+# the candidate with the application stopped. This is what upgrades released
+# v1.11 data and is intentionally idempotent on rerun.
 cd "$NOOSPHERE_HOME"
 if docker inspect noosphere-openclaw-app >/dev/null 2>&1 &&
    [[ "$(docker inspect noosphere-openclaw-app --format '{{.State.Running}}')" == true ]]; then
@@ -1750,9 +1773,6 @@ NOOSPHERE_EXPECTED_POSTGRES_IMAGE_MODE=candidate \
 NOOSPHERE_MIN_ARTICLES="$verify_min_articles" \
 NOOSPHERE_POSTGRES_EVIDENCE="$POSTGRES_BACKUP_DIR/noosphere_postgres_data.phase-a2b.json" \
   "$POSTGRES_VERIFY_SCRIPT"
-else
-  echo 'PostgreSQL transition controller completed bootstrap, authorization, activation, and verification.'
-fi
 
 install -m 600 /dev/null "$SECRETS_FILE"
 cat > "$SECRETS_FILE" <<JSON

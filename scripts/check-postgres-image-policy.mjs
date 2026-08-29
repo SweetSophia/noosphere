@@ -601,6 +601,9 @@ const completeControllerCompletion = completeReconciliation.indexOf(
 );
 const existingSwitchBlock = transitionRoute.indexOf('if [[ "$existing_switch_required" == true ]]');
 const candidatePull = transitionRoute.indexOf('-f "$POSTGRES_CONTROLLER_CANDIDATE" pull');
+const controllerRoleProvisioning = transitionRoute.indexOf(
+  'provision_existing_postgres_roles_for_controller "$docker_host" "$docker_path"',
+);
 const controllerManifest = transitionRoute.indexOf("write_postgres_controller_manifest");
 const controllerExecution = transitionRoute.indexOf("run_existing_postgres_controller_transition");
 const installerLockReacquisition = transitionRoute.indexOf(
@@ -699,13 +702,21 @@ expect(
   candidateGateTemplate >= 0 &&
     existingSwitchBlock >= 0 &&
     candidatePull > existingSwitchBlock &&
-    controllerManifest > candidatePull &&
+    controllerRoleProvisioning > candidatePull &&
+    controllerManifest > controllerRoleProvisioning &&
     controllerExecution > controllerManifest &&
     newInstallBlock > controllerExecution &&
     transitionRoute.includes('controller_transition_completed=true') &&
     installer.includes('compose_target="$POSTGRES_CONTROLLER_CANDIDATE"') &&
     installer.includes('install -m 600 "$NOOSPHERE_HOME/docker-compose.yml" "$POSTGRES_CONTROLLER_SOURCE"'),
-  "install-openclaw.sh must preserve source Compose bytes and route existing volumes through candidate pull, manifest preparation, and the controller",
+  "install-openclaw.sh must preserve source Compose bytes and route existing volumes through candidate pull, role provisioning, manifest preparation, and the controller",
+);
+expect(
+  installer.includes("provision_existing_postgres_roles_for_controller() {") &&
+    installer.includes("run --rm -T --no-deps --entrypoint node init") &&
+    installer.includes("docker/provision-database-roles.mjs < /dev/null") &&
+    installer.includes("Database role provisioning for the existing PostgreSQL transition failed"),
+  "existing-volume transitions must provision released v1.11 database roles with the candidate role-only helper before controller preparation",
 );
 expect(
   recoveredSwitchResume >= 0 &&
@@ -750,6 +761,22 @@ expect(
     installer.includes("verify_min_articles=0") &&
     installer.includes('NOOSPHERE_MIN_ARTICLES="$verify_min_articles"'),
   "install-openclaw.sh must allow zero articles only for a proven new install",
+);
+const mainTransitionRouteCall = installer.lastIndexOf("\nroute_postgres_install_transition\n");
+const mainStopBeforeBootstrap = installer.indexOf(
+  'echo "Stopping Noosphere app before schema/bootstrap work..."',
+  mainTransitionRouteCall,
+);
+const mainBootstrap = installer.indexOf(
+  'echo "Applying database schema and bootstrap data..."',
+  mainTransitionRouteCall,
+);
+expect(
+  mainTransitionRouteCall >= 0 &&
+    mainStopBeforeBootstrap > mainTransitionRouteCall &&
+    mainBootstrap > mainStopBeforeBootstrap &&
+    !installer.includes('if [[ "$controller_transition_completed" != true ]]'),
+  "controller completion must still stop the app and run idempotent schema/bootstrap work before final activation",
 );
 expect(
   installer.includes(`if docker inspect noosphere-openclaw-app >/dev/null 2>&1 &&

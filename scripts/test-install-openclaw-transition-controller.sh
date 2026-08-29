@@ -536,6 +536,7 @@ test_existing_upgrade_routes_through_controller() (
 
   assert_postgres_controller_bootstrap_node() { printf 'bootstrap\n' >> "$trace"; }
   resolve_local_docker_endpoint() { printf 'unix:///fixture/docker.sock\n'; }
+  provision_existing_postgres_roles_for_controller() { printf 'provision\n' >> "$trace"; }
   write_postgres_controller_manifest() {
     printf 'manifest\n' >> "$trace"
     jq -n --arg lockRoot "$XDG_RUNTIME_DIR" \
@@ -547,7 +548,7 @@ test_existing_upgrade_routes_through_controller() (
   route_postgres_install_transition
 
   [[ "$controller_transition_completed" == true ]]
-  [[ $(paste -sd, "$trace") == bootstrap,manifest,controller ]]
+  [[ $(paste -sd, "$trace") == bootstrap,provision,manifest,controller ]]
   grep -F -- "compose --project-directory $NOOSPHERE_HOME --env-file $NOOSPHERE_HOME/.env -f $POSTGRES_CONTROLLER_CANDIDATE pull" \
     "$fixture/docker.log" >/dev/null
 )
