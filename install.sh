@@ -181,6 +181,11 @@ if [[ "$DRY_RUN" == true ]]; then
   exit 0
 fi
 
+if has_integration hermes && ! command -v tar >/dev/null 2>&1; then
+  echo 'Hermes integration requires tar.' >&2
+  exit 1
+fi
+
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
 backend=''
@@ -274,10 +279,10 @@ NODE
 }
 
 configure_hermes() {
-  local bundle_root installer_path hermes_home
+  local bundle_root source_root plugin_source skill_source plugin_target skill_target hermes_home
   hermes_home="${HERMES_HOME:-$HOME/.hermes}"
   if [[ "$SOURCE_CHECKOUT" == true ]]; then
-    installer_path="$SCRIPT_DIR/hermes-noosphere-memory/install-hermes.sh"
+    source_root="$SCRIPT_DIR/hermes-noosphere-memory"
   else
     [[ "$HERMES_BUNDLE_SHA256" =~ ^[a-f0-9]{64}$ ]] || {
       echo 'Packaged installer is missing the Hermes bundle checksum.' >&2
@@ -293,9 +298,28 @@ configure_hermes() {
       exit 1
     }
     tar -xzf "$archive" -C "$bundle_root"
-    installer_path="$bundle_root/hermes-noosphere-memory-${RELEASE_VERSION}/install-hermes.sh"
+    source_root="$bundle_root/hermes-noosphere-memory-${RELEASE_VERSION}"
   fi
-  HERMES_NOOSPHERE_NON_INTERACTIVE=true HERMES_HOME="$hermes_home" bash "$installer_path"
+
+  plugin_source="$source_root/plugins/memory/noosphere"
+  skill_source="$source_root/skills/noosphere-memory-hermes"
+  plugin_target="$hermes_home/plugins/noosphere"
+  skill_target="$hermes_home/skills/noosphere-memory-hermes"
+  [[ -d "$plugin_source" && -d "$skill_source" ]] || {
+    echo 'Hermes bundle is missing the plugin or setup skill payload.' >&2
+    exit 1
+  }
+  [[ ! -L "$plugin_target" && ! -L "$skill_target" ]] || {
+    echo 'Refusing to replace a symlinked Hermes plugin or skill target.' >&2
+    exit 1
+  }
+  install -d -m 700 "$plugin_target" "$skill_target"
+  tar -C "$plugin_source" -cf - . | tar -C "$plugin_target" -xf -
+  tar -C "$skill_source" -cf - . | tar -C "$skill_target" -xf -
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -m compileall -q "$plugin_target"
+  fi
+
   CREDENTIALS_FILE="$NOOSPHERE_CREDENTIALS_FILE" HERMES_HOME="$hermes_home" node <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");

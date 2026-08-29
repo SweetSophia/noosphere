@@ -103,6 +103,45 @@ test -f "$tmp/home/.hermes/plugins/noosphere/plugin.yaml"
 grep -q '^version: 1.12.0$' "$tmp/home/.hermes/plugins/noosphere/plugin.yaml"
 grep -q '^config set memory.provider noosphere$' "$tmp/hermes.log"
 
+# Exercise the single-file launcher path with a checksum-owned Hermes archive.
+mkdir -p "$tmp/hermes-release" "$tmp/remote-launcher"
+"$root/scripts/package-hermes-plugin.sh" "$tmp/hermes-release" >/dev/null
+hermes_archive="$tmp/hermes-release/hermes-noosphere-memory-1.12.0.tar.gz"
+hermes_sha=$(sha256sum "$hermes_archive" | awk '{print $1}')
+cp "$root/install.sh" "$tmp/remote-launcher/install.sh"
+REMOTE_LAUNCHER="$tmp/remote-launcher/install.sh" HERMES_FIXTURE_SHA="$hermes_sha" node <<'NODE'
+const fs = require("node:fs");
+const path = process.env.REMOTE_LAUNCHER;
+let source = fs.readFileSync(path, "utf8");
+source = source.replace(/^HERMES_BUNDLE_URL='[^']+'$/m, "HERMES_BUNDLE_URL='https://fixture.invalid/hermes.tar.gz'");
+source = source.replace(/^HERMES_BUNDLE_SHA256='[a-f0-9]{64}'$/m, `HERMES_BUNDLE_SHA256='${process.env.HERMES_FIXTURE_SHA}'`);
+fs.writeFileSync(path, source, { mode: 0o700 });
+NODE
+cat > "$tmp/fake-bin/curl" <<'CURL'
+#!/usr/bin/env bash
+set -euo pipefail
+target=''
+while (($# > 0)); do
+  case "$1" in
+    -o) target=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[[ -n "$target" ]]
+cp "$INSTALLER_TEST_HERMES_ARCHIVE" "$target"
+CURL
+chmod 700 "$tmp/fake-bin/curl"
+: > "$tmp/hermes.log"
+env "${common_env[@]}" \
+  HERMES_HOME="$tmp/home/.hermes-remote" \
+  INSTALLER_TEST_HERMES_ARCHIVE="$hermes_archive" \
+  bash "$tmp/remote-launcher/install.sh" --non-interactive --with hermes > "$tmp/hermes-remote.out"
+test -f "$tmp/home/.hermes-remote/plugins/noosphere/plugin.yaml"
+test -f "$tmp/home/.hermes-remote/skills/noosphere-memory-hermes/SKILL.md"
+grep -q '^config set memory.provider noosphere$' "$tmp/hermes.log"
+! grep -q 'memory setup' "$tmp/hermes.log"
+! grep -q 'noo_fixture_installer_key' "$tmp/hermes-remote.out"
+
 env "${common_env[@]}" bash "$root/install.sh" \
   --non-interactive --with openclaw > "$tmp/openclaw.out"
 test "$(<"$tmp/backend-mode.txt")" = true
@@ -125,4 +164,4 @@ fi
 env "${common_env[@]}" NOOSPHERE_BACKEND_PATH=/does/not/exist \
   bash "$root/install.sh" --dry-run --core-only >/dev/null
 
-printf 'installer_ux_tests=GREEN core_mode=yes integration_merge=yes secret_output=clean guards=4\n'
+printf 'installer_ux_tests=GREEN core_mode=yes integration_merge=yes remote_hermes=yes secret_output=clean guards=4\n'
