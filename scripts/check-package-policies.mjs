@@ -355,9 +355,13 @@ expect(
     hermesReleaseWorkflowLines.includes("persist-credentials: false") &&
     hermesReleaseWorkflow.includes("actions/upload-artifact@") &&
     hermesReleaseWorkflow.includes("Verify release bundle installation") &&
+    hermesReleaseWorkflow.includes(
+      '(cd dist && sha256sum --check "hermes-noosphere-memory-${version}.tar.gz.sha256")',
+    ) &&
+    !hermesReleaseWorkflow.includes('sha256sum --check "${archive}.sha256"') &&
     !hermesReleaseWorkflow.includes("GH_TOKEN") &&
     !hermesReleaseWorkflow.includes("gh release upload"),
-  "The Hermes tag workflow must be secret-free, install-test its bundle, and publish only a read-only Actions artifact.",
+  "The Hermes tag workflow must verify checksums from dist, remain secret-free, install-test its bundle, and publish only a read-only Actions artifact.",
 );
 
 if (failures.length > 0) {
