@@ -41,7 +41,7 @@ jobs:
           scripts/package-hermes-plugin.sh dist
           version=$(cat VERSION)
           archive="dist/hermes-noosphere-memory-${version}.tar.gz"
-          sha256sum --check "${archive}.sha256"
+          (cd dist && sha256sum --check "hermes-noosphere-memory-${version}.tar.gz.sha256")
           tar -tzf "$archive" >/dev/null
 
       - name: Verify release bundle installation
