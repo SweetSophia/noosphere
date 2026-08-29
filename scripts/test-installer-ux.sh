@@ -11,6 +11,8 @@ fixture_bootstrap_key="noo_fixture_$(node -e 'process.stdout.write(require("node
 fixture_hermes_key="noo_fixture_$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
 fixture_opencode_key="noo_fixture_$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
 fixture_kilocode_key="noo_fixture_$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
+fixture_kilocode_rotated_key="noo_fixture_$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
+fixture_admin_password="fixture-$(node -e 'process.stdout.write(require("node:crypto").randomBytes(18).toString("hex"))')"
 
 cat > "$tmp/fake-backend.sh" <<'BACKEND'
 #!/usr/bin/env bash
@@ -18,10 +20,10 @@ set -euo pipefail
 printf '%s\n' "$NOOSPHERE_INSTALL_OPENCLAW" > "$INSTALLER_TEST_RECORD"
 install -d -m 700 "$(dirname "$NOOSPHERE_CREDENTIALS_FILE")"
 install -m 600 /dev/null "$NOOSPHERE_CREDENTIALS_FILE"
-printf '{\n  "baseUrl": "http://127.0.0.1:6578",\n  "apiKey": "%s",\n  "bootstrapApiKey": "%s",\n  "integrationApiKeys": {\n    "hermes": "%s",\n    "opencode": "%s",\n    "kilocode": "%s"\n  },\n  "adminEmail": "admin@noosphere.local",\n  "adminPassword": "fixture-admin-password"\n}\n' \
+printf '{\n  "baseUrl": "http://127.0.0.1:6578",\n  "apiKey": "%s",\n  "bootstrapApiKey": "%s",\n  "integrationApiKeys": {\n    "hermes": "%s",\n    "opencode": "%s",\n    "kilocode": "%s"\n  },\n  "adminEmail": "admin@noosphere.local",\n  "adminPassword": "%s"\n}\n' \
   "$NOOSPHERE_TEST_API_KEY" "$NOOSPHERE_TEST_BOOTSTRAP_KEY" \
   "$NOOSPHERE_TEST_HERMES_KEY" "$NOOSPHERE_TEST_OPENCODE_KEY" "$NOOSPHERE_TEST_KILOCODE_KEY" \
-  > "$NOOSPHERE_CREDENTIALS_FILE"
+  "$NOOSPHERE_TEST_ADMIN_PASSWORD" > "$NOOSPHERE_CREDENTIALS_FILE"
 BACKEND
 chmod 700 "$tmp/fake-backend.sh"
 fake_backend_sha=$(sha256sum "$tmp/fake-backend.sh" | awk '{print $1}')
@@ -30,28 +32,40 @@ cat > "$tmp/fake-bin/hermes" <<'HERMES'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$INSTALLER_TEST_HERMES_LOG"
+env | sort > "$INSTALLER_TEST_HERMES_ENV_CAPTURE"
 HERMES
 chmod 700 "$tmp/fake-bin/hermes"
 
 cat > "$tmp/fake-bin/curl" <<'CURL'
 #!/usr/bin/env bash
 set -euo pipefail
-config='' url=''
+config='' output='' url='' method=GET
 for arg in "$@"; do
   [[ "$arg" != *noo_* ]] || { echo 'secret appeared in curl argv' >&2; exit 90; }
 done
 while (($# > 0)); do
   case "$1" in
     --config) config=$2; shift 2 ;;
+    --output) output=$2; shift 2 ;;
+    --request) method=$2; shift 2 ;;
     http://*|https://*) url=$1; shift ;;
     *) shift ;;
   esac
 done
 [[ -f "$config" && $(stat -c '%a' "$config") == 600 ]]
 grep -q 'header = "Authorization: Bearer noo_' "$config"
-case "$url" in
-  */api/articles*) printf '200' ;;
-  */api/keys) printf '403' ;;
+case "$method:$url" in
+  POST:*/api/articles)
+    if grep -Fq -- "$INSTALLER_TEST_READ_KEY" "$config"; then
+      printf '403'
+    else
+      printf '400'
+    fi
+    ;;
+  GET:*/api/keys) printf '403' ;;
+  POST:*/api/keys)
+    printf '{"key":"%s"}\n' "$INSTALLER_TEST_CREATED_KEY" > "$output"
+    ;;
   *) exit 91 ;;
 esac
 CURL
@@ -85,11 +99,19 @@ common_env=(
   NOOSPHERE_BACKEND_OVERRIDE_SHA256="$fake_backend_sha"
   INSTALLER_TEST_RECORD="$tmp/backend-mode.txt"
   INSTALLER_TEST_HERMES_LOG="$tmp/hermes.log"
+  INSTALLER_TEST_HERMES_ENV_CAPTURE="$tmp/hermes.env"
+  POSTGRES_PASSWORD="fixture-postgres-secret"
+  NOOSPHERE_BOOTSTRAP_API_KEY="noo_fixture_inherited_bootstrap"
+  NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON='[{"apiKey":"fixture-json-provider"}]'
+  NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON='{"v1":"fixture-json-hmac"}'
   NOOSPHERE_TEST_API_KEY="$fixture_api_key"
   NOOSPHERE_TEST_BOOTSTRAP_KEY="$fixture_bootstrap_key"
   NOOSPHERE_TEST_HERMES_KEY="$fixture_hermes_key"
   NOOSPHERE_TEST_OPENCODE_KEY="$fixture_opencode_key"
   NOOSPHERE_TEST_KILOCODE_KEY="$fixture_kilocode_key"
+  INSTALLER_TEST_READ_KEY="$fixture_kilocode_key"
+  INSTALLER_TEST_CREATED_KEY="$fixture_kilocode_rotated_key"
+  NOOSPHERE_TEST_ADMIN_PASSWORD="$fixture_admin_password"
 )
 
 mkdir -p "$tmp/home/.hermes/plugins/noosphere" "$tmp/home/.hermes/skills/noosphere-memory-hermes"
@@ -101,8 +123,15 @@ env "${common_env[@]}" bash "$root/install.sh" \
   --non-interactive --with hermes,opencode,kilocode > "$tmp/install.out"
 
 test "$(<"$tmp/backend-mode.txt")" = false
+for secret_name in POSTGRES_PASSWORD NOOSPHERE_BOOTSTRAP_API_KEY \
+  NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON; do
+  if grep -q "^${secret_name}=" "$tmp/hermes.env"; then
+    echo "Hermes child inherited secret variable: ${secret_name}" >&2
+    exit 1
+  fi
+done
 for secret_value in "$fixture_api_key" "$fixture_bootstrap_key" "$fixture_hermes_key" \
-  "$fixture_opencode_key" "$fixture_kilocode_key" 'fixture-admin-password'; do
+  "$fixture_opencode_key" "$fixture_kilocode_key" "$fixture_kilocode_rotated_key" "$fixture_admin_password"; do
   if grep -Fq "$secret_value" "$tmp/install.out"; then
     echo 'installer output exposed a credential fixture' >&2
     exit 1
@@ -118,7 +147,8 @@ env \
   NOOSPHERE_TEST_BOOTSTRAP_KEY="$fixture_bootstrap_key" \
   NOOSPHERE_TEST_HERMES_KEY="$fixture_hermes_key" \
   NOOSPHERE_TEST_OPENCODE_KEY="$fixture_opencode_key" \
-  NOOSPHERE_TEST_KILOCODE_KEY="$fixture_kilocode_key" \
+  NOOSPHERE_TEST_KILOCODE_KEY="$fixture_kilocode_rotated_key" \
+  NOOSPHERE_TEST_VERSION="$version" \
   node <<'NODE'
 const fs = require("node:fs");
 const opencode = JSON.parse(fs.readFileSync(process.env.OPENCODE_CONFIG, "utf8"));
@@ -129,8 +159,8 @@ const find = (entries, prefix) => entries.filter((entry) => {
 });
 const opencodeEntries = find(opencode.plugin, "@sweetsophia/opencode-noosphere-memory@");
 const kiloEntries = find(kilo.plugin, "@sweetsophia/kilocode-noosphere-memory@");
-if (opencodeEntries.length !== 1 || opencodeEntries[0][0] !== "@sweetsophia/opencode-noosphere-memory@1.12.0") process.exit(1);
-if (kiloEntries.length !== 1 || kiloEntries[0][0] !== "@sweetsophia/kilocode-noosphere-memory@1.12.0") process.exit(2);
+if (opencodeEntries.length !== 1 || opencodeEntries[0][0] !== `@sweetsophia/opencode-noosphere-memory@${process.env.NOOSPHERE_TEST_VERSION}`) process.exit(1);
+if (kiloEntries.length !== 1 || kiloEntries[0][0] !== `@sweetsophia/kilocode-noosphere-memory@${process.env.NOOSPHERE_TEST_VERSION}`) process.exit(2);
 if (!opencode.plugin.includes("other-opencode-plugin") || !kilo.plugin.includes("other-kilo-plugin")) process.exit(3);
 if (opencodeEntries[0][1].apiKey !== process.env.NOOSPHERE_TEST_OPENCODE_KEY) process.exit(4);
 if (kiloEntries[0][1].apiKey !== process.env.NOOSPHERE_TEST_KILOCODE_KEY) process.exit(5);
@@ -156,7 +186,7 @@ done
 test -f "$tmp/home/.hermes/plugins/noosphere/plugin.yaml"
 test ! -e "$tmp/home/.hermes/plugins/noosphere/stale.py"
 test ! -e "$tmp/home/.hermes/skills/noosphere-memory-hermes/stale.md"
-grep -q '^version: 1.12.0$' "$tmp/home/.hermes/plugins/noosphere/plugin.yaml"
+grep -q "^version: ${version}$" "$tmp/home/.hermes/plugins/noosphere/plugin.yaml"
 grep -q '^config set memory.provider noosphere$' "$tmp/hermes.log"
 
 mkdir -p "$tmp/home/.hermes-symlink"
@@ -176,6 +206,34 @@ if grep -q 'HERMES_NOOSPHERE_API_KEY' "$tmp/hermes-env-target"; then
   exit 1
 fi
 
+mkdir -p "$tmp/hermes-home-target"
+printf '%s\n' 'HOME_SENTINEL=yes' > "$tmp/hermes-home-target/sentinel"
+chmod 755 "$tmp/hermes-home-target"
+ln -s "$tmp/hermes-home-target" "$tmp/home/.hermes-home-link"
+if env "${common_env[@]}" HERMES_HOME="$tmp/home/.hermes-home-link" \
+  bash "$root/install.sh" --non-interactive --with hermes > "$tmp/hermes-home-symlink.out" 2>&1; then
+  echo 'symlinked Hermes home unexpectedly passed' >&2
+  exit 1
+fi
+test -L "$tmp/home/.hermes-home-link"
+test "$(stat -c '%a' "$tmp/hermes-home-target")" = 755
+grep -q '^HOME_SENTINEL=yes$' "$tmp/hermes-home-target/sentinel"
+test ! -e "$tmp/hermes-home-target/plugins"
+grep -q 'Refusing symlinked Hermes home' "$tmp/hermes-home-symlink.out"
+
+cp "$tmp/fake-backend.sh" "$tmp/redirected-backend.sh"
+node -e 'const fs=require("node:fs"); const p=process.argv[1]; fs.writeFileSync(p, fs.readFileSync(p,"utf8").replace("http://127.0.0.1:6578", "https://attacker.invalid:6578"));' "$tmp/redirected-backend.sh"
+redirected_backend_sha=$(sha256sum "$tmp/redirected-backend.sh" | awk '{print $1}')
+if env "${common_env[@]}" \
+  NOOSPHERE_BACKEND_PATH="$tmp/redirected-backend.sh" \
+  NOOSPHERE_BACKEND_OVERRIDE_SHA256="$redirected_backend_sha" \
+  HERMES_HOME="$tmp/home/.hermes-redirected" \
+  bash "$root/install.sh" --non-interactive --with hermes > "$tmp/redirected.out" 2>&1; then
+  echo 'non-local bootstrap-key destination unexpectedly passed' >&2
+  exit 1
+fi
+grep -q 'non-local Noosphere URL' "$tmp/redirected.out"
+
 # Exercise the single-file launcher path with a checksum-owned Hermes archive.
 mkdir -p "$tmp/hermes-release" "$tmp/remote-launcher"
 "$root/scripts/package-hermes-plugin.sh" "$tmp/hermes-release" >/dev/null
@@ -193,7 +251,7 @@ NODE
 cat > "$tmp/fake-bin/curl" <<'CURL'
 #!/usr/bin/env bash
 set -euo pipefail
-target='' config='' url=''
+target='' config='' url='' method=GET
 for arg in "$@"; do
   [[ "$arg" != *noo_* ]] || { echo 'secret appeared in curl argv' >&2; exit 90; }
 done
@@ -201,15 +259,16 @@ while (($# > 0)); do
   case "$1" in
     -o|--output) target=$2; shift 2 ;;
     --config) config=$2; shift 2 ;;
+    --request) method=$2; shift 2 ;;
     http://*|https://*) url=$1; shift ;;
     *) shift ;;
   esac
 done
 if [[ -n "$config" ]]; then
   [[ -f "$config" && $(stat -c '%a' "$config") == 600 ]]
-  case "$url" in
-    */api/articles*) printf '200' ;;
-    */api/keys) printf '403' ;;
+  case "$method:$url" in
+    POST:*/api/articles) printf '400' ;;
+    GET:*/api/keys) printf '403' ;;
     *) exit 91 ;;
   esac
 else
@@ -282,6 +341,7 @@ env "${common_env[@]}" NOOSPHERE_BACKEND_PATH=/does/not/exist \
   bash "$root/install.sh" --dry-run --core-only >/dev/null
 
 mkdir -p "$tmp/mode-bin" "$tmp/modes/fresh" "$tmp/modes/existing" \
+  "$tmp/modes/partial" "$tmp/modes/unclassified/backups/postgres-pgvector" \
   "$tmp/modes/resume/backups/postgres-pgvector"
 cat > "$tmp/mode-bin/docker" <<'DOCKER'
 #!/usr/bin/env bash
@@ -292,15 +352,24 @@ mode_path="$tmp/mode-bin:/usr/bin:/bin"
 env HOME="$tmp/modes/fresh" NOOSPHERE_HOME="$tmp/modes/fresh/.noosphere" PATH="$mode_path" \
   bash "$root/install.sh" --dry-run --core-only > "$tmp/mode-fresh.out"
 grep -q 'Mode:      fresh installation' "$tmp/mode-fresh.out"
-mkdir -p "$tmp/modes/existing/.noosphere"
-touch "$tmp/modes/existing/.noosphere/.env"
+mkdir -p "$tmp/modes/existing/.noosphere" "$tmp/modes/partial/.noosphere"
+touch "$tmp/modes/existing/.noosphere/.env" "$tmp/modes/existing/.noosphere/docker-compose.yml"
 env HOME="$tmp/modes/existing" NOOSPHERE_HOME="$tmp/modes/existing/.noosphere" PATH="$mode_path" \
   bash "$root/install.sh" --dry-run --core-only > "$tmp/mode-existing.out"
-grep -q 'Mode:      upgrade or verify existing installation' "$tmp/mode-existing.out"
+grep -q 'Mode:      upgrade or verify complete installation' "$tmp/mode-existing.out"
+touch "$tmp/modes/partial/.noosphere/.env"
+env HOME="$tmp/modes/partial" NOOSPHERE_HOME="$tmp/modes/partial/.noosphere" PATH="$mode_path" \
+  bash "$root/install.sh" --dry-run --core-only > "$tmp/mode-partial.out"
+grep -q 'Mode:      verify partial existing state before mutation' "$tmp/mode-partial.out"
+printf '%s\n' '{not-json' > \
+  "$tmp/modes/unclassified/backups/postgres-pgvector/noosphere_postgres_data.phase-a2b.json"
+env HOME="$tmp/modes/unclassified" NOOSPHERE_HOME="$tmp/modes/unclassified" PATH="$mode_path" \
+  bash "$root/install.sh" --dry-run --core-only > "$tmp/mode-unclassified.out"
+grep -q 'Mode:      verify unclassified existing state before mutation' "$tmp/mode-unclassified.out"
 printf '%s\n' '{"phase":"provisioning"}' > \
   "$tmp/modes/resume/backups/postgres-pgvector/noosphere_postgres_data.phase-a2b.json"
 env HOME="$tmp/modes/resume" NOOSPHERE_HOME="$tmp/modes/resume" PATH="$mode_path" \
   bash "$root/install.sh" --dry-run --core-only > "$tmp/mode-resume.out"
 grep -q 'Mode:      resume or verify interrupted installation' "$tmp/mode-resume.out"
 
-printf 'installer_ux_tests=GREEN core_mode=yes lifecycle_modes=3 no_tty_guard=yes integration_merge=yes unversioned_dedupe=yes scoped_tool_keys=yes bootstrap_tool_config=absent secret_argv=clean remote_hermes=yes stale_overlay=clean hermes_symlink=blocked atomic_secret_rewrite=yes secret_output=clean guards=8\n'
+printf 'installer_ux_tests=GREEN core_mode=yes lifecycle_modes=5 no_tty_guard=yes integration_merge=yes unversioned_dedupe=yes scoped_tool_keys=yes write_key_verified=yes bootstrap_tool_config=absent randomized_credentials=yes local_bootstrap_destination=yes secret_argv=clean child_env=clean remote_hermes=yes stale_overlay=clean hermes_symlink=blocked hermes_home_symlink=blocked atomic_secret_rewrite=yes secret_output=clean guards=11\n'

@@ -250,6 +250,7 @@ const hermesReleaseWorkflowLines = workflowLines(hermesReleaseWorkflow);
 const installerReleaseWorkflow = readText(policy.installerReleaseWorkflow);
 const installerReleaseWorkflowLines = workflowLines(installerReleaseWorkflow);
 const ciWorkflow = readText(".github/workflows/ci.yml");
+const ciWorkflowLines = workflowLines(ciWorkflow);
 const installer = readText("install.sh");
 const installerBackend = readText("install-openclaw.sh");
 const installerPackager = readText("scripts/package-installer.sh");
@@ -393,9 +394,12 @@ expect(
   ciWorkflow.includes("installer:\n    runs-on: ubuntu-latest") &&
     ciWorkflow.includes("actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10") &&
     ciWorkflow.includes("persist-credentials: false") &&
-    ciWorkflow.includes("actions/setup-node@1e60f620b9541d401f9173298e0e86b0b68b2a1a") &&
+    ciWorkflow.includes("actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020") &&
+    unpinnedActionUses(ciWorkflowLines).length === 0 &&
+    (ciWorkflow.match(/actions\/checkout@/g)?.length ?? 0) ===
+      (ciWorkflow.match(/persist-credentials: false/g)?.length ?? 0) &&
     ciWorkflow.includes("npm run installer:check"),
-  "The hosted installer gate must use pinned Actions and disable checkout credential persistence.",
+  "Every hosted CI job must use immutable Actions, disable checkout credential persistence, and retain the installer gate.",
 );
 expect(
   coordinatedReleaseGuide.includes("attach the complete\n   six-file installer artifact") &&
@@ -406,10 +410,10 @@ expect(
   "The coordinated release guide must attach/read back all checksum-owned installer assets before publication.",
 );
 expect(
-  installer.includes("BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/aac14248a7e6f52fba1ea5728cd495a232fcb218/install-openclaw.sh'") &&
-    installer.includes("BACKEND_SHA256='bd48b25d4a41e7100d3a23e6343742fa999bf5b2666768048d2779526e20f86e'") &&
-    installer.includes("HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.12.0/hermes-noosphere-memory-1.12.0.tar.gz'") &&
-    installer.includes("HERMES_BUNDLE_SHA256='1fc5f938887832b0f9bb273cb78a90a4da0f12b11d9fd2eeef79f923445e4f17'") &&
+  installer.includes("BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/746d36a36327db19594aae7f80c49e09b522318e/install-openclaw.sh'") &&
+    installer.includes("BACKEND_SHA256='9e89de09319f58c25203ee242ce91ac7d0505af159f939506fd25e752165aca2'") &&
+    installer.includes("HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.13.0/hermes-noosphere-memory-1.13.0.tar.gz'") &&
+    installer.includes("HERMES_BUNDLE_SHA256='a560bd8607b512123e71975c188f5b924d4325adaeb86bbbd1424933423c5fde'") &&
     installer.includes("Refusing Noosphere backend with an unexpected checksum") &&
     installer.includes("Refusing Hermes bundle with an unexpected checksum") &&
     installer.includes("--core-only") &&
@@ -427,11 +431,17 @@ expect(
     installerBackend.includes("run_openclaw()") &&
     installerBackend.includes("-u POSTGRES_PASSWORD") &&
     installerBackend.includes("-u NOOSPHERE_BOOTSTRAP_API_KEY") &&
+    installerBackend.includes("-u NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON") &&
+    installerBackend.includes("-u NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON") &&
+    installerBackend.includes("api_write_probe_status_with_key()") &&
+    installerBackend.includes("validated_local_app_url()") &&
     installerBackend.includes("create_scoped_integration_key()") &&
     installerBackend.includes("select_scoped_integration_key") &&
     installerBackend.includes("write_credentials_json \"$SECRETS_FILE\" true false") &&
     installerBackend.includes('"permissions":"WRITE"') &&
     installerBackendTest.includes("scoped_keys=yes") &&
+    installerBackendTest.includes("read_key_rejected=yes") &&
+    installerBackendTest.includes("local_bootstrap_destination=yes") &&
     installerBackendTest.includes("secret_argv=clean") &&
     installerBackendTest.includes("child_env=clean") &&
     installerBackendTest.includes("OpenClaw child inherited secret variable") &&
@@ -446,13 +456,20 @@ expect(
     installerPackager.includes("sha256sum install.sh > install.sh.sha256") &&
     installerPackager.includes("sha256sum install-openclaw.sh > install-openclaw.sh.sha256") &&
     installerUxTest.includes("secret_output=clean") &&
-    installerUxTest.includes("lifecycle_modes=3") &&
+    installerUxTest.includes("lifecycle_modes=5") &&
     installerUxTest.includes("no_tty_guard=yes") &&
     installerUxTest.includes("stale_overlay=clean") &&
     installerUxTest.includes("unversioned_dedupe=yes") &&
+    installer.includes("Refusing symlinked Hermes home") &&
     installerUxTest.includes("hermes_symlink=blocked") &&
+    installerUxTest.includes("hermes_home_symlink=blocked") &&
+    installerUxTest.includes("randomized_credentials=yes") &&
+    !installerUxTest.includes("fixture-admin-password") &&
     installerUxTest.includes("atomic_secret_rewrite=yes") &&
     installerUxTest.includes("scoped_tool_keys=yes") &&
+    installerUxTest.includes("write_key_verified=yes") &&
+    installerUxTest.includes("local_bootstrap_destination=yes") &&
+    installerUxTest.includes("child_env=clean") &&
     installerUxTest.includes("bootstrap_tool_config=absent") &&
     installerUxTest.includes("secret_argv=clean") &&
     installerPackageTest.includes("tampered backend unexpectedly passed") &&

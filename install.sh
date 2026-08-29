@@ -2,11 +2,11 @@
 set -euo pipefail
 trap 'printf "Installer failed near line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
-RELEASE_VERSION='1.12.0'
-BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/aac14248a7e6f52fba1ea5728cd495a232fcb218/install-openclaw.sh'
-BACKEND_SHA256='bd48b25d4a41e7100d3a23e6343742fa999bf5b2666768048d2779526e20f86e'
-HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.12.0/hermes-noosphere-memory-1.12.0.tar.gz'
-HERMES_BUNDLE_SHA256='1fc5f938887832b0f9bb273cb78a90a4da0f12b11d9fd2eeef79f923445e4f17'
+RELEASE_VERSION='1.13.0'
+BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/746d36a36327db19594aae7f80c49e09b522318e/install-openclaw.sh'
+BACKEND_SHA256='9e89de09319f58c25203ee242ce91ac7d0505af159f939506fd25e752165aca2'
+HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.13.0/hermes-noosphere-memory-1.13.0.tar.gz'
+HERMES_BUNDLE_SHA256='a560bd8607b512123e71975c188f5b924d4325adaeb86bbbd1424933423c5fde'
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
 if [[ -n "$SCRIPT_PATH" ]]; then
   SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"
@@ -129,21 +129,27 @@ detect_lifecycle_mode() {
     [[ -f "$state_file" ]] || continue
     if command -v node >/dev/null 2>&1; then
       phase=$(STATE_FILE="$state_file" node -e 'try { const s=JSON.parse(require("node:fs").readFileSync(process.env.STATE_FILE,"utf8")); process.stdout.write(typeof s.phase === "string" ? s.phase : ""); } catch {}' || true)
-      if [[ -n "$phase" && "$phase" != complete ]]; then
+      if [[ "$phase" == complete ]]; then
+        printf '%s\n' 'upgrade or verify complete installation'
+      elif [[ -n "$phase" ]]; then
         printf '%s\n' 'resume or verify interrupted installation'
-        return 0
+      else
+        printf '%s\n' 'verify unclassified existing state before mutation'
       fi
+    else
+      printf '%s\n' 'verify unclassified existing state before mutation'
     fi
-    printf '%s\n' 'upgrade or verify existing installation'
     return 0
   done
 
   if command -v docker >/dev/null 2>&1 &&
      { docker inspect noosphere-openclaw-db >/dev/null 2>&1 ||
        docker volume inspect noosphere_postgres_data >/dev/null 2>&1; }; then
-    printf '%s\n' 'upgrade or verify existing installation'
-  elif [[ -f "$NOOSPHERE_HOME/.env" || -f "$NOOSPHERE_HOME/docker-compose.yml" ]]; then
-    printf '%s\n' 'upgrade or verify existing installation'
+    printf '%s\n' 'verify data-bearing existing state before mutation'
+  elif [[ -f "$NOOSPHERE_HOME/.env" && -f "$NOOSPHERE_HOME/docker-compose.yml" ]]; then
+    printf '%s\n' 'upgrade or verify complete installation'
+  elif [[ -e "$NOOSPHERE_HOME/.env" || -e "$NOOSPHERE_HOME/docker-compose.yml" ]]; then
+    printf '%s\n' 'verify partial existing state before mutation'
   else
     printf '%s\n' 'fresh installation'
   fi
@@ -284,6 +290,15 @@ NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:$RELEASE_VERSI
 NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@$RELEASE_VERSION}" \
   bash "$backend"
 
+# The stateful backend has consumed these inputs. Do not let later integration
+# helpers or host CLIs inherit database, bootstrap, provider, or HMAC secrets.
+unset \
+  POSTGRES_PASSWORD POSTGRES_MIGRATION_PASSWORD POSTGRES_APP_PASSWORD \
+  POSTGRES_HYBRID_ADMIN_PASSWORD POSTGRES_HYBRID_WORKER_PASSWORD \
+  NEXTAUTH_SECRET REDIS_URL NOOSPHERE_ADMIN_PASSWORD NOOSPHERE_BOOTSTRAP_API_KEY \
+  NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 \
+  NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64 || true
+
 [[ -f "$NOOSPHERE_CREDENTIALS_FILE" && ! -L "$NOOSPHERE_CREDENTIALS_FILE" ]] || {
   echo "Installer did not produce the expected credential file: $NOOSPHERE_CREDENTIALS_FILE" >&2
   exit 1
@@ -299,30 +314,69 @@ credential_field() {
     node -e 'try { const fs=require("node:fs"); const d=JSON.parse(fs.readFileSync(process.env.CREDENTIALS_FILE,"utf8")); const v=process.env.CREDENTIAL_INTEGRATION ? d[process.env.CREDENTIAL_FIELD]?.[process.env.CREDENTIAL_INTEGRATION] : d[process.env.CREDENTIAL_FIELD]; if (typeof v === "string") process.stdout.write(v); } catch { process.exit(0); }'
 }
 
+installer_validated_local_base_url() {
+  local base_url
+  base_url=$(credential_field baseUrl)
+  APP_URL_INPUT="$base_url" node -e '
+    const os = require("node:os");
+    const url = new URL(process.env.APP_URL_INPUT);
+    const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    const local = new Set(["localhost", "127.0.0.1", "::1"]);
+    for (const entries of Object.values(os.networkInterfaces())) {
+      for (const entry of entries || []) local.add(String(entry.address).toLowerCase());
+    }
+    if (url.protocol !== "http:" || url.username || url.password ||
+        url.pathname !== "/" || url.search || url.hash || !url.port || !local.has(host)) {
+      throw new Error("Protected credentials contain a non-local Noosphere URL");
+    }
+    process.stdout.write(url.origin);
+  '
+}
+
 installer_api_status_with_key() {
-  local key=$1 endpoint=$2 config status
+  local key=$1 endpoint=$2 config status base_url
   [[ "$key" =~ ^noo_[A-Za-z0-9_-]+$ ]] || { printf '000'; return 0; }
+  base_url=$(installer_validated_local_base_url) || { printf '000'; return 0; }
   config=$(mktemp "$work_dir/curl-auth.XXXXXX")
   chmod 600 "$config"
   printf 'silent\nshow-error\nheader = "Authorization: Bearer %s"\n' "$key" > "$config"
   status=$(curl --config "$config" --output /dev/null --write-out '%{http_code}' \
-    "$(credential_field baseUrl)$endpoint" 2>/dev/null || true)
+    "$base_url$endpoint" 2>/dev/null || true)
   rm -f "$config"
   printf '%s' "${status:-000}"
 }
 
+installer_write_probe_status_with_key() {
+  local key=$1 config body status base_url
+  [[ "$key" =~ ^noo_[A-Za-z0-9_-]+$ ]] || { printf '000'; return 0; }
+  base_url=$(installer_validated_local_base_url) || { printf '000'; return 0; }
+  config=$(mktemp "$work_dir/curl-auth.XXXXXX")
+  body=$(mktemp "$work_dir/write-probe.XXXXXX")
+  chmod 600 "$config" "$body"
+  printf 'silent\nshow-error\nheader = "Authorization: Bearer %s"\n' "$key" > "$config"
+  printf '{}\n' > "$body"
+  status=$(curl --config "$config" --request POST --header 'Content-Type: application/json' \
+    --data-binary "@$body" --output /dev/null --write-out '%{http_code}' \
+    "$base_url/api/articles" 2>/dev/null || true)
+  rm -f "$config" "$body"
+  printf '%s' "${status:-000}"
+}
+
 installer_key_is_scoped() {
-  local key=$1 read_status admin_status
+  local key=$1 write_status admin_status
   [[ -n "$key" ]] || return 1
-  read_status=$(installer_api_status_with_key "$key" '/api/articles?limit=1')
+  write_status=$(installer_write_probe_status_with_key "$key")
   admin_status=$(installer_api_status_with_key "$key" '/api/keys')
-  [[ "$read_status" =~ ^2[0-9][0-9]$ && "$admin_status" == 403 ]]
+  [[ "$write_status" == 400 && "$admin_status" == 403 ]]
 }
 
 create_tool_api_key() {
   local integration=$1 bootstrap config body response name raw base_url
   bootstrap=$(credential_field bootstrapApiKey)
-  base_url=$(credential_field baseUrl)
+  base_url=$(installer_validated_local_base_url) || {
+    echo 'Refusing to send the bootstrap API key to a non-local Noosphere URL.' >&2
+    return 1
+  }
   [[ "$bootstrap" =~ ^noo_[A-Za-z0-9_-]+$ ]] || {
     echo 'Protected credentials do not contain a valid bootstrap API key.' >&2
     return 1
@@ -438,6 +492,10 @@ NODE
 configure_hermes() {
   local key_file=$1 bundle_root source_root plugin_source skill_source plugin_target skill_target hermes_home
   hermes_home="${HERMES_HOME:-$HOME/.hermes}"
+  [[ ! -L "$hermes_home" ]] || {
+    echo "Refusing symlinked Hermes home: $hermes_home" >&2
+    return 1
+  }
   if [[ "$SOURCE_CHECKOUT" == true ]]; then
     source_root="$SCRIPT_DIR/hermes-noosphere-memory"
   else
@@ -486,13 +544,14 @@ const home = process.env.HERMES_HOME;
 const credentials = JSON.parse(fs.readFileSync(process.env.CREDENTIALS_FILE, "utf8"));
 const integrationKey = fs.readFileSync(process.env.KEY_FILE, "utf8").trim();
 if (!/^noo_[A-Za-z0-9_-]+$/.test(integrationKey)) throw new Error("Invalid scoped Hermes key");
-fs.mkdirSync(home, { recursive: true, mode: 0o700 });
-fs.chmodSync(home, 0o700);
 const assertNotSymlink = (target) => {
   if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) {
     throw new Error(`Refusing symlinked Hermes configuration: ${target}`);
   }
 };
+assertNotSymlink(home);
+fs.mkdirSync(home, { recursive: true, mode: 0o700 });
+fs.chmodSync(home, 0o700);
 const atomicWriteProtected = (target, content) => {
   const temp = `${target}.tmp-${process.pid}-${crypto.randomBytes(6).toString("hex")}`;
   const fd = fs.openSync(temp, "wx", 0o600);
