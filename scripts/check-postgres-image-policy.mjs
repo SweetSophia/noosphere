@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
+const verifyReleaseArtifacts = process.argv.includes("--verify-release-assets");
 const immutableHelperRef = "9da4af0a7b2275aa91eecd102095e0e470bbb0e3";
 const guidedInstallerRef = "f599129515eb8f70006bf68077e22a258633e5e1";
 const guidedInstallerSha256 = "24e15da38f8ff210cd2c99802edd1ee8a7f00a7df546c75b2a746d9e801b96e1";
@@ -1551,12 +1552,6 @@ if (verifyRemoteArtifacts) {
     `${rawRepositoryUrl}/${guidedBackendRef}/install-openclaw.sh`,
     guidedBackendSha256,
   );
-  await verifyRemoteArtifact(
-    "guided Hermes bundle",
-    extractShellStringConstant(read("install.sh"), "HERMES_BUNDLE_URL"),
-    extractShellConstant(read("install.sh"), "HERMES_BUNDLE_SHA256"),
-    { followRedirects: true },
-  );
   for (const { label, shaConstant, urlConstant } of helperArtifacts) {
     await verifyRemoteArtifact(
       label,
@@ -1564,6 +1559,15 @@ if (verifyRemoteArtifacts) {
       extractShellConstant(installer, shaConstant),
     );
   }
+}
+
+if (verifyReleaseArtifacts) {
+  await verifyRemoteArtifact(
+    "guided Hermes bundle",
+    extractShellStringConstant(read("install.sh"), "HERMES_BUNDLE_URL"),
+    extractShellConstant(read("install.sh"), "HERMES_BUNDLE_SHA256"),
+    { followRedirects: true },
+  );
 }
 
 if (failures.length > 0) {

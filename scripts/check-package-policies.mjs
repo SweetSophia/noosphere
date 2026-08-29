@@ -430,6 +430,7 @@ expect(
     coordinatedReleaseGuide.includes("install.sh` and `install.sh.sha256") &&
     coordinatedReleaseGuide.includes("install-openclaw.sh` and `install-openclaw.sh.sha256") &&
     coordinatedReleaseGuide.includes("From a directory containing only the downloaded `install.sh`") &&
+    coordinatedReleaseGuide.includes("--verify-release-assets") &&
     coordinatedReleaseGuide.includes("Never move, overwrite, or force-push a published release tag or replace a\n   published release asset"),
   "The coordinated release guide must attach/read back all checksum-owned installer assets before publication.",
 );
