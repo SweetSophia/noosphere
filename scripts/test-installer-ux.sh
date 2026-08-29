@@ -14,6 +14,9 @@ fixture_kilocode_key="noo_fixture_$(node -e 'process.stdout.write(require("node:
 fixture_kilocode_rotated_key="noo_fixture_$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
 fixture_transport_key="noo_fixture_$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
 fixture_admin_password="fixture-$(node -e 'process.stdout.write(require("node:crypto").randomBytes(18).toString("hex"))')"
+fixture_postgres_password="fixture-$(node -e 'process.stdout.write(require("node:crypto").randomBytes(18).toString("hex"))')"
+fixture_provider_secret="fixture-$(node -e 'process.stdout.write(require("node:crypto").randomBytes(18).toString("hex"))')"
+fixture_hmac_secret="fixture-$(node -e 'process.stdout.write(require("node:crypto").randomBytes(18).toString("hex"))')"
 
 cat > "$tmp/fake-backend.sh" <<'BACKEND'
 #!/usr/bin/env bash
@@ -104,15 +107,16 @@ common_env=(
   HERMES_HOME="$tmp/home/.hermes"
   PATH="$tmp/fake-bin:$PATH"
   NOOSPHERE_HOME="$tmp/home/.noosphere"
+  NOOSPHERE_PORT=6578
   NOOSPHERE_BACKEND_PATH="$tmp/fake-backend.sh"
   NOOSPHERE_BACKEND_OVERRIDE_SHA256="$fake_backend_sha"
   INSTALLER_TEST_RECORD="$tmp/backend-mode.txt"
   INSTALLER_TEST_HERMES_LOG="$tmp/hermes.log"
   INSTALLER_TEST_HERMES_ENV_CAPTURE="$tmp/hermes.env"
-  POSTGRES_PASSWORD="fixture-postgres-secret"
-  NOOSPHERE_BOOTSTRAP_API_KEY="noo_fixture_inherited_bootstrap"
-  NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON='[{"apiKey":"fixture-json-provider"}]'
-  NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON='{"v1":"fixture-json-hmac"}'
+  POSTGRES_PASSWORD="$fixture_postgres_password"
+  NOOSPHERE_BOOTSTRAP_API_KEY="$fixture_bootstrap_key"
+  NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON="[{\"apiKey\":\"${fixture_provider_secret}\"}]"
+  NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON="{\"v1\":\"${fixture_hmac_secret}\"}"
   NOOSPHERE_TEST_API_KEY="$fixture_api_key"
   NOOSPHERE_TEST_BOOTSTRAP_KEY="$fixture_bootstrap_key"
   NOOSPHERE_TEST_HERMES_KEY="$fixture_hermes_key"
@@ -259,6 +263,19 @@ if env "${common_env[@]}" \
 fi
 grep -q 'non-local Noosphere URL' "$tmp/redirected.out"
 
+cp "$tmp/fake-backend.sh" "$tmp/wrong-port-backend.sh"
+node -e 'const fs=require("node:fs"); const p=process.argv[1]; fs.writeFileSync(p, fs.readFileSync(p,"utf8").replaceAll("http://127.0.0.1:6578", "http://127.0.0.1:7777"));' "$tmp/wrong-port-backend.sh"
+wrong_port_backend_sha=$(sha256sum "$tmp/wrong-port-backend.sh" | awk '{print $1}')
+if env "${common_env[@]}" \
+  NOOSPHERE_BACKEND_PATH="$tmp/wrong-port-backend.sh" \
+  NOOSPHERE_BACKEND_OVERRIDE_SHA256="$wrong_port_backend_sha" \
+  HERMES_HOME="$tmp/home/.hermes-wrong-port" \
+  bash "$root/install.sh" --non-interactive --with hermes > "$tmp/wrong-port.out" 2>&1; then
+  echo 'wrong-port bootstrap-key destination unexpectedly passed' >&2
+  exit 1
+fi
+grep -q 'non-local Noosphere URL' "$tmp/wrong-port.out"
+
 # Exercise the single-file launcher path with a checksum-owned Hermes archive.
 mkdir -p "$tmp/hermes-release" "$tmp/remote-launcher"
 "$root/scripts/package-hermes-plugin.sh" "$tmp/hermes-release" >/dev/null
@@ -397,4 +414,4 @@ env HOME="$tmp/modes/resume" NOOSPHERE_HOME="$tmp/modes/resume" PATH="$mode_path
   bash "$root/install.sh" --dry-run --core-only > "$tmp/mode-resume.out"
 grep -q 'Mode:      resume or verify interrupted installation' "$tmp/mode-resume.out"
 
-printf 'installer_ux_tests=GREEN core_mode=yes lifecycle_modes=5 no_tty_guard=yes integration_merge=yes unversioned_dedupe=yes scoped_tool_keys=yes write_key_verified=yes transport_rotation=blocked bootstrap_tool_config=absent randomized_credentials=yes local_bootstrap_destination=yes secret_argv=clean child_env=clean remote_hermes=yes stale_overlay=clean hermes_symlink=blocked hermes_home_symlink=blocked atomic_secret_rewrite=yes secret_output=clean guards=11\n'
+printf 'installer_ux_tests=GREEN core_mode=yes lifecycle_modes=5 no_tty_guard=yes integration_merge=yes unversioned_dedupe=yes scoped_tool_keys=yes write_key_verified=yes transport_rotation=blocked bootstrap_tool_config=absent randomized_credentials=yes local_bootstrap_destination=yes port_binding=blocked secret_argv=clean child_env=clean remote_hermes=yes stale_overlay=clean hermes_symlink=blocked hermes_home_symlink=blocked atomic_secret_rewrite=yes secret_output=clean guards=11\n'

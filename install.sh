@@ -290,6 +290,28 @@ NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:$RELEASE_VERSI
 NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@$RELEASE_VERSION}" \
   bash "$backend"
 
+if [[ -z "${NOOSPHERE_PORT:-}" ]]; then
+  runtime_env="$NOOSPHERE_HOME/.env"
+  [[ -f "$runtime_env" && ! -L "$runtime_env" ]] || {
+    echo "Cannot determine the protected Noosphere port from $runtime_env." >&2
+    exit 1
+  }
+  NOOSPHERE_PORT=$(RUNTIME_ENV="$runtime_env" node -e '
+    const lines = require("node:fs").readFileSync(process.env.RUNTIME_ENV, "utf8").split(/\r?\n/);
+    let port = "";
+    for (const line of lines) {
+      const match = line.match(/^NOOSPHERE_PORT=([0-9]+)$/);
+      if (match) port = match[1];
+    }
+    process.stdout.write(port);
+  ')
+fi
+[[ "$NOOSPHERE_PORT" =~ ^[0-9]+$ ]] && ((NOOSPHERE_PORT >= 1 && NOOSPHERE_PORT <= 65535)) || {
+  echo 'Noosphere runtime port is missing or invalid.' >&2
+  exit 1
+}
+export NOOSPHERE_PORT
+
 # The stateful backend has consumed these inputs. Do not let later integration
 # helpers or host CLIs inherit database, bootstrap, provider, or HMAC secrets.
 unset \
@@ -317,16 +339,18 @@ credential_field() {
 installer_validated_local_base_url() {
   local base_url
   base_url=$(credential_field baseUrl)
-  APP_URL_INPUT="$base_url" node -e '
+  APP_URL_INPUT="$base_url" EXPECTED_PORT="$NOOSPHERE_PORT" node -e '
     const os = require("node:os");
     const url = new URL(process.env.APP_URL_INPUT);
+    const expectedPort = String(process.env.EXPECTED_PORT || "");
     const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
     const local = new Set(["localhost", "127.0.0.1", "::1"]);
     for (const entries of Object.values(os.networkInterfaces())) {
       for (const entry of entries || []) local.add(String(entry.address).toLowerCase());
     }
     if (url.protocol !== "http:" || url.username || url.password ||
-        url.pathname !== "/" || url.search || url.hash || !url.port || !local.has(host)) {
+        url.pathname !== "/" || url.search || url.hash || !url.port ||
+        url.port !== expectedPort || !local.has(host)) {
       throw new Error("Protected credentials contain a non-local Noosphere URL");
     }
     process.stdout.write(url.origin);

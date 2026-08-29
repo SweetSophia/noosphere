@@ -129,10 +129,14 @@ export POSTGRES_HYBRID_ADMIN_PASSWORD POSTGRES_HYBRID_WORKER_PASSWORD
 export NEXTAUTH_SECRET NOOSPHERE_ADMIN_PASSWORD="$ADMIN_PASSWORD"
 export NOOSPHERE_BOOTSTRAP_API_KEY="$API_KEY"
 export REDIS_URL="redis://fixture.invalid"
-export NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON='[{"apiKey":"fixture-json-provider"}]'
-export NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64="fixture-provider-config"
-export NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON='{"v1":"fixture-json-hmac"}'
-export NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64="fixture-cache-keys"
+provider_fixture="fixture-$(fixture_value)"
+hmac_fixture="fixture-$(fixture_value)"
+provider_b64_fixture="fixture-$(fixture_value)"
+hmac_b64_fixture="fixture-$(fixture_value)"
+export NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON="[{\"apiKey\":\"${provider_fixture}\"}]"
+export NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64="$provider_b64_fixture"
+export NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON="{\"v1\":\"${hmac_fixture}\"}"
+export NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64="$hmac_b64_fixture"
 export OPENCLAW_ENV_CAPTURE="$tmp/openclaw.env" INSTALLER_SAFE_MARKER=preserved
 PATH="$tmp/fake-bin:$PATH" run_openclaw gateway status
 for secret_name in \

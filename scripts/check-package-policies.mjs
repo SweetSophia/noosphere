@@ -496,6 +496,7 @@ expect(
     installerUxTest.includes("write_key_verified=yes") &&
     installerUxTest.includes("transport_rotation=blocked") &&
     installerUxTest.includes("local_bootstrap_destination=yes") &&
+    installerUxTest.includes("port_binding=blocked") &&
     installerUxTest.includes("child_env=clean") &&
     installerUxTest.includes("bootstrap_tool_config=absent") &&
     installerUxTest.includes("secret_argv=clean") &&
