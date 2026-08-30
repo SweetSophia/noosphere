@@ -19,9 +19,9 @@ The installer checks its prerequisites before changing the machine.
 
 ### Run the installer
 
-The launcher is coupled to the coordinated `v1.13.0` image, packages, and
+The launcher is coupled to the coordinated `v1.13.1` image, packages, and
 Hermes archive. Before running it, confirm that the
-[`v1.13.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.0)
+[`v1.13.1` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.1)
 exists with all six installer assets. Merging the installer source does not by
 itself publish those artifacts.
 
@@ -29,7 +29,7 @@ This URL is pinned to an immutable Git commit. It does not execute a moving
 `master` or `main` branch:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1f3081b65f146619600a6f90bc43e9b1612e2e01/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/3404b5aa344fe7a27d5928ae3794d2eadd95e479/install.sh | bash
 ```
 
 The script can prompt through `/dev/tty`, even when it is piped to Bash. It:
@@ -93,11 +93,11 @@ Examples:
 
 ```bash
 # Show the plan without changing the machine.
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1f3081b65f146619600a6f90bc43e9b1612e2e01/install.sh \
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/3404b5aa344fe7a27d5928ae3794d2eadd95e479/install.sh \
   | bash -s -- --dry-run --core-only
 
 # Automation: local Noosphere plus Hermes, without prompts.
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1f3081b65f146619600a6f90bc43e9b1612e2e01/install.sh \
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/3404b5aa344fe7a27d5928ae3794d2eadd95e479/install.sh \
   | bash -s -- --non-interactive --with hermes
 ```
 
@@ -114,8 +114,8 @@ the advertised SHA-256:
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1f3081b65f146619600a6f90bc43e9b1612e2e01/install.sh -o "$installer"
-  printf '%s  %s\n' '2117e1696f6fec25470517f504ec0fe7e3ffd4dc331ba05a25d14f06df18ed81' "$installer" | sha256sum -c -
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/3404b5aa344fe7a27d5928ae3794d2eadd95e479/install.sh -o "$installer"
+  printf '%s  %s\n' '1254088bd22250e1c53bad2c547285019cffbdacd21c07115946bca81450d85e' "$installer" | sha256sum -c -
   bash "$installer"
 )
 ```
@@ -164,14 +164,14 @@ Noosphere into another deployment system. It is intentionally more detailed
 than the guided Quick Start.
 
 ```bash
-git clone --branch v1.13.0 --depth 1 https://github.com/SweetSophia/noosphere.git
+git clone --branch v1.13.1 --depth 1 https://github.com/SweetSophia/noosphere.git
 cd noosphere
 cp noosphere.env.example .env
 ```
 
 Edit `.env` and set at least:
 
-- `NOOSPHERE_VERSION=1.13.0`
+- `NOOSPHERE_VERSION=1.13.1`
 - distinct `POSTGRES_PASSWORD`, `POSTGRES_MIGRATION_PASSWORD`, and
   `POSTGRES_APP_PASSWORD` values
 - `NEXTAUTH_SECRET`
