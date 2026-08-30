@@ -27,14 +27,14 @@ unrestricted across corpus scopes by default so ordinary saves without
 integration tags.
 
 ```bash
-# Installer commit: 3404b5aa344fe7a27d5928ae3794d2eadd95e479
-# Expected SHA-256: 1254088bd22250e1c53bad2c547285019cffbdacd21c07115946bca81450d85e
+# Installer commit: ef616729339db2114e53f7b199700379fc3435bb
+# Expected SHA-256: ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2
 (
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/3404b5aa344fe7a27d5928ae3794d2eadd95e479/install.sh -o "$installer"
-  printf '%s  %s\n' '1254088bd22250e1c53bad2c547285019cffbdacd21c07115946bca81450d85e' "$installer" | sha256sum -c -
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/ef616729339db2114e53f7b199700379fc3435bb/install.sh -o "$installer"
+  printf '%s  %s\n' 'ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2' "$installer" | sha256sum -c -
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.1}" bash "$installer" --non-interactive --with openclaw
 )
 ```
