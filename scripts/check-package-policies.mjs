@@ -672,8 +672,8 @@ expect(
   "The coordinated release guide must attach/read back all checksum-owned installer assets before publication.",
 );
 expect(
-  installer.includes("BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/bf10dc9647eb5639e4293a84a4eda76221be2b42/install-openclaw.sh'") &&
-    installer.includes("BACKEND_SHA256='03a6056d690149e4020670add8da81faf5559e78948d646f581d3ab12924b533'") &&
+  installer.includes("BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/ba16ea7f5de6fb91de01838e46fc07381ff0bc75/install-openclaw.sh'") &&
+    installer.includes("BACKEND_SHA256='a5adb6b9a9c12b0816d7e3dcfaa1a1a7d4733ef2904dd69f4730f14835a730cf'") &&
     installer.includes("HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.13.0/hermes-noosphere-memory-1.13.0.tar.gz'") &&
     installer.includes("HERMES_BUNDLE_SHA256='a560bd8607b512123e71975c188f5b924d4325adaeb86bbbd1424933423c5fde'") &&
     installer.includes("Refusing Noosphere backend with an unexpected checksum") &&
@@ -689,6 +689,7 @@ expect(
   installerBackend.includes('NOOSPHERE_INSTALL_OPENCLAW="${NOOSPHERE_INSTALL_OPENCLAW:-true}"') &&
     installerBackend.includes('if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then\n  need openclaw\nfi') &&
     installerBackend.includes('write_credentials_json "$NOOSPHERE_CREDENTIALS_FILE"') &&
+    installerBackend.includes('assert_no_symlink_path_components "$target" credential') &&
     installerBackend.includes('Credentials were not printed. Read the mode-0600 file above when needed.') &&
     installerBackend.includes("run_openclaw()") &&
     installerBackend.includes("-u POSTGRES_PASSWORD") &&
@@ -710,6 +711,8 @@ expect(
     installerBackendTest.includes("backend proxy-bypass sabotage unexpectedly passed") &&
     installerBackendTest.includes("secret_argv=clean") &&
     installerBackendTest.includes("child_env=clean") &&
+    installerBackendTest.includes("credential_parent_symlink=blocked") &&
+    installerBackendTest.includes("symlinked credential parent unexpectedly passed") &&
     installerBackendTest.includes("OpenClaw child inherited secret variable") &&
     !installerBackend.includes("API KEY (save this - it will not be shown again)"),
   "The reviewed backend must preserve OpenClaw-by-default compatibility while supporting core-only mode and non-disclosing credentials.",
@@ -729,9 +732,12 @@ expect(
     installerUxTest.includes("unversioned_dedupe=yes") &&
     installer.includes("Refusing symlinked Hermes home") &&
     installer.includes("Refusing symlinked Hermes path component") &&
+    installer.includes('assert_no_symlink_path_components "$config_file" "integration config"') &&
     installerUxTest.includes("hermes_symlink=blocked") &&
     installerUxTest.includes("hermes_home_symlink=blocked") &&
     installerUxTest.includes("hermes_parent_symlink=blocked") &&
+    installerUxTest.includes("integration_parent_symlink=blocked") &&
+    installerUxTest.includes("symlinked integration config parent unexpectedly passed") &&
     installerUxTest.includes("randomized_credentials=yes") &&
     !installerUxTest.includes("fixture-admin-password") &&
     installerUxTest.includes("atomic_secret_rewrite=yes") &&

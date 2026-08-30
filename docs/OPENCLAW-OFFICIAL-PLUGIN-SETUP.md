@@ -49,7 +49,7 @@ image, package, or release assets.
 Use the guided launcher, selecting OpenClaw explicitly:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/d139ea0d95c6e901ee3400e00a440a9810963ef8/install.sh \
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1f3081b65f146619600a6f90bc43e9b1612e2e01/install.sh \
   | bash -s -- --with openclaw
 ```
 
@@ -61,14 +61,14 @@ The checksum-verifying download form below runs the same guided `1.13.0`
 launcher non-interactively for OpenClaw:
 
 ```bash
-# Installer commit: d139ea0d95c6e901ee3400e00a440a9810963ef8
-# Expected SHA-256: 3a3abf491210fb4115305d68b099cd4d4bac67cfadbe8fb310c616ba12272352
+# Installer commit: 1f3081b65f146619600a6f90bc43e9b1612e2e01
+# Expected SHA-256: 2117e1696f6fec25470517f504ec0fe7e3ffd4dc331ba05a25d14f06df18ed81
 (
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/d139ea0d95c6e901ee3400e00a440a9810963ef8/install.sh -o "$installer"
-  printf '%s  %s\n' '3a3abf491210fb4115305d68b099cd4d4bac67cfadbe8fb310c616ba12272352' "$installer" | sha256sum -c -
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1f3081b65f146619600a6f90bc43e9b1612e2e01/install.sh -o "$installer"
+  printf '%s  %s\n' '2117e1696f6fec25470517f504ec0fe7e3ffd4dc331ba05a25d14f06df18ed81' "$installer" | sha256sum -c -
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.0}" bash "$installer" --non-interactive --with openclaw
 )
 ```
@@ -444,14 +444,14 @@ curl -s https://<host>/api/memory/status \
 Use the guarded installer for upgrades as well as first-time setup:
 
 ```bash
-# Installer commit: d139ea0d95c6e901ee3400e00a440a9810963ef8
-# Expected SHA-256: 3a3abf491210fb4115305d68b099cd4d4bac67cfadbe8fb310c616ba12272352
+# Installer commit: 1f3081b65f146619600a6f90bc43e9b1612e2e01
+# Expected SHA-256: 2117e1696f6fec25470517f504ec0fe7e3ffd4dc331ba05a25d14f06df18ed81
 (
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/d139ea0d95c6e901ee3400e00a440a9810963ef8/install.sh -o "$installer"
-  printf '%s  %s\n' '3a3abf491210fb4115305d68b099cd4d4bac67cfadbe8fb310c616ba12272352' "$installer" | sha256sum -c -
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1f3081b65f146619600a6f90bc43e9b1612e2e01/install.sh -o "$installer"
+  printf '%s  %s\n' '2117e1696f6fec25470517f504ec0fe7e3ffd4dc331ba05a25d14f06df18ed81' "$installer" | sha256sum -c -
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.0}" bash "$installer" --non-interactive --with openclaw
   openclaw noosphere doctor
 )
@@ -581,14 +581,14 @@ then the install did not complete. A healthy run must continue with `Bootstrap c
 First use the reviewed installer revision and verify its checksum before execution:
 
 ```bash
-# Installer commit: d139ea0d95c6e901ee3400e00a440a9810963ef8
-# Expected SHA-256: 3a3abf491210fb4115305d68b099cd4d4bac67cfadbe8fb310c616ba12272352
+# Installer commit: 1f3081b65f146619600a6f90bc43e9b1612e2e01
+# Expected SHA-256: 2117e1696f6fec25470517f504ec0fe7e3ffd4dc331ba05a25d14f06df18ed81
 (
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/d139ea0d95c6e901ee3400e00a440a9810963ef8/install.sh -o "$installer"
-  printf '%s  %s\n' '3a3abf491210fb4115305d68b099cd4d4bac67cfadbe8fb310c616ba12272352' "$installer" | sha256sum -c -
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1f3081b65f146619600a6f90bc43e9b1612e2e01/install.sh -o "$installer"
+  printf '%s  %s\n' '2117e1696f6fec25470517f504ec0fe7e3ffd4dc331ba05a25d14f06df18ed81' "$installer" | sha256sum -c -
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.0}" bash "$installer" --non-interactive --with openclaw
 )
 ```
