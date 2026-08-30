@@ -3,8 +3,8 @@ set -euo pipefail
 trap 'printf "Installer failed near line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 RELEASE_VERSION='1.13.0'
-BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/bf10dc9647eb5639e4293a84a4eda76221be2b42/install-openclaw.sh'
-BACKEND_SHA256='03a6056d690149e4020670add8da81faf5559e78948d646f581d3ab12924b533'
+BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/ba16ea7f5de6fb91de01838e46fc07381ff0bc75/install-openclaw.sh'
+BACKEND_SHA256='a5adb6b9a9c12b0816d7e3dcfaa1a1a7d4733ef2904dd69f4730f14835a730cf'
 HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.13.0/hermes-noosphere-memory-1.13.0.tar.gz'
 HERMES_BUNDLE_SHA256='a560bd8607b512123e71975c188f5b924d4325adaeb86bbbd1424933423c5fde'
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
@@ -217,6 +217,27 @@ if [[ "$SELECTION_EXPLICIT" == false ]]; then
   fi
 fi
 
+assert_no_symlink_path_components() {
+  local target=$1 label=$2
+  TARGET_PATH="$target" TARGET_LABEL="$label" node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    let current = path.resolve(process.env.TARGET_PATH);
+    while (true) {
+      try {
+        if (fs.lstatSync(current).isSymbolicLink()) {
+          throw new Error(`Refusing symlinked ${process.env.TARGET_LABEL} path component: ${current}`);
+        }
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  '
+}
+
 runtime_env_value() {
   local key=$1 runtime_env="$NOOSPHERE_HOME/.env"
   [[ -f "$runtime_env" ]] || return 0
@@ -316,6 +337,7 @@ if has_integration openclaw; then
   install_openclaw=true
 fi
 
+assert_no_symlink_path_components "$NOOSPHERE_CREDENTIALS_FILE" credential
 NOOSPHERE_INSTALL_OPENCLAW="$install_openclaw" \
 NOOSPHERE_SHOW_CREDENTIALS="$SHOW_CREDENTIALS" \
 NOOSPHERE_CREDENTIALS_FILE="$NOOSPHERE_CREDENTIALS_FILE" \
@@ -323,6 +345,7 @@ NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-$RELEASE_VERSION}" \
 NOOSPHERE_IMAGE="$effective_image" \
 NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@$RELEASE_VERSION}" \
   bash "$backend"
+assert_no_symlink_path_components "$NOOSPHERE_CREDENTIALS_FILE" credential
 
 if [[ -z "${NOOSPHERE_PORT:-}" ]]; then
   runtime_env="$NOOSPHERE_HOME/.env"
@@ -481,22 +504,42 @@ ensure_tool_api_key() {
     fi
     key=$(create_tool_api_key "$integration")
   fi
+  assert_no_symlink_path_components "$NOOSPHERE_CREDENTIALS_FILE" credential || return 1
+  assert_no_symlink_path_components "$key_file" "integration key" || return 1
   INTEGRATION_KEY="$key" INTEGRATION_NAME="$integration" KEY_FILE="$key_file" \
   CREDENTIALS_FILE="$NOOSPHERE_CREDENTIALS_FILE" node <<'NODE'
 const fs = require("node:fs");
+const path = require("node:path");
 const crypto = require("node:crypto");
 const credentialsFile = process.env.CREDENTIALS_FILE;
 const keyFile = process.env.KEY_FILE;
+const assertNoSymlinkComponents = (target, label) => {
+  let current = path.resolve(target);
+  while (true) {
+    try {
+      if (fs.lstatSync(current).isSymbolicLink()) throw new Error(`Refusing symlinked ${label} path component: ${current}`);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+};
+assertNoSymlinkComponents(credentialsFile, "credential");
+assertNoSymlinkComponents(keyFile, "integration key");
 if (fs.lstatSync(credentialsFile).isSymbolicLink()) throw new Error("Refusing symlinked credentials");
 const credentials = JSON.parse(fs.readFileSync(credentialsFile, "utf8"));
 credentials.integrationApiKeys = credentials.integrationApiKeys && typeof credentials.integrationApiKeys === "object"
   ? credentials.integrationApiKeys : {};
 credentials.integrationApiKeys[process.env.INTEGRATION_NAME] = process.env.INTEGRATION_KEY;
 const atomicWrite = (target, content) => {
+  assertNoSymlinkComponents(target, "protected integration");
   if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) throw new Error(`Refusing symlinked key target: ${target}`);
   const temp = `${target}.tmp-${process.pid}-${crypto.randomBytes(6).toString("hex")}`;
   const fd = fs.openSync(temp, "wx", 0o600);
   try { fs.writeFileSync(fd, content); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  assertNoSymlinkComponents(target, "protected integration");
   fs.renameSync(temp, target);
   fs.chmodSync(target, 0o600);
 };
@@ -507,7 +550,9 @@ NODE
 
 configure_json_plugin() {
   local config_file=$1 package_name=$2 key_file=$3
+  assert_no_symlink_path_components "$config_file" "integration config" || return 1
   install -d -m 700 "$(dirname "$config_file")"
+  assert_no_symlink_path_components "$config_file" "integration config" || return 1
   CREDENTIALS_FILE="$NOOSPHERE_CREDENTIALS_FILE" \
   CONFIG_FILE="$config_file" \
   PACKAGE_NAME="$package_name" \
@@ -515,6 +560,22 @@ configure_json_plugin() {
     node <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
+const assertNoSymlinkComponents = (target, label) => {
+  let current = path.resolve(target);
+  while (true) {
+    try {
+      if (fs.lstatSync(current).isSymbolicLink()) throw new Error(`Refusing symlinked ${label} path component: ${current}`);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+};
+assertNoSymlinkComponents(process.env.CREDENTIALS_FILE, "credential");
+assertNoSymlinkComponents(process.env.KEY_FILE, "integration key");
+assertNoSymlinkComponents(process.env.CONFIG_FILE, "integration config");
 const credentials = JSON.parse(fs.readFileSync(process.env.CREDENTIALS_FILE, "utf8"));
 const integrationKey = fs.readFileSync(process.env.KEY_FILE, "utf8").trim();
 if (!/^noo_[A-Za-z0-9_-]+$/.test(integrationKey)) throw new Error("Invalid scoped integration key");
@@ -556,6 +617,7 @@ try {
 } finally {
   fs.closeSync(fd);
 }
+assertNoSymlinkComponents(configFile, "integration config");
 fs.renameSync(temp, configFile);
 fs.chmodSync(configFile, 0o600);
 NODE

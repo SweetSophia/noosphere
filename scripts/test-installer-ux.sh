@@ -254,6 +254,25 @@ if grep -q '^POST .*/api/keys$' "$tmp/curl.calls"; then
   exit 1
 fi
 
+integration_home="$tmp/integration-parent-home"
+integration_target="$tmp/integration-parent-target"
+mkdir -p "$integration_home/.noosphere" "$integration_home/.config" "$integration_target"
+printf '%s\n' 'INTEGRATION_SENTINEL=yes' > "$integration_target/sentinel"
+ln -s "$integration_target" "$integration_home/.config/opencode-link"
+if env "${common_env[@]}" \
+  HOME="$integration_home" \
+  NOOSPHERE_HOME="$integration_home/.noosphere" \
+  OPENCODE_CONFIG_FILE="$integration_home/.config/opencode-link/opencode.json" \
+  bash "$root/install.sh" --non-interactive --with opencode \
+  >"$tmp/integration-parent-symlink.out" 2>&1; then
+  echo 'symlinked integration config parent unexpectedly passed' >&2
+  exit 1
+fi
+test -L "$integration_home/.config/opencode-link"
+grep -q '^INTEGRATION_SENTINEL=yes$' "$integration_target/sentinel"
+test ! -e "$integration_target/opencode.json"
+grep -q 'Refusing symlinked integration config path component' "$tmp/integration-parent-symlink.out"
+
 mkdir -p "$tmp/home/.hermes-symlink"
 printf '%s\n' 'SENTINEL=yes' > "$tmp/hermes-env-target"
 chmod 644 "$tmp/hermes-env-target"
@@ -480,4 +499,4 @@ if "$0" "$sabotage_package/install.sh" >/dev/null 2>&1; then
   exit 1
 fi
 
-printf 'installer_ux_tests=GREEN core_mode=yes lifecycle_modes=5 no_tty_guard=yes integration_merge=yes unversioned_dedupe=yes scoped_tool_keys=yes write_key_verified=yes transport_rotation=blocked bootstrap_tool_config=absent randomized_credentials=yes local_bootstrap_destination=yes port_binding=blocked custom_port=preserved custom_image=preserved proxy_bypass=yes secret_argv=clean child_env=clean remote_hermes=yes stale_overlay=clean hermes_symlink=blocked hermes_home_symlink=blocked hermes_parent_symlink=blocked atomic_secret_rewrite=yes secret_output=clean guards=13\n'
+printf 'installer_ux_tests=GREEN core_mode=yes lifecycle_modes=5 no_tty_guard=yes integration_merge=yes unversioned_dedupe=yes scoped_tool_keys=yes write_key_verified=yes transport_rotation=blocked bootstrap_tool_config=absent randomized_credentials=yes local_bootstrap_destination=yes port_binding=blocked custom_port=preserved custom_image=preserved proxy_bypass=yes secret_argv=clean child_env=clean remote_hermes=yes stale_overlay=clean hermes_symlink=blocked hermes_home_symlink=blocked hermes_parent_symlink=blocked integration_parent_symlink=blocked atomic_secret_rewrite=yes secret_output=clean guards=13\n'
