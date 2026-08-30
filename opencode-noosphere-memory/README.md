@@ -13,31 +13,37 @@ It provides:
 You need two things before this plugin will do anything useful:
 
 1. **A reachable Noosphere instance.** The plugin defaults to
-   `http://127.0.0.1:6578`. For a local install, use the repository's guarded
-   [1.12.0 Quick Start](https://github.com/SweetSophia/noosphere/blob/v1.12.0/README.md#quick-start). It provisions Noosphere without
-   installing any agent plugin. For the 1.12.0 release snapshot:
+   `http://127.0.0.1:6578`. For a guided local install that also configures
+   OpenCode, run:
+
+   Before running this pinned `1.13.0` command, confirm that the coordinated
+   [`v1.13.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.0)
+   exists with all six installer assets. Source merge alone does not publish the
+   image, package, or release assets.
 
    ```bash
-   git clone --branch v1.12.0 --depth 1 https://github.com/SweetSophia/noosphere.git
-   cd noosphere
-   cp noosphere.env.example .env
-   # Set NOOSPHERE_VERSION=1.12.0, then follow the guarded Quick Start.
+   # Installer commit: 1f3081b65f146619600a6f90bc43e9b1612e2e01
+   # Expected SHA-256: 2117e1696f6fec25470517f504ec0fe7e3ffd4dc331ba05a25d14f06df18ed81
+   (
+     set -e
+     installer="$(mktemp)"
+     trap 'rm -f "$installer"' EXIT
+     curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1f3081b65f146619600a6f90bc43e9b1612e2e01/install.sh -o "$installer"
+     printf '%s  %s\n' '2117e1696f6fec25470517f504ec0fe7e3ffd4dc331ba05a25d14f06df18ed81' "$installer" | sha256sum -c -
+     bash "$installer" --non-interactive --with opencode
+   )
    ```
 
-   Do not replace the guarded prepare/init/record sequence with an unrestricted
-   `docker compose up`; the database service intentionally refuses startup
-   without transition evidence.
+   The immutable launcher checksum-verifies its backend, preserves existing
+   database state, and stores generated credentials without printing them. See
+   [Installing Noosphere](../docs/INSTALLATION.md) for the auditable download,
+   upgrade behavior, and manual Compose path.
 
-   The bootstrap key is whatever you put in `NOOSPHERE_BOOTSTRAP_API_KEY` and
-   has full `ADMIN` scope. To point at an existing Noosphere instead, set
-   `baseUrl` in the plugin options (see [Configuration](#configuration)).
-
-   > **Note:** the repository also ships `install-openclaw.sh`, a one-shot
-   > installer that provisions Noosphere *plus* the OpenClaw plugin. Use it
-   > if you intend to run both tools; skip it if you only want opencode.
+   To point at an existing Noosphere instead, set `baseUrl` in the plugin options
+   (see [Configuration](#configuration)).
 
 2. **A Noosphere API key for this tool.** The plugin will refuse to start
-   without one. Create a **tool-scoped** key (named after the tool, e.g.
+   without one. Create a **tool-specific WRITE key** (named after the tool, e.g.
    `opencode`) in the Noosphere admin UI at:
 
    ```text
@@ -47,7 +53,10 @@ You need two things before this plugin will do anything useful:
    Admin login is required. The local Docker Compose install creates an
    `admin@noosphere.local` admin account whose password is in `.env` as
    `NOOSPHERE_ADMIN_PASSWORD`. See [Secrets](#secrets) below for which
-   permissions the key needs and where to put it.
+   permissions the key needs and where to put it. “Tool-specific” means the
+   credential is isolated from ADMIN and other integrations; guided setup leaves
+   corpus scopes unrestricted so saves without `restrictedTags` continue to
+   work. Apply a restricted scope only together with matching integration tags.
 
 ## Install
 
@@ -57,7 +66,7 @@ npm plugins from this config:
 ```json
 {
   "plugin": [
-    "@sweetsophia/opencode-noosphere-memory@1.12.0"
+    "@sweetsophia/opencode-noosphere-memory@1.13.0"
   ]
 }
 ```
@@ -65,7 +74,7 @@ npm plugins from this config:
 Or install the package globally first if you prefer explicit local installs:
 
 ```bash
-npm install -g @sweetsophia/opencode-noosphere-memory@1.12.0
+npm install -g @sweetsophia/opencode-noosphere-memory@1.13.0
 ```
 
 ### oh-my-opencode-slim
@@ -77,7 +86,7 @@ need a separate fork. Install both plugins and keep both entries in
 ```bash
 npx oh-my-opencode-slim@latest install
 # Optional: Opencode can also auto-install npm plugins from opencode.json.
-npm install -g @sweetsophia/opencode-noosphere-memory@1.12.0
+npm install -g @sweetsophia/opencode-noosphere-memory@1.13.0
 export OPENCODE_NOOSPHERE_API_KEY="noo_..."
 ```
 
@@ -85,7 +94,7 @@ export OPENCODE_NOOSPHERE_API_KEY="noo_..."
 {
   "plugin": [
     "oh-my-opencode-slim",
-    "@sweetsophia/opencode-noosphere-memory@1.12.0"
+    "@sweetsophia/opencode-noosphere-memory@1.13.0"
   ]
 }
 ```
@@ -102,7 +111,7 @@ Or configure it with explicit options:
 {
   "plugin": [
     [
-      "@sweetsophia/opencode-noosphere-memory@1.12.0",
+      "@sweetsophia/opencode-noosphere-memory@1.13.0",
       {
         "baseUrl": "http://127.0.0.1:6578",
         "autoRecall": true,

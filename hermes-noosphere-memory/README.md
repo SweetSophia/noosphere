@@ -48,17 +48,25 @@ Not implemented yet:
 
 Those are intentionally left for later PRs so each step stays reviewable.
 
-## Install the 1.12.0 Release Bundle
+## Guided Noosphere + Hermes Setup
+
+Use the repository's [Installing Noosphere](../docs/INSTALLATION.md) guide for
+the immutable, checksum-verifying launcher. The launcher verifies its backend
+and Hermes bundle, writes the scoped WRITE key to the mode-`0600` Hermes
+environment file, and configures the provider. Keeping the launcher command in
+the release-owned installation guide avoids a circular bundle-to-launcher pin.
+
+## Install the 1.13.0 Release Bundle
 
 The coordinated Noosphere release attaches a deterministic Hermes provider
 bundle and checksum to the main GitHub release:
 
 ```bash
-curl -fsSLO https://github.com/SweetSophia/noosphere/releases/download/v1.12.0/hermes-noosphere-memory-1.12.0.tar.gz
-curl -fsSLO https://github.com/SweetSophia/noosphere/releases/download/v1.12.0/hermes-noosphere-memory-1.12.0.tar.gz.sha256
-sha256sum --check hermes-noosphere-memory-1.12.0.tar.gz.sha256
-tar -xzf hermes-noosphere-memory-1.12.0.tar.gz
-cd hermes-noosphere-memory-1.12.0
+curl -fsSLO https://github.com/SweetSophia/noosphere/releases/download/v1.13.0/hermes-noosphere-memory-1.13.0.tar.gz
+curl -fsSLO https://github.com/SweetSophia/noosphere/releases/download/v1.13.0/hermes-noosphere-memory-1.13.0.tar.gz.sha256
+sha256sum --check hermes-noosphere-memory-1.13.0.tar.gz.sha256
+tar -xzf hermes-noosphere-memory-1.13.0.tar.gz
+cd hermes-noosphere-memory-1.13.0
 ./install-hermes.sh
 ```
 
@@ -68,7 +76,7 @@ Use this path to clone the Noosphere repository and run the helper script that
 copies the Hermes plugin and setup skill into the active Hermes profile:
 
 ```bash
-git clone --branch v-hermes-1.12.0 --depth 1 https://github.com/SweetSophia/noosphere.git
+git clone --branch v-hermes-1.13.0 --depth 1 https://github.com/SweetSophia/noosphere.git
 cd noosphere/hermes-noosphere-memory
 ./install-hermes.sh
 ```

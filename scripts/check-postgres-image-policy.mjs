@@ -1,17 +1,23 @@
 #!/usr/bin/env node
 
-import { readFileSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
 const verifyRemoteArtifacts = process.argv.includes("--verify-remote");
+const verifyReleaseArtifacts = process.argv.includes("--verify-release-assets");
+const verifyReleaseFiles = process.argv.includes("--verify-release-files");
+const releaseRoot = resolve(process.cwd());
 const immutableHelperRef = "9da4af0a7b2275aa91eecd102095e0e470bbb0e3";
-const verifiedInstallerRef = "1bbc266283577c3a5c9fe285633955df45f6bcfd";
-const verifiedInstallerSha256 = "28355163784403bf3445a0028863d8496b66d3fa70ea3492a6f4c7ba4c6af556";
+const guidedInstallerRef = "1f3081b65f146619600a6f90bc43e9b1612e2e01";
+const guidedInstallerSha256 = "2117e1696f6fec25470517f504ec0fe7e3ffd4dc331ba05a25d14f06df18ed81";
+const guidedBackendRef = "ba16ea7f5de6fb91de01838e46fc07381ff0bc75";
+const guidedBackendSha256 = "a5adb6b9a9c12b0816d7e3dcfaa1a1a7d4733ef2904dd69f4730f14835a730cf";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
@@ -52,9 +58,8 @@ function expect(condition, message) {
 const releaseVersion = read("VERSION").trim();
 const versionBoundInstallerCommand =
   `NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-${releaseVersion}}" ` +
-  `NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${releaseVersion}}" ` +
   `NOOSPHERE_PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${releaseVersion}}" ` +
-  'bash "$installer"';
+  'bash "$installer" --non-interactive --with openclaw';
 
 function countLiteral(text, literal) {
   if (!literal) return 0;
@@ -101,6 +106,32 @@ function sha256(relativePath) {
   return createHash("sha256").update(read(relativePath)).digest("hex");
 }
 
+function sha256Bytes(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function readReleaseBytes(filename) {
+  try {
+    return readFileSync(resolve(releaseRoot, filename));
+  } catch (error) {
+    failures.push(`Failed to read release file ${filename}: ${error.message}`);
+    return Buffer.alloc(0);
+  }
+}
+
+function readReleaseText(filename) {
+  return readReleaseBytes(filename).toString("utf8");
+}
+
+function expectedChecksum(checksumText, filename) {
+  const match = checksumText.match(/^([a-f0-9]{64})  ([^\r\n]+)\r?\n?$/);
+  if (!match || match[2] !== filename) {
+    failures.push(`${filename}.sha256 must contain exactly a SHA-256 and ${filename}`);
+    return "";
+  }
+  return match[1];
+}
+
 function isExecutable(relativePath) {
   try {
     return (statSync(resolve(root, relativePath)).mode & 0o111) !== 0;
@@ -118,10 +149,15 @@ function extractShellStringConstant(text, name) {
   return text.match(new RegExp(`^${name}='([^']+)'$`, "m"))?.[1] ?? "";
 }
 
-async function verifyRemoteArtifact(label, url, expectedSha256) {
+async function verifyRemoteArtifact(
+  label,
+  url,
+  expectedSha256,
+  { followRedirects = false } = {},
+) {
   try {
     const response = await fetch(url, {
-      redirect: "error",
+      redirect: followRedirects ? "follow" : "error",
       signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) {
@@ -821,8 +857,8 @@ for (const relativePath of [
 ]) {
   const text = read(relativePath);
   expect(
-    text.includes(verifiedInstallerRef) &&
-      text.includes(verifiedInstallerSha256) &&
+    text.includes(guidedInstallerRef) &&
+      text.includes(guidedInstallerSha256) &&
       text.includes("VERIFIED_NOOSPHERE_VERSION") &&
       text.includes(releaseVersion) &&
       text.includes("NOOSPHERE_VERSION") &&
@@ -844,7 +880,6 @@ for (const relativePath of [
 }
 
 for (const relativePath of [
-  "README.md",
   "README-legacy.md",
   "openclaw-noosphere-memory/README.md",
   "docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md",
@@ -856,12 +891,12 @@ for (const relativePath of [
   const checksumCount = countLiteral(text, "sha256sum -c -");
   const safeInstallerBlocks = Array.from(
     text.matchAll(
-      /^(\s*)\(\n\1  set -e\n\1  installer="\$\(mktemp\)"\n\1  trap 'rm -f "\$installer"' EXIT\n\1  curl -fsSL [^\n]+ -o "\$installer"\n\1  printf '[^\n]+' '[a-f0-9]{64}' "\$installer" \| sha256sum -c -\n\1  NOOSPHERE_VERSION="\$\{NOOSPHERE_VERSION:-[0-9]+\.[0-9]+\.[0-9]+\}" NOOSPHERE_IMAGE="\$\{NOOSPHERE_IMAGE:-ghcr\.io\/sweetsophia\/noosphere:[0-9]+\.[0-9]+\.[0-9]+\}" NOOSPHERE_PLUGIN_SPEC="\$\{NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia\/openclaw-noosphere-memory@[0-9]+\.[0-9]+\.[0-9]+\}" bash "\$installer"\n(?:\1  openclaw noosphere (?:doctor|status)\n)*\1\)$/gm,
+      /^(\s*)\(\n\1  set -e\n\1  installer="\$\(mktemp\)"\n\1  trap 'rm -f "\$installer"' EXIT\n\1  curl -fsSL [^\n]+ -o "\$installer"\n\1  printf '[^\n]+' '[a-f0-9]{64}' "\$installer" \| sha256sum -c -\n\1  NOOSPHERE_VERSION="\$\{NOOSPHERE_VERSION:-[0-9]+\.[0-9]+\.[0-9]+\}" NOOSPHERE_PLUGIN_SPEC="\$\{NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia\/openclaw-noosphere-memory@[0-9]+\.[0-9]+\.[0-9]+\}" bash "\$installer" --non-interactive --with openclaw\n(?:\1  openclaw noosphere (?:doctor|status)\n)*\1\)$/gm,
     ),
   ).length;
   expect(
-    text.includes(verifiedInstallerRef) &&
-      text.includes(verifiedInstallerSha256) &&
+    text.includes(guidedInstallerRef) &&
+      text.includes(guidedInstallerSha256) &&
       text.includes(versionBoundInstallerCommand) &&
       checksumCount > 0 &&
       safeInstallerBlocks === checksumCount,
@@ -877,6 +912,69 @@ for (const relativePath of [
     `${relativePath} must not recommend executing a moving-branch installer`,
   );
 }
+
+const readme = read("README.md");
+const installationGuide = read("docs/INSTALLATION.md");
+const guidedLauncherDocs = [
+  "README.md",
+  "docs/INSTALLATION.md",
+  "docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md",
+  "openclaw-noosphere-memory/README.md",
+  "opencode-noosphere-memory/README.md",
+  "kilocode-noosphere-memory/README.md",
+];
+for (const relativePath of guidedLauncherDocs) {
+  const text = read(relativePath);
+  expect(
+    text.includes(`${rawRepositoryUrl}/${guidedInstallerRef}/install.sh`) &&
+      !text.includes("/master/install.sh") &&
+      !text.includes("/main/install.sh"),
+    `${relativePath} must pin the reviewed guided launcher without a moving-branch fallback`,
+  );
+}
+const hermesBundleReadme = read("hermes-noosphere-memory/README.md");
+expect(
+  !hermesBundleReadme.includes("raw.githubusercontent.com/SweetSophia/noosphere/") &&
+    hermesBundleReadme.includes("avoids a circular bundle-to-launcher pin"),
+  "The bundled Hermes README must delegate guided launcher ownership without embedding a circular launcher pin",
+);
+const guidedOneLiner =
+  `curl -fsSL ${rawRepositoryUrl}/${guidedInstallerRef}/install.sh | bash`;
+expect(
+  readme.includes(guidedInstallerRef) &&
+    !readme.includes("/master/install.sh") &&
+    !readme.includes("/main/install.sh"),
+  "README.md must pin the guided launcher commit without a moving-branch fallback",
+);
+expect(
+  installationGuide.includes(guidedInstallerRef) &&
+    installationGuide.includes(guidedInstallerSha256) &&
+    !installationGuide.includes("/master/install.sh") &&
+    !installationGuide.includes("/main/install.sh"),
+  "docs/INSTALLATION.md must pin the guided launcher commit and checksum without a moving-branch fallback",
+);
+expect(
+  readme.includes(guidedOneLiner) &&
+    readme.includes("~/.noosphere/credentials.json") &&
+    readme.includes("--dry-run --core-only") &&
+    readme.includes("noosphere_postgres_data") &&
+    readme.includes("docs/INSTALLATION.md") &&
+    readme.includes("a merged commit alone is not a release") &&
+    installationGuide.includes("Merging the installer source does not by") &&
+    installationGuide.includes("all six installer assets"),
+  "README.md and docs/INSTALLATION.md must keep novice guidance, protected state, and the pre-release artifact boundary synchronized",
+);
+expect(
+  installationGuide.includes("## Fresh install versus upgrade") &&
+    installationGuide.includes("## Manual Docker Compose installation") &&
+    installationGuide.includes("### Bootstrap credential file rules") &&
+    installationGuide.includes("NOOSPHERE_BOOTSTRAP_SECRETS_FILE=/app/uploads/bootstrap-secrets/secrets.json") &&
+    installationGuide.includes("mode `0600`") &&
+    installationGuide.includes("mode `0700`") &&
+    installationGuide.includes("directly under shared directories") &&
+    installationGuide.includes("sha256sum -c -"),
+  "docs/INSTALLATION.md must preserve advanced bootstrap-secret protections, manual deployment, upgrade separation, and the auditable launcher path",
+);
 
 const switchScript = read("scripts/switch-pgvector-compose.sh");
 const controllerScript = read("scripts/run-pgvector-transition-controller.sh");
@@ -1463,21 +1561,144 @@ for (const relativePath of [
 }
 
 expect(
-  sha256("install-openclaw.sh") === verifiedInstallerSha256,
-  "the checked-in installer bytes must match the checksum advertised by public immutable-install guidance",
+  sha256("install-openclaw.sh") === guidedBackendSha256,
+  "the checked-in backend bytes must match the checksum pinned by the guided launcher",
+);
+expect(
+  sha256("install.sh") === guidedInstallerSha256,
+  "the checked-in guided launcher bytes must match the checksum advertised by public immutable-install guidance",
 );
 
 if (verifyRemoteArtifacts) {
   await verifyRemoteArtifact(
-    "public installer",
-    `${rawRepositoryUrl}/${verifiedInstallerRef}/install-openclaw.sh`,
-    verifiedInstallerSha256,
+    "guided installer",
+    `${rawRepositoryUrl}/${guidedInstallerRef}/install.sh`,
+    guidedInstallerSha256,
+  );
+  await verifyRemoteArtifact(
+    "guided installer backend",
+    `${rawRepositoryUrl}/${guidedBackendRef}/install-openclaw.sh`,
+    guidedBackendSha256,
   );
   for (const { label, shaConstant, urlConstant } of helperArtifacts) {
     await verifyRemoteArtifact(
       label,
       extractShellStringConstant(installer, urlConstant),
       extractShellConstant(installer, shaConstant),
+    );
+  }
+}
+
+let releaseAssetExpectations = [];
+if (verifyReleaseArtifacts) {
+  const expectedReleaseDir = mkdtempSync(join(tmpdir(), "noosphere-release-assets-"));
+  try {
+    const packageResult = spawnSync(
+      "bash",
+      [resolve(root, "scripts/package-installer.sh"), expectedReleaseDir],
+      { cwd: root, encoding: "utf8", env: { ...process.env } },
+    );
+    expect(
+      packageResult.status === 0,
+      `failed to build deterministic release expectations: ${packageResult.stderr || packageResult.stdout}`,
+    );
+    if (packageResult.status === 0) {
+      const hermesName = `hermes-noosphere-memory-${releaseVersion}.tar.gz`;
+      const expectedNames = [
+        "install.sh",
+        "install.sh.sha256",
+        "install-openclaw.sh",
+        "install-openclaw.sh.sha256",
+        hermesName,
+        `${hermesName}.sha256`,
+      ];
+      const expectedReleaseBase =
+        `https://github.com/SweetSophia/noosphere/releases/download/v${releaseVersion}/`;
+      releaseAssetExpectations = expectedNames.map((filename) => ({
+        filename,
+        sha256: sha256Bytes(readFileSync(resolve(expectedReleaseDir, filename))),
+        url: `${expectedReleaseBase}${filename}`,
+      }));
+    }
+  } finally {
+    rmSync(expectedReleaseDir, { recursive: true, force: true });
+  }
+}
+if (verifyReleaseFiles) {
+  const releaseLauncherName = "install.sh";
+  const releaseBackendName = "install-openclaw.sh";
+  const releaseLauncher = readReleaseText(releaseLauncherName);
+  const releaseVersion = extractShellStringConstant(releaseLauncher, "RELEASE_VERSION");
+  const hermesName = `hermes-noosphere-memory-${releaseVersion}.tar.gz`;
+  const expectedNames = [
+    releaseLauncherName,
+    `${releaseLauncherName}.sha256`,
+    releaseBackendName,
+    `${releaseBackendName}.sha256`,
+    hermesName,
+    `${hermesName}.sha256`,
+  ].sort();
+  try {
+    const actualNames = readdirSync(releaseRoot).sort();
+    expect(
+      JSON.stringify(actualNames) === JSON.stringify(expectedNames),
+      `release verification directory must contain exactly: ${expectedNames.join(", ")}`,
+    );
+  } catch (error) {
+    failures.push(`Failed to enumerate release verification directory: ${error.message}`);
+  }
+
+  const releaseBackend = readReleaseBytes(releaseBackendName);
+  const releaseHermes = readReleaseBytes(hermesName);
+  const releaseLauncherBytes = Buffer.from(releaseLauncher, "utf8");
+  const releaseLauncherSha = sha256Bytes(releaseLauncherBytes);
+  const releaseBackendSha = sha256Bytes(releaseBackend);
+  const releaseHermesSha = sha256Bytes(releaseHermes);
+  const declaredLauncherSha = expectedChecksum(
+    readReleaseText(`${releaseLauncherName}.sha256`),
+    releaseLauncherName,
+  );
+  const declaredBackendSha = expectedChecksum(
+    readReleaseText(`${releaseBackendName}.sha256`),
+    releaseBackendName,
+  );
+  const declaredHermesSha = expectedChecksum(
+    readReleaseText(`${hermesName}.sha256`),
+    hermesName,
+  );
+  expect(declaredLauncherSha === releaseLauncherSha, "release install.sh checksum must match downloaded bytes");
+  expect(declaredBackendSha === releaseBackendSha, "release install-openclaw.sh checksum must match downloaded bytes");
+  expect(declaredHermesSha === releaseHermesSha, "release Hermes checksum must match downloaded bytes");
+  expect(
+    extractShellConstant(releaseLauncher, "BACKEND_SHA256") === releaseBackendSha,
+    "release launcher must pin the downloaded backend bytes",
+  );
+  expect(
+    extractShellConstant(releaseLauncher, "HERMES_BUNDLE_SHA256") === releaseHermesSha,
+    "release launcher must pin the downloaded Hermes bundle bytes",
+  );
+
+  const expectedReleaseBase =
+    `https://github.com/SweetSophia/noosphere/releases/download/v${releaseVersion}/`;
+  const releaseBackendUrl = extractShellStringConstant(releaseLauncher, "BACKEND_URL");
+  const releaseHermesUrl = extractShellStringConstant(releaseLauncher, "HERMES_BUNDLE_URL");
+  expect(
+    releaseBackendUrl === `${expectedReleaseBase}${releaseBackendName}`,
+    "release launcher backend URL must target its coordinated release asset",
+  );
+  expect(
+    releaseHermesUrl === `${expectedReleaseBase}${hermesName}`,
+    "release launcher Hermes URL must target its coordinated release asset",
+  );
+}
+
+if (verifyReleaseArtifacts) {
+  for (const asset of releaseAssetExpectations) {
+    await verifyRemoteArtifact(
+      `published release asset ${asset.filename}`,
+      asset.url,
+      asset.sha256,
+      { followRedirects: true },
     );
   }
 }

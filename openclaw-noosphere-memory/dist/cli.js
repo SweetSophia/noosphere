@@ -5,10 +5,10 @@ import { NoosphereMemoryClient } from "./client.js";
 const PLUGIN_ID = "noosphere-memory";
 const DEFAULT_COMPOSE_FILE = "~/.noosphere/docker-compose.yml";
 const DEFAULT_LOG_TAIL = 80;
-const VERIFIED_INSTALLER_REF = "1bbc266283577c3a5c9fe285633955df45f6bcfd";
-const VERIFIED_INSTALLER_SHA256 = "28355163784403bf3445a0028863d8496b66d3fa70ea3492a6f4c7ba4c6af556";
-const VERIFIED_NOOSPHERE_VERSION = "1.12.0";
-const VERIFIED_INSTALLER_URL = `https://raw.githubusercontent.com/SweetSophia/noosphere/${VERIFIED_INSTALLER_REF}/install-openclaw.sh`;
+const VERIFIED_INSTALLER_REF = "1f3081b65f146619600a6f90bc43e9b1612e2e01";
+const VERIFIED_INSTALLER_SHA256 = "2117e1696f6fec25470517f504ec0fe7e3ffd4dc331ba05a25d14f06df18ed81";
+const VERIFIED_NOOSPHERE_VERSION = "1.13.0";
+const VERIFIED_INSTALLER_URL = `https://raw.githubusercontent.com/SweetSophia/noosphere/${VERIFIED_INSTALLER_REF}/install.sh`;
 export function getVerifiedInstallerCommands() {
     return [
         "(",
@@ -17,7 +17,7 @@ export function getVerifiedInstallerCommands() {
         '  trap \'rm -f "$installer"\' EXIT',
         `  curl -fsSL ${VERIFIED_INSTALLER_URL} -o "$installer"`,
         `  printf '%s  %s\\n' '${VERIFIED_INSTALLER_SHA256}' "$installer" | sha256sum -c -`,
-        `  NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-${VERIFIED_NOOSPHERE_VERSION}}" NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${VERIFIED_NOOSPHERE_VERSION}}" NOOSPHERE_PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${VERIFIED_NOOSPHERE_VERSION}}" bash "$installer"`,
+        `  NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-${VERIFIED_NOOSPHERE_VERSION}}" NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${VERIFIED_NOOSPHERE_VERSION}}" NOOSPHERE_PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${VERIFIED_NOOSPHERE_VERSION}}" bash "$installer" --non-interactive --with openclaw`,
         ")",
     ];
 }

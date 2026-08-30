@@ -3,6 +3,9 @@ set -euo pipefail
 trap 'echo "Installer failed near line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 
 NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
+NOOSPHERE_INSTALL_OPENCLAW="${NOOSPHERE_INSTALL_OPENCLAW:-true}"
+NOOSPHERE_SHOW_CREDENTIALS="${NOOSPHERE_SHOW_CREDENTIALS:-false}"
+NOOSPHERE_CREDENTIALS_FILE="${NOOSPHERE_CREDENTIALS_FILE:-$NOOSPHERE_HOME/credentials.json}"
 NOOSPHERE_PORT="${NOOSPHERE_PORT:-}"
 if [[ -n ${NOOSPHERE_VERSION:-} ]]; then
   NOOSPHERE_VERSION_WAS_EXPLICIT=1
@@ -48,7 +51,7 @@ NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH="${NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH:-}"
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH="${NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH:-}"
 NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS="${NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS:-}"
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS="${NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS:-}"
-PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.12.0}"
+PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.0}"
 SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$HOME/.openclaw/secrets}"
 SECRETS_FILE="${NOOSPHERE_SECRETS_FILE:-$SECRETS_DIR/noosphere-memory.json}"
 SECRET_PROVIDER_ID="${NOOSPHERE_SECRET_PROVIDER_ID:-noosphere-memory}"
@@ -75,6 +78,24 @@ need() {
   fi
 }
 
+run_openclaw() {
+  env \
+    -u POSTGRES_PASSWORD \
+    -u POSTGRES_MIGRATION_PASSWORD \
+    -u POSTGRES_APP_PASSWORD \
+    -u POSTGRES_HYBRID_ADMIN_PASSWORD \
+    -u POSTGRES_HYBRID_WORKER_PASSWORD \
+    -u NEXTAUTH_SECRET \
+    -u REDIS_URL \
+    -u NOOSPHERE_ADMIN_PASSWORD \
+    -u NOOSPHERE_BOOTSTRAP_API_KEY \
+    -u NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON \
+    -u NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 \
+    -u NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON \
+    -u NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64 \
+    openclaw "$@"
+}
+
 random_secret() {
   node -e "console.log(require('crypto').randomBytes(Number(process.argv[1])).toString('base64url'))" "$1"
 }
@@ -83,6 +104,208 @@ json_get() {
   local file="$1"
   local key="$2"
   JSON_GET_FILE="$file" JSON_GET_KEY="$key" node -e 'try { const fs=require("fs"); const p=process.env.JSON_GET_FILE; const k=process.env.JSON_GET_KEY; if (!p || !k || !fs.existsSync(p)) process.exit(0); const data=JSON.parse(fs.readFileSync(p,"utf8")); if (typeof data[k] === "string") process.stdout.write(data[k]); } catch { process.exit(0); }'
+}
+
+assert_no_symlink_path_components() {
+  local target=$1 label=$2
+  TARGET_PATH="$target" TARGET_LABEL="$label" node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    let current = path.resolve(process.env.TARGET_PATH);
+    while (true) {
+      try {
+        if (fs.lstatSync(current).isSymbolicLink()) {
+          throw new Error(`Refusing symlinked ${process.env.TARGET_LABEL} path component: ${current}`);
+        }
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  '
+}
+
+write_credentials_json() {
+  local target=$1 include_runtime=${2:-false} include_bootstrap=${3:-true} parent temp
+  parent=$(dirname "$target")
+  assert_no_symlink_path_components "$target" credential || return 1
+  install -d -m 700 "$parent"
+  assert_no_symlink_path_components "$target" credential || return 1
+  [[ ! -L "$target" ]] || {
+    echo "Refusing symlinked credential target: $target" >&2
+    return 1
+  }
+  temp=$(mktemp "$parent/.credentials.XXXXXX")
+  CREDENTIALS_EXISTING_TARGET="$target" \
+  CREDENTIALS_BASE_URL="$APP_URL" \
+  CREDENTIALS_API_KEY="$INTEGRATION_API_KEY" \
+  CREDENTIALS_BOOTSTRAP_API_KEY="$API_KEY" \
+  CREDENTIALS_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
+  CREDENTIALS_POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+  CREDENTIALS_POSTGRES_MIGRATION_PASSWORD="$POSTGRES_MIGRATION_PASSWORD" \
+  CREDENTIALS_POSTGRES_APP_PASSWORD="$POSTGRES_APP_PASSWORD" \
+  CREDENTIALS_POSTGRES_HYBRID_ADMIN_PASSWORD="$POSTGRES_HYBRID_ADMIN_PASSWORD" \
+  CREDENTIALS_POSTGRES_HYBRID_WORKER_PASSWORD="$POSTGRES_HYBRID_WORKER_PASSWORD" \
+  CREDENTIALS_NEXTAUTH_SECRET="$NEXTAUTH_SECRET" \
+  CREDENTIALS_INCLUDE_RUNTIME="$include_runtime" \
+  CREDENTIALS_INCLUDE_BOOTSTRAP="$include_bootstrap" \
+    node -e '
+      const fs = require("node:fs");
+      const target = process.argv[1];
+      let integrationApiKeys = {};
+      const existingTarget = process.env.CREDENTIALS_EXISTING_TARGET;
+      if (existingTarget && fs.existsSync(existingTarget)) {
+        const existing = JSON.parse(fs.readFileSync(existingTarget, "utf8"));
+        if (existing.integrationApiKeys && typeof existing.integrationApiKeys === "object" && !Array.isArray(existing.integrationApiKeys)) {
+          integrationApiKeys = Object.fromEntries(Object.entries(existing.integrationApiKeys).filter(
+            ([name, key]) => /^[a-z0-9-]+$/.test(name) && typeof key === "string" && /^noo_[A-Za-z0-9_-]+$/.test(key),
+          ));
+        }
+      }
+      const data = {
+        baseUrl: process.env.CREDENTIALS_BASE_URL,
+        apiKey: process.env.CREDENTIALS_API_KEY,
+        integrationApiKeys,
+        adminEmail: "admin@noosphere.local",
+        adminPassword: process.env.CREDENTIALS_ADMIN_PASSWORD,
+      };
+      if (process.env.CREDENTIALS_INCLUDE_BOOTSTRAP === "true") {
+        data.bootstrapApiKey = process.env.CREDENTIALS_BOOTSTRAP_API_KEY;
+      }
+      if (process.env.CREDENTIALS_INCLUDE_RUNTIME === "true") {
+        Object.assign(data, {
+          postgresPassword: process.env.CREDENTIALS_POSTGRES_PASSWORD,
+          postgresMigrationPassword: process.env.CREDENTIALS_POSTGRES_MIGRATION_PASSWORD,
+          postgresAppPassword: process.env.CREDENTIALS_POSTGRES_APP_PASSWORD,
+          postgresHybridAdminPassword: process.env.CREDENTIALS_POSTGRES_HYBRID_ADMIN_PASSWORD,
+          postgresHybridWorkerPassword: process.env.CREDENTIALS_POSTGRES_HYBRID_WORKER_PASSWORD,
+          nextAuthSecret: process.env.CREDENTIALS_NEXTAUTH_SECRET,
+        });
+      }
+      fs.writeFileSync(target, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
+    ' "$temp"
+  chmod 600 "$temp"
+  assert_no_symlink_path_components "$target" credential || return 1
+  mv "$temp" "$target"
+}
+
+validated_local_app_url() {
+  APP_URL_INPUT=$1 EXPECTED_PORT=$NOOSPHERE_PORT node -e '
+    const os = require("node:os");
+    const input = process.env.APP_URL_INPUT;
+    const expectedPort = String(process.env.EXPECTED_PORT || "");
+    const url = new URL(input);
+    const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    const local = new Set(["localhost", "127.0.0.1", "::1"]);
+    for (const entries of Object.values(os.networkInterfaces())) {
+      for (const entry of entries || []) local.add(String(entry.address).toLowerCase());
+    }
+    if (url.protocol !== "http:" || url.username || url.password ||
+        url.pathname !== "/" || url.search || url.hash || !url.port ||
+        url.port !== expectedPort || !local.has(host)) {
+      throw new Error("Noosphere application URL is not the expected local endpoint");
+    }
+    process.stdout.write(url.origin);
+  '
+}
+
+local_no_proxy_curl() {
+  curl --disable --noproxy '*' --connect-timeout 5 --max-time 15 "$@"
+}
+
+api_http_status_with_key() {
+  local key=$1 endpoint=$2 config status base_url
+  [[ "$key" =~ ^noo_[A-Za-z0-9_-]+$ ]] || {
+    printf '000'
+    return 0
+  }
+  base_url=$(validated_local_app_url "$APP_URL") || {
+    printf '000'
+    return 0
+  }
+  config=$(mktemp)
+  chmod 600 "$config"
+  printf 'silent\nshow-error\nheader = "Authorization: Bearer %s"\n' "$key" > "$config"
+  status=$(local_no_proxy_curl --config "$config" --output /dev/null --write-out '%{http_code}' \
+    "$base_url$endpoint" 2>/dev/null || true)
+  rm -f "$config"
+  printf '%s' "${status:-000}"
+}
+
+api_write_probe_status_with_key() {
+  local key=$1 config body status base_url
+  [[ "$key" =~ ^noo_[A-Za-z0-9_-]+$ ]] || { printf '000'; return 0; }
+  base_url=$(validated_local_app_url "$APP_URL") || { printf '000'; return 0; }
+  config=$(mktemp)
+  body=$(mktemp)
+  chmod 600 "$config" "$body"
+  printf 'silent\nshow-error\nheader = "Authorization: Bearer %s"\n' "$key" > "$config"
+  printf '{}\n' > "$body"
+  status=$(local_no_proxy_curl --config "$config" --request POST --header 'Content-Type: application/json' \
+    --data-binary "@$body" --output /dev/null --write-out '%{http_code}' \
+    "$base_url/api/articles" 2>/dev/null || true)
+  rm -f "$config" "$body"
+  printf '%s' "${status:-000}"
+}
+
+integration_key_is_safe() {
+  local key=$1 write_status admin_status
+  [[ -n "$key" ]] || return 1
+  write_status=$(api_write_probe_status_with_key "$key")
+  admin_status=$(api_http_status_with_key "$key" '/api/keys')
+  if [[ "$write_status" == 000 || "$admin_status" == 000 ]]; then
+    return 2
+  fi
+  [[ "$write_status" == 400 && "$admin_status" == 403 ]]
+}
+
+create_scoped_integration_key() {
+  local label=$1 config body response name raw base_url
+  [[ "$API_KEY" =~ ^noo_[A-Za-z0-9_-]+$ ]] || {
+    echo 'Bootstrap API key has an unexpected format.' >&2
+    return 1
+  }
+  name="guided-${label}-$(date +%s)-${RANDOM}"
+  base_url=$(validated_local_app_url "$APP_URL") || {
+    echo 'Refusing to send the bootstrap API key to a non-local Noosphere URL.' >&2
+    return 1
+  }
+  config=$(mktemp)
+  body=$(mktemp)
+  response=$(mktemp)
+  chmod 600 "$config" "$body" "$response"
+  printf 'silent\nshow-error\nfail-with-body\nheader = "Authorization: Bearer %s"\n' "$API_KEY" > "$config"
+  printf '{"name":"%s","permissions":"WRITE","allowedScopes":[]}\n' "$name" > "$body"
+  if ! local_no_proxy_curl --config "$config" --request POST --header 'Content-Type: application/json' \
+    --data-binary "@$body" --output "$response" "$base_url/api/keys"; then
+    rm -f "$config" "$body" "$response"
+    echo "Failed to create a scoped ${label} API key." >&2
+    return 1
+  fi
+  raw=$(json_get "$response" key)
+  rm -f "$config" "$body" "$response"
+  [[ "$raw" =~ ^noo_[A-Za-z0-9_-]+$ ]] || {
+    echo "Noosphere returned an invalid scoped ${label} API key." >&2
+    return 1
+  }
+  printf '%s' "$raw"
+}
+
+select_scoped_integration_key() {
+  local existing=$1 label=$2 status
+  if integration_key_is_safe "$existing"; then
+    printf '%s' "$existing"
+    return 0
+  else
+    status=$?
+  fi
+  if [[ "$status" == 2 ]]; then
+    echo "Could not verify the existing scoped ${label} API key; refusing to rotate it after a transport failure." >&2
+    return 1
+  fi
+  create_scoped_integration_key "$label"
 }
 
 env_get() {
@@ -323,7 +546,7 @@ resolve_runtime_config() {
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-$(env_get "$runtime_env" NOOSPHERE_PORT)}"
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-$(env_get "$runtime_env" NOOSPHERE_VERSION)}"
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.12.0}"
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.0}"
   if ((NOOSPHERE_VERSION_WAS_EXPLICIT == 1 && NOOSPHERE_IMAGE_WAS_EXPLICIT == 0)); then
     # A version-bound public upgrade must not inherit an installer-persisted
     # image from the previous release. Operators retaining a custom registry or
@@ -1165,7 +1388,7 @@ wait_for_http_health() {
   local url="$1"
   local attempts="${2:-60}"
   for _ in $(seq 1 "$attempts"); do
-    if curl -fsS "$url/api/health" >/dev/null 2>&1; then
+    if local_no_proxy_curl -fsS "$url/api/health" >/dev/null 2>&1; then
       return 0
     fi
     sleep 2
@@ -1176,10 +1399,20 @@ wait_for_http_health() {
 }
 
 main() {
+case "$NOOSPHERE_INSTALL_OPENCLAW" in
+  true|false) ;;
+  *) echo 'NOOSPHERE_INSTALL_OPENCLAW must be exactly true or false.' >&2; exit 1 ;;
+esac
+case "$NOOSPHERE_SHOW_CREDENTIALS" in
+  true|false) ;;
+  *) echo 'NOOSPHERE_SHOW_CREDENTIALS must be exactly true or false.' >&2; exit 1 ;;
+esac
 need docker
 need node
 need curl
-need openclaw
+if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then
+  need openclaw
+fi
 need jq
 need sha256sum
 need flock
@@ -1190,8 +1423,11 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
-mkdir -p "$NOOSPHERE_HOME" "$SECRETS_DIR"
-chmod 700 "$SECRETS_DIR" || true
+mkdir -p "$NOOSPHERE_HOME"
+if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then
+  mkdir -p "$SECRETS_DIR"
+  chmod 700 "$SECRETS_DIR" || true
+fi
 POSTGRES_BACKUP_DIR="$NOOSPHERE_HOME/backups/postgres-pgvector"
 controller_transition_completed=false
 acquire_postgres_operation_lock
@@ -1271,6 +1507,8 @@ POSTGRES_HYBRID_WORKER_PASSWORD="${POSTGRES_HYBRID_WORKER_PASSWORD:-$(env_get_se
 NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(env_get_secret "$NOOSPHERE_HOME/.env" NEXTAUTH_SECRET)}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_ADMIN_PASSWORD)}"
 API_KEY="${API_KEY:-$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_API_KEY)}"
+EXISTING_INTEGRATION_API_KEY="$(json_get "$NOOSPHERE_CREDENTIALS_FILE" apiKey)"
+INTEGRATION_API_KEY=""
 NOOSPHERE_BOOTSTRAP_SECRETS_FILE="${NOOSPHERE_BOOTSTRAP_SECRETS_FILE:-$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_SECRETS_FILE)}"
 
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(json_get "$SECRETS_FILE" postgresPassword)}"
@@ -1810,31 +2048,21 @@ NOOSPHERE_MIN_ARTICLES="$verify_min_articles" \
 NOOSPHERE_POSTGRES_EVIDENCE="$POSTGRES_BACKUP_DIR/noosphere_postgres_data.phase-a2b.json" \
   "$POSTGRES_VERIFY_SCRIPT"
 
-install -m 600 /dev/null "$SECRETS_FILE"
-cat > "$SECRETS_FILE" <<JSON
-{
-  "baseUrl": "${APP_URL}",
-  "apiKey": "${API_KEY}",
-  "adminEmail": "admin@noosphere.local",
-  "adminPassword": "${ADMIN_PASSWORD}",
-  "postgresPassword": "${POSTGRES_PASSWORD}",
-  "postgresMigrationPassword": "${POSTGRES_MIGRATION_PASSWORD}",
-  "postgresAppPassword": "${POSTGRES_APP_PASSWORD}",
-  "postgresHybridAdminPassword": "${POSTGRES_HYBRID_ADMIN_PASSWORD}",
-  "postgresHybridWorkerPassword": "${POSTGRES_HYBRID_WORKER_PASSWORD}",
-  "nextAuthSecret": "${NEXTAUTH_SECRET}"
-}
-JSON
+INTEGRATION_API_KEY=$(select_scoped_integration_key "$EXISTING_INTEGRATION_API_KEY" default)
+write_credentials_json "$NOOSPHERE_CREDENTIALS_FILE"
 
-echo "Installing OpenClaw plugin: ${PLUGIN_SPEC}"
-PLUGIN_INSTALL_ARGS=(plugins install "$PLUGIN_SPEC" --force)
-if [[ "$PLUGIN_SPEC" == npm:* ]]; then
-  PLUGIN_INSTALL_ARGS+=(--pin)
-fi
-openclaw "${PLUGIN_INSTALL_ARGS[@]}"
+if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then
+  write_credentials_json "$SECRETS_FILE" true false
 
-PATCH_FILE="$(mktemp)"
-cat > "$PATCH_FILE" <<JSON5
+  echo "Installing OpenClaw plugin: ${PLUGIN_SPEC}"
+  PLUGIN_INSTALL_ARGS=(plugins install "$PLUGIN_SPEC" --force)
+  if [[ "$PLUGIN_SPEC" == npm:* ]]; then
+    PLUGIN_INSTALL_ARGS+=(--pin)
+  fi
+  run_openclaw "${PLUGIN_INSTALL_ARGS[@]}"
+
+  PATCH_FILE="$(mktemp)"
+  cat > "$PATCH_FILE" <<JSON5
 {
   secrets: {
     providers: {
@@ -1868,40 +2096,43 @@ cat > "$PATCH_FILE" <<JSON5
 }
 JSON5
 
-openclaw config patch --file "$PATCH_FILE"
-rm -f "$PATCH_FILE"
+  run_openclaw config patch --file "$PATCH_FILE"
+  rm -f "$PATCH_FILE"
 
-if openclaw gateway status >/dev/null 2>&1; then
-  echo "Restarting OpenClaw Gateway..."
-  openclaw gateway restart
-else
-  echo "OpenClaw Gateway is not running or status is unavailable; start/restart it when ready."
+  if run_openclaw gateway status >/dev/null 2>&1; then
+    echo "Restarting OpenClaw Gateway..."
+    run_openclaw gateway restart
+  else
+    echo "OpenClaw Gateway is not running or status is unavailable; start/restart it when ready."
+  fi
 fi
 
 cat <<DONE
 
 ╔══════════════════════════════════════════════════════════════════════╗
-║              Noosphere OpenClaw Setup Complete                       ║
+║                    Noosphere Setup Complete                           ║
 ╠══════════════════════════════════════════════════════════════════════╣
 ║                                                                      ║
 ║  Noosphere URL:    ${APP_URL}
 ║  Admin email:      admin@noosphere.local
-║  Admin password:   ${ADMIN_PASSWORD}
 ║                                                                      ║
-║  ────────────────────────────────────────────────────────────────   ║
-║  🔑 API KEY (save this - it will not be shown again):               ║
-║     ${API_KEY}
-║  ────────────────────────────────────────────────────────────────   ║
-║                                                                      ║
-║  Credentials also saved in: ${SECRETS_FILE}
+║  Credentials saved in: ${NOOSPHERE_CREDENTIALS_FILE}
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
 
 Verify:
   curl -fsS ${APP_URL}/api/health
-  openclaw plugins inspect ${PLUGIN_ID} --runtime --json
-
 DONE
+
+if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then
+  printf '  openclaw plugins inspect %s --runtime --json\n\n' "$PLUGIN_ID"
+fi
+if [[ "$NOOSPHERE_SHOW_CREDENTIALS" == true ]]; then
+  printf 'Admin password: %s\nDefault WRITE API key: %s\nBootstrap ADMIN API key: %s\n\n' \
+    "$ADMIN_PASSWORD" "$INTEGRATION_API_KEY" "$API_KEY"
+else
+  printf 'Credentials were not printed. Read the mode-0600 file above when needed.\n\n'
+fi
 
 # ── Per-Agent API Keys ──────────────────────────────────────────────────────────
 #
