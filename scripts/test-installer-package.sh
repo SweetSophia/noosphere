@@ -60,7 +60,7 @@ NODE
 done
 mode_extract="$tmp/mode-extract"
 mkdir -p "$mode_extract"
-tar -xzf "$mode_baseline/hermes-noosphere-memory-${version}.tar.gz" -C "$mode_extract"
+tar -xpzf "$mode_baseline/hermes-noosphere-memory-${version}.tar.gz" -C "$mode_extract"
 mode_root="$mode_extract/hermes-noosphere-memory-${version}"
 test "$(stat -c '%a' "$mode_root")" = 755
 test "$(stat -c '%a' "$mode_root/install-hermes.sh")" = 755
