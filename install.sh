@@ -6,7 +6,7 @@ RELEASE_VERSION='1.13.1'
 BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/9195733bd59756d21d51d6d3b34e33ca3c8c674b/install-openclaw.sh'
 BACKEND_SHA256='91784b96fb6a699555f35cb87cf5d5800644a2a1761956d537d9e7c32bafa973'
 HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.13.1/hermes-noosphere-memory-1.13.1.tar.gz'
-HERMES_BUNDLE_SHA256='1bcf28e388e210929dce2b8389073c305fbdafd3ee0ede7aa1a9443ec673f040'
+HERMES_BUNDLE_SHA256='5231c755ef7f6feaebcedae6aa412f19c43658814d83b0643acf5dc9887f9aae'
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
 if [[ -n "$SCRIPT_PATH" ]]; then
   SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"
