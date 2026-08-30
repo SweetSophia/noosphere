@@ -244,6 +244,13 @@ function exactBlockLines(block, expected) {
   return lines.length === expected.length && expected.every((line, index) => lines[index] === line);
 }
 
+function hasConsecutiveRawLines(block, expected) {
+  const lines = block.split(/\r?\n/).map((line) => line.trim());
+  return lines.some((_, start) =>
+    expected.every((line, offset) => lines[start + offset] === line),
+  );
+}
+
 function yamlScalarLine(block, name, indent) {
   const prefix = `${" ".repeat(indent)}${name}:`;
   return block.split("\n").find((line) => line.startsWith(prefix))?.trim() ?? "";
@@ -562,7 +569,12 @@ expect(
       "packages: write",
     ]) &&
     !workflowLines(dockerAssembleStep).some((line) => line.startsWith("if:")) &&
-    dockerAssembleStep.includes("expected two platform digests") &&
+    hasConsecutiveRawLines(dockerAssembleStep, [
+      'if [[ ${#sources[@]} -ne 2 ]]; then',
+      "printf 'expected two platform digests, found %s\\n' \"${#sources[@]}\" >&2",
+      "exit 1",
+      "fi",
+    ]) &&
     dockerAssembleStep.includes("docker buildx imagetools create") &&
     dockerAssembleStep.includes('tag_args+=(-t "$tag")') &&
     dockerAssembleStep.includes("jq -r '.tags[]'") &&
