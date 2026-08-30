@@ -14,6 +14,7 @@ const required = [
   'NOOSPHERE_INSTALL_OPENCLAW="${NOOSPHERE_INSTALL_OPENCLAW:-true}"',
   'if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then\n  need openclaw\nfi',
   'write_credentials_json "$NOOSPHERE_CREDENTIALS_FILE"',
+  'assert_no_symlink_path_components "$target" credential',
   'if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then\n  write_credentials_json "$SECRETS_FILE" true',
   'Credentials were not printed. Read the mode-0600 file above when needed.',
 ];
@@ -195,6 +196,19 @@ for file in "$tmp/user/credentials.json" "$tmp/runtime/noosphere-memory.json"; d
   test "$(stat -c '%a' "$file")" = 600
 done
 
+mkdir -p "$tmp/credential-parent-target"
+printf '%s\n' 'CREDENTIAL_SENTINEL=yes' > "$tmp/credential-parent-target/sentinel"
+ln -s "$tmp/credential-parent-target" "$tmp/credential-parent-link"
+if write_credentials_json "$tmp/credential-parent-link/credentials.json" \
+  >"$tmp/credential-parent-symlink.out" 2>&1; then
+  echo 'symlinked credential parent unexpectedly passed' >&2
+  exit 1
+fi
+test -L "$tmp/credential-parent-link"
+grep -q '^CREDENTIAL_SENTINEL=yes$' "$tmp/credential-parent-target/sentinel"
+test ! -e "$tmp/credential-parent-target/credentials.json"
+grep -q 'Refusing symlinked credential path component' "$tmp/credential-parent-symlink.out"
+
 cp "$backend" "$tmp/proxy-sabotaged.sh"
 SABOTAGED_BACKEND="$tmp/proxy-sabotaged.sh" node <<'NODE'
 const fs = require("node:fs");
@@ -225,4 +239,4 @@ if "$0" "$tmp/sabotaged.sh" >/dev/null 2>&1; then
   exit 1
 fi
 
-printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 scoped_keys=yes read_key_rejected=yes transport_rotation=blocked local_bootstrap_destination=yes proxy_bypass=yes secret_argv=clean child_env=clean sabotage=red\n'
+printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 scoped_keys=yes read_key_rejected=yes transport_rotation=blocked local_bootstrap_destination=yes proxy_bypass=yes secret_argv=clean child_env=clean credential_parent_symlink=blocked sabotage=red\n'

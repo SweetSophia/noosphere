@@ -106,10 +106,33 @@ json_get() {
   JSON_GET_FILE="$file" JSON_GET_KEY="$key" node -e 'try { const fs=require("fs"); const p=process.env.JSON_GET_FILE; const k=process.env.JSON_GET_KEY; if (!p || !k || !fs.existsSync(p)) process.exit(0); const data=JSON.parse(fs.readFileSync(p,"utf8")); if (typeof data[k] === "string") process.stdout.write(data[k]); } catch { process.exit(0); }'
 }
 
+assert_no_symlink_path_components() {
+  local target=$1 label=$2
+  TARGET_PATH="$target" TARGET_LABEL="$label" node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    let current = path.resolve(process.env.TARGET_PATH);
+    while (true) {
+      try {
+        if (fs.lstatSync(current).isSymbolicLink()) {
+          throw new Error(`Refusing symlinked ${process.env.TARGET_LABEL} path component: ${current}`);
+        }
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  '
+}
+
 write_credentials_json() {
   local target=$1 include_runtime=${2:-false} include_bootstrap=${3:-true} parent temp
   parent=$(dirname "$target")
+  assert_no_symlink_path_components "$target" credential || return 1
   install -d -m 700 "$parent"
+  assert_no_symlink_path_components "$target" credential || return 1
   [[ ! -L "$target" ]] || {
     echo "Refusing symlinked credential target: $target" >&2
     return 1
@@ -164,6 +187,7 @@ write_credentials_json() {
       fs.writeFileSync(target, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
     ' "$temp"
   chmod 600 "$temp"
+  assert_no_symlink_path_components "$target" credential || return 1
   mv "$temp" "$target"
 }
 
