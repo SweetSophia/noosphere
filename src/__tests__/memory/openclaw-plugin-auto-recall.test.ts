@@ -23,7 +23,7 @@ import {
   type NoosphereTopicCreateResponse,
 } from "../../../openclaw-noosphere-memory/src/client.js";
 import {
-  DEFAULT_NOOSPHERE_BASE_URL,
+  NoosphereConfigError,
   resolveApiKeyForAgent,
   resolveNoosphereMemoryConfig,
 } from "../../../openclaw-noosphere-memory/src/config.js";
@@ -146,8 +146,9 @@ describe("resolveAutoRecallConfig", () => {
 });
 
 describe("OpenClaw Noosphere plugin auto-recall", () => {
-  it("rejects literal internal baseUrl targets, including HTTPS", () => {
+  it("rejects invalid and internal baseUrl targets explicitly", () => {
     for (const baseUrl of [
+      "not-a-url",
       "https://10.0.0.5:6578",
       "https://172.16.0.9",
       "https://192.168.1.50",
@@ -155,15 +156,56 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
       "https://[fc00::1]",
       "https://[fd12:3456::1]",
       "https://[fe80::1]",
+      "http://noosphere.example.test",
     ]) {
-      assert.equal(
-        resolveNoosphereMemoryConfig({ baseUrl }, {} as NodeJS.ProcessEnv).baseUrl,
-        DEFAULT_NOOSPHERE_BASE_URL,
+      assert.throws(
+        () => resolveNoosphereMemoryConfig({ baseUrl }, {} as NodeJS.ProcessEnv),
+        (error) => {
+          assert.ok(error instanceof NoosphereConfigError);
+          assert.match(error.message, /Noosphere base URL/);
+          return true;
+        },
       );
     }
   });
 
-  it("keeps localhost baseUrl targets usable for local installs", () => {
+  it("rejects IPv4-mapped private hosts after URL canonicalization", () => {
+    assert.throws(
+      () => resolveNoosphereMemoryConfig(
+        { baseUrl: "https://[::ffff:10.0.0.1]" },
+        {} as NodeJS.ProcessEnv,
+      ),
+      (error) => {
+        assert.ok(error instanceof NoosphereConfigError);
+        assert.match(error.message, /loopback or public host/);
+        return true;
+      },
+    );
+  });
+
+  it("rejects non-public IPv6 site-local and discard-only literals", () => {
+    for (const baseUrl of [
+      "https://[fec0::1]",
+      "https://[feff::1]",
+      "https://[100::1]",
+    ]) {
+      assert.throws(
+        () => resolveNoosphereMemoryConfig(
+          { baseUrl },
+          {
+            OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN: new URL(baseUrl).origin,
+          } as unknown as NodeJS.ProcessEnv,
+        ),
+        (error: unknown) => {
+          assert.ok(error instanceof NoosphereConfigError);
+          assert.match(error.message, /loopback or public host/);
+          return true;
+        },
+      );
+    }
+  });
+
+  it("keeps localhost baseUrl targets usable for local installs without a pin", () => {
     assert.equal(
       resolveNoosphereMemoryConfig({ baseUrl: "http://127.0.0.1:6578/" }, {} as NodeJS.ProcessEnv)
         .baseUrl,
@@ -174,12 +216,114 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
         .baseUrl,
       "https://[::1]:6578",
     );
+    assert.equal(
+      resolveNoosphereMemoryConfig({ baseUrl: "http://localhost.:6578/" }, {} as NodeJS.ProcessEnv)
+        .baseUrl,
+      "http://localhost.:6578",
+    );
+    assert.equal(
+      resolveNoosphereMemoryConfig(
+        { baseUrl: "http://[::ffff:127.0.0.1]:6578/" },
+        {} as NodeJS.ProcessEnv,
+      ).baseUrl,
+      "http://[::ffff:7f00:1]:6578",
+    );
+  });
+
+  it("does not treat 127-prefixed DNS names as loopback", () => {
+    assert.throws(
+      () => resolveNoosphereMemoryConfig(
+        { baseUrl: "https://127.attacker.example" },
+        {} as NodeJS.ProcessEnv,
+      ),
+      (error) => {
+        assert.ok(error instanceof NoosphereConfigError);
+        assert.match(error.message, /OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN/);
+        return true;
+      },
+    );
+  });
+
+  it("does not let mutable plugin config authorize its own remote origin", async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+
+    try {
+      await assert.rejects(
+        async () => {
+          const config = resolveNoosphereMemoryConfig(
+            {
+              baseUrl: "https://attacker.example.test",
+              apiKey: ["synthetic", "test", "key"].join("-"),
+              trustedOrigins: ["https://attacker.example.test"],
+            },
+            {} as NodeJS.ProcessEnv,
+          );
+          await new NoosphereMemoryClient(config).status();
+        },
+        (error) => {
+          assert.ok(error instanceof NoosphereConfigError);
+          assert.match(error.message, /OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN/);
+          return true;
+        },
+      );
+      assert.equal(fetchCalls, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("rejects remote origins that do not match the protected pin", () => {
+    assert.throws(
+      () => resolveNoosphereMemoryConfig(
+        { baseUrl: "https://attacker.example.test" },
+        {
+          OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN: "https://noosphere.example.test",
+        } as unknown as NodeJS.ProcessEnv,
+      ),
+      (error) => {
+        assert.ok(error instanceof NoosphereConfigError);
+        assert.match(error.message, /does not match/);
+        return true;
+      },
+    );
+  });
+
+  it("requires the protected pin to contain only an HTTPS origin", () => {
+    for (const trustedOrigin of [
+      "not-a-url",
+      "http://noosphere.example.test",
+      "https://noosphere.example.test/api",
+      "https://user:password@noosphere.example.test",
+    ]) {
+      assert.throws(
+        () => resolveNoosphereMemoryConfig(
+          { baseUrl: "https://noosphere.example.test" },
+          { OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN: trustedOrigin } as unknown as NodeJS.ProcessEnv,
+        ),
+        (error) => {
+          assert.ok(error instanceof NoosphereConfigError);
+          assert.match(error.message, /trusted origin/);
+          assert.equal(error.message.includes("password"), false);
+          return true;
+        },
+      );
+    }
   });
 
   it("uses OpenClaw-specific default env vars before generic Noosphere env vars", () => {
     const env = {
-      OPENCLAW_NOOSPHERE_BASE_URL: "https://openclaw.example.test",
+      OPENCLAW_NOOSPHERE_BASE_URL: "https://openclaw.example.test/api/",
       NOOSPHERE_BASE_URL: "https://generic.example.test",
+      OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN: "https://openclaw.example.test",
+      NOOSPHERE_TRUSTED_ORIGIN: "https://generic.example.test",
       OPENCLAW_NOOSPHERE_API_KEY: "noo_openclaw",
       NOOSPHERE_API_KEY: "noo_generic",
       OPENCLAW_NOOSPHERE_TIMEOUT_MS: "1234",
@@ -188,7 +332,7 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
 
     const config = resolveNoosphereMemoryConfig({}, env);
 
-    assert.equal(config.baseUrl, "https://openclaw.example.test");
+    assert.equal(config.baseUrl, "https://openclaw.example.test/api");
     assert.equal(config.apiKey, "noo_openclaw");
     assert.equal(config.timeoutMs, 1234);
   });
@@ -1725,6 +1869,43 @@ describe("OpenClaw Noosphere corpus supplement", () => {
 });
 
 describe("OpenClaw Noosphere client", () => {
+  it("refuses redirects before request bodies can reach another origin", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_input, init) => {
+      assert.equal(init?.redirect, "error");
+      return new Response(JSON.stringify({
+        success: true,
+        candidate: {
+          id: "candidate-1",
+          title: "Test",
+          slug: "test",
+          topicId: "topic-1",
+          status: "draft",
+        },
+        strippedBlocks: [],
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+
+    try {
+      const client = new NoosphereMemoryClient({
+        baseUrl: "http://127.0.0.1:6578",
+        apiKey: ["synthetic", "test", "key"].join("-"),
+        timeoutMs: 5000,
+      });
+
+      await client.save({
+        title: "Test",
+        content: "Sensitive memory body",
+        topicId: "topic-1",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("rejects oversized response bodies before JSON parsing", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
@@ -2031,7 +2212,7 @@ describe("OpenClaw Noosphere CLI helpers", () => {
   };
 
   const rawConfig = {
-    baseUrl: "https://noosphere.local",
+    baseUrl: "http://127.0.0.1:6578",
     apiKey: { value: "noo_test" },
     autoRecall: true,
     enabledAgents: ["cylena"],
@@ -2090,7 +2271,7 @@ describe("OpenClaw Noosphere CLI helpers", () => {
     });
 
     assert.equal(report.ok, true);
-    assert.equal(report.baseUrl, "https://noosphere.local");
+    assert.equal(report.baseUrl, "http://127.0.0.1:6578");
     assert.equal(report.apiKeyConfigured, true);
     assert.equal(report.apiKeyRedacted, "[redacted]");
     assert.equal(report.checks.find((check) => check.id === "hooks.allowPromptInjection")?.status, "pass");
@@ -2145,7 +2326,7 @@ describe("OpenClaw Noosphere CLI helpers", () => {
 
   it("fails status when the API key is missing", async () => {
     const report = await buildNoosphereStatusReport(
-      { baseUrl: "https://noosphere.local" },
+      { baseUrl: "http://127.0.0.1:6578" },
       rootConfig,
       { fetchImpl },
     );
@@ -2157,7 +2338,7 @@ describe("OpenClaw Noosphere CLI helpers", () => {
 
   it("omits apiKeyRedacted when the API key is missing", async () => {
     const report = await buildNoosphereDoctorReport(
-      { baseUrl: "https://noosphere.local", autoRecall: true },
+      { baseUrl: "http://127.0.0.1:6578", autoRecall: true },
       rootConfig,
       { fetchImpl },
     );

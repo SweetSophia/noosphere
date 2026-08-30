@@ -30,6 +30,9 @@ export interface ResolvedNoosphereMemoryConfig {
     apiKeys?: Record<string, string>;
     timeoutMs: number;
 }
+export declare class NoosphereConfigError extends Error {
+    constructor(message: string);
+}
 export declare const DEFAULT_NOOSPHERE_BASE_URL = "http://localhost:3000";
 export declare const DEFAULT_NOOSPHERE_TIMEOUT_MS = 5000;
 export declare const MAX_NOOSPHERE_TIMEOUT_MS = 30000;

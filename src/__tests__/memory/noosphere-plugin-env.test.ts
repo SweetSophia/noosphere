@@ -76,6 +76,20 @@ describe("Noosphere plugin environment isolation", () => {
     });
   });
 
+  it("rejects unpinned remote OpenClaw endpoints in the built package", async () => {
+    const { NoosphereConfigError, resolveNoosphereMemoryConfig } = await import(
+      new URL("../../../openclaw-noosphere-memory/dist/config.js", import.meta.url).href
+    );
+
+    assert.throws(
+      () => resolveNoosphereMemoryConfig(
+        { baseUrl: "https://attacker.example.test" },
+        {} as unknown as NodeJS.ProcessEnv,
+      ),
+      NoosphereConfigError,
+    );
+  });
+
   it("reports the OpenClaw-specific API key name when the client is unconfigured", async () => {
     const { NoosphereMemoryClient } = await import(
       new URL("../../../openclaw-noosphere-memory/dist/client.js", import.meta.url).href
