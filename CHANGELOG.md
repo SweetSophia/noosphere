@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-08-30
+
+Patch release restoring cross-environment reproducibility for the coordinated
+Hermes and six-file installer artifacts. The `1.13.0` coordination was stopped
+after its application tag/image publication when independent readback found that
+checkout directory modes changed the Hermes archive and rewritten launcher.
+No `1.13.0` npm packages or GitHub Release assets were published, and its public
+tag/image remain immutable.
+
+### Fixed
+
+- Canonicalize staged bundle permissions to `0644` for regular files and `0755`
+  for executable files/directories before archiving.
+- Require complete six-file package equality when source directory modes are
+  `0755`, `0775`, and `0700`, covering common ambient umask outcomes.
+
 ## [1.13.0] - 2026-08-29
 
 Minor release adding the beginner-oriented, checksum-pinned installer and its
@@ -349,7 +365,8 @@ changes.
   backfill pipeline, and the memory provider refactor. Refer to the commit
   history (`git log v1.8.0..v1.9.0`) for the full set of changes.
 
-[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.13.0...HEAD
+[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.13.1...HEAD
+[1.13.1]: https://github.com/SweetSophia/noosphere/compare/v1.13.0...v1.13.1
 [1.13.0]: https://github.com/SweetSophia/noosphere/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/SweetSophia/noosphere/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/SweetSophia/noosphere/compare/v1.10.3...v1.11.0

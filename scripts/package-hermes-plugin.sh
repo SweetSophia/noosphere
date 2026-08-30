@@ -23,6 +23,7 @@ tar \
   tar -C "$work_dir/$archive_name" -xf -
 install -m 0644 "$repo_root/LICENSE" "$work_dir/$archive_name/LICENSE"
 install -m 0644 "$repo_root/NOTICE" "$work_dir/$archive_name/NOTICE"
+chmod -R u=rwX,go=rX "$work_dir/$archive_name"
 
 archive_path="$output_dir/${archive_name}.tar.gz"
 tar \

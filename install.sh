@@ -2,11 +2,11 @@
 set -euo pipefail
 trap 'printf "Installer failed near line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
-RELEASE_VERSION='1.13.0'
-BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/ba16ea7f5de6fb91de01838e46fc07381ff0bc75/install-openclaw.sh'
-BACKEND_SHA256='a5adb6b9a9c12b0816d7e3dcfaa1a1a7d4733ef2904dd69f4730f14835a730cf'
-HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.13.0/hermes-noosphere-memory-1.13.0.tar.gz'
-HERMES_BUNDLE_SHA256='a560bd8607b512123e71975c188f5b924d4325adaeb86bbbd1424933423c5fde'
+RELEASE_VERSION='1.13.1'
+BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/9195733bd59756d21d51d6d3b34e33ca3c8c674b/install-openclaw.sh'
+BACKEND_SHA256='91784b96fb6a699555f35cb87cf5d5800644a2a1761956d537d9e7c32bafa973'
+HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.13.1/hermes-noosphere-memory-1.13.1.tar.gz'
+HERMES_BUNDLE_SHA256='5231c755ef7f6feaebcedae6aa412f19c43658814d83b0643acf5dc9887f9aae'
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
 if [[ -n "$SCRIPT_PATH" ]]; then
   SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"
