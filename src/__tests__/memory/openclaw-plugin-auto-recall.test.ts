@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { describe, it } from "node:test";
 import {
   buildAutoRecallQuery,
@@ -1870,10 +1871,17 @@ describe("OpenClaw Noosphere corpus supplement", () => {
 
 describe("OpenClaw Noosphere client", () => {
   it("refuses redirects before request bodies can reach another origin", async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (_input, init) => {
-      assert.equal(init?.redirect, "error");
-      return new Response(JSON.stringify({
+    let targetRequests = 0;
+    let targetAuthorization: string | undefined;
+    const targetBodies: Buffer[] = [];
+    const targetServer = createServer(async (request, response) => {
+      targetRequests += 1;
+      targetAuthorization = request.headers.authorization;
+      for await (const chunk of request) {
+        targetBodies.push(Buffer.from(chunk));
+      }
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
         success: true,
         candidate: {
           id: "candidate-1",
@@ -1883,26 +1891,54 @@ describe("OpenClaw Noosphere client", () => {
           status: "draft",
         },
         strippedBlocks: [],
-      }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
+      }));
+    });
+    const redirectServer = createServer((request, response) => {
+      request.resume();
+      const targetAddress = targetServer.address();
+      assert.ok(targetAddress && typeof targetAddress === "object");
+      response.writeHead(307, {
+        location: `http://127.0.0.1:${targetAddress.port}/capture`,
       });
-    };
+      response.end();
+    });
+
+    const listen = (server: typeof targetServer) => new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const close = (server: typeof targetServer) => new Promise<void>((resolve, reject) => {
+      if (!server.listening) {
+        resolve();
+        return;
+      }
+      server.close((error) => error ? reject(error) : resolve());
+    });
 
     try {
+      await listen(targetServer);
+      await listen(redirectServer);
+      const redirectAddress = redirectServer.address();
+      assert.ok(redirectAddress && typeof redirectAddress === "object");
       const client = new NoosphereMemoryClient({
-        baseUrl: "http://127.0.0.1:6578",
+        baseUrl: `http://127.0.0.1:${redirectAddress.port}`,
         apiKey: ["synthetic", "test", "key"].join("-"),
         timeoutMs: 5000,
       });
 
-      await client.save({
-        title: "Test",
-        content: "Sensitive memory body",
-        topicId: "topic-1",
-      });
+      await assert.rejects(
+        client.save({
+          title: "Test",
+          content: "Sensitive memory body",
+          topicId: "topic-1",
+        }),
+        NoosphereClientError,
+      );
+      assert.equal(targetRequests, 0);
+      assert.equal(targetAuthorization, undefined);
+      assert.equal(Buffer.concat(targetBodies).byteLength, 0);
     } finally {
-      globalThis.fetch = originalFetch;
+      await Promise.all([close(redirectServer), close(targetServer)]);
     }
   });
 

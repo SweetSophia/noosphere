@@ -43,7 +43,7 @@
   "uiHints": {
     "baseUrl": {
       "label": "Noosphere Base URL",
-      "help": "Base URL for Noosphere, for example http://127.0.0.1:6578. Remote HTTPS URLs must match OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN from the protected process environment.",
+      "help": "Base URL for Noosphere, for example http://127.0.0.1:6578. Remote HTTPS URLs must match OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN, or NOOSPHERE_TRUSTED_ORIGIN as a compatibility fallback, from the protected process environment.",
       "placeholder": "http://127.0.0.1:6578"
     },
     "apiKey": {
@@ -108,7 +108,7 @@
     "properties": {
       "baseUrl": {
         "type": "string",
-        "description": "Noosphere deployment URL. Loopback URLs work directly; remote HTTPS URLs must match OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN from the protected process environment."
+        "description": "Noosphere deployment URL. Loopback URLs work directly; remote HTTPS URLs must match OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN, or NOOSPHERE_TRUSTED_ORIGIN as a compatibility fallback, from the protected process environment."
       },
       "apiKey": {
         "type": [
