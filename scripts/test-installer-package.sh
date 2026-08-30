@@ -20,6 +20,38 @@ assets=(
 for asset in "${assets[@]}"; do
   cmp "$first/$asset" "$second/$asset"
 done
+
+mode_baseline=''
+for mode in 0755 0775 0700; do
+  fixture="$tmp/fixture-$mode"
+  output="$tmp/output-$mode"
+  install -d "$fixture/scripts"
+  cp "$root/LICENSE" "$root/NOTICE" "$root/VERSION" \
+    "$root/install.sh" "$root/install-openclaw.sh" "$fixture/"
+  cp "$root/scripts/package-hermes-plugin.sh" "$root/scripts/package-installer.sh" \
+    "$fixture/scripts/"
+  cp -a "$root/hermes-noosphere-memory" "$fixture/"
+  FIXTURE_ROOT="$fixture" FIXTURE_MODE="$mode" node <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const mode = Number.parseInt(process.env.FIXTURE_MODE, 8);
+const visit = (directory) => {
+  fs.chmodSync(directory, mode);
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (entry.isDirectory()) visit(path.join(directory, entry.name));
+  }
+};
+visit(process.env.FIXTURE_ROOT);
+NODE
+  "$fixture/scripts/package-installer.sh" "$output" >/dev/null
+  if [[ -z "$mode_baseline" ]]; then
+    mode_baseline="$output"
+  else
+    for asset in "${assets[@]}"; do
+      cmp "$mode_baseline/$asset" "$output/$asset"
+    done
+  fi
+done
 (
   cd "$first"
   sha256sum --check install.sh.sha256
@@ -203,4 +235,4 @@ if (cd "$tmp/aligned-hermes-release" && node "$root/scripts/check-postgres-image
 fi
 grep -q 'release launcher must pin the downloaded Hermes bundle bytes' "$tmp/aligned-hermes-release.out"
 
-printf 'installer_package_tests=GREEN assets=6 deterministic=yes piped_entrypoint=yes sibling_checksum_sensitive=yes remote_checksum_sensitive=yes release_set_verified=yes release_public_fixture_verified=yes release_negative_controls=7\n'
+printf 'installer_package_tests=GREEN assets=6 deterministic=yes source_mode_matrix=3 piped_entrypoint=yes sibling_checksum_sensitive=yes remote_checksum_sensitive=yes release_set_verified=yes release_public_fixture_verified=yes release_negative_controls=7\n'
