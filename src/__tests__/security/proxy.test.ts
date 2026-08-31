@@ -151,6 +151,30 @@ test("proxy redirects unauthenticated admin pages to login with callback", async
   assert.equal(redirect.searchParams.get("callbackUrl"), "/wiki/admin/keys?tab=active");
 });
 
+test("proxy treats malformed percent-encoded Bearer tokens as unauthenticated", async () => {
+  const previousSecret = process.env.NEXTAUTH_SECRET;
+  process.env.NEXTAUTH_SECRET = "proxy-security-test-secret";
+
+  try {
+    const response = await proxy(
+      request("/wiki/admin", {
+        headers: { authorization: "Bearer %" },
+      })
+    );
+    const location = response.headers.get("location");
+
+    assert.equal(response.status, 307);
+    assert.ok(location);
+    assert.equal(new URL(location).pathname, "/wiki/login");
+  } finally {
+    if (previousSecret === undefined) {
+      delete process.env.NEXTAUTH_SECRET;
+    } else {
+      process.env.NEXTAUTH_SECRET = previousSecret;
+    }
+  }
+});
+
 test("proxy does not treat similarly named wiki paths as admin pages", async () => {
   const response = await proxy(request("/wiki/administrator"));
 
