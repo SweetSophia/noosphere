@@ -11,12 +11,456 @@ PLATFORM=${1:-linux/amd64}
   exit 2
 }
 
+test_legacy_recovered_authorization_binding_mutation() (
+  local fixture_dir backup_dir journal state_file fixture_log assert_count_file write_called_file switch_script
+  local expected_fingerprint mutated_fingerprint original_digest
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf "$fixture_dir"' EXIT
+  backup_dir="$fixture_dir/backups"
+  journal="$fixture_dir/journal.json"
+  state_file="$fixture_dir/authorization-volume-fingerprint"
+  fixture_log="$fixture_dir/binding.log"
+  assert_count_file="$fixture_dir/assert-count"
+  write_called_file="$fixture_dir/write-called"
+  switch_script=${PGVECTOR_SWITCH_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}
+  mkdir -m 700 "$backup_dir"
+  expected_fingerprint=$(printf expected | sha256sum | awk '{print $1}')
+  mutated_fingerprint=$(printf mutated | sha256sum | awk '{print $1}')
+  command jq -n '{phase:"recovered",authorizationVolumeFingerprint:null}' > "$journal"
+  chmod 0600 "$journal"
+  printf '%s\n' "$expected_fingerprint" > "$state_file"
+  printf '0\n' > "$assert_count_file"
+  original_digest=$(sha256sum "$journal" | awk '{print $1}')
+
+  eval "$(
+    awk '
+      /^bind_legacy_recovered_authorization_volume\(\) \{/ { emit = 1 }
+      emit { print }
+      emit && /^}$/ { exit }
+    ' "$switch_script"
+  )"
+
+  die() {
+    printf 'fixture: %s\n' "$*" >&2
+    exit 1
+  }
+
+  assert_authorization_volume() {
+    local expected=$1 actual count
+    count=$(<"$assert_count_file")
+    printf '%s\n' "$((count + 1))" > "$assert_count_file"
+    actual=$(<"$state_file")
+    [[ -z "$expected" || "$actual" == "$expected" ]] ||
+      die 'candidate-authorization volume fingerprint changed'
+    printf '%s\n' "$actual"
+  }
+
+  assert_legacy_authorization_state() {
+    :
+  }
+
+  jq() {
+    local status=0
+    command jq "$@" || status=$?
+    (( status == 0 )) || return "$status"
+    # Model replacement of the authorization volume after the temporary
+    # journal has been rendered but before the durable journal replacement.
+    printf '%s\n' "$mutated_fingerprint" > "$state_file"
+  }
+
+  write_json_atomic() {
+    : > "$write_called_file"
+    install -m 600 "$2" "$1"
+  }
+
+  if (
+    bind_legacy_recovered_authorization_volume \
+      "$expected_fingerprint" source-image required "$PLATFORM"
+  ) > "$fixture_log" 2>&1; then
+    echo 'Legacy recovered binding accepted a post-render authorization-volume mutation' >&2
+    exit 1
+  fi
+  [[ $(<"$fixture_log") == 'fixture: candidate-authorization volume fingerprint changed' ]] || {
+    echo 'Legacy recovered binding failed for an unexpected reason' >&2
+    exit 1
+  }
+  [[ $(<"$assert_count_file") == 2 ]] || {
+    echo 'Legacy recovered binding did not reject at the second authorization-volume assertion' >&2
+    exit 1
+  }
+  [[ ! -e "$write_called_file" ]] || {
+    echo 'Legacy recovered binding reached journal replacement after authorization-volume mutation' >&2
+    exit 1
+  }
+  [[ $(<"$state_file") == "$mutated_fingerprint" ]]
+  [[ $(sha256sum "$journal" | awk '{print $1}') == "$original_digest" ]] || {
+    echo 'Legacy recovered binding replaced the journal after authorization-volume mutation' >&2
+    exit 1
+  }
+)
+
+test_legacy_recovered_authorization_binding_mutation
+[[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == legacy-recovered-authorization-binding ]] && exit 0
+
+test_recovery_writer_stop_classification_fails_closed() (
+  local fixture_dir switch_script probe_mode
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf "$fixture_dir"' EXIT
+  switch_script=${PGVECTOR_SWITCH_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}
+  app_container=fixture-app
+
+  eval "$(
+    awk '
+      /^container_running_state\(\) \{/ { emit = 1 }
+      emit { print }
+      emit && /^}$/ { exit }
+    ' "$switch_script"
+  )"
+  eval "$(
+    awk '
+      /^stop_app_writer_for_recovery\(\) \{/ { emit = 1 }
+      emit { print }
+      emit && /^}$/ { exit }
+    ' "$switch_script"
+  )"
+  die() { printf 'fixture: %s\n' "$*" >&2; return 1; }
+  docker() {
+    if [[ ${1:-} == container && ${2:-} == inspect ]]; then
+      return 1
+    fi
+    if [[ ${1:-} == container && ${2:-} == ls ]]; then
+      [[ "$probe_mode" != list-failure ]] || return 75
+      return 0
+    fi
+    printf 'unexpected Docker command: %s\n' "$*" >&2
+    return 99
+  }
+
+  probe_mode=list-failure
+  if (stop_app_writer_for_recovery) >"$fixture_dir/failure.out" 2>"$fixture_dir/failure.err"; then
+    echo 'Recovery writer-stop accepted a failed container classification as absence' >&2
+    exit 1
+  fi
+  grep -F 'could not classify the app container at the recovery boundary' \
+    "$fixture_dir/failure.err" >/dev/null || {
+    echo 'Recovery writer-stop classification failure lacked its fail-closed diagnostic' >&2
+    exit 1
+  }
+
+  probe_mode=absent
+  stop_app_writer_for_recovery || {
+    echo 'Recovery writer-stop rejected exact-name-confirmed container absence' >&2
+    exit 1
+  }
+)
+
+test_recovery_writer_stop_classification_fails_closed
+[[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == recovery-writer-stop-classification ]] && exit 0
+
+test_data_signature_version_dispatch() (
+  local fixture_dir switch_script journal
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf "$fixture_dir"' EXIT
+  switch_script=${PGVECTOR_SWITCH_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}
+  journal="$fixture_dir/journal.json"
+  DATA_SIGNATURE_VERSION=2
+
+  for helper in data_signature_for_version load_journal_baseline; do
+    definition=$(awk -v signature="${helper}() {" '
+      $0 == signature { emit = 1 }
+      emit { print }
+      emit && $0 == "}" { exit }
+    ' "$switch_script")
+    [[ -n "$definition" ]] || {
+      echo "Missing signature-version helper: $helper" >&2
+      exit 1
+    }
+    eval "$definition"
+  done
+
+  die() {
+    printf 'fixture: %s\n' "$*" >&2
+    exit 1
+  }
+  legacy_data_signature() {
+    printf 'legacy:%s\n' "$1"
+  }
+  data_signature() {
+    printf 'v2:%s\n' "$1"
+  }
+
+  [[ $(data_signature_for_version fixture-container 1) == 'legacy:fixture-container' ]]
+  [[ $(data_signature_for_version fixture-container 2) == 'v2:fixture-container' ]]
+  if (data_signature_for_version fixture-container 3 >/dev/null 2>&1); then
+    echo 'Unsupported data signature version was accepted' >&2
+    exit 1
+  fi
+
+  jq -n '{
+    volumeFingerprint:("a" * 64), dataSignature:("b" * 64),
+    schemaSignature:("c" * 64), migrationSignature:("d" * 64),
+    databaseIdentity:"identity", originalCompose:"original",
+    candidateCompose:"candidate", sourceOverride:"source-override",
+    runId:"legacy-run", probeDatabase:"legacy-probe", appWasRunning:false
+  }' > "$journal"
+  load_journal_baseline
+  [[ "$expected_data_version" == 1 ]] || {
+    echo 'Unversioned legacy journal did not select signature version 1' >&2
+    exit 1
+  }
+
+  jq '.dataSignatureVersion = 2' "$journal" > "$fixture_dir/versioned.json"
+  install -m 600 "$fixture_dir/versioned.json" "$journal"
+  load_journal_baseline
+  [[ "$expected_data_version" == 2 ]] || {
+    echo 'Versioned journal did not select signature version 2' >&2
+    exit 1
+  }
+
+  for invalid_version in false null 0 3 1.5 '"1"'; do
+    jq --argjson invalid_version "$invalid_version" \
+      '.dataSignatureVersion = $invalid_version' "$journal" > "$fixture_dir/invalid.json"
+    install -m 600 "$fixture_dir/invalid.json" "$journal"
+    if (load_journal_baseline >/dev/null 2>&1); then
+      echo "Explicit $invalid_version data signature version downgraded to legacy v1" >&2
+      exit 1
+    fi
+  done
+)
+
+test_data_signature_version_dispatch
+[[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == data-signature-version ]] && exit 0
+
+test_rehearsal_cleanup_continues_after_failure() (
+  local fixture_dir switch_script command_log error_log restore_failure_line reparse_cleanup_line
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf "$fixture_dir"' EXIT
+  switch_script=${PGVECTOR_SWITCH_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}
+  command_log="$fixture_dir/docker.log"
+  error_log="$fixture_dir/errors.log"
+  run_id=fixture-run
+  LABEL_KEY=io.noosphere.pgvector-switch-run
+
+  eval "$(
+    awk '
+      /^cleanup_rehearsal_resources\(\) \{/ { emit = 1 }
+      emit { print }
+      emit && /^}$/ { exit }
+    ' "$switch_script"
+  )"
+
+  die() {
+    printf 'fixture: %s\n' "$*" >&2
+    exit 1
+  }
+
+  docker() {
+    printf '%s\n' "$*" >> "$command_log"
+    if [[ $1 == inspect ]]; then
+      if [[ ${FIXTURE_INSPECT_FAILURE:-} == "$2" ]]; then
+        return 74
+      fi
+      if [[ ${3:-} == --format ]]; then
+        if [[ $4 == '{{.State.Running}}' ]]; then
+          printf true
+        elif [[ ${FIXTURE_BAD_LABEL:-} == "$2" ]]; then
+          printf '{"%s":"other-run"}' "$LABEL_KEY"
+        else
+          printf '{"%s":"%s"}' "$LABEL_KEY" "$run_id"
+        fi
+      fi
+      return 0
+    fi
+    if [[ $1 == stop && ${FIXTURE_STOP_FAILURE:-} == "${4:-}" ]]; then
+      return 76
+    fi
+    if [[ $1 == rm && ${FIXTURE_CONTAINER_RM_FAILURE:-} == "${2:-}" ]]; then
+      return 77
+    fi
+    if [[ $1 == volume && $2 == inspect ]]; then
+      if [[ ${FIXTURE_INSPECT_FAILURE:-} == "$3" ]]; then
+        return 74
+      fi
+      if [[ ${4:-} == --format ]]; then
+        if [[ ${FIXTURE_BAD_LABEL:-} == "$3" ]]; then
+          printf '{"%s":"other-run"}' "$LABEL_KEY"
+        else
+          printf '{"%s":"%s"}' "$LABEL_KEY" "$run_id"
+        fi
+      fi
+      return 0
+    fi
+    if [[ $1 == volume && $2 == ls ]]; then
+      [[ ${FIXTURE_INSPECT_FAILURE:-} == restore-volume ]] && printf '%s\n' restore-volume
+      return 0
+    fi
+    if [[ $1 == ps ]]; then
+      if [[ ${FIXTURE_CONSUMER_QUERY_FAILURE:-} == restore-volume && "$*" == *'volume=restore-volume'* ]]; then
+        return 75
+      fi
+      [[ ${FIXTURE_INSPECT_FAILURE:-} == restore-container && "$*" == *'name=^/restore-container$'* ]] &&
+        printf '%s\n' fixture-container-id
+      return 0
+    fi
+    if [[ $1 == volume && $2 == rm && ${FIXTURE_VOLUME_RM_FAILURE:-} == "$3" ]]; then
+      return 73
+    fi
+    return 0
+  }
+
+  : > "$error_log"
+  FIXTURE_VOLUME_RM_FAILURE=restore-volume
+  if cleanup_rehearsal_resources \
+    restore-container schema-reparse-container restore-volume schema-reparse-volume 2>> "$error_log"; then
+    echo 'Rehearsal cleanup hid a restore-volume removal failure' >&2
+    exit 1
+  fi
+  unset FIXTURE_VOLUME_RM_FAILURE
+
+  grep -Fx '[pgvector-switch] ERROR: could not remove rehearsal volume: restore-volume' "$error_log" >/dev/null
+  grep -Fx 'stop --time 60 schema-reparse-container' "$command_log" >/dev/null
+  grep -Fx 'rm schema-reparse-container' "$command_log" >/dev/null
+  restore_failure_line=$(grep -n -F 'volume rm restore-volume' "$command_log" | cut -d: -f1)
+  reparse_cleanup_line=$(grep -n -F 'volume rm schema-reparse-volume' "$command_log" | cut -d: -f1)
+  (( reparse_cleanup_line > restore_failure_line )) || {
+    echo 'Rehearsal cleanup skipped the reparse volume after an earlier failure' >&2
+    exit 1
+  }
+
+  : > "$command_log"
+  : > "$error_log"
+  FIXTURE_INSPECT_FAILURE=restore-container
+  if cleanup_rehearsal_resources \
+    restore-container schema-reparse-container restore-volume schema-reparse-volume 2>> "$error_log"; then
+    echo 'Rehearsal cleanup hid an existing-container inspect failure' >&2
+    exit 1
+  fi
+  unset FIXTURE_INSPECT_FAILURE
+  grep -Fx '[pgvector-switch] ERROR: could not inspect rehearsal container: restore-container' "$error_log" >/dev/null
+  ! grep -Fx 'rm restore-container' "$command_log" >/dev/null
+  grep -Fx 'rm schema-reparse-container' "$command_log" >/dev/null
+  grep -Fx 'volume rm restore-volume' "$command_log" >/dev/null
+  grep -Fx 'volume rm schema-reparse-volume' "$command_log" >/dev/null
+
+  : > "$command_log"
+  : > "$error_log"
+  FIXTURE_BAD_LABEL=restore-container
+  if cleanup_rehearsal_resources \
+    restore-container schema-reparse-container restore-volume schema-reparse-volume 2>> "$error_log"; then
+    echo 'Rehearsal cleanup accepted an invalid container label' >&2
+    exit 1
+  fi
+  unset FIXTURE_BAD_LABEL
+  grep -Fx '[pgvector-switch] ERROR: refusing unlabelled container removal: restore-container' "$error_log" >/dev/null
+  ! grep -Fx 'rm restore-container' "$command_log" >/dev/null
+  grep -Fx 'rm schema-reparse-container' "$command_log" >/dev/null
+  grep -Fx 'volume rm restore-volume' "$command_log" >/dev/null
+  grep -Fx 'volume rm schema-reparse-volume' "$command_log" >/dev/null
+
+  : > "$command_log"
+  : > "$error_log"
+  FIXTURE_CONSUMER_QUERY_FAILURE=restore-volume
+  if cleanup_rehearsal_resources \
+    restore-container schema-reparse-container restore-volume schema-reparse-volume 2>> "$error_log"; then
+    echo 'Rehearsal cleanup hid a volume-consumer query failure' >&2
+    exit 1
+  fi
+  unset FIXTURE_CONSUMER_QUERY_FAILURE
+  grep -Fx '[pgvector-switch] ERROR: could not inspect rehearsal volume consumers: restore-volume' "$error_log" >/dev/null
+  grep -Fx 'volume rm restore-volume' "$command_log" >/dev/null
+  grep -Fx 'volume rm schema-reparse-volume' "$command_log" >/dev/null
+
+  : > "$command_log"
+  : > "$error_log"
+  FIXTURE_STOP_FAILURE=restore-container
+  if cleanup_rehearsal_resources \
+    restore-container schema-reparse-container restore-volume schema-reparse-volume 2>> "$error_log"; then
+    echo 'Rehearsal cleanup hid a container stop failure' >&2
+    exit 1
+  fi
+  unset FIXTURE_STOP_FAILURE
+  grep -Fx '[pgvector-switch] ERROR: could not stop rehearsal container: restore-container' "$error_log" >/dev/null
+  grep -Fx 'rm restore-container' "$command_log" >/dev/null
+  grep -Fx 'rm schema-reparse-container' "$command_log" >/dev/null
+  grep -Fx 'volume rm restore-volume' "$command_log" >/dev/null
+  grep -Fx 'volume rm schema-reparse-volume' "$command_log" >/dev/null
+
+  : > "$command_log"
+  : > "$error_log"
+  FIXTURE_CONTAINER_RM_FAILURE=restore-container
+  if cleanup_rehearsal_resources \
+    restore-container schema-reparse-container restore-volume schema-reparse-volume 2>> "$error_log"; then
+    echo 'Rehearsal cleanup hid a container removal failure' >&2
+    exit 1
+  fi
+  unset FIXTURE_CONTAINER_RM_FAILURE
+  grep -Fx '[pgvector-switch] ERROR: could not remove rehearsal container: restore-container' "$error_log" >/dev/null
+  grep -Fx 'rm schema-reparse-container' "$command_log" >/dev/null
+  grep -Fx 'volume rm restore-volume' "$command_log" >/dev/null
+  grep -Fx 'volume rm schema-reparse-volume' "$command_log" >/dev/null
+)
+
+test_rehearsal_cleanup_continues_after_failure
+[[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == rehearsal-cleanup ]] && exit 0
+
+test_migrator_producer_authority() (
+  local switch_script definition helper expected_role
+  switch_script=${PGVECTOR_SWITCH_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}
+
+  for helper in digest_role migrator_sql migration_signature create_logical_backup; do
+    definition=$(awk -v signature="${helper}() {" '
+      $0 == signature { emit = 1 }
+      emit { print }
+      emit && $0 == "}" { exit }
+    ' "$switch_script")
+    [[ -n "$definition" ]] || {
+      echo "Missing digest-authority helper: $helper" >&2
+      exit 1
+    }
+    eval "$definition"
+  done
+
+  die() {
+    printf 'fixture: %s\n' "$*" >&2
+    exit 1
+  }
+
+  docker() {
+    local invocation=" $* "
+    if [[ "$invocation" == *"SELECT CASE"* ]]; then
+      printf '%s\n' "$expected_role"
+      return 0
+    fi
+    [[ "$invocation" == *" -U $expected_role "* ]] || {
+      echo "Digest or backup producer used unexpected authority: $*" >&2
+      return 97
+    }
+    if [[ "$invocation" == *" psql "* ]]; then
+      printf 'migration|checksum|1|<null>|<null>\n'
+    else
+      printf 'logical-backup-fixture\n'
+    fi
+  }
+
+  for expected_role in noosphere_migrator noosphere; do
+    migration_signature fixture-container >/dev/null
+    create_logical_backup fixture-container /dev/null
+  done
+)
+
+test_migrator_producer_authority
+[[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == migrator-producer-authority ]] && exit 0
+
 slug=${PLATFORM#linux/}
 run_id=${PGVECTOR_SWITCH_TEST_RUN_ID:-local-$$-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')}
 safe_id=${run_id//[^A-Za-z0-9]/-}
+# Compose normalizes project names to lowercase. Normalize the shared suffix
+# before deriving explicit external resource names so they stay identical.
+safe_id=${safe_id,,}
 project="noosphere-a2b-test-$safe_id"
 db_container="$project-db"
 app_container="$project-app"
+app_collision_image="$app_container:latest"
 volume="noosphere_a2b_test_${safe_id//-/_}"
 probe_volume="${volume}_mount_probe"
 authorization_volume="${volume}_authorization"
@@ -48,6 +492,34 @@ lock_path_for_volume() {
   printf '%s/noosphere-pgvector-switch-%s.lock\n' "$lock_root" "$lock_key"
 }
 
+assert_marker_contract() {
+  local container=$1 marker_name=$2 expected=$3 marker_path
+  marker_path="/run/noosphere-pgvector/$marker_name"
+  docker exec "$container" sh -ceu \
+    'path=$1; [ -f "$path" ] && [ ! -L "$path" ] && [ "$(stat -c "%u:%g:%a" "$path")" = "0:0:644" ]' \
+    -- "$marker_path"
+  [[ $(docker exec --user 1001:1001 "$container" cat "$marker_path") == "$expected" ]]
+  if docker exec "$container" sh -ceu 'printf x >> "$1"' -- "$marker_path" >/dev/null 2>&1; then
+    echo "Authorization marker mount is writable: $marker_name" >&2
+    exit 1
+  fi
+}
+
+authorization_volume_marker_digest() {
+  local marker_name=$1 marker_volume=${2:-$authorization_volume}
+  docker run --rm --network none --platform "$PLATFORM" \
+    --mount "type=volume,source=$marker_volume,target=/authorization,readonly" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'sha256sum "/authorization/$1"' -- "$marker_name" | awk '{print $1}'
+}
+
+authorization_volume_fingerprint() {
+  docker volume inspect "$authorization_volume" |
+    jq -Sc '.[0] | {Name,Driver,Mountpoint,CreatedAt,Scope,Labels,Options}' |
+    sha256sum | awk '{print $1}'
+}
+
 cleanup() {
   local status=$? id
   for id in $(docker ps -aq --filter "label=io.noosphere.pgvector-switch-run" --filter "name=noosphere-a2b"); do
@@ -56,11 +528,15 @@ cleanup() {
     docker rm "$id" >/dev/null 2>&1 || true
   done
   docker rm -f "$db_container" "$app_container" "$new_db_container" "$new_app_container" >/dev/null 2>&1 || true
+  docker image rm -f "$app_collision_image" >/dev/null 2>&1 || true
   for id in $(docker volume ls -q --filter "label=io.noosphere.pgvector-switch-run=$run_id"); do
     docker volume rm "$id" >/dev/null 2>&1 || true
   done
   if [[ -n ${interrupted_restore_volume:-} ]]; then
     docker volume rm "$interrupted_restore_volume" >/dev/null 2>&1 || true
+  fi
+  if [[ -n ${interrupted_schema_reparse_volume:-} ]]; then
+    docker volume rm "$interrupted_schema_reparse_volume" >/dev/null 2>&1 || true
   fi
   docker volume rm "$volume" "$probe_volume" "$authorization_volume" "$new_volume" "$new_authorization_volume" >/dev/null 2>&1 || true
   docker network rm "${project}_default" >/dev/null 2>&1 || true
@@ -96,6 +572,7 @@ services:
   app:
     image: $SOURCE_IMAGE
     platform: $PLATFORM
+    user: "1001:1001"
     container_name: $app_container
     command: ["/bin/sh", "-ceu", "trap 'exit 0' TERM INT; while :; do sleep 1; done"]
     depends_on:
@@ -128,6 +605,10 @@ done
 [[ $(docker exec "$db_container" psql -XAtq -v ON_ERROR_STOP=1 -U noosphere -d noosphere -c 'SELECT 1;') == 1 ]]
 
 docker exec -i "$db_container" psql -X -v ON_ERROR_STOP=1 -U noosphere -d noosphere <<'SQL'
+CREATE ROLE noosphere_migrator LOGIN NOSUPERUSER;
+ALTER DATABASE noosphere OWNER TO noosphere_migrator;
+ALTER SCHEMA public OWNER TO noosphere_migrator;
+SET ROLE noosphere_migrator;
 CREATE TABLE "_prisma_migrations" (
   migration_name text PRIMARY KEY,
   checksum text NOT NULL,
@@ -144,6 +625,23 @@ CREATE TABLE "ApiKey" (id text PRIMARY KEY, name text NOT NULL);
 INSERT INTO "Topic" VALUES ('topic-1', 'Phase A2b');
 INSERT INTO "Article" VALUES ('article-1', 'Guarded switch', NULL);
 INSERT INTO "ApiKey" VALUES ('key-1', 'Fixture key');
+-- Regression fixture for issue #298: BETWEEN-written compound CHECK
+-- constraints canonically re-group their deparse parens across a dump/restore
+-- round-trip, so the restore rehearsal must compare against the
+-- re-parse-normalized live schema baseline.
+CREATE TABLE "MemoryCapture" (
+  id text PRIMARY KEY,
+  "userText" text NOT NULL,
+  "assistantText" text NOT NULL,
+  CONSTRAINT "MemoryCapture_bounded_content"
+    CHECK (
+      octet_length("userText") BETWEEN 1 AND 12000
+      AND octet_length("assistantText") BETWEEN 1 AND 12000
+      AND octet_length("userText") + octet_length("assistantText") <= 20000
+    )
+);
+INSERT INTO "MemoryCapture" VALUES ('capture-1', 'fixture user text', 'fixture assistant text');
+RESET ROLE;
 SQL
 
 switch_args=(
@@ -185,8 +683,7 @@ fi
   echo 'Guarded switch did not fail at the PostgreSQL data-mount boundary' >&2
   exit 1
 }
-[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
-docker start "$app_container" >/dev/null
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 
 # A legacy source Compose file cannot be promoted by image-line substitution
 # alone. Refuse it before writing any transition journal or touching the source
@@ -200,8 +697,7 @@ fi
 [[ ! -f "$backup_dir/$volume.phase-a2b.json" ]]
 [[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]]
 [[ $(docker inspect "$db_container" --format '{{.Config.Image}}') == "$SOURCE_IMAGE" ]]
-[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
-docker start "$app_container" >/dev/null
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 
 # Model an operator checking out the candidate revision while the existing
 # exact-source container is still running. The guard must derive a restartable
@@ -243,6 +739,7 @@ services:
   app:
     image: $SOURCE_IMAGE
     platform: $PLATFORM
+    user: "1001:1001"
     container_name: $app_container
     entrypoint:
       - /bin/sh
@@ -278,6 +775,51 @@ YAML
 install -m "$(stat -c '%a' "$compose_file")" "$compose_file" "$target_compose"
 journal="$backup_dir/$volume.phase-a2b.json"
 
+# A dangling journal symlink is an existing unsafe evidence path, not an absent
+# journal. Reject it without replacing the symlink or stopping either service.
+journal_symlink_target="$tmp_dir/missing-journal-target"
+ln -s "$journal_symlink_target" "$journal"
+journal_symlink_log="$tmp_dir/dangling-journal.log"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$journal_symlink_log" 2>&1; then
+  echo 'Guarded switch accepted a dangling journal symlink' >&2
+  exit 1
+fi
+grep -F "required evidence file is missing or unsafe: $journal" "$journal_symlink_log" >/dev/null
+[[ -L "$journal" && ! -e "$journal" ]]
+[[ ! -e "$journal_symlink_target" ]]
+[[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+rm "$journal"
+
+# Fresh stale-volume validation precedes any fail-closed service mutation. An
+# unsafe marker path must survive rejection while the source app stays online.
+fresh_stale_run="fresh-preflight-$safe_id"
+docker volume create --driver local \
+  --label "io.noosphere.pgvector-authorization-data=$volume" \
+  --label "io.noosphere.pgvector-authorization-run=$fresh_stale_run" \
+  --label "io.noosphere.pgvector-authorization-image=$CANDIDATE_IMAGE" \
+  "$authorization_volume" >/dev/null
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'ln -s missing-candidate-target /authorization/candidate-authorized'
+fresh_stale_log="$tmp_dir/fresh-stale-marker.log"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$fresh_stale_log" 2>&1; then
+  echo 'Fresh switch accepted an unsafe stale authorization marker' >&2
+  exit 1
+fi
+grep -F 'legacy authorization marker must be a root-owned regular file: candidate-authorized' "$fresh_stale_log" >/dev/null
+[[ ! -e "$journal" && ! -L "$journal" ]]
+[[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  '[ -L /authorization/candidate-authorized ] && [ ! -e /authorization/candidate-authorized ]'
+docker volume rm "$authorization_volume" >/dev/null
+
 # Kill after the earliest durable journal, before the normal app stop. A
 # fault at the recovery writer boundary must prove the app is stopped while
 # the exact source database remains online and untouched.
@@ -300,7 +842,50 @@ wait "$switch_pid" 2>/dev/null || true
 [[ -f "$journal" && $(jq -r '.phase' "$journal") == preparing ]]
 [[ $(jq -r '.dockerEngineId' "$journal") == "$docker_engine_id" ]]
 [[ $(jq -r '.dockerEndpoint' "$journal") == "$docker_endpoint" ]]
+[[ $(jq -r '.authorizationVolumeFingerprint' "$journal") == null ]]
 probe=$(jq -r '.probeDatabase' "$journal")
+active_run=$(jq -r '.runId' "$journal")
+
+# An authorization volume that appears after an early journal recorded its
+# absence is unclaimed state. Reject both the original journal and a recovered
+# journal whose volume labels do not bind the exact guarded run.
+saved_preparing_journal="$tmp_dir/journal.preparing.saved.json"
+install -m 600 "$journal" "$saved_preparing_journal"
+docker volume create --driver local \
+  --label "io.noosphere.pgvector-authorization-data=$volume" \
+  --label "io.noosphere.pgvector-authorization-run=unclaimed-$active_run" \
+  --label "io.noosphere.pgvector-authorization-image=$CANDIDATE_IMAGE" \
+  "$authorization_volume" >/dev/null
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n" "$1" > /authorization/candidate-authorized; chmod 0644 /authorization/candidate-authorized' \
+  -- "$SOURCE_IMAGE"
+early_marker_digest=$(authorization_volume_marker_digest candidate-authorized)
+early_auth_log="$tmp_dir/early-authorization-volume.log"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$early_auth_log" 2>&1; then
+  echo 'Preparing recovery accepted an authorization volume absent from its journal claim' >&2
+  exit 1
+fi
+grep -F 'transition authorization volume appeared after its journal claim' "$early_auth_log" >/dev/null
+[[ $(jq -r '.phase' "$journal") == preparing ]]
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$early_marker_digest" ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+
+jq '.recoveredFromPhase = .phase | .phase = "recovered"' "$saved_preparing_journal" > "$journal"
+chmod 0600 "$journal"
+: > "$early_auth_log"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$early_auth_log" 2>&1; then
+  echo 'Recovered-from-preparing evidence accepted a mismatched authorization-volume run claim' >&2
+  exit 1
+fi
+grep -F 'candidate-authorization volume does not match this guarded transaction' "$early_auth_log" >/dev/null
+[[ $(jq -r '.phase + "|" + .recoveredFromPhase' "$journal") == 'recovered|preparing' ]]
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$early_marker_digest" ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+install -m 600 "$saved_preparing_journal" "$journal"
+docker volume rm "$authorization_volume" >/dev/null
 
 # Model a power loss after the claimed CREATE DATABASE but before DROP. The
 # active journal is the durable ownership proof recovery requires.
@@ -309,15 +894,20 @@ docker exec "$db_container" psql -Xq -v ON_ERROR_STOP=1 -U noosphere -d postgres
 [[ $(docker exec "$db_container" psql -XAtq -v ON_ERROR_STOP=1 -U noosphere -d postgres \
   -c "SELECT count(*) FROM pg_database WHERE datname = '$probe';") == 1 ]]
 
-# Simulate a kill during restore testing: recovery must remove the exact
-# run-labeled volume containing a private logical-backup copy.
-active_run=$(jq -r '.runId' "$journal")
+# Simulate a kill during restore testing: recovery must remove both exact
+# run-labeled scratch volumes, including their private logical-backup copies.
 interrupted_restore_volume="noosphere_a2b_restore_${active_run//-/_}"
+interrupted_schema_reparse_volume="noosphere_a2b_schema_reparse_${active_run//-/_}"
 docker volume create --driver local --label "io.noosphere.pgvector-switch-run=$active_run" \
   "$interrupted_restore_volume" >/dev/null
+docker volume create --driver local --label "io.noosphere.pgvector-switch-run=$active_run" \
+  "$interrupted_schema_reparse_volume" >/dev/null
 docker run --rm --network none --platform "$PLATFORM" \
   --mount "type=volume,source=$interrupted_restore_volume,target=/private-copy" \
   --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'printf private-data > /private-copy/sentinel'
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$interrupted_schema_reparse_volume,target=/private-copy" \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'printf private-schema > /private-copy/sentinel'
 
 if NOOSPHERE_A2B_FAIL_AFTER_PHASE=recovery-writer-stopped \
   "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" >> "$log_file" 2>&1; then
@@ -352,6 +942,73 @@ compgen -G "$journal.recovered-*" >/dev/null
   --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
   --mount type=tmpfs,destination=/var/lib/postgresql/data \
   --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'cat /authorization/writer-authorized 2>/dev/null || true') == '' ]]
+
+# A dangling writer symlink is a present unsafe path, even though test -e is
+# false. Reject it without deleting the path or rewriting the source marker.
+# Model the candidate revision being checked out again after the recovered
+# source evidence was archived so marker validation—not the Compose gate—owns
+# the failure.
+archived_source_compose="$tmp_dir/archived-source-compose.yml"
+install -m "$(stat -c '%a' "$compose_file")" "$compose_file" "$archived_source_compose"
+install -m "$(stat -c '%a' "$compose_file")" "$target_compose" "$compose_file"
+[[ $(docker compose -f "$compose_file" config --format json | jq -r '.services.db.image') == "$CANDIDATE_IMAGE" ]]
+source_marker_digest=$(printf '%s\n' "$SOURCE_IMAGE" | sha256sum | awk '{print $1}')
+archived_failure_log="$tmp_dir/archived-marker-failure.log"
+exec 8>"$installer_lock_path"
+flock -w 5 8
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'ln -s missing-writer-target /authorization/writer-authorized; [ -L /authorization/writer-authorized ]; [ ! -e /authorization/writer-authorized ]'
+: > "$archived_failure_log"
+if NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$installer_lock_path" \
+  "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" --defer-app-restart > "$archived_failure_log" 2>&1; then
+  echo 'Archived recovery accepted a dangling writer marker symlink' >&2
+  exit 1
+fi
+grep -F 'deferred source recovery unexpectedly published writer authorization' "$archived_failure_log" >/dev/null
+cat "$archived_failure_log" >> "$log_file"
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$source_marker_digest" ]]
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  '[ -L /authorization/writer-authorized ] && [ ! -e /authorization/writer-authorized ]'
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'rm /authorization/writer-authorized'
+
+# Command substitution strips trailing newlines. Preserve malformed bytes across
+# the failed validation to prove rejection happens before normalization.
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n\n" "$1" > /authorization/candidate-authorized; chmod 0600 /authorization/candidate-authorized' \
+  -- "$SOURCE_IMAGE"
+malformed_source_digest=$(authorization_volume_marker_digest candidate-authorized)
+[[ "$malformed_source_digest" != "$source_marker_digest" ]]
+: > "$archived_failure_log"
+if NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$installer_lock_path" \
+  "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" --defer-app-restart > "$archived_failure_log" 2>&1; then
+  echo 'Archived recovery accepted a source marker with extra trailing bytes' >&2
+  exit 1
+fi
+grep -F 'authorization marker contains unexpected bytes: candidate-authorized' "$archived_failure_log" >/dev/null
+cat "$archived_failure_log" >> "$log_file"
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$malformed_source_digest" ]]
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n" "$1" > /authorization/candidate-authorized; chmod 0600 /authorization/candidate-authorized; [ "$(stat -c "%u:%g:%a" /authorization/candidate-authorized)" = "0:0:600" ]; [ ! -e /authorization/writer-authorized ]' \
+  -- "$SOURCE_IMAGE"
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$source_marker_digest" ]]
+exec 8>&-
+install -m "$(stat -c '%a' "$compose_file")" "$archived_source_compose" "$compose_file"
+[[ $(docker compose -f "$compose_file" config --format json | jq -r '.services.db.image') == "$SOURCE_IMAGE" ]]
 
 # Ordinary Compose must remain unable to publish a writer after the installer
 # requested deferred ownership and released its failed transaction.
@@ -408,6 +1065,57 @@ wait "$switch_pid" 2>/dev/null || true
 # test before exercising the legitimate recovery path.
 saved_journal="$tmp_dir/journal.saved.json"
 install -m 600 "$journal" "$saved_journal"
+
+# Incomplete candidate evidence must authenticate the persisted authorization
+# state before recovery stops containers or republishes source markers.
+candidate_marker_digest=$(authorization_volume_marker_digest candidate-authorized)
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'ln -s missing-writer-target /authorization/writer-authorized; [ -L /authorization/writer-authorized ]; [ ! -e /authorization/writer-authorized ]'
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" >> "$log_file" 2>&1; then
+  echo 'Candidate-authorized recovery accepted a dangling writer marker symlink' >&2
+  exit 1
+fi
+[[ $(jq -r '.phase' "$journal") == candidate-authorized ]]
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$candidate_marker_digest" ]]
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  '[ -L /authorization/writer-authorized ] && [ ! -e /authorization/writer-authorized ]'
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'rm /authorization/writer-authorized'
+
+# The adjacent candidate-online recovery phase uses the same persisted marker
+# contract. Exercise it explicitly with malformed exact bytes and prove the
+# failed preflight leaves both the journal and marker bytes unchanged.
+candidate_online_journal="$tmp_dir/journal.candidate-online.json"
+jq '.phase = "candidate-online-verified"' "$saved_journal" > "$candidate_online_journal"
+install -m 600 "$candidate_online_journal" "$journal"
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n\000" "$1" > /authorization/writer-authorized; chmod 0644 /authorization/writer-authorized' \
+  -- "$CANDIDATE_IMAGE"
+malformed_writer_digest=$(authorization_volume_marker_digest writer-authorized)
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" >> "$log_file" 2>&1; then
+  echo 'Candidate-online recovery accepted malformed writer marker bytes' >&2
+  exit 1
+fi
+[[ $(jq -r '.phase' "$journal") == candidate-online-verified ]]
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$candidate_marker_digest" ]]
+[[ $(authorization_volume_marker_digest writer-authorized) == "$malformed_writer_digest" ]]
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'rm /authorization/writer-authorized'
+install -m 600 "$saved_journal" "$journal"
+
 tampered_journal="$tmp_dir/journal.tampered.json"
 jq '.originalComposeSha256 = "0000000000000000000000000000000000000000000000000000000000000000"' \
   "$journal" > "$tampered_journal"
@@ -447,6 +1155,7 @@ if NOOSPHERE_A2B_FAIL_AFTER_PHASE=recovered \
 fi
 [[ $(jq -r '.phase' "$journal") == recovered ]]
 ! docker volume inspect "$interrupted_restore_volume" >/dev/null 2>&1
+! docker volume inspect "$interrupted_schema_reparse_volume" >/dev/null 2>&1
 if docker inspect "$app_container" >/dev/null 2>&1; then
   [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
 fi
@@ -461,6 +1170,214 @@ fi
   --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'cat /authorization/writer-authorized 2>/dev/null || true') == "$SOURCE_IMAGE" ]]
 [[ $(docker compose -f "$compose_file" config --format json | jq -r '.services.db.image') == "$SOURCE_IMAGE" ]]
 grep -F "actual\" != '$SOURCE_IMAGE'" "$compose_file" >/dev/null
+
+# A recovered journal derived from candidate authorization must authenticate
+# both its bound authorization-volume fingerprint and exact source marker bytes
+# before stopping a resumed writer or republishing either marker.
+docker compose -f "$compose_file" up -d app
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+recovered_journal_saved="$tmp_dir/journal.recovered.saved.json"
+install -m 600 "$journal" "$recovered_journal_saved"
+recovered_failure_log="$tmp_dir/recovered-marker-failure.log"
+
+# Historical recovered journals did not persist the recovery restart policy.
+# Accept an originally stopped app with exact source writer authorization,
+# bind the fingerprint, and archive the verified recovery evidence.
+docker stop --time 60 "$app_container" >/dev/null
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n" "$1" > /authorization/writer-authorized; chmod 0600 /authorization/writer-authorized; sync' \
+  -- "$SOURCE_IMAGE"
+legacy_recovered_data=$(docker exec "$db_container" pg_dump -U noosphere -d noosphere \
+  --data-only --no-owner --no-privileges --inserts 2>/dev/null | sed -E '/^\\(un)?restrict /d' | sha256sum | awk '{print $1}')
+jq --arg legacy_data "$legacy_recovered_data" \
+  '.recoveredFromPhase = "baseline-recorded" |
+   del(.authorizationVolumeFingerprint, .dataSignatureVersion) |
+   .dataSignature = $legacy_data | .appWasRunning = false' \
+  "$recovered_journal_saved" > "$journal"
+chmod 0600 "$journal"
+direct_recovered_journal="$journal.recovered-$(jq -r '.runId' "$journal")"
+: > "$recovered_failure_log"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$recovered_failure_log" 2>&1; then
+  echo 'Direct legacy recovered evidence unexpectedly reported switch success' >&2
+  exit 1
+fi
+[[ ! -f "$journal" && -f "$direct_recovered_journal" ]] || {
+  echo 'Historical recovered evidence with appWasRunning=false and writer authorization was not archived' >&2
+  exit 1
+}
+[[ $(jq -r '.authorizationVolumeFingerprint' "$direct_recovered_journal") == "$(authorization_volume_fingerprint)" ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$source_marker_digest" ]]
+[[ $(authorization_volume_marker_digest writer-authorized) == "$source_marker_digest" ]]
+rm -f "$direct_recovered_journal"
+install -m 600 "$recovered_journal_saved" "$journal"
+docker compose -f "$compose_file" up -d app
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+
+# A container with the expected managed name is not trusted unless its exact
+# authorization mount is read-only.
+docker rm -f "$app_container" >/dev/null
+docker run -d --name "$app_container" --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/run/noosphere-pgvector" \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'sleep 300' >/dev/null
+jq '.recoveredFromPhase = "baseline-recorded" | del(.authorizationVolumeFingerprint) | .appWasRunning = true' \
+  "$recovered_journal_saved" > "$journal"
+chmod 0600 "$journal"
+readonly_journal_digest=$(sha256sum "$journal" | awk '{print $1}')
+: > "$recovered_failure_log"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$recovered_failure_log" 2>&1; then
+  echo 'Legacy recovered evidence accepted a read-write managed authorization consumer' >&2
+  exit 1
+fi
+grep -F 'must mount the candidate-authorization volume read-only at /run/noosphere-pgvector' "$recovered_failure_log" >/dev/null
+[[ $(sha256sum "$journal" | awk '{print $1}') == "$readonly_journal_digest" ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+docker rm -f "$app_container" >/dev/null
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'chmod 0644 /authorization/writer-authorized; sync'
+docker compose -f "$compose_file" up -d app
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+
+# An originally running app can also carry a writer-absent recovered state
+# when the prior recovery was deferred. Bind it under the inherited installer
+# lock, archive the verified evidence, and keep the writer stopped.
+docker stop --time 60 "$app_container" >/dev/null
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'rm -f /authorization/writer-authorized; sync'
+jq '.recoveredFromPhase = "baseline-recorded" | del(.authorizationVolumeFingerprint) | .appWasRunning = true' \
+  "$recovered_journal_saved" > "$journal"
+chmod 0600 "$journal"
+deferred_recovered_journal="$journal.recovered-$(jq -r '.runId' "$journal")"
+exec 8>"$installer_lock_path"
+flock -w 5 8
+if NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$installer_lock_path" \
+  "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" --defer-app-restart > "$recovered_failure_log" 2>&1; then
+  echo 'Deferred legacy recovered evidence with appWasRunning=true unexpectedly reported switch success' >&2
+  exit 1
+fi
+exec 8>&-
+[[ ! -f "$journal" && -f "$deferred_recovered_journal" ]]
+[[ $(jq -r '.authorizationVolumeFingerprint' "$deferred_recovered_journal") == "$(authorization_volume_fingerprint)" ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
+! authorization_volume_marker_digest writer-authorized >/dev/null 2>&1
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$source_marker_digest" ]]
+rm -f "$deferred_recovered_journal"
+install -m 600 "$recovered_journal_saved" "$journal"
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n" "$1" > /authorization/writer-authorized; chmod 0644 /authorization/writer-authorized; sync' \
+  -- "$SOURCE_IMAGE"
+docker compose -f "$compose_file" up -d app
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+
+# Exact volume labels alone are insufficient: reject malformed legacy source
+# marker bytes before upgrading the journal or stopping the running writer.
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n\000" "$1" > /authorization/writer-authorized; chmod 0600 /authorization/writer-authorized' \
+  -- "$SOURCE_IMAGE"
+jq '.recoveredFromPhase = "baseline-recorded" | .authorizationVolumeFingerprint = null | .appWasRunning = true' \
+  "$recovered_journal_saved" > "$journal"
+chmod 0600 "$journal"
+: > "$recovered_failure_log"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$recovered_failure_log" 2>&1; then
+  echo 'Legacy recovered evidence accepted malformed source writer bytes' >&2
+  exit 1
+fi
+grep -F 'authorization marker contains unexpected bytes: writer-authorized' "$recovered_failure_log" >/dev/null
+[[ $(jq -r '.authorizationVolumeFingerprint' "$journal") == null ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n" "$1" > /authorization/writer-authorized; chmod 0600 /authorization/writer-authorized; sync' \
+  -- "$SOURCE_IMAGE"
+
+# Old helpers could publish verified source recovery before journals carried an
+# authorization-volume fingerprint. Accept only an exact run-labeled volume
+# with exact source markers, then atomically bind its fingerprint before any
+# fail-closed writer stop. Inject a later fault so this disposable fixture can
+# inspect the upgraded active journal before the ordinary retry archives it.
+jq '.recoveredFromPhase = "baseline-recorded" | .authorizationVolumeFingerprint = null | .appWasRunning = true' \
+  "$recovered_journal_saved" > "$journal"
+chmod 0600 "$journal"
+: > "$recovered_failure_log"
+if NOOSPHERE_A2B_FAIL_AFTER_PHASE=recovery-writer-restarted \
+  "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$recovered_failure_log" 2>&1; then
+  echo 'Legacy recovered evidence unexpectedly reported switch success' >&2
+  exit 1
+fi
+grep -F 'test fault injected after journal phase recovery-writer-restarted' "$recovered_failure_log" >/dev/null
+grep -F 'manual recovery evidence:' "$recovered_failure_log" >/dev/null
+[[ $(jq -r '.phase + "|" + .recoveredFromPhase' "$journal") == 'recovered|baseline-recorded' ]]
+[[ $(jq -r '.authorizationVolumeFingerprint' "$journal") == "$(authorization_volume_fingerprint)" ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+install -m 600 "$recovered_journal_saved" "$journal"
+
+jq '.authorizationVolumeFingerprint = ("0" * 64)' "$recovered_journal_saved" > "$journal"
+chmod 0600 "$journal"
+: > "$recovered_failure_log"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$recovered_failure_log" 2>&1; then
+  echo 'Recovered candidate evidence accepted a mismatched authorization-volume fingerprint' >&2
+  exit 1
+fi
+grep -F 'candidate-authorization volume fingerprint changed' "$recovered_failure_log" >/dev/null
+cat "$recovered_failure_log" >> "$log_file"
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+[[ $(jq -r '.phase' "$journal") == recovered ]]
+jq '.appWasRunning = true' "$recovered_journal_saved" > "$journal"
+chmod 0600 "$journal"
+
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n\000" "$1" > /authorization/writer-authorized; chmod 0644 /authorization/writer-authorized' \
+  -- "$SOURCE_IMAGE"
+malformed_recovered_writer_digest=$(authorization_volume_marker_digest writer-authorized)
+: > "$recovered_failure_log"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$recovered_failure_log" 2>&1; then
+  echo 'Recovered candidate evidence accepted malformed source writer bytes' >&2
+  exit 1
+fi
+grep -F 'authorization marker contains unexpected bytes: writer-authorized' "$recovered_failure_log" >/dev/null
+cat "$recovered_failure_log" >> "$log_file"
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+[[ $(jq -r '.phase' "$journal") == recovered ]]
+[[ $(authorization_volume_marker_digest writer-authorized) == "$malformed_recovered_writer_digest" ]]
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n" "$1" > /authorization/writer-authorized; chmod 0644 /authorization/writer-authorized' \
+  -- "$SOURCE_IMAGE"
+
+# Reproduce the exact pre-fix production handoff: a durable recovered journal
+# paired with root-owned mode-0600 markers. The next recovered invocation must
+# atomically normalize both files before the UID-1001 writer can restart.
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'chmod 0600 /authorization/candidate-authorized /authorization/writer-authorized'
+if docker exec --user 1001:1001 "$db_container" cat /run/noosphere-pgvector/writer-authorized >/dev/null 2>&1; then
+  echo 'Legacy mode-0600 writer marker was unexpectedly readable by UID 1001' >&2
+  exit 1
+fi
 
 # The restored source gate must remain restartable after recovery. This catches
 # a crash-safe marker change that would otherwise strand the source on its next
@@ -481,9 +1398,11 @@ if NOOSPHERE_A2B_FAIL_AFTER_PHASE=recovery-writer-restarted \
 fi
 [[ $(jq -r '.phase' "$journal") == recovered ]]
 if docker inspect "$app_container" >/dev/null 2>&1; then
-  [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
+  [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 fi
 [[ $(docker inspect "$db_container" --format '{{.Config.Image}}') == "$SOURCE_IMAGE" ]]
+assert_marker_contract "$db_container" candidate-authorized "$SOURCE_IMAGE"
+assert_marker_contract "$db_container" writer-authorized "$SOURCE_IMAGE"
 docker compose -f "$compose_file" up -d app
 [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 docker exec "$db_container" psql -X -v ON_ERROR_STOP=1 -U noosphere -d noosphere -c \
@@ -494,7 +1413,7 @@ if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" >> "$log_f
   exit 1
 fi
 [[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]]
-[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 [[ $(docker inspect "$db_container" --format '{{.Config.Image}}') == "$SOURCE_IMAGE" ]]
 [[ $(docker exec "$db_container" psql -XAtq -U noosphere -d noosphere -c \
   "SELECT count(*) FROM \"Topic\" WHERE id = 'topic-recovery-write';") == 1 ]]
@@ -507,6 +1426,36 @@ docker compose -f "$compose_file" up -d app
 compgen -G "$journal.recovered-*" >/dev/null
 
 install -m "$(stat -c '%a' "$compose_file")" "$target_compose" "$compose_file"
+schema_mismatch_log="$tmp_dir/schema-mismatch-recovery.log"
+if NOOSPHERE_A2B_TEST_FORCE_RESTORE_SCHEMA_MISMATCH=true \
+  "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" > "$schema_mismatch_log" 2>&1; then
+  echo 'Forced restore-schema mismatch unexpectedly reported switch success' >&2
+  exit 1
+fi
+grep -F 'restored backup schema digest mismatch' "$schema_mismatch_log" >/dev/null
+grep -F 'source rollback verified; rerun the guarded switch from a fresh journal' "$schema_mismatch_log" >/dev/null
+[[ ! -f "$journal" ]]
+mapfile -t mismatch_recovery_evidence < <(
+  sed -n 's/^\[pgvector-switch\] recovery evidence: //p' "$schema_mismatch_log"
+)
+((${#mismatch_recovery_evidence[@]} == 1)) || {
+  echo 'Forced restore-schema mismatch did not emit exactly one recovery evidence path' >&2
+  exit 1
+}
+mismatch_recovered_journal=${mismatch_recovery_evidence[0]}
+[[ -f "$mismatch_recovered_journal" ]]
+mismatch_run=$(jq -er '.runId' "$mismatch_recovered_journal")
+! docker inspect "noosphere-a2b-restore-$mismatch_run" >/dev/null 2>&1
+! docker inspect "noosphere-a2b-schema-reparse-$mismatch_run" >/dev/null 2>&1
+! docker volume inspect "noosphere_a2b_restore_${mismatch_run//-/_}" >/dev/null 2>&1
+! docker volume inspect "noosphere_a2b_schema_reparse_${mismatch_run//-/_}" >/dev/null 2>&1
+[[ $(docker inspect "$db_container" --format '{{.State.Running}}|{{.Config.Image}}') == "true|$SOURCE_IMAGE" ]]
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+[[ $(docker compose -f "$compose_file" config --format json | jq -r '.services.db.image') == "$SOURCE_IMAGE" ]]
+
+# Recovery restores the exact source desired state. Republish the already
+# verified target gate before the ordinary successful transition.
+install -m "$(stat -c '%a' "$compose_file")" "$target_compose" "$compose_file"
 "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" >> "$log_file" 2>&1
 [[ $(jq -r '.phase' "$journal") == complete ]]
 [[ $(jq -r '.authorizationVolume' "$journal") == "$authorization_volume" ]]
@@ -514,6 +1463,8 @@ install -m "$(stat -c '%a' "$compose_file")" "$target_compose" "$compose_file"
 [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
 [[ $(docker compose -f "$compose_file" config --format json | jq -r '.services.db.image') == "$CANDIDATE_IMAGE" ]]
 [[ $(docker exec "$db_container" cat /run/noosphere-pgvector/writer-authorized) == "$CANDIDATE_IMAGE" ]]
+assert_marker_contract "$db_container" candidate-authorized "$CANDIDATE_IMAGE"
+assert_marker_contract "$db_container" writer-authorized "$CANDIDATE_IMAGE"
 docker inspect "$app_container" | jq -e --arg candidate "$CANDIDATE_IMAGE" '
   .[0].Config.Entrypoint | any(type == "string" and contains("writer-authorized") and contains($candidate))
 ' >/dev/null
@@ -522,6 +1473,86 @@ docker inspect "$app_container" | jq -e --arg candidate "$CANDIDATE_IMAGE" '
 # application row counts: legitimate writes after commit must not be rolled back.
 docker exec "$db_container" psql -X -v ON_ERROR_STOP=1 -U noosphere -d noosphere -c \
   "INSERT INTO \"Topic\" VALUES ('topic-2', 'Post-commit write');" >/dev/null
+
+# Completed evidence must likewise reject a dangling writer symlink without
+# stopping the active app or mutating the marker paths.
+candidate_marker_digest=$(printf '%s\n' "$CANDIDATE_IMAGE" | sha256sum | awk '{print $1}')
+completed_failure_log="$tmp_dir/completed-marker-failure.log"
+exec 8>"$installer_lock_path"
+flock -w 5 8
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'rm /authorization/writer-authorized; ln -s missing-writer-target /authorization/writer-authorized; [ -L /authorization/writer-authorized ]; [ ! -e /authorization/writer-authorized ]'
+: > "$completed_failure_log"
+if NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$installer_lock_path" \
+  "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" --defer-app-restart > "$completed_failure_log" 2>&1; then
+  echo 'Completed evidence accepted a dangling writer marker symlink' >&2
+  exit 1
+fi
+grep -F 'legacy authorization marker must be a root-owned regular file: writer-authorized' "$completed_failure_log" >/dev/null
+cat "$completed_failure_log" >> "$log_file"
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]] || {
+  echo 'Completed dangling-writer preflight stopped the active app' >&2
+  exit 1
+}
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$candidate_marker_digest" ]] || {
+  echo 'Completed dangling-writer preflight changed the candidate marker' >&2
+  exit 1
+}
+if ! docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  '[ -L /authorization/writer-authorized ] && rm /authorization/writer-authorized; printf "%s\n" "$1" > /authorization/writer-authorized; chmod 0644 /authorization/writer-authorized' \
+  -- "$CANDIDATE_IMAGE"; then
+  echo 'Completed dangling-writer preflight removed or rewrote the symlink' >&2
+  exit 1
+fi
+
+# Bash cannot represent NUL bytes in variables. An exact digest comparison must
+# reject a marker with a trailing NUL and leave the active app and bytes intact.
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n\000" "$1" > /authorization/writer-authorized' \
+  -- "$CANDIDATE_IMAGE"
+malformed_writer_digest=$(authorization_volume_marker_digest writer-authorized)
+[[ "$malformed_writer_digest" != "$candidate_marker_digest" ]] || {
+  echo 'Completed malformed-writer fixture did not create distinct bytes' >&2
+  exit 1
+}
+: > "$completed_failure_log"
+if NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$installer_lock_path" \
+  "$ROOT_DIR/scripts/switch-pgvector-compose.sh" "${switch_args[@]}" --defer-app-restart > "$completed_failure_log" 2>&1; then
+  echo 'Completed evidence accepted a writer marker with trailing NUL bytes' >&2
+  exit 1
+fi
+grep -F 'authorization marker contains unexpected bytes: writer-authorized' "$completed_failure_log" >/dev/null
+cat "$completed_failure_log" >> "$log_file"
+[[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]] || {
+  echo 'Completed malformed-writer preflight stopped the active app' >&2
+  exit 1
+}
+[[ $(authorization_volume_marker_digest writer-authorized) == "$malformed_writer_digest" ]] || {
+  echo 'Completed malformed-writer preflight changed the writer marker' >&2
+  exit 1
+}
+exec 8>&-
+
+# Reproduce pre-fix completed evidence. Both exact candidate markers are
+# root-owned 0600 while the complete journal remains active; the deferred
+# verification and later --authorize-writer handoff must normalize and resume.
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "%s\n" "$1" > /authorization/writer-authorized; chmod 0600 /authorization/candidate-authorized /authorization/writer-authorized; [ "$(stat -c "%u:%g:%a" /authorization/candidate-authorized)" = "0:0:600" ]; [ "$(stat -c "%u:%g:%a" /authorization/writer-authorized)" = "0:0:600" ]' \
+  -- "$CANDIDATE_IMAGE"
+[[ $(authorization_volume_marker_digest candidate-authorized) == "$candidate_marker_digest" ]]
+[[ $(authorization_volume_marker_digest writer-authorized) == "$candidate_marker_digest" ]]
 exec 8>"$installer_lock_path"
 flock -w 5 8
 NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$installer_lock_path" \
@@ -531,17 +1562,31 @@ if docker exec "$db_container" test -e /run/noosphere-pgvector/writer-authorized
   echo 'Deferred completed-evidence verification published writer authorization' >&2
   exit 1
 fi
+assert_marker_contract "$db_container" candidate-authorized "$CANDIDATE_IMAGE"
 docker compose -f "$compose_file" up -d --force-recreate app >> "$log_file" 2>&1 || true
 for _ in $(seq 1 30); do
   [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == false ]] && break
   sleep 1
 done
 [[ $(docker inspect "$app_container" --format '{{.State.ExitCode}}') == 78 ]]
+# Reproduce the production topology: the guard removed the stopped app
+# container because it consumed stale authorization state, while a same-named
+# image remains. Generic `docker inspect` resolves that image and has no State;
+# container-only identity must classify the app as absent, authorize the
+# writer, and let Compose recreate it.
+docker rm "$app_container" >/dev/null
+docker image tag "$CANDIDATE_IMAGE" "$app_collision_image"
+! docker container inspect "$app_container" >/dev/null 2>&1
+docker image inspect "$app_collision_image" >/dev/null
 NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$installer_lock_path" \
   "$ROOT_DIR/scripts/switch-pgvector-compose.sh" --authorize-writer "${switch_args[@]}" >> "$log_file" 2>&1
 exec 8>&-
+! docker container inspect "$app_container" >/dev/null 2>&1
+assert_marker_contract "$db_container" candidate-authorized "$CANDIDATE_IMAGE"
+assert_marker_contract "$db_container" writer-authorized "$CANDIDATE_IMAGE"
 docker compose -f "$compose_file" up -d --force-recreate app
 [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+docker image rm "$app_collision_image" >/dev/null
 [[ $(docker exec "$db_container" psql -XAtq -U noosphere -d noosphere -c 'SELECT count(*) FROM "Topic";') == 3 ]]
 
 # A candidate that already contains an upgraded source volume cannot be blessed
@@ -594,6 +1639,7 @@ services:
   app:
     image: $CANDIDATE_IMAGE
     platform: $PLATFORM
+    user: "1001:1001"
     container_name: $new_app_container
     entrypoint:
       - /bin/sh
@@ -679,9 +1725,87 @@ fi
 [[ $(docker volume inspect "$new_authorization_volume" --format "{{index .Labels \"io.noosphere.pgvector-authorization-run\"}}") == \
    "$(jq -r '.runId' "$new_install_journal")" ]]
 
+# The claim-created journal has not durably bound a published candidate marker.
+# Even exact candidate bytes must be rejected without changing either object.
+new_candidate_marker_digest=$(authorization_volume_marker_digest candidate-authorized "$new_authorization_volume")
+claim_failure_log="$tmp_dir/claim-created-marker-failure.log"
+: > "$claim_failure_log"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" --prepare-new-install "${new_install_args[@]}" > "$claim_failure_log" 2>&1; then
+  echo 'Claim-created new-install resume accepted a published candidate marker' >&2
+  exit 1
+fi
+grep -F 'pending authorization marker must remain empty: candidate-authorized' "$claim_failure_log" >/dev/null
+cat "$claim_failure_log" >> "$log_file"
+[[ $(jq -r '.phase' "$new_install_journal") == claim-created ]]
+[[ $(authorization_volume_marker_digest candidate-authorized "$new_authorization_volume") == "$new_candidate_marker_digest" ]]
+
+# A claim-created resume may inherit a safe empty candidate marker from a crash
+# boundary. Unsafe metadata and any writer pathname must survive rejection; once
+# corrected, the same empty marker is accepted and atomically published.
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$new_authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  ': > /authorization/candidate-authorized; chmod 0666 /authorization/candidate-authorized; [ "$(stat -c "%u:%g:%a" /authorization/candidate-authorized)" = "0:0:666" ]'
+new_candidate_marker_digest=$(authorization_volume_marker_digest candidate-authorized "$new_authorization_volume")
+: > "$claim_failure_log"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" --prepare-new-install "${new_install_args[@]}" > "$claim_failure_log" 2>&1; then
+  echo 'Claim-created new-install resume accepted unsafe empty-marker metadata' >&2
+  exit 1
+fi
+grep -F 'legacy authorization marker must have mode 0600 or 0644: candidate-authorized' "$claim_failure_log" >/dev/null
+cat "$claim_failure_log" >> "$log_file"
+[[ $(jq -r '.phase' "$new_install_journal") == claim-created ]]
+[[ $(authorization_volume_marker_digest candidate-authorized "$new_authorization_volume") == "$new_candidate_marker_digest" ]]
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$new_authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'chmod 0600 /authorization/candidate-authorized; [ "$(stat -c "%u:%g:%a" /authorization/candidate-authorized)" = "0:0:600" ]'
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$new_authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'ln -s missing-writer-target /authorization/writer-authorized; [ -L /authorization/writer-authorized ]; [ ! -e /authorization/writer-authorized ]'
+: > "$claim_failure_log"
+if "$ROOT_DIR/scripts/switch-pgvector-compose.sh" --prepare-new-install "${new_install_args[@]}" > "$claim_failure_log" 2>&1; then
+  echo 'Claim-created new-install resume accepted a dangling writer marker symlink' >&2
+  exit 1
+fi
+grep -F 'pending authorization state unexpectedly contains writer authorization' "$claim_failure_log" >/dev/null
+cat "$claim_failure_log" >> "$log_file"
+[[ $(jq -r '.phase' "$new_install_journal") == claim-created ]]
+[[ $(authorization_volume_marker_digest candidate-authorized "$new_authorization_volume") == "$new_candidate_marker_digest" ]]
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$new_authorization_volume,target=/authorization,readonly" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  '[ -L /authorization/writer-authorized ] && [ ! -e /authorization/writer-authorized ]'
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$new_authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu 'rm /authorization/writer-authorized'
+
+# A preplanted symlink at the old predictable temporary pathname must never be
+# followed or replaced by marker publication.
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$new_authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  'printf "preplanted-target\n" > /authorization/preplanted-target; ln -s /authorization/preplanted-target /authorization/candidate-authorized.tmp'
+preplanted_target_digest=$(authorization_volume_marker_digest preplanted-target "$new_authorization_volume")
+
 "$ROOT_DIR/scripts/switch-pgvector-compose.sh" --prepare-new-install "${new_install_args[@]}" >> "$log_file" 2>&1
 [[ $(jq -r '.phase + "|" + .mode + "|" + .platform' "$new_install_journal") == "provisioning|new-install|$PLATFORM" ]]
 [[ $(jq -r '.authorizationVolume' "$new_install_journal") == "$new_authorization_volume" ]]
+[[ $(authorization_volume_marker_digest candidate-authorized "$new_authorization_volume") == \
+   "$(printf '%s\n' "$CANDIDATE_IMAGE" | sha256sum | awk '{print $1}')" ]]
+[[ $(authorization_volume_marker_digest preplanted-target "$new_authorization_volume") == "$preplanted_target_digest" ]]
+docker run --rm --network none --platform "$PLATFORM" \
+  --mount "type=volume,source=$new_authorization_volume,target=/authorization" \
+  --mount type=tmpfs,destination=/var/lib/postgresql/data \
+  --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+  '[ -L /authorization/candidate-authorized.tmp ]; rm /authorization/candidate-authorized.tmp /authorization/preplanted-target'
 
 docker compose -f "$new_compose_file" up -d db
 for _ in $(seq 1 180); do
@@ -700,6 +1824,10 @@ done
 [[ $(docker exec "$new_db_container" psql -XAtq -v ON_ERROR_STOP=1 -U noosphere -d noosphere -c 'SELECT 1;') == 1 ]]
 
 docker exec -i "$new_db_container" psql -X -v ON_ERROR_STOP=1 -U noosphere -d noosphere <<'SQL'
+CREATE ROLE noosphere_migrator LOGIN NOSUPERUSER;
+ALTER DATABASE noosphere OWNER TO noosphere_migrator;
+ALTER SCHEMA public OWNER TO noosphere_migrator;
+SET ROLE noosphere_migrator;
 CREATE TABLE "_prisma_migrations" (
   migration_name text PRIMARY KEY,
   checksum text NOT NULL,
@@ -712,6 +1840,7 @@ INSERT INTO "_prisma_migrations"
 VALUES ('20260717_phase_a2b_new_install', 'new-install-checksum', 1, '2026-07-17 00:00:00+00', NULL);
 CREATE TABLE "Topic" (id text PRIMARY KEY, name text NOT NULL);
 INSERT INTO "Topic" VALUES ('new-topic-1', 'Fresh candidate');
+RESET ROLE;
 SQL
 
 # Direct Compose may create the app container, but the missing completion marker
@@ -759,6 +1888,8 @@ NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$new_installer_lock_path" \
   "${new_install_args[@]}" >> "$log_file" 2>&1
 exec 8>&-
 [[ $(docker exec "$new_db_container" cat /run/noosphere-pgvector/writer-authorized) == "$CANDIDATE_IMAGE" ]]
+assert_marker_contract "$new_db_container" candidate-authorized "$CANDIDATE_IMAGE"
+assert_marker_contract "$new_db_container" writer-authorized "$CANDIDATE_IMAGE"
 docker compose -f "$new_compose_file" up -d --force-recreate app
 for _ in $(seq 1 30); do
   [[ $(docker inspect "$new_app_container" --format '{{.State.Running}}') == true ]] && break

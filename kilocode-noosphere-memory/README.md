@@ -13,31 +13,39 @@ It provides:
 You need two things before this plugin will do anything useful:
 
 1. **A reachable Noosphere instance.** The plugin defaults to
-   `http://127.0.0.1:6578`. For a local install, the cleanest path is the
-   repository's Docker Compose stack — it provisions just Noosphere, without
-   pulling in any other plugin:
+   `http://127.0.0.1:6578`. For a guided local install that also configures
+   Kilo Code, run:
+
+   Before running this pinned `1.13.1` command, confirm that the coordinated
+   [`v1.13.1` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.1)
+   exists with all six installer assets. Source merge alone does not publish the
+   image, package, or release assets.
 
    ```bash
-   git clone https://github.com/SweetSophia/noosphere.git
-   cd noosphere
-   cp noosphere.env.example .env
-   # Edit .env: POSTGRES_PASSWORD, NEXTAUTH_SECRET, NOOSPHERE_ADMIN_PASSWORD,
-   # and NOOSPHERE_BOOTSTRAP_API_KEY. Generate strong values, for example:
-   # openssl rand -hex 32
-   # printf 'noo_%s\n' "$(openssl rand -hex 32)"
-   docker compose -f docker-compose.noosphere.yml up -d
+   # Installer commit: ef616729339db2114e53f7b199700379fc3435bb
+   # Expected SHA-256: ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2
+   (
+     set -e
+     installer="$(mktemp)"
+     trap 'rm -f "$installer"' EXIT
+     curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/ef616729339db2114e53f7b199700379fc3435bb/install.sh -o "$installer"
+     printf '%s  %s\n' 'ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2' "$installer" | sha256sum -c -
+     bash "$installer" --non-interactive --with kilocode
+   )
    ```
 
-   The bootstrap key is whatever you put in `NOOSPHERE_BOOTSTRAP_API_KEY` and
-   has full `ADMIN` scope. To point at an existing Noosphere instead, set
-   `baseUrl` in the plugin options (see [Configuration](#configuration)).
+   The immutable launcher checksum-verifies its backend, preserves existing
+   database state, and stores generated credentials without printing them. It
+   creates and persists a Kilo-specific WRITE key; the bootstrap ADMIN key is
+   not written to Kilo configuration. See
+   [Installing Noosphere](../docs/INSTALLATION.md) for the auditable download,
+   upgrade behavior, and manual Compose path.
 
-   > **Note:** the repository also ships `install-openclaw.sh`, a one-shot
-   > installer that provisions Noosphere *plus* the OpenClaw plugin. Use it
-   > if you intend to run both tools; skip it if you only want Kilo Code.
+   To point at an existing Noosphere instead, set `baseUrl` in the plugin options
+   (see [Configuration](#configuration)).
 
 2. **A Noosphere API key for this tool.** The plugin will refuse to start
-   without one. Create a **tool-scoped** key (named after the tool, e.g.
+   without one. Create a **tool-specific WRITE key** (named after the tool, e.g.
    `kilocode`) in the Noosphere admin UI at:
 
    ```text
@@ -47,12 +55,15 @@ You need two things before this plugin will do anything useful:
    Admin login is required. The local Docker Compose install creates an
    `admin@noosphere.local` admin account whose password is in `.env` as
    `NOOSPHERE_ADMIN_PASSWORD`. See [Secrets](#secrets) below for which
-   permissions the key needs and where to put it.
+   permissions the key needs and where to put it. “Tool-specific” means the
+   credential is isolated from ADMIN and other integrations; guided setup leaves
+   corpus scopes unrestricted so saves without `restrictedTags` continue to
+   work. Apply a restricted scope only together with matching integration tags.
 
 ## Install
 
 ```bash
-npm install -g @sweetsophia/kilocode-noosphere-memory
+npm install -g @sweetsophia/kilocode-noosphere-memory@1.13.1
 ```
 
 Add it to `~/.config/kilo/kilo.json`:
@@ -60,7 +71,7 @@ Add it to `~/.config/kilo/kilo.json`:
 ```json
 {
   "plugin": [
-    "@sweetsophia/kilocode-noosphere-memory"
+    "@sweetsophia/kilocode-noosphere-memory@1.13.1"
   ]
 }
 ```
@@ -68,7 +79,7 @@ Add it to `~/.config/kilo/kilo.json`:
 You can also install it with Kilo's plugin command:
 
 ```bash
-kilo plugin @sweetsophia/kilocode-noosphere-memory --global
+kilo plugin @sweetsophia/kilocode-noosphere-memory@1.13.1 --global
 ```
 
 Or configure it with explicit options:
@@ -77,7 +88,7 @@ Or configure it with explicit options:
 {
   "plugin": [
     [
-      "@sweetsophia/kilocode-noosphere-memory",
+      "@sweetsophia/kilocode-noosphere-memory@1.13.1",
       {
         "baseUrl": "http://127.0.0.1:6578",
         "autoRecall": true,

@@ -8,8 +8,8 @@ x-noosphere-image: &noosphere-image
       # Prisma only needs a syntactically valid URL while generating/building;
       # the image build never authenticates or performs database work.
       DATABASE_URL: postgresql://localhost/noosphere
-      NOOSPHERE_VERSION: ${NOOSPHERE_VERSION:-1.11.0}
-  image: noosphere-local:${NOOSPHERE_VERSION:-1.11.0}
+      NOOSPHERE_VERSION: ${NOOSPHERE_VERSION:-1.13.1}
+  image: noosphere-local:${NOOSPHERE_VERSION:-1.13.1}
 
 services:
   init:
@@ -70,15 +70,15 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     labels:
-      org.opencontainers.image.version: "${NOOSPHERE_VERSION:-1.11.0}"
+      org.opencontainers.image.version: "${NOOSPHERE_VERSION:-1.13.1}"
     ports:
       - "6578:3000"
     environment:
       DATABASE_URL: postgresql://noosphere_app:${POSTGRES_APP_PASSWORD}@db:5432/noosphere
       SKIP_MIGRATION: "1"
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
-      NEXTAUTH_URL: ${APP_URL:-http://100.111.85.48:6578}
-      APP_URL: ${APP_URL:-http://100.111.85.48:6578}
+      NEXTAUTH_URL: ${APP_URL:-http://127.0.0.1:6578}
+      APP_URL: ${APP_URL:-http://127.0.0.1:6578}
       UPLOAD_DIR: /app/uploads
       OBSIDIAN_SYNC_ENABLED: ${OBSIDIAN_SYNC_ENABLED:-true}
       OBSIDIAN_SYNC_VAULT_PATH: ${OBSIDIAN_SYNC_VAULT_PATH:-/app/obsidian-vault}
@@ -97,7 +97,7 @@ services:
     volumes:
       - ./uploads:/app/uploads:rw
       - ./uploads/images:/app/uploads/images:rw
-      - /home/niya/obsidian-vault/noosphere:/app/obsidian-vault:rw
+      - ${OBSIDIAN_SYNC_HOST_VAULT_PATH:-./obsidian-vault}:/app/obsidian-vault:rw
       - postgres_authorization:/run/noosphere-pgvector:ro
     depends_on:
       init:

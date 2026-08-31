@@ -39,15 +39,21 @@ Docker administrator access is an explicit trust boundary. The lock serializes t
 
 ## OpenClaw installer deployments
 
-Install and upgrade through the same command:
+Install and upgrade through the same command, but only after the coordinated
+[`v1.13.1` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.1)
+exists with all six installer assets. Source merge alone does not publish them:
 
 ```bash
-# Installer commit: 19ba70a9e8c40dbe01df6de9ca79725c708f3997
-# Expected SHA-256: 6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c
-installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/19ba70a9e8c40dbe01df6de9ca79725c708f3997/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c' "$installer" | sha256sum -c -
-bash "$installer" && rm -f "$installer"
+# Installer commit: ef616729339db2114e53f7b199700379fc3435bb
+# Expected SHA-256: ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2
+(
+  set -e
+  installer="$(mktemp)"
+  trap 'rm -f "$installer"' EXIT
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/ef616729339db2114e53f7b199700379fc3435bb/install.sh -o "$installer"
+  printf '%s  %s\n' 'ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2' "$installer" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.1}" bash "$installer" --non-interactive --with openclaw
+)
 ```
 
 On an existing supported source install, the installer downloads checksum-pinned guard and deploy-verification scripts, writes the fail-closed candidate Compose gate while leaving the running source container unchanged, performs the full offline transition with writer restart deferred to the installer, then runs bootstrap, application health, exact image/volume/version/extension verification, and minimum data checks. If interrupted after writing Compose but before authorization, an accidental candidate recreation exits before PostgreSQL can touch the source volume.
@@ -108,6 +114,8 @@ If `cmp` or `git diff` fails, stop. A verified recovery intentionally leaves a s
 
 ## Recovery and evidence
 
+The authorization volume contains only the pinned source/candidate image digests used by the startup gates. The guard publishes both marker files as root-owned mode `0644`: they remain immutable to the non-root application while UID 1001 can read the writer marker through the read-only volume mount. A resumed legacy `recovered` journal atomically republishes its exact-source markers before restarting the writer. If that historical journal predates the authorization fingerprint field, the guard accepts only the exact run/data/image-labeled local volume with exact source marker bytes, then durably binds its current fingerprint before stopping a writer. Treat a symlink, non-regular file, any other owner or mode, an owner-writable consumer mount, mismatched ownership labels, or unexpected marker content as a failed authorization boundary.
+
 The active journal is `<backup-dir>/<volume>.phase-a2b.json`. Verified source recovery durably checkpoints `recovered`, then either restarts and verifies the source app for a direct guard invocation or proves it remains stopped for an inherited installer transaction. The guard archives the journal as `.recovered-<run-id>` and exits non-zero so automation cannot mistake rollback for upgrade success. If interrupted after either the recovered checkpoint or the direct source-writer restart, the next invocation re-verifies the exact source and safely finishes recovery.
 
 Recovery deliberately leaves the live Compose file staged for the exact source and its authorization marker. If the installer was interrupted after the durable `recovered` checkpoint, its next invocation first verifies and archives that source state without overwriting the source gate, exits non-zero, and asks for one more rerun. Before a fresh transaction, republish the already-verified target candidate template while leaving the recovered source container running. The following installer invocation does this automatically. In a repository checkout, verify the archived recovery evidence, then restore only the target template and rerun the guard:
@@ -132,6 +140,19 @@ backup checksum, and database integrity signatures. If that evidence is
 inconsistent or unsafe, the guard stops the named app writer and refuses to
 guess at recovery; preserve the files and investigate manually.
 
+Current journals record `dataSignatureVersion: 2`. Version 2 streams every
+primary-keyed ordinary table in every user schema plus sequence state into a
+fixed per-object SHA-256 frame, uses server-quoted catalog identifiers, and
+executes reads as the non-superuser `noosphere_migrator` production owner. It
+rejects materialized-view data, foreign-table data, partitioned-table data,
+large objects, and ordinary tables without primary keys instead of silently
+narrowing backup coverage.
+Incomplete historical journals without the field are treated as version 1 and
+verified with the legacy `pg_dump --inserts` algorithm; an explicit null,
+boolean, or unsupported numeric version is rejected instead of being treated as
+absence. This keeps installer updates from stranding otherwise recoverable runs
+without allowing malformed evidence to downgrade its verification algorithm.
+
 The authorization volume contains two independent markers. The database marker
 permits candidate PostgreSQL provisioning only after the guard owns and binds
 the volume. The writer marker is absent during migration/bootstrap and is
@@ -153,4 +174,4 @@ For a failed rollback:
 - inspect the exact database container, volume consumers, and guard diagnostics; and
 - recover only from the recorded source image and backup evidence.
 
-The logical backup is restore-tested during the transaction, but it is not a substitute for the normal independent backup-retention policy.
+The logical backup is restore-tested during the transaction, but it is not a substitute for the normal independent backup-retention policy. The restore test compares schema bytes against the live baseline normalized through the same dump/re-parse path: a dump/restore round-trip canonically re-groups nested boolean CHECK-constraint parens (for example BETWEEN-written compound CHECKs), so a raw live-to-restored byte comparison can never match (issue #298).

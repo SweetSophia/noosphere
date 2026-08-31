@@ -20,12 +20,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: AI PR Reviewer
-        uses: sourcefuse/ai-pr-reviewer@main
+        uses: sourcefuse/ai-pr-reviewer@e2e7227428ac47b83686356b7ac3e595f7e4c6a5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.MINIMAX_API_KEY }}

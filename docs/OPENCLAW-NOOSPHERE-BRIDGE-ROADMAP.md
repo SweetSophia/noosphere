@@ -1,8 +1,32 @@
 # OpenClaw ↔ Noosphere Memory Bridge Roadmap
 
-Status: implementation complete through PR 7; official plugin productization tracked separately in `OPENCLAW-OFFICIAL-PLUGIN-DEVELOPMENT-PLAN.md`.
+Status: bridge implementation complete through PR 7; memory revamp continues under the linked status matrix.
 Owner: Noosphere/OpenClaw integration workstream
-Last updated: 2026-04-30
+Last updated: 2026-08-24
+
+## Memory revamp continuation
+
+The bridge baseline in this roadmap is complete. Automatic capture and hybrid
+retrieval now span server storage, privacy lifecycle, workers, retrieval, and
+operator rollout, so their current state is maintained in the
+[memory revamp status matrix](MEMORY-REVAMP-STATUS.md) rather than duplicated
+here.
+
+Current boundary:
+
+- explicit save and prompt-time capture guidance are implemented;
+- automatic-capture Phase A is merged but default-off, while `agent_end`
+  capture, extraction, enrichment, and promotion remain pending;
+- hybrid Phases A1 through C and the transition controller are merged; current
+  Compose templates select the guarded pgvector image, while storage activation,
+  provider/worker operation, backfill, and hybrid retrieval remain opt-in;
+- issue #303's production-safety subset precedes any existing-volume
+  transition; and
+- transition, backfill, shadow evaluation, quality acceptance, and serving all
+  remain explicit operator actions.
+
+Updating this roadmap or the status matrix never authorizes those rollout
+actions.
 
 ## Goal
 

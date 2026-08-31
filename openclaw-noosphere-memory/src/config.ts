@@ -34,6 +34,13 @@ export interface ResolvedNoosphereMemoryConfig {
   timeoutMs: number;
 }
 
+export class NoosphereConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NoosphereConfigError";
+  }
+}
+
 export const DEFAULT_NOOSPHERE_BASE_URL = "http://localhost:3000";
 export const DEFAULT_NOOSPHERE_TIMEOUT_MS = 5_000;
 export const MAX_NOOSPHERE_TIMEOUT_MS = 30_000;
@@ -52,6 +59,7 @@ export function resolveNoosphereMemoryConfig(
       readString(env.NOOSPHERE_BASE_URL) ||
       DEFAULT_NOOSPHERE_BASE_URL,
   );
+  assertTrustedRemoteOrigin(baseUrl, env);
   const defaultApiKey =
     readSecret(config.apiKey, rootConfig) ||
     readString(env.OPENCLAW_NOOSPHERE_API_KEY) ||
@@ -124,20 +132,35 @@ function normalizeBaseUrl(value: string): string {
   try {
     url = new URL(trimmed);
   } catch {
-    return DEFAULT_NOOSPHERE_BASE_URL;
+    throw new NoosphereConfigError(
+      "Noosphere base URL must be a valid HTTP or HTTPS URL.",
+    );
   }
 
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    return DEFAULT_NOOSPHERE_BASE_URL;
+    throw new NoosphereConfigError(
+      "Noosphere base URL must be a valid HTTP or HTTPS URL.",
+    );
   }
   if (url.username || url.password) {
-    return DEFAULT_NOOSPHERE_BASE_URL;
+    throw new NoosphereConfigError(
+      "Noosphere base URL must not contain credentials.",
+    );
+  }
+  if (trimmed.includes("?") || trimmed.includes("#")) {
+    throw new NoosphereConfigError(
+      "Noosphere base URL must not contain a query string or fragment.",
+    );
   }
   if (isBlockedInternalHost(url.hostname)) {
-    return DEFAULT_NOOSPHERE_BASE_URL;
+    throw new NoosphereConfigError(
+      "Noosphere base URL must use a loopback or public host.",
+    );
   }
   if (url.protocol === "http:" && !isLoopbackHost(url.hostname)) {
-    return DEFAULT_NOOSPHERE_BASE_URL;
+    throw new NoosphereConfigError(
+      "Noosphere base URL must use HTTPS unless the host is loopback.",
+    );
   }
 
   while (url.pathname.length > 1 && url.pathname.endsWith("/")) {
@@ -149,12 +172,71 @@ function normalizeBaseUrl(value: string): string {
   return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
 }
 
+function assertTrustedRemoteOrigin(
+  baseUrl: string,
+  env: NodeJS.ProcessEnv,
+): void {
+  const base = new URL(baseUrl);
+  if (isLoopbackHost(base.hostname)) return;
+
+  // Deliberately environment-only: plugin config is not an independent trust
+  // source when config.baseUrl itself may be attacker-controlled.
+  const rawTrustedOrigin =
+    readString(env.OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN) ||
+    readString(env.NOOSPHERE_TRUSTED_ORIGIN);
+  if (!rawTrustedOrigin) {
+    throw new NoosphereConfigError(
+      "Remote Noosphere base URL requires OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN (or NOOSPHERE_TRUSTED_ORIGIN) in the protected process environment.",
+    );
+  }
+
+  const trustedOrigin = normalizeTrustedOrigin(rawTrustedOrigin);
+  if (base.origin !== trustedOrigin) {
+    throw new NoosphereConfigError(
+      "Noosphere base URL origin does not match the protected trusted origin.",
+    );
+  }
+}
+
+function normalizeTrustedOrigin(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw invalidTrustedOriginError();
+  }
+
+  if (
+    url.protocol !== "https:" ||
+    !!url.username ||
+    !!url.password ||
+    url.pathname !== "/" ||
+    !!url.search ||
+    !!url.hash ||
+    isBlockedInternalHost(url.hostname) ||
+    isLoopbackHost(url.hostname)
+  ) {
+    throw invalidTrustedOriginError();
+  }
+  return url.origin;
+}
+
+function invalidTrustedOriginError(): NoosphereConfigError {
+  return new NoosphereConfigError(
+    "Noosphere trusted origin must be a public HTTPS origin without credentials, path, query, or fragment.",
+  );
+}
+
 function isLoopbackHost(hostname: string): boolean {
-  const normalized = stripIpv6Brackets(hostname.toLowerCase());
+  const withoutBrackets = stripIpv6Brackets(hostname.toLowerCase());
+  const normalized = withoutBrackets.endsWith(".")
+    ? withoutBrackets.slice(0, -1)
+    : withoutBrackets;
+  const ipv4 = parseIpv4(normalized) ?? parseIpv4MappedIpv6(normalized);
   return (
     normalized === "localhost" ||
     normalized === "::1" ||
-    normalized.startsWith("127.")
+    ipv4?.[0] === 127
   );
 }
 
@@ -165,10 +247,8 @@ function isBlockedInternalHost(hostname: string): boolean {
   const ipv4 = parseIpv4(normalized);
   if (ipv4) return isPrivateOrReservedIpv4(ipv4);
 
-  if (normalized.startsWith("::ffff:")) {
-    const mappedIpv4 = parseIpv4(normalized.slice("::ffff:".length));
-    if (mappedIpv4) return isPrivateOrReservedIpv4(mappedIpv4);
-  }
+  const mappedIpv4 = parseIpv4MappedIpv6(normalized);
+  if (mappedIpv4) return isPrivateOrReservedIpv4(mappedIpv4);
 
   return isPrivateOrReservedIpv6(normalized);
 }
@@ -192,6 +272,23 @@ function parseIpv4(hostname: string): [number, number, number, number] | undefin
     : undefined;
 }
 
+function parseIpv4MappedIpv6(
+  hostname: string,
+): [number, number, number, number] | undefined {
+  const prefix = "::ffff:";
+  if (!hostname.startsWith(prefix)) return undefined;
+
+  const suffix = hostname.slice(prefix.length);
+  const dotted = parseIpv4(suffix);
+  if (dotted) return dotted;
+
+  const match = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(suffix);
+  if (!match) return undefined;
+  const high = Number.parseInt(match[1], 16);
+  const low = Number.parseInt(match[2], 16);
+  return [high >> 8, high & 0xff, low >> 8, low & 0xff];
+}
+
 function isPrivateOrReservedIpv4([a, b, c]: [number, number, number, number]): boolean {
   return (
     a === 0 ||
@@ -209,15 +306,53 @@ function isPrivateOrReservedIpv4([a, b, c]: [number, number, number, number]): b
   );
 }
 
+function parseIpv6Hextets(hostname: string): number[] | undefined {
+  if (!hostname.includes(":")) return undefined;
+  const halves = hostname.split("::");
+  if (halves.length > 2) return undefined;
+
+  const parseHalf = (value: string): number[] | undefined => {
+    if (!value) return [];
+    const parts = value.split(":");
+    if (parts.some((part) => !/^[0-9a-f]{1,4}$/.test(part))) return undefined;
+    return parts.map((part) => Number.parseInt(part, 16));
+  };
+
+  const left = parseHalf(halves[0]);
+  const right = parseHalf(halves[1] ?? "");
+  if (!left || !right) return undefined;
+
+  if (halves.length === 1) return left.length === 8 ? left : undefined;
+  const omitted = 8 - left.length - right.length;
+  if (omitted < 1) return undefined;
+  return [...left, ...Array<number>(omitted).fill(0), ...right];
+}
+
 function isPrivateOrReservedIpv6(hostname: string): boolean {
-  if (!hostname.includes(":")) return false;
+  const hextets = parseIpv6Hextets(hostname);
+  if (!hextets) return false;
+
+  const first = hextets[0];
+  const unspecifiedOrIpv4Compatible = hextets.slice(0, 6).every((part) => part === 0);
+  const uniqueLocal = (first & 0xfe00) === 0xfc00;
+  const linkLocal = (first & 0xffc0) === 0xfe80;
+  const deprecatedSiteLocal = (first & 0xffc0) === 0xfec0;
+  const multicast = (first & 0xff00) === 0xff00;
+  const discardOnly =
+    first === 0x0100 &&
+    hextets[1] === 0 &&
+    hextets[2] === 0 &&
+    hextets[3] === 0;
+  const documentation = first === 0x2001 && hextets[1] === 0x0db8;
+
   return (
-    hostname === "::" ||
-    hostname.startsWith("fc") ||
-    hostname.startsWith("fd") ||
-    /^fe[89ab][0-9a-f]:/.test(hostname) ||
-    hostname.startsWith("ff") ||
-    hostname.startsWith("2001:db8:")
+    unspecifiedOrIpv4Compatible ||
+    uniqueLocal ||
+    linkLocal ||
+    deprecatedSiteLocal ||
+    multicast ||
+    discardOnly ||
+    documentation
   );
 }
 
