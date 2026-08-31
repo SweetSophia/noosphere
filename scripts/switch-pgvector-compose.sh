@@ -10,6 +10,7 @@ EXPECTED_POSTGRES_VERSION='16.14'
 EXPECTED_SOURCE_ALPINE_VERSION='3.23.4'
 EXPECTED_CANDIDATE_ALPINE_VERSION='3.24.1'
 EXPECTED_PGVECTOR_VERSION='0.8.1'
+DATA_SIGNATURE_VERSION=2
 LABEL_KEY='io.noosphere.pgvector-switch-run'
 NEW_INSTALL_LABEL_KEY='io.noosphere.pgvector-new-install-run'
 NEW_INSTALL_IMAGE_LABEL_KEY='io.noosphere.pgvector-new-install-image'
@@ -45,6 +46,7 @@ candidate_compose=''
 source_override=''
 backup_file=''
 fail_closed_on_die=false
+expected_data_version=''
 
 usage() {
   cat <<'USAGE'
@@ -83,9 +85,18 @@ log() {
 }
 
 die() {
+  local caller_line=${BASH_LINENO[0]:-$LINENO}
   printf '[pgvector-switch] ERROR: %s\n' "$*" >&2
   if [[ "$fail_closed_on_die" == true && -n "$app_container" ]]; then
     docker stop --time 60 "$app_container" >/dev/null 2>&1 || true
+  fi
+  # An explicit `exit` does not trigger Bash's ERR trap. Once a durable switch
+  # journal has entered fail-closed mode, route fatal paths through the same
+  # state-aware handler as ordinary command failures so incomplete validated
+  # transitions recover source in this invocation. Early argument/preflight
+  # failures occur before `on_error` exists and keep the original direct exit.
+  if [[ "$fail_closed_on_die" == true ]] && declare -F on_error >/dev/null; then
+    on_error "$caller_line" 1
   fi
   exit 1
 }
@@ -205,6 +216,51 @@ fi
 
 journal="$backup_dir/${volume}.phase-a2b.json"
 
+path_present() {
+  [[ -e "$1" || -L "$1" ]]
+}
+
+# Return true, false, or absent for one exact container name. Container-only
+# inspect avoids the Docker CLI's fallback to a same-named image. A failed
+# inspect is classified as absent only after an exact-name container listing
+# succeeds; daemon, permission, and inconsistent identity failures stay fatal.
+container_running_state() {
+  local container=$1 running names name
+  if running=$(docker container inspect "$container" --format '{{.State.Running}}' 2>/dev/null); then
+    case "$running" in
+      true|false) printf '%s\n' "$running"; return 0 ;;
+      *) return 1 ;;
+    esac
+  fi
+  names=$(docker container ls --all --format '{{.Names}}' 2>/dev/null) || return $?
+  while IFS= read -r name; do
+    [[ "$name" != "$container" ]] || return 1
+  done <<< "$names"
+  printf 'absent\n'
+}
+
+assert_app_writer_not_running() {
+  local message=$1 state
+  state=$(container_running_state "$app_container") ||
+    die "could not classify the app container: $message"
+  [[ "$state" != true ]] || die "$message"
+}
+
+stop_app_writer_for_recovery() {
+  local state final_state
+  state=$(container_running_state "$app_container") ||
+    die 'could not classify the app container at the recovery boundary'
+  if [[ "$state" == true ]]; then
+    if ! docker container stop --time 60 "$app_container" >/dev/null; then
+      docker container kill "$app_container" >/dev/null 2>&1 || true
+    fi
+  fi
+  final_state=$(container_running_state "$app_container") ||
+    die 'could not reclassify the app container at the recovery boundary'
+  [[ "$final_state" == false || "$final_state" == absent ]] ||
+    die 'app writer remained running at the recovery boundary'
+}
+
 fsync_path() {
   node -e '
     const fs = require("node:fs");
@@ -220,6 +276,9 @@ sha256_file() {
 
 write_json_atomic() {
   local target=$1 source=$2 temp
+  if path_present "$target"; then
+    assert_owned_regular_file "$target"
+  fi
   temp=$(mktemp "${target}.tmp.XXXXXX")
   install -m 600 "$source" "$temp"
   fsync_path "$temp"
@@ -241,11 +300,13 @@ phase_checkpoint() {
 }
 
 update_journal() {
-  local phase=$1 temp
+  local phase=$1 temp authorization_fingerprint
   temp=$(mktemp "$backup_dir/.journal.XXXXXX")
   if [[ "$phase" == recovered ]]; then
-    jq --arg phase "$phase" \
-      'if .phase == $phase then . else .recoveredFromPhase = .phase | .phase = $phase end' \
+    authorization_fingerprint=$(authorization_volume_fingerprint)
+    jq --arg phase "$phase" --arg authorizationVolumeFingerprint "$authorization_fingerprint" \
+      'if .phase == $phase then . else .recoveredFromPhase = .phase | .phase = $phase end |
+       .authorizationVolumeFingerprint = $authorizationVolumeFingerprint' \
       "$journal" > "$temp"
   else
     jq --arg phase "$phase" '.phase = $phase' "$journal" > "$temp"
@@ -316,12 +377,29 @@ assert_owned_regular_file() {
   [[ $(stat -c '%u' "$path") == "$(id -u)" ]] || die "evidence file is not owned by the current user: $path"
 }
 
+bind_legacy_recovered_authorization_volume() {
+  local expected_fingerprint=$1 expected_image=$2 writer_policy=$3 target_platform=$4
+  local current_fingerprint temp
+  current_fingerprint=$(assert_authorization_volume "$expected_fingerprint" false "$target_platform")
+  [[ "$current_fingerprint" == "$expected_fingerprint" ]] ||
+    die 'legacy recovered authorization volume changed before durable binding'
+  temp=$(mktemp "$backup_dir/.legacy-recovered-journal.XXXXXX")
+  jq --arg authorizationVolumeFingerprint "$expected_fingerprint" \
+    '.authorizationVolumeFingerprint = $authorizationVolumeFingerprint' "$journal" > "$temp"
+  assert_authorization_volume "$expected_fingerprint" false "$target_platform" >/dev/null
+  assert_legacy_authorization_state "$expected_image" "$writer_policy" "$target_platform"
+  write_json_atomic "$journal" "$temp"
+  rm -f "$temp"
+  [[ $(jq -er '.authorizationVolumeFingerprint' "$journal") == "$expected_fingerprint" ]] ||
+    die 'legacy recovered authorization volume binding was not persisted'
+}
+
 validate_journal() {
   local stored_volume stored_source stored_candidate stored_platform stored_authorization expected_run_dir
-  local stored_engine_id stored_docker_endpoint
+  local stored_engine_id stored_docker_endpoint stored_authorization_fingerprint
   local stored_original stored_candidate_compose stored_source_override stored_backup
   local stored_original_sha stored_candidate_sha stored_override_sha stored_backup_sha
-  local evidence_file signature evidence_phase
+  local evidence_file signature evidence_phase legacy_recovered_authorization_fingerprint=''
 
   assert_owned_regular_file "$journal"
   [[ $(stat -c '%a' "$journal") == 600 ]] || die 'transition journal mode must be 0600'
@@ -370,6 +448,7 @@ validate_journal() {
         if docker volume inspect "$authorization_volume" >/dev/null 2>&1; then
           assert_authorization_volume '' false "$stored_platform" >/dev/null
           [[ -z $(authorization_volume_consumers) ]] || die 'unprovisioned authorization volume has an unexpected consumer'
+          assert_pending_authorization_state "$CANDIDATE_IMAGE" "$stored_platform"
         fi
       else
         jq -e '.volumeFingerprint | type == "string" and test("^[a-f0-9]{64}$")' "$journal" >/dev/null ||
@@ -377,9 +456,17 @@ validate_journal() {
         assert_new_install_volume_claim "$(jq -er '.volumeFingerprint' "$journal")" >/dev/null
         jq -e '.authorizationVolumeFingerprint | type == "string" and test("^[a-f0-9]{64}$")' "$journal" >/dev/null ||
           die 'new-install evidence contains an invalid authorization volume fingerprint'
-        assert_authorization_volume "$(jq -er '.authorizationVolumeFingerprint' "$journal")" true "$stored_platform" >/dev/null
+        assert_authorization_volume "$(jq -er '.authorizationVolumeFingerprint' "$journal")" false "$stored_platform" >/dev/null
+        if [[ "$journal_phase" == complete ]]; then
+          assert_legacy_authorization_state "$CANDIDATE_IMAGE" optional "$stored_platform"
+        else
+          assert_authorization_volume "$(jq -er '.authorizationVolumeFingerprint' "$journal")" true "$stored_platform" >/dev/null
+        fi
       fi
       if [[ "$journal_phase" == complete ]]; then
+        jq -e '(if has("dataSignatureVersion") then .dataSignatureVersion else 1 end) as $version |
+          ($version | type == "number") and ($version == 1 or $version == 2)' "$journal" >/dev/null ||
+          die 'new-install evidence contains an invalid data signature version'
         for signature in dataSignature schemaSignature migrationSignature; do
           jq -e --arg signature "$signature" '.[$signature] | type == "string" and test("^[a-f0-9]{64}$")' "$journal" >/dev/null ||
             die "new-install evidence contains an invalid $signature"
@@ -410,7 +497,6 @@ validate_journal() {
       [[ $(jq -r '.dbContainer' "$journal") == "$db_container" ]] || die 'transition journal names another database container'
       [[ $(jq -r '.appContainer' "$journal") == "$app_container" ]] || die 'transition journal names another app container'
       jq -e '.appWasRunning | type == "boolean"' "$journal" >/dev/null || die 'transition journal has invalid app state'
-
       expected_run_dir="$backup_dir/phase-a2b-$run_id"
       stored_original=$(jq -er '.originalCompose' "$journal")
       stored_candidate_compose=$(jq -er '.candidateCompose' "$journal")
@@ -436,6 +522,9 @@ validate_journal() {
       fi
 
       if [[ "$evidence_phase" != preparing ]]; then
+        jq -e '(if has("dataSignatureVersion") then .dataSignatureVersion else 1 end) as $version |
+          ($version | type == "number") and ($version == 1 or $version == 2)' "$journal" >/dev/null ||
+          die 'transition journal contains an invalid data signature version'
         for signature in dataSignature schemaSignature migrationSignature backupSha256; do
           jq -e --arg signature "$signature" '.[$signature] | type == "string" and test("^[a-f0-9]{64}$")' "$journal" >/dev/null ||
             die "transition journal contains an invalid $signature"
@@ -451,17 +540,60 @@ validate_journal() {
         fi
       fi
       case "$evidence_phase" in
-        candidate-authorized|candidate-online-verified|complete)
+        preparing|baseline-recorded|backup-restored|candidate-verified|source-rollback-verified|final-candidate-maintenance-verified)
+          jq -e '
+            (.authorizationVolumeFingerprint == null) or
+            (.authorizationVolumeFingerprint | type == "string" and test("^[a-f0-9]{64}$"))
+          ' "$journal" >/dev/null ||
+            die 'transition journal contains an invalid early authorization volume fingerprint'
+          stored_authorization_fingerprint=$(jq -r '.authorizationVolumeFingerprint // empty' "$journal")
+          if [[ "$journal_phase" == recovered && -z "$stored_authorization_fingerprint" ]]; then
+            docker volume inspect "$authorization_volume" >/dev/null 2>&1 ||
+              die 'recovered transition authorization volume is missing'
+            stored_authorization_fingerprint=$(assert_authorization_volume '' false "$stored_platform")
+            assert_legacy_authorization_state "$SOURCE_IMAGE" optional "$stored_platform"
+            legacy_recovered_authorization_fingerprint=$stored_authorization_fingerprint
+          elif docker volume inspect "$authorization_volume" >/dev/null 2>&1; then
+            [[ -n "$stored_authorization_fingerprint" ]] ||
+              die 'transition authorization volume appeared after its journal claim'
+            [[ $(authorization_volume_fingerprint) == "$stored_authorization_fingerprint" ]] ||
+              die 'transition authorization volume fingerprint changed'
+            if [[ "$journal_phase" == recovered ]]; then
+              assert_legacy_authorization_state "$SOURCE_IMAGE" optional "$stored_platform"
+            else
+              assert_stale_authorization_volume optional
+            fi
+          elif [[ "$journal_phase" == recovered ]]; then
+            die 'recovered transition authorization volume is missing'
+          fi
+          ;;
+        candidate-authorized|candidate-online-verified)
+          jq -e '.authorizationVolumeFingerprint | type == "string" and test("^[a-f0-9]{64}$")' "$journal" >/dev/null ||
+            die 'transition journal contains an invalid authorization volume fingerprint'
+          stored_authorization_fingerprint=$(jq -er '.authorizationVolumeFingerprint' "$journal")
+          assert_authorization_volume "$stored_authorization_fingerprint" false "$stored_platform" >/dev/null
+          if [[ "$journal_phase" == recovered ]]; then
+            assert_legacy_authorization_state "$SOURCE_IMAGE" optional "$stored_platform"
+          else
+            assert_legacy_authorization_state "$CANDIDATE_IMAGE" absent "$stored_platform"
+          fi
+          ;;
+        complete)
           jq -e '.authorizationVolumeFingerprint | type == "string" and test("^[a-f0-9]{64}$")' "$journal" >/dev/null ||
             die 'transition journal contains an invalid authorization volume fingerprint'
           ;;
       esac
       if [[ "$journal_phase" == complete ]]; then
-        assert_authorization_volume "$(jq -er '.authorizationVolumeFingerprint' "$journal")" true "$stored_platform" >/dev/null
+        assert_authorization_volume "$(jq -er '.authorizationVolumeFingerprint' "$journal")" false "$stored_platform" >/dev/null
+        assert_legacy_authorization_state "$CANDIDATE_IMAGE" optional "$stored_platform"
       fi
       ;;
     *) die "transition journal contains an invalid mode: $journal_mode" ;;
   esac
+  if [[ -n "$legacy_recovered_authorization_fingerprint" && "$mode" == switch ]]; then
+    bind_legacy_recovered_authorization_volume \
+      "$legacy_recovered_authorization_fingerprint" "$SOURCE_IMAGE" optional "$stored_platform"
+  fi
   journal_validated=true
 }
 
@@ -527,20 +659,196 @@ authorization_volume_consumers() {
   docker ps -aq --no-trunc --filter "volume=$authorization_volume" | sort -u
 }
 
+assert_authorization_marker_file() {
+  local marker_name=$1 target_platform=${2:-${platform:-$(engine_platform)}}
+  [[ "$target_platform" =~ ^linux/(amd64|arm64)$ ]] || die 'authorization marker platform is invalid'
+  docker run --rm --network none --platform "$target_platform" \
+    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'path="/authorization/$1"; [ -f "$path" ] && [ ! -L "$path" ] && [ "$(stat -c "%u:%g:%a" "$path")" = "0:0:644" ]' \
+    -- "$marker_name" ||
+    die "authorization marker must be a root-owned regular file with mode 0644: $marker_name"
+}
+
+assert_legacy_authorization_marker_file() {
+  local marker_name=$1 target_platform=${2:-${platform:-$(engine_platform)}} metadata
+  [[ "$target_platform" =~ ^linux/(amd64|arm64)$ ]] || die 'authorization marker platform is invalid'
+  metadata=$(docker run --rm --network none --platform "$target_platform" \
+    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'path="/authorization/$1"; [ -f "$path" ] && [ ! -L "$path" ] || exit 1; stat -c "%u:%g:%a" "$path"' \
+    -- "$marker_name") ||
+    die "legacy authorization marker must be a root-owned regular file: $marker_name"
+  case "$metadata" in
+    0:0:600|0:0:644) ;;
+    *) die "legacy authorization marker must have mode 0600 or 0644: $marker_name" ;;
+  esac
+}
+
+authorization_marker_digest() {
+  local marker_name=$1 target_platform=${2:-${platform:-$(engine_platform)}}
+  docker run --rm --network none --platform "$target_platform" \
+    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'sha256sum "/authorization/$1"' -- "$marker_name" | awk '{print $1}'
+}
+
+expected_authorization_marker_digest() {
+  printf '%s\n' "$1" | sha256sum | awk '{print $1}'
+}
+
+empty_authorization_marker_digest() {
+  printf %s '' | sha256sum | awk '{print $1}'
+}
+
+assert_authorization_marker_content() {
+  local marker_name=$1 expected_image=$2 target_platform=${3:-${platform:-$(engine_platform)}} actual_digest expected_digest
+  actual_digest=$(authorization_marker_digest "$marker_name" "$target_platform") ||
+    die "authorization marker is missing or unreadable: $marker_name"
+  expected_digest=$(expected_authorization_marker_digest "$expected_image")
+  [[ "$actual_digest" == "$expected_digest" ]] ||
+    die "authorization marker contains unexpected bytes: $marker_name"
+}
+
+authorization_marker_path_present() {
+  local marker_name=$1 target_platform=${2:-${platform:-$(engine_platform)}}
+  docker run --rm --network none --platform "$target_platform" \
+    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'path="/authorization/$1"; [ -e "$path" ] || [ -L "$path" ]' -- "$marker_name"
+}
+
+publish_authorization_marker() {
+  local marker_name=$1 expected_image=$2 target_platform=${3:-${platform:-$(engine_platform)}}
+  [[ "$marker_name" == "$AUTH_MARKER" || "$marker_name" == "$WRITER_MARKER" ]] ||
+    die "refusing unsupported authorization marker publication: $marker_name"
+  [[ "$expected_image" == "$SOURCE_IMAGE" || "$expected_image" == "$CANDIDATE_IMAGE" ]] ||
+    die 'refusing unsupported authorization marker image'
+  docker run --rm --network none --platform "$target_platform" \
+    --label "$LABEL_KEY=${run_id:-marker-publication}" \
+    --mount "type=volume,source=$authorization_volume,target=/authorization" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'marker=$1; expected=$2
+     target="/authorization/$marker"
+     temp=$(mktemp "/authorization/.$marker.XXXXXX")
+     trap '\''rm -f -- "$temp"'\'' EXIT
+     printf "%s\n" "$expected" > "$temp"
+     chmod 0644 "$temp"
+     sync
+     mv -f -- "$temp" "$target"
+     trap - EXIT
+     sync' \
+    -- "$marker_name" "$expected_image"
+}
+
+remove_authorization_marker() {
+  local marker_name=$1 target_platform=${2:-${platform:-$(engine_platform)}}
+  [[ "$marker_name" == "$AUTH_MARKER" || "$marker_name" == "$WRITER_MARKER" ]] ||
+    die "refusing unsupported authorization marker removal: $marker_name"
+  docker run --rm --network none --platform "$target_platform" \
+    --label "$LABEL_KEY=${run_id:-marker-removal}" \
+    --mount "type=volume,source=$authorization_volume,target=/authorization" \
+    --mount type=tmpfs,destination=/var/lib/postgresql/data \
+    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
+    'rm -f -- "/authorization/$1"; sync' -- "$marker_name"
+}
+
+assert_legacy_authorization_state() {
+  local expected_image=$1 writer_policy=$2 target_platform=${3:-${platform:-$(engine_platform)}}
+  assert_authorization_consumers_managed
+  assert_legacy_authorization_marker_file "$AUTH_MARKER" "$target_platform"
+  assert_authorization_marker_content "$AUTH_MARKER" "$expected_image" "$target_platform"
+  case "$writer_policy" in
+    required)
+      assert_legacy_authorization_marker_file "$WRITER_MARKER" "$target_platform"
+      assert_authorization_marker_content "$WRITER_MARKER" "$expected_image" "$target_platform"
+      ;;
+    absent)
+      ! authorization_marker_path_present "$WRITER_MARKER" "$target_platform" ||
+        die 'deferred source recovery unexpectedly published writer authorization'
+      ;;
+    optional)
+      if authorization_marker_path_present "$WRITER_MARKER" "$target_platform"; then
+        assert_legacy_authorization_marker_file "$WRITER_MARKER" "$target_platform"
+        assert_authorization_marker_content "$WRITER_MARKER" "$expected_image" "$target_platform"
+      fi
+      ;;
+    *) die "invalid writer-marker policy: $writer_policy" ;;
+  esac
+}
+
+assert_pending_authorization_state() {
+  local _expected_image=$1 target_platform=${2:-${platform:-$(engine_platform)}} actual_digest
+  if authorization_marker_path_present "$AUTH_MARKER" "$target_platform"; then
+    assert_legacy_authorization_marker_file "$AUTH_MARKER" "$target_platform"
+    actual_digest=$(authorization_marker_digest "$AUTH_MARKER" "$target_platform") ||
+      die "authorization marker is missing or unreadable: $AUTH_MARKER"
+    [[ "$actual_digest" == "$(empty_authorization_marker_digest)" ]] ||
+      die "pending authorization marker must remain empty: $AUTH_MARKER"
+  fi
+  ! authorization_marker_path_present "$WRITER_MARKER" "$target_platform" ||
+    die 'pending authorization state unexpectedly contains writer authorization'
+}
+
+normalize_legacy_authorization_state() {
+  local expected_image=$1 writer_policy=$2 target_platform=${3:-${platform:-$(engine_platform)}}
+  local writer_present=false
+  assert_legacy_authorization_state "$expected_image" "$writer_policy" "$target_platform"
+  if authorization_marker_path_present "$WRITER_MARKER" "$target_platform"; then
+    writer_present=true
+  fi
+  if [[ "$writer_present" == true ]]; then
+    publish_authorization_marker "$AUTH_MARKER" "$expected_image" "$target_platform"
+    publish_authorization_marker "$WRITER_MARKER" "$expected_image" "$target_platform"
+  else
+    remove_authorization_marker "$WRITER_MARKER" "$target_platform"
+    publish_authorization_marker "$AUTH_MARKER" "$expected_image" "$target_platform"
+  fi
+  assert_authorization_marker_file "$AUTH_MARKER" "$target_platform"
+  assert_authorization_marker_content "$AUTH_MARKER" "$expected_image" "$target_platform"
+  if [[ "$writer_present" == true ]]; then
+    assert_authorization_marker_file "$WRITER_MARKER" "$target_platform"
+    assert_authorization_marker_content "$WRITER_MARKER" "$expected_image" "$target_platform"
+  else
+    ! authorization_marker_path_present "$WRITER_MARKER" "$target_platform" ||
+      die 'normalization unexpectedly published writer authorization'
+  fi
+}
+
 assert_authorization_consumers_managed() {
-  local actual id db_id app_id
+  local actual id db_id app_id container mounts
   actual=$(authorization_volume_consumers)
-  db_id=$(docker inspect "$db_container" --format '{{.Id}}' 2>/dev/null || true)
-  app_id=$(docker inspect "$app_container" --format '{{.Id}}' 2>/dev/null || true)
+  db_id=$(docker container inspect "$db_container" --format '{{.Id}}' 2>/dev/null || true)
+  app_id=$(docker container inspect "$app_container" --format '{{.Id}}' 2>/dev/null || true)
   while IFS= read -r id; do
     [[ -n "$id" ]] || continue
     [[ "$id" == "$db_id" || "$id" == "$app_id" ]] ||
       die 'candidate-authorization volume has an unexpected consumer'
+    if [[ "$id" == "$db_id" ]]; then
+      container=$db_container
+    else
+      container=$app_container
+    fi
+    mounts=$(docker inspect "$id" | jq -c --arg volume "$authorization_volume" '
+      [.[0].Mounts[] | select(.Name == $volume)]
+    ')
+    jq -e '
+      length == 1 and
+      .[0].Type == "volume" and
+      .[0].Destination == "/run/noosphere-pgvector" and
+      .[0].RW == false
+    ' >/dev/null <<< "$mounts" ||
+      die "$container must mount the candidate-authorization volume read-only at /run/noosphere-pgvector"
   done <<< "$actual"
 }
 
 assert_authorization_volume() {
-  local expected_fingerprint=${1:-} require_marker=${2:-true} target_platform=${3:-${platform:-}} labels fingerprint marker actual
+  local expected_fingerprint=${1:-} require_marker=${2:-true} target_platform=${3:-${platform:-}} labels fingerprint
   [[ $(docker volume inspect "$authorization_volume" --format '{{.Driver}}') == local ]] ||
     die "$authorization_volume must use the local volume driver"
   labels=$(docker volume inspect "$authorization_volume" --format '{{json .Labels}}')
@@ -552,13 +860,8 @@ assert_authorization_volume() {
   [[ -z "$expected_fingerprint" || "$fingerprint" == "$expected_fingerprint" ]] ||
     die 'candidate-authorization volume fingerprint changed'
   if [[ "$require_marker" == true ]]; then
-    [[ "$target_platform" =~ ^linux/(amd64|arm64)$ ]] || die 'authorization marker platform is invalid'
-    marker=$(docker run --rm --network none --platform "$target_platform" \
-      --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
-      --mount type=tmpfs,destination=/var/lib/postgresql/data \
-      --entrypoint sh "$CANDIDATE_IMAGE" -ceu "cat /authorization/$AUTH_MARKER") ||
-      die 'candidate-authorization marker is missing'
-    [[ "$marker" == "$CANDIDATE_IMAGE" ]] || die 'candidate-authorization marker names another image'
+    assert_authorization_marker_file "$AUTH_MARKER" "$target_platform"
+    assert_authorization_marker_content "$AUTH_MARKER" "$CANDIDATE_IMAGE" "$target_platform"
   fi
   printf '%s' "$fingerprint"
 }
@@ -566,6 +869,8 @@ assert_authorization_volume() {
 create_authorization_volume() {
   if docker volume inspect "$authorization_volume" >/dev/null 2>&1; then
     assert_authorization_volume '' false "${platform:-$(engine_platform)}" >/dev/null
+    [[ -z $(authorization_volume_consumers) ]] || die 'candidate-authorization volume has an unexpected consumer'
+    assert_pending_authorization_state "$CANDIDATE_IMAGE" "${platform:-$(engine_platform)}"
   else
     docker volume create --driver local \
       --label "$AUTH_DATA_LABEL_KEY=$volume" \
@@ -574,39 +879,27 @@ create_authorization_volume() {
       "$authorization_volume" >/dev/null
   fi
   [[ -z $(authorization_volume_consumers) ]] || die 'candidate-authorization volume has an unexpected consumer'
-  docker run --rm --network none --platform "${platform:-$(engine_platform)}" \
-    --label "$LABEL_KEY=$run_id" \
-    --mount "type=volume,source=$authorization_volume,target=/authorization" \
-    --mount type=tmpfs,destination=/var/lib/postgresql/data \
-    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-    "umask 077; rm -f /authorization/$WRITER_MARKER; printf '%s\\n' '$CANDIDATE_IMAGE' > /authorization/$AUTH_MARKER.tmp; sync; mv -f /authorization/$AUTH_MARKER.tmp /authorization/$AUTH_MARKER; sync"
+  remove_authorization_marker "$WRITER_MARKER"
+  publish_authorization_marker "$AUTH_MARKER" "$CANDIDATE_IMAGE"
   assert_authorization_volume '' true "${platform:-$(engine_platform)}"
 }
 
 authorize_writer_marker() {
   assert_authorization_volume '' true "${platform:-$(engine_platform)}" >/dev/null
   assert_authorization_consumers_managed
-  docker run --rm --network none --platform "${platform:-$(engine_platform)}" \
-    --label "$LABEL_KEY=$run_id" \
-    --mount "type=volume,source=$authorization_volume,target=/authorization" \
-    --mount type=tmpfs,destination=/var/lib/postgresql/data \
-    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-    "umask 077; printf '%s\\n' '$CANDIDATE_IMAGE' > /authorization/$WRITER_MARKER.tmp; sync; mv -f /authorization/$WRITER_MARKER.tmp /authorization/$WRITER_MARKER; sync"
+  publish_authorization_marker "$WRITER_MARKER" "$CANDIDATE_IMAGE"
+  assert_authorization_marker_file "$WRITER_MARKER"
+  assert_authorization_marker_content "$WRITER_MARKER" "$CANDIDATE_IMAGE"
 }
 
 revoke_writer_marker() {
   assert_authorization_volume '' true "${platform:-$(engine_platform)}" >/dev/null
   assert_authorization_consumers_managed
-  docker run --rm --network none --platform "${platform:-$(engine_platform)}" \
-    --label "$LABEL_KEY=$run_id" \
-    --mount "type=volume,source=$authorization_volume,target=/authorization" \
-    --mount type=tmpfs,destination=/var/lib/postgresql/data \
-    --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-    "rm -f /authorization/$WRITER_MARKER; sync"
+  remove_authorization_marker "$WRITER_MARKER"
 }
 
 assert_stale_authorization_volume() {
-  local expect_writer=${1:-true} labels marker writer_marker target_platform=${platform:-$(engine_platform)}
+  local expect_writer=${1:-true} labels writer_policy=absent target_platform=${platform:-$(engine_platform)}
   [[ $(docker volume inspect "$authorization_volume" --format '{{.Driver}}') == local ]] ||
     die "$authorization_volume must use the local volume driver"
   labels=$(docker volume inspect "$authorization_volume" --format '{{json .Labels}}')
@@ -615,23 +908,13 @@ assert_stale_authorization_volume() {
       .[$dataKey] == $data and .[$imageKey] == $image and
       (.[$runKey] | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$"))
     ' >/dev/null <<< "$labels" || die 'stale authorization volume has invalid ownership labels'
-  marker=$(docker run --rm --network none --platform "$target_platform" \
-    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
-    --mount type=tmpfs,destination=/var/lib/postgresql/data \
-    --entrypoint sh "$CANDIDATE_IMAGE" -ceu "cat /authorization/$AUTH_MARKER 2>/dev/null || true")
-  [[ "$marker" == "$SOURCE_IMAGE" ]] ||
-    die 'authorization volume is not safely rebound to the exact source image'
-  writer_marker=$(docker run --rm --network none --platform "$target_platform" \
-    --mount "type=volume,source=$authorization_volume,target=/authorization,readonly" \
-    --mount type=tmpfs,destination=/var/lib/postgresql/data \
-    --entrypoint sh "$CANDIDATE_IMAGE" -ceu "cat /authorization/$WRITER_MARKER 2>/dev/null || true")
-  if [[ "$expect_writer" == true ]]; then
-    [[ "$writer_marker" == "$SOURCE_IMAGE" ]] ||
-      die 'writer authorization is not safely rebound to the exact source image'
-  else
-    [[ -z "$writer_marker" ]] || die 'deferred source recovery unexpectedly published writer authorization'
-  fi
-  assert_authorization_consumers_managed
+  case "$expect_writer" in
+    true) writer_policy=required ;;
+    false) writer_policy=absent ;;
+    optional) writer_policy=optional ;;
+    *) die "invalid stale writer-marker policy: $expect_writer" ;;
+  esac
+  assert_legacy_authorization_state "$SOURCE_IMAGE" "$writer_policy" "$target_platform"
 }
 
 authorize_source_marker() {
@@ -646,25 +929,23 @@ authorize_source_marker() {
   labels=$(docker volume inspect "$authorization_volume" --format '{{json .Labels}}')
   if ! jq -e --arg run "$run_id" --arg runKey "$AUTH_RUN_LABEL_KEY" '.[$runKey] == $run' >/dev/null <<< "$labels"; then
     assert_stale_authorization_volume "$restart_app_after_switch"
+    if [[ "$restart_app_after_switch" == true ]]; then
+      normalize_legacy_authorization_state "$SOURCE_IMAGE" required
+    else
+      normalize_legacy_authorization_state "$SOURCE_IMAGE" absent
+    fi
     return 0
   fi
   assert_authorization_volume '' false "${platform:-$(engine_platform)}" >/dev/null
   assert_authorization_consumers_managed
   if [[ "$restart_app_after_switch" == true ]]; then
-    docker run --rm --network none --platform "${platform:-$(engine_platform)}" \
-      --label "$LABEL_KEY=$run_id" \
-      --mount "type=volume,source=$authorization_volume,target=/authorization" \
-      --mount type=tmpfs,destination=/var/lib/postgresql/data \
-      --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-      "umask 077; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$AUTH_MARKER.source-$run_id.tmp; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$WRITER_MARKER.source-$run_id.tmp; sync; mv -f /authorization/$AUTH_MARKER.source-$run_id.tmp /authorization/$AUTH_MARKER; mv -f /authorization/$WRITER_MARKER.source-$run_id.tmp /authorization/$WRITER_MARKER; sync"
+    publish_authorization_marker "$AUTH_MARKER" "$SOURCE_IMAGE"
+    publish_authorization_marker "$WRITER_MARKER" "$SOURCE_IMAGE"
   else
-    docker run --rm --network none --platform "${platform:-$(engine_platform)}" \
-      --label "$LABEL_KEY=$run_id" \
-      --mount "type=volume,source=$authorization_volume,target=/authorization" \
-      --mount type=tmpfs,destination=/var/lib/postgresql/data \
-      --entrypoint sh "$CANDIDATE_IMAGE" -ceu \
-      "umask 077; rm -f /authorization/$WRITER_MARKER; printf '%s\\n' '$SOURCE_IMAGE' > /authorization/$AUTH_MARKER.source-$run_id.tmp; sync; mv -f /authorization/$AUTH_MARKER.source-$run_id.tmp /authorization/$AUTH_MARKER; sync"
+    remove_authorization_marker "$WRITER_MARKER"
+    publish_authorization_marker "$AUTH_MARKER" "$SOURCE_IMAGE"
   fi
+  assert_stale_authorization_volume "$restart_app_after_switch"
 }
 
 engine_platform() {
@@ -762,9 +1043,40 @@ sql() {
   docker exec "$container" psql -XAtq -v ON_ERROR_STOP=1 -U noosphere -d "$database" -c "$query"
 }
 
+digest_role() {
+  local container=$1 role
+  role=$(docker exec "$container" psql -XAtq -v ON_ERROR_STOP=1 -U noosphere -d postgres -c "
+    SELECT CASE
+      WHEN EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles
+        WHERE rolname = 'noosphere_migrator' AND rolcanlogin AND NOT rolsuper
+      ) THEN 'noosphere_migrator'
+      WHEN EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'noosphere_migrator'
+      ) THEN 'invalid-migrator'
+      WHEN EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'noosphere' AND rolcanlogin
+      ) THEN 'noosphere'
+      ELSE 'missing'
+    END;
+  ") || die "could not select a database digest role in $container"
+  case "$role" in
+    noosphere_migrator|noosphere) printf '%s\n' "$role" ;;
+    invalid-migrator) die "noosphere_migrator is not a login-capable non-superuser in $container" ;;
+    *) die "no supported database digest role exists in $container" ;;
+  esac
+}
+
+migrator_sql() {
+  local container=$1 database=$2 query=$3 role
+  role=$(digest_role "$container")
+  docker exec "$container" psql -XAtq -v ON_ERROR_STOP=1 -U "$role" -d "$database" -c "$query"
+}
+
 assert_cluster_vector_absent() {
   local container=$1 db installed databases probe=$probe_database
-  [[ -n "$probe" && -f "$journal" ]] || die 'template0 probe requires a durable journal claim'
+  [[ -n "$probe" ]] && path_present "$journal" ||
+    die 'template0 probe requires a durable journal claim'
   [[ $(jq -er '.probeDatabase' "$journal") == "$probe" ]] ||
     die 'template0 probe does not match durable journal ownership'
 
@@ -795,25 +1107,196 @@ assert_cluster_vector_absent() {
     die 'cannot verify vector absence in a non-connectable database'
 }
 
+# Version 2 inventories every ordinary user table and sequence. SQL fragments
+# are generated by PostgreSQL with pg_catalog.format('%I', ...), transported as
+# base64, and executed as the non-superuser production migration owner. A
+# released v1.11 cluster does not have that role yet, so source inspection falls
+# back to its legacy owner only while the migration role is absent. Structured
+# identifiers keep that compatibility path out of COPY TO PROGRAM territory.
+_digest_psql() {
+  local container=$1 query=$2 role
+  role=$(digest_role "$container")
+  docker exec "$container" psql -XAtq -v ON_ERROR_STOP=1 -U "$role" -d noosphere -c "$query"
+}
+
+_digest_object_signature() {
+  local container=$1 query=$2 signature
+  if ! signature=$(_digest_psql "$container" "$query" | sha256sum | awk '{print $1}'); then
+    return 1
+  fi
+  [[ "$signature" =~ ^[a-f0-9]{64}$ ]] || return 1
+  printf '%s\n' "$signature"
+}
+
+_assert_supported_data_objects() {
+  local container=$1 unsupported large_objects
+  if ! unsupported=$(_digest_psql "$container" "
+    SET search_path = pg_catalog;
+    SELECT pg_catalog.string_agg(pg_catalog.format('%I.%I', n.nspname, c.relname), ', ' ORDER BY n.nspname, c.relname)
+    FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname <> 'information_schema'
+      AND n.nspname !~ '^pg_'
+      AND c.relkind IN ('m', 'f', 'p');
+  " 2>/dev/null); then
+    die "normalized_dump: failed to inspect unsupported data objects in $container"
+  fi
+  [[ -z "$unsupported" ]] ||
+    die "normalized_dump: materialized-view, foreign-table, or partitioned-table data is unsupported: $unsupported"
+
+  if ! large_objects=$(_digest_psql "$container" "
+    SET search_path = pg_catalog;
+    SELECT count(*) FROM pg_catalog.pg_largeobject_metadata;
+  " 2>/dev/null); then
+    die "normalized_dump: failed to inspect large objects in $container"
+  fi
+  [[ "$large_objects" == 0 ]] ||
+    die 'normalized_dump: large-object data is unsupported'
+}
+
+_collect_data_inventory() {
+  local container=$1
+  _digest_psql "$container" "
+    SET search_path = pg_catalog;
+    WITH primary_keys AS (
+      SELECT i.indrelid,
+             pg_catalog.string_agg(pg_catalog.format('%I', a.attname), ', ' ORDER BY key.ordinality) AS order_sql
+      FROM pg_catalog.pg_index i
+      CROSS JOIN LATERAL pg_catalog.unnest(i.indkey) WITH ORDINALITY AS key(attnum, ordinality)
+      JOIN pg_catalog.pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = key.attnum
+      WHERE i.indisprimary
+        AND key.ordinality <= i.indnkeyatts
+      GROUP BY i.indrelid
+    )
+    SELECT CASE c.relkind WHEN 'r' THEN 'table' ELSE 'sequence' END || '|' ||
+           pg_catalog.replace(pg_catalog.encode(pg_catalog.convert_to(n.nspname, 'UTF8'), 'base64'), E'\\n', '') || '|' ||
+           pg_catalog.replace(pg_catalog.encode(pg_catalog.convert_to(c.relname, 'UTF8'), 'base64'), E'\\n', '') || '|' ||
+           pg_catalog.replace(pg_catalog.encode(pg_catalog.convert_to(pg_catalog.format('%I.%I', n.nspname, c.relname), 'UTF8'), 'base64'), E'\\n', '') || '|' ||
+           pg_catalog.replace(pg_catalog.encode(pg_catalog.convert_to(COALESCE(pk.order_sql, ''), 'UTF8'), 'base64'), E'\\n', '')
+    FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    LEFT JOIN primary_keys pk ON pk.indrelid = c.oid
+    WHERE n.nspname <> 'information_schema'
+      AND n.nspname !~ '^pg_'
+      AND c.relkind IN ('r', 'S')
+    ORDER BY CASE c.relkind WHEN 'r' THEN 0 ELSE 1 END, n.nspname, c.relname;
+  "
+}
+
+_decode_base64() {
+  local encoded=$1 decoded
+  if ! decoded=$(printf '%s' "$encoded" | base64 -d); then
+    die 'normalized_dump: invalid base64 inventory field'
+  fi
+  printf '%s' "$decoded"
+}
+
 normalized_dump() {
-  local container=$1 section=$2
-  docker exec "$container" pg_dump -U noosphere -d noosphere "$section" --no-owner --no-privileges --inserts 2>/dev/null |
-    sed -E '/^\\(un)?restrict /d'
+  local container=$1 section=$2 role
+  local inventory kind schema_b64 name_b64 qualified_b64 order_b64 qualified_sql order_sql object_signature
+  if [[ "$section" == "--schema-only" ]]; then
+    role=$(digest_role "$container")
+    if ! docker exec "$container" pg_dump -U "$role" -d noosphere "$section" --no-owner --no-privileges --inserts 2>/dev/null |
+      sed -E '/^\\(un)?restrict /d'; then
+      die "normalized_dump: schema producer failed for $container"
+    fi
+    return 0
+  fi
+  [[ "$section" == "--data-only" ]] || die "normalized_dump: unsupported section $section"
+
+  _assert_supported_data_objects "$container"
+  if ! inventory=$(_collect_data_inventory "$container" 2>/dev/null); then
+    die "normalized_dump: failed to inventory data objects in $container"
+  fi
+
+  printf 'noosphere-data-signature-v%s\n' "$DATA_SIGNATURE_VERSION"
+  while IFS='|' read -r kind schema_b64 name_b64 qualified_b64 order_b64; do
+    [[ -n "$kind" ]] || continue
+    [[ "$kind" == table || "$kind" == sequence ]] ||
+      die "normalized_dump: invalid inventory kind $kind"
+    qualified_sql=$(_decode_base64 "$qualified_b64")
+    if [[ "$kind" == table ]]; then
+      [[ -n "$order_b64" ]] ||
+        die "normalized_dump: no primary key on encoded table ${schema_b64}:${name_b64}"
+      order_sql=$(_decode_base64 "$order_b64")
+      if ! object_signature=$(_digest_object_signature "$container" "
+        SET search_path = pg_catalog;
+        SET row_security = off;
+        COPY (SELECT * FROM $qualified_sql ORDER BY $order_sql) TO STDOUT;
+      "); then
+        die "normalized_dump: table producer failed for encoded table ${schema_b64}:${name_b64}"
+      fi
+    else
+      if ! object_signature=$(_digest_object_signature "$container" "
+        SET search_path = pg_catalog;
+        SET row_security = off;
+        COPY (SELECT last_value, is_called FROM $qualified_sql) TO STDOUT;
+      "); then
+        die "normalized_dump: sequence producer failed for encoded sequence ${schema_b64}:${name_b64}"
+      fi
+    fi
+    printf '===%s:%s:%s:%s===\n' "$kind" "$schema_b64" "$name_b64" "$object_signature"
+  done <<< "$inventory"
+}
+
+legacy_normalized_dump() {
+  local container=$1 section=$2 role
+  role=$(digest_role "$container")
+  if ! docker exec "$container" pg_dump -U "$role" -d noosphere "$section" --no-owner --no-privileges --inserts 2>/dev/null |
+    sed -E '/^\\(un)?restrict /d'; then
+    die "legacy_normalized_dump: producer failed for $container"
+  fi
 }
 
 data_signature() {
-  normalized_dump "$1" --data-only | sha256sum | awk '{print $1}'
+  local signature
+  if ! signature=$(normalized_dump "$1" --data-only | sha256sum | awk '{print $1}'); then
+    die "data_signature: producer failed for $1"
+  fi
+  [[ "$signature" =~ ^[a-f0-9]{64}$ ]] || die 'data_signature: invalid digest output'
+  printf '%s\n' "$signature"
+}
+
+legacy_data_signature() {
+  local signature
+  if ! signature=$(legacy_normalized_dump "$1" --data-only | sha256sum | awk '{print $1}'); then
+    die "legacy_data_signature: producer failed for $1"
+  fi
+  [[ "$signature" =~ ^[a-f0-9]{64}$ ]] || die 'legacy_data_signature: invalid digest output'
+  printf '%s\n' "$signature"
+}
+
+data_signature_for_version() {
+  local container=$1 version=$2
+  case "$version" in
+    1) legacy_data_signature "$container" ;;
+    "$DATA_SIGNATURE_VERSION") data_signature "$container" ;;
+    *) die "unsupported data signature version: $version" ;;
+  esac
 }
 
 schema_signature() {
-  normalized_dump "$1" --schema-only | sha256sum | awk '{print $1}'
+  local signature
+  if ! signature=$(normalized_dump "$1" --schema-only | sha256sum | awk '{print $1}'); then
+    die "schema_signature: producer failed for $1"
+  fi
+  [[ "$signature" =~ ^[a-f0-9]{64}$ ]] || die 'schema_signature: invalid digest output'
+  printf '%s\n' "$signature"
 }
 
 migration_signature() {
-  sql "$1" noosphere "
+  migrator_sql "$1" noosphere "
     SELECT migration_name || '|' || checksum || '|' || applied_steps_count || '|' ||
            coalesce(finished_at::text, '<null>') || '|' || coalesce(rolled_back_at::text, '<null>')
     FROM \"_prisma_migrations\" ORDER BY migration_name;" | sha256sum | awk '{print $1}'
+}
+
+create_logical_backup() {
+  local container=$1 output=$2 role
+  role=$(digest_role "$container")
+  if ! docker exec "$container" pg_dump -U "$role" -d noosphere -Fc --no-owner --no-privileges > "$output"; then
+    die "logical backup producer failed for $container"
+  fi
 }
 
 database_identity() {
@@ -870,11 +1353,11 @@ assert_image_identity() {
 }
 
 assert_baseline() {
-  local container=$1 expected_volume=$2 expected_data=$3 expected_schema=$4 expected_migrations=$5 expected_database=$6
+  local container=$1 expected_volume=$2 expected_data=$3 expected_schema=$4 expected_migrations=$5 expected_database=$6 data_version=$7
   assert_volume_contract "$expected_volume" >/dev/null
   assert_volume_consumers "$container"
   assert_container_volume_mount "$container"
-  [[ $(data_signature "$container") == "$expected_data" ]] || die "$container data digest changed"
+  [[ $(data_signature_for_version "$container" "$data_version") == "$expected_data" ]] || die "$container data digest changed"
   [[ $(schema_signature "$container") == "$expected_schema" ]] || die "$container schema digest changed"
   [[ $(migration_signature "$container") == "$expected_migrations" ]] || die "$container migration history changed"
   [[ $(database_identity "$container") == "$expected_database" ]] || die "$container database identity changed"
@@ -899,6 +1382,83 @@ stop_remove() {
   assert_volume_consumers
 }
 
+cleanup_rehearsal_resources() {
+  local restore_container=$1 schema_reparse_container=$2 restore_volume=$3 schema_reparse_volume=$4
+  local current labels consumers existing names state cleanup_failed=false
+
+  # Authenticate every resource before teardown, then attempt every cleanup
+  # step even if an earlier Docker operation fails. The aggregate failure still
+  # reaches the ERR trap, but the second container/volume is not skipped.
+  for current in "$restore_container" "$schema_reparse_container"; do
+    if ! labels=$(docker inspect "$current" --format '{{json .Config.Labels}}' 2>/dev/null); then
+      if ! existing=$(docker ps -aq --no-trunc --filter "name=^/${current}$"); then
+        printf '[pgvector-switch] ERROR: could not determine whether rehearsal container exists: %s\n' "$current" >&2
+        cleanup_failed=true
+      elif [[ -n "$existing" ]]; then
+        printf '[pgvector-switch] ERROR: could not inspect rehearsal container: %s\n' "$current" >&2
+        cleanup_failed=true
+      fi
+      continue
+    fi
+    if ! jq -e --arg key "$LABEL_KEY" --arg run "$run_id" '.[$key] == $run' >/dev/null <<< "$labels"; then
+      printf '[pgvector-switch] ERROR: refusing unlabelled container removal: %s\n' "$current" >&2
+      cleanup_failed=true
+      continue
+    fi
+    if ! state=$(docker inspect "$current" --format '{{.State.Running}}' 2>/dev/null); then
+      printf '[pgvector-switch] ERROR: could not inspect rehearsal container state: %s\n' "$current" >&2
+      cleanup_failed=true
+      continue
+    fi
+    if [[ "$state" == true ]] && ! docker stop --time 60 "$current" >/dev/null; then
+      printf '[pgvector-switch] ERROR: could not stop rehearsal container: %s\n' "$current" >&2
+      cleanup_failed=true
+    fi
+    if ! docker rm "$current" >/dev/null; then
+      printf '[pgvector-switch] ERROR: could not remove rehearsal container: %s\n' "$current" >&2
+      cleanup_failed=true
+    fi
+  done
+
+  for current in "$restore_volume" "$schema_reparse_volume"; do
+    if ! labels=$(docker volume inspect "$current" --format '{{json .Labels}}' 2>/dev/null); then
+      if ! names=$(docker volume ls -q --filter "name=$current"); then
+        printf '[pgvector-switch] ERROR: could not determine whether rehearsal volume exists: %s\n' "$current" >&2
+        cleanup_failed=true
+      else
+        for existing in $names; do
+          if [[ "$existing" == "$current" ]]; then
+            printf '[pgvector-switch] ERROR: could not inspect rehearsal volume: %s\n' "$current" >&2
+            cleanup_failed=true
+          fi
+        done
+      fi
+      continue
+    fi
+    if ! jq -e --arg key "$LABEL_KEY" --arg run "$run_id" '.[$key] == $run' >/dev/null <<< "$labels"; then
+      printf '[pgvector-switch] ERROR: refusing unlabelled volume removal: %s\n' "$current" >&2
+      cleanup_failed=true
+      continue
+    fi
+    if ! consumers=$(docker ps -aq --no-trunc --filter "volume=$current"); then
+      printf '[pgvector-switch] ERROR: could not inspect rehearsal volume consumers: %s\n' "$current" >&2
+      cleanup_failed=true
+    elif [[ -n "$consumers" ]]; then
+      printf '[pgvector-switch] ERROR: refusing removal of in-use rehearsal volume: %s\n' "$current" >&2
+      cleanup_failed=true
+    fi
+    # Docker's non-force removal remains the final consumer safety gate. Try it
+    # even when the diagnostic consumer query failed so later safe teardown is
+    # never skipped because of an earlier daemon/API error.
+    if ! docker volume rm "$current" >/dev/null; then
+      printf '[pgvector-switch] ERROR: could not remove rehearsal volume: %s\n' "$current" >&2
+      cleanup_failed=true
+    fi
+  done
+
+  [[ "$cleanup_failed" == false ]]
+}
+
 compose_up_db() {
   local base=$1 override=${2:-}
   compose_args "$base"
@@ -913,7 +1473,7 @@ restart_app() {
   compose_args "$compose_file"
   docker compose "${COMPOSE_ARGS[@]}" up -d --no-deps --force-recreate app >/dev/null
   for _ in $(seq 1 45); do
-    status=$(docker inspect "$app_container" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}')
+    status=$(docker container inspect "$app_container" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}')
     [[ "$status" == healthy || "$status" == running ]] && return 0
     sleep 2
   done
@@ -923,6 +1483,13 @@ restart_app() {
 load_journal_baseline() {
   expected_volume=$(jq -er '.volumeFingerprint' "$journal")
   expected_data=$(jq -r '.dataSignature // empty' "$journal")
+  if jq -e 'has("dataSignatureVersion")' "$journal" >/dev/null; then
+    expected_data_version=$(jq -er '.dataSignatureVersion |
+      select(type == "number" and (. == 1 or . == 2))' "$journal") ||
+      die 'journal contains an invalid data signature version'
+  else
+    expected_data_version=1
+  fi
   expected_schema=$(jq -r '.schemaSignature // empty' "$journal")
   expected_migrations=$(jq -r '.migrationSignature // empty' "$journal")
   expected_database=$(jq -r '.databaseIdentity // empty' "$journal")
@@ -938,7 +1505,7 @@ attempt_source_recovery() (
   trap - ERR
   set -Eeuo pipefail
   load_journal_baseline
-  local maintenance="noosphere-a2b-source-${run_id}" current staged recovery_restore_volume labels
+  local maintenance="noosphere-a2b-source-${run_id}" current staged recovery_restore_volume recovery_schema_reparse_volume app_state
 
   # `recovered` is the durable rollback commit boundary. The source database,
   # marker, and desired state were already authenticated before this phase was
@@ -946,62 +1513,50 @@ attempt_source_recovery() (
   # resume verifies identities only and must never compare stale pre-restart
   # content signatures or restore the old backup.
   if [[ "$journal_phase" == recovered ]]; then
-    if docker inspect "$app_container" >/dev/null 2>&1 &&
-       [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]; then
-      docker stop --time 60 "$app_container" >/dev/null
-    fi
-    [[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]] ||
+    stop_app_writer_for_recovery
+    [[ $(docker container inspect "$db_container" --format '{{.State.Running}}') == true ]] ||
       die 'recovered source database is not running'
     assert_volume_contract "$expected_volume" >/dev/null
     assert_volume_consumers "$db_container"
     assert_container_volume_mount "$db_container"
     assert_image_identity "$db_container" "$SOURCE_IMAGE" source false
     assert_compose_authorization_gate "$SOURCE_IMAGE"
+    authorize_source_marker
     assert_stale_authorization_volume "$restart_app_after_switch"
     if [[ "$restart_app_after_switch" == true ]]; then
       restart_app
       phase_checkpoint recovery-writer-restarted || return $?
-    elif docker inspect "$app_container" >/dev/null 2>&1; then
-      [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
-        die 'deferred source app writer restarted unexpectedly'
+    else
+      assert_app_writer_not_running 'deferred source app writer restarted unexpectedly'
     fi
     return 0
   fi
 
-  if docker inspect "$app_container" >/dev/null 2>&1; then
-    if [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]; then
-      if ! docker stop --time 60 "$app_container" >/dev/null; then
-        docker kill "$app_container" >/dev/null 2>&1 || true
-      fi
-    fi
-    [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
-      die 'app writer remained running at the recovery boundary'
-  fi
+  stop_app_writer_for_recovery
   phase_checkpoint recovery-writer-stopped || return $?
-  if docker inspect "$db_container" >/dev/null 2>&1; then
+  if docker container inspect "$db_container" >/dev/null 2>&1; then
     assert_volume_contract "$expected_volume" >/dev/null
     assert_volume_consumers "$db_container"
     assert_container_volume_mount "$db_container"
     docker stop --time 60 "$db_container" >/dev/null
     docker rm "$db_container" >/dev/null
   fi
+  recovery_restore_volume="noosphere_a2b_restore_${run_id//-/_}"
+  recovery_schema_reparse_volume="noosphere_a2b_schema_reparse_${run_id//-/_}"
+  cleanup_rehearsal_resources \
+    "noosphere-a2b-restore-$run_id" \
+    "noosphere-a2b-schema-reparse-$run_id" \
+    "$recovery_restore_volume" \
+    "$recovery_schema_reparse_volume" ||
+    die 'restore-rehearsal cleanup failed during source recovery'
   for current in $(docker ps -aq --filter "label=$LABEL_KEY=$run_id"); do
     docker stop --time 60 "$current" >/dev/null 2>&1
     docker rm "$current" >/dev/null 2>&1
   done
-  recovery_restore_volume="noosphere_a2b_restore_${run_id//-/_}"
-  if docker volume inspect "$recovery_restore_volume" >/dev/null 2>&1; then
-    labels=$(docker volume inspect "$recovery_restore_volume" --format '{{json .Labels}}')
-    jq -e --arg key "$LABEL_KEY" --arg run "$run_id" '.[$key] == $run' >/dev/null <<< "$labels" ||
-      die 'restore-test volume has invalid recovery ownership'
-    [[ -z $(docker ps -aq --no-trunc --filter "volume=$recovery_restore_volume") ]] ||
-      die 'restore-test volume still has a recovery consumer'
-    docker volume rm "$recovery_restore_volume" >/dev/null
-  fi
   start_maintenance "$maintenance" "$SOURCE_IMAGE"
   assert_image_identity "$maintenance" "$SOURCE_IMAGE" source
   if [[ -n "${expected_data:-}" ]]; then
-    assert_baseline "$maintenance" "$expected_volume" "$expected_data" "$expected_schema" "$expected_migrations" "$expected_database"
+    assert_baseline "$maintenance" "$expected_volume" "$expected_data" "$expected_schema" "$expected_migrations" "$expected_database" "$expected_data_version"
   fi
   stop_remove "$maintenance"
   # Rebind the shared authorization marker before starting the restored
@@ -1011,7 +1566,7 @@ attempt_source_recovery() (
   compose_up_db "$original_compose" "$source_override"
   assert_image_identity "$db_container" "$SOURCE_IMAGE" source
   if [[ -n "${expected_data:-}" ]]; then
-    assert_baseline "$db_container" "$expected_volume" "$expected_data" "$expected_schema" "$expected_migrations" "$expected_database"
+    assert_baseline "$db_container" "$expected_volume" "$expected_data" "$expected_schema" "$expected_migrations" "$expected_database" "$expected_data_version"
   fi
   # Restore the source desired state if the interruption happened after the
   # candidate Compose file was promoted.
@@ -1024,13 +1579,14 @@ attempt_source_recovery() (
   if [[ "$restart_app_after_switch" == true ]]; then
     restart_app
     if [[ "$app_was_running" == true ]]; then
-      [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]] ||
+      app_state=$(container_running_state "$app_container") ||
+        die 'could not classify the source app after verified recovery'
+      [[ "$app_state" == true ]] ||
         die 'source app writer did not restart after verified recovery'
     fi
     phase_checkpoint recovery-writer-restarted || return $?
-  elif docker inspect "$app_container" >/dev/null 2>&1; then
-    [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
-      die 'deferred source app writer restarted unexpectedly'
+  else
+    assert_app_writer_not_running 'deferred source app writer restarted unexpectedly'
   fi
 )
 
@@ -1058,7 +1614,10 @@ recover_source() {
 
 on_error() {
   local line=$1 status=$2 durable_phase=$journal_phase
-  [[ "$operation_complete" == true || "$rollback_active" == true || ! -f "$journal" ]] && exit "$status"
+  if [[ "$operation_complete" == true || "$rollback_active" == true ]] || ! path_present "$journal"; then
+    exit "$status"
+  fi
+  [[ "$fail_closed_on_die" == true ]] || exit "$status"
   durable_phase=$(jq -r '.phase // empty' "$journal" 2>/dev/null || printf '%s' "$journal_phase")
   if [[ "$durable_phase" == complete ]]; then
     docker stop --time 60 "$app_container" >/dev/null 2>&1 || true
@@ -1078,33 +1637,38 @@ on_error() {
   recover_source "failure near line $line (exit $status)"
 }
 trap 'on_error "$LINENO" "$?"' ERR
-fail_closed_on_die=true
 
-if [[ -f "$journal" ]]; then
+if path_present "$journal"; then
   validate_journal
   if [[ "$journal_mode" == switch ]]; then
     [[ "$mode" == switch || "$mode" == authorize-writer ]] ||
       die 'switch evidence cannot be used by a new-install operation'
     if [[ "$journal_phase" != complete ]]; then
       [[ "$mode" == switch ]] || die 'writer authorization requires complete switch evidence'
+      fail_closed_on_die=true
       recover_source "incomplete prior journal phase $journal_phase"
     fi
     assert_candidate_authorization_gate
+    current_app_state=$(container_running_state "$app_container") ||
+      die 'could not classify the app container during completed-evidence verification'
     current_app_was_running=false
-    if docker inspect "$app_container" >/dev/null 2>&1; then
-      current_app_was_running=$(docker inspect "$app_container" --format '{{.State.Running}}')
-    fi
-    [[ "$mode" != authorize-writer || "$current_app_was_running" == false ]] ||
+    [[ "$current_app_state" != true ]] || current_app_was_running=true
+    [[ "$mode" != authorize-writer || "$current_app_state" != true ]] ||
       die 'writer authorization requires the app container to remain stopped'
-    docker stop --time 60 "$app_container" >/dev/null 2>&1 || true
-    if docker inspect "$app_container" >/dev/null 2>&1; then
-      [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
-        die 'app writer remained running during completed-evidence verification'
+    fail_closed_on_die=true
+    if [[ "$current_app_state" != absent ]]; then
+      docker container stop --time 60 "$app_container" >/dev/null 2>&1 ||
+        die 'could not stop the app writer during completed-evidence verification'
     fi
+    post_stop_app_state=$(container_running_state "$app_container") ||
+      die 'could not verify the app writer after completed-evidence stop'
+    [[ "$post_stop_app_state" != true ]] ||
+      die 'app writer remained running during completed-evidence verification'
+    normalize_legacy_authorization_state "$CANDIDATE_IMAGE" optional "$(jq -er '.platform' "$journal")"
     revoke_writer_marker
     load_journal_baseline
     assert_volume_contract "$expected_volume" >/dev/null
-    [[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]] || die 'completed evidence exists but database is not running'
+    [[ $(docker container inspect "$db_container" --format '{{.State.Running}}') == true ]] || die 'completed evidence exists but database is not running'
     assert_image_identity "$db_container" "$CANDIDATE_IMAGE" candidate false
     assert_volume_consumers "$db_container"
     assert_container_volume_mount "$db_container"
@@ -1123,20 +1687,25 @@ if [[ -f "$journal" ]]; then
     [[ "$mode" == switch || "$mode" == record-new-install || "$mode" == authorize-writer ]] ||
       die 'completed new-install evidence cannot be used by this operation'
     assert_candidate_authorization_gate
+    current_app_state=$(container_running_state "$app_container") ||
+      die 'could not classify the app container during completed new-install verification'
     current_app_was_running=false
-    if docker inspect "$app_container" >/dev/null 2>&1; then
-      current_app_was_running=$(docker inspect "$app_container" --format '{{.State.Running}}')
-    fi
-    [[ "$mode" != authorize-writer || "$current_app_was_running" == false ]] ||
+    [[ "$current_app_state" != true ]] || current_app_was_running=true
+    [[ "$mode" != authorize-writer || "$current_app_state" != true ]] ||
       die 'writer authorization requires the app container to remain stopped'
     [[ "$mode" != switch ]] || app_was_running=$current_app_was_running
-    docker stop --time 60 "$app_container" >/dev/null 2>&1 || true
-    if docker inspect "$app_container" >/dev/null 2>&1; then
-      [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
-        die 'app writer remained running during completed new-install verification'
+    fail_closed_on_die=true
+    if [[ "$current_app_state" != absent ]]; then
+      docker container stop --time 60 "$app_container" >/dev/null 2>&1 ||
+        die 'could not stop the app writer during completed new-install verification'
     fi
+    post_stop_app_state=$(container_running_state "$app_container") ||
+      die 'could not verify the app writer after completed new-install stop'
+    [[ "$post_stop_app_state" != true ]] ||
+      die 'app writer remained running during completed new-install verification'
+    normalize_legacy_authorization_state "$CANDIDATE_IMAGE" optional "$(jq -er '.platform' "$journal")"
     revoke_writer_marker
-    [[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]] || die 'completed new-install evidence exists but database is not running'
+    [[ $(docker container inspect "$db_container" --format '{{.State.Running}}') == true ]] || die 'completed new-install evidence exists but database is not running'
     assert_image_identity "$db_container" "$CANDIDATE_IMAGE" candidate false
     assert_volume_consumers "$db_container"
     assert_container_volume_mount "$db_container"
@@ -1155,9 +1724,13 @@ fi
 
 if [[ "$mode" == prepare-new-install ]]; then
   assert_candidate_authorization_gate
-  if [[ ! -f "$journal" ]]; then
-    docker inspect "$db_container" >/dev/null 2>&1 && die 'new-install database container already exists without a durable claim'
-    docker inspect "$app_container" >/dev/null 2>&1 && die 'new-install app container already exists without a durable claim'
+  if ! path_present "$journal"; then
+    db_state=$(container_running_state "$db_container") ||
+      die 'could not classify the database container before the new-install claim'
+    [[ "$db_state" == absent ]] || die 'new-install database container already exists without a durable claim'
+    initial_app_state=$(container_running_state "$app_container") ||
+      die 'could not classify the app container before the new-install claim'
+    [[ "$initial_app_state" == absent ]] || die 'new-install app container already exists without a durable claim'
     docker volume inspect "$volume" >/dev/null 2>&1 && die 'PostgreSQL volume already exists without a durable new-install claim'
     docker volume inspect "$authorization_volume" >/dev/null 2>&1 &&
       die 'candidate-authorization volume already exists without a durable new-install claim'
@@ -1178,6 +1751,7 @@ if [[ "$mode" == prepare-new-install ]]; then
         platform:$platform,dockerEngineId:$dockerEngineId,dockerEndpoint:$dockerEndpoint,
         probeDatabase:$probeDatabase,composeFile:$composeFile,dbService:$dbService,
         dbContainer:$dbContainer,appContainer:$appContainer}' > "$temp"
+    fail_closed_on_die=true
     write_json_atomic "$journal" "$temp"
     rm -f "$temp"
     validate_journal
@@ -1189,6 +1763,7 @@ if [[ "$mode" == prepare-new-install ]]; then
     die "new-install preparation cannot resume phase $journal_phase"
   run_id=$(jq -er '.runId' "$journal")
   if [[ "$journal_phase" == claim-created ]]; then
+    fail_closed_on_die=true
     if ! docker volume inspect "$volume" >/dev/null 2>&1; then
       docker volume create --driver local \
         --label "$NEW_INSTALL_LABEL_KEY=$run_id" \
@@ -1211,19 +1786,20 @@ if [[ "$mode" == prepare-new-install ]]; then
     phase_checkpoint provisioning
   fi
 
-  if docker inspect "$app_container" >/dev/null 2>&1; then
-    [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
-      die 'app writer must remain stopped until new-install evidence is complete'
-  fi
-  if docker inspect "$db_container" >/dev/null 2>&1; then
-    [[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]] ||
-      die 'prepared new-install database container exists but is not running'
-    assert_image_identity "$db_container" "$CANDIDATE_IMAGE" candidate
-    assert_volume_consumers "$db_container"
-    assert_container_volume_mount "$db_container"
-  else
-    assert_volume_consumers
-  fi
+  fail_closed_on_die=true
+  assert_app_writer_not_running 'app writer must remain stopped until new-install evidence is complete'
+  db_state=$(container_running_state "$db_container") ||
+    die 'could not classify the prepared new-install database container'
+  case "$db_state" in
+    true)
+      assert_image_identity "$db_container" "$CANDIDATE_IMAGE" candidate
+      assert_volume_consumers "$db_container"
+      assert_container_volume_mount "$db_container"
+      ;;
+    absent) assert_volume_consumers ;;
+    false) die 'prepared new-install database container exists but is not running' ;;
+    *) die 'prepared new-install database container has an unsupported state' ;;
+  esac
   operation_complete=true
   trap - ERR
   log "new-install volume claim prepared: $journal"
@@ -1232,13 +1808,14 @@ fi
 
 if [[ "$mode" == record-new-install ]]; then
   assert_candidate_authorization_gate
-  [[ -f "$journal" && "$journal_mode" == new-install && "$journal_phase" == provisioning ]] ||
+  path_present "$journal" &&
+    [[ "$journal_mode" == new-install && "$journal_phase" == provisioning ]] ||
     die 'new-install finalization requires prepared provisioning evidence'
-  if docker inspect "$app_container" >/dev/null 2>&1; then
-    [[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
-      die 'app writer must remain stopped until new-install evidence is complete'
-  fi
-  [[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]] || die 'new-install database is not running'
+  fail_closed_on_die=true
+  assert_app_writer_not_running 'app writer must remain stopped until new-install evidence is complete'
+  db_state=$(container_running_state "$db_container") ||
+    die 'could not classify the new-install database during finalization'
+  [[ "$db_state" == true ]] || die 'new-install database is not running'
   platform=$(jq -er '.platform' "$journal")
   expected_volume=$(jq -er '.volumeFingerprint' "$journal")
   assert_new_install_volume_claim "$expected_volume" >/dev/null
@@ -1250,9 +1827,11 @@ if [[ "$mode" == record-new-install ]]; then
   migrations=$(migration_signature "$db_container")
   database=$(database_identity "$db_container")
   temp=$(mktemp "$backup_dir/.new-install.XXXXXX")
-  jq --arg phase complete --arg dataSignature "$data" --arg schemaSignature "$schema" \
+  jq --arg phase complete --argjson dataSignatureVersion "$DATA_SIGNATURE_VERSION" \
+    --arg dataSignature "$data" --arg schemaSignature "$schema" \
     --arg migrationSignature "$migrations" --arg databaseIdentity "$database" \
-    '.phase=$phase | .dataSignature=$dataSignature | .schemaSignature=$schemaSignature |
+    '.phase=$phase | .dataSignatureVersion=$dataSignatureVersion |
+      .dataSignature=$dataSignature | .schemaSignature=$schemaSignature |
       .migrationSignature=$migrationSignature | .databaseIdentity=$databaseIdentity' "$journal" > "$temp"
   write_json_atomic "$journal" "$temp"
   rm -f "$temp"
@@ -1267,10 +1846,11 @@ fi
 
 [[ "$mode" == switch ]] || die "unsupported operation mode: $mode"
 
-[[ ! -f "$journal" ]] || die 'completed evidence exists; current state should have returned earlier'
-[[ $(docker inspect "$db_container" --format '{{.State.Running}}') == true ]] || die 'source database must be running'
-docker inspect "$app_container" >/dev/null 2>&1 || die 'managed app container must exist before the switch'
-app_was_running=$(docker inspect "$app_container" --format '{{.State.Running}}')
+! path_present "$journal" || die 'completed evidence exists; current state should have returned earlier'
+[[ $(docker container inspect "$db_container" --format '{{.State.Running}}') == true ]] || die 'source database must be running'
+app_was_running=$(container_running_state "$app_container") ||
+  die 'could not classify the managed app container before the switch'
+[[ "$app_was_running" != absent ]] || die 'managed app container must exist before the switch'
 [[ "$app_was_running" == true || "$app_was_running" == false ]] || die 'app container has an invalid running state'
 platform=${platform:-$(container_platform "$db_container")}
 [[ "$platform" =~ ^linux/(amd64|arm64)$ ]] || die "unsupported platform: $platform"
@@ -1280,12 +1860,20 @@ expected_volume=$(assert_volume_contract)
 assert_volume_consumers "$db_container"
 assert_candidate_authorization_gate
 stale_authorization_volume=false
+stale_authorization_fingerprint=''
 if docker volume inspect "$authorization_volume" >/dev/null 2>&1; then
   # A stopped managed writer may legitimately be resuming an installer-owned
   # deferred recovery, where the source gate is present but writer permission
   # intentionally is not. Bind the stale-marker expectation to observed app
   # state instead of accidentally re-authorizing it here.
   assert_stale_authorization_volume "$app_was_running"
+  stale_authorization_fingerprint=$(authorization_volume_fingerprint)
+  fail_closed_on_die=true
+  if [[ "$app_was_running" == true ]]; then
+    normalize_legacy_authorization_state "$SOURCE_IMAGE" required
+  else
+    normalize_legacy_authorization_state "$SOURCE_IMAGE" absent
+  fi
   stale_authorization_volume=true
 fi
 
@@ -1318,6 +1906,7 @@ jq -n --arg phase preparing --arg mode switch --arg runId "$run_id" --arg volume
   --arg sourceOverrideSha256 "$source_override_sha" --arg composeFile "$compose_file" --arg dbService "$db_service" \
   --arg dbContainer "$db_container" --arg appContainer "$app_container" --arg platform "$platform" \
   --arg authorizationVolume "$authorization_volume" --arg probeDatabase "$probe_database" \
+  --arg authorizationVolumeFingerprint "$stale_authorization_fingerprint" \
   --arg dockerEngineId "$engine_id" --arg dockerEndpoint "$docker_host" \
   --argjson appWasRunning "$app_was_running" \
   '{phase:$phase,mode:$mode,runId:$runId,volume:$volume,appWasRunning:$appWasRunning,volumeFingerprint:$volumeFingerprint,
@@ -1326,26 +1915,36 @@ jq -n --arg phase preparing --arg mode switch --arg runId "$run_id" --arg volume
     candidateComposeSha256:$candidateComposeSha256,sourceOverrideSha256:$sourceOverrideSha256,composeFile:$composeFile,
     dbService:$dbService,dbContainer:$dbContainer,appContainer:$appContainer,platform:$platform,
     dockerEngineId:$dockerEngineId,dockerEndpoint:$dockerEndpoint,probeDatabase:$probeDatabase,
-    authorizationVolume:$authorizationVolume}' > "$temp"
+    authorizationVolume:$authorizationVolume,
+    authorizationVolumeFingerprint:(if $authorizationVolumeFingerprint == "" then null else $authorizationVolumeFingerprint end)}' > "$temp"
 write_json_atomic "$journal" "$temp"
 rm -f "$temp"
 validate_journal
+fail_closed_on_die=true
 phase_checkpoint preparing
 
 if [[ "$app_was_running" == true ]]; then
-  docker stop --time 60 "$app_container" >/dev/null
+  docker container stop --time 60 "$app_container" >/dev/null
 fi
-[[ $(docker inspect "$app_container" --format '{{.State.Running}}') != true ]] ||
+app_stop_state=$(container_running_state "$app_container") ||
+  die 'could not classify the app container before offline database verification'
+[[ "$app_stop_state" != true ]] ||
   die 'app writer remained running before offline database verification'
 assert_image_identity "$db_container" "$SOURCE_IMAGE" source
 docker stop --time 60 "$db_container" >/dev/null
 docker rm "$db_container" >/dev/null
 assert_volume_consumers
 if [[ "$stale_authorization_volume" == true ]]; then
-  if docker inspect "$app_container" >/dev/null 2>&1 &&
-     docker inspect "$app_container" | jq -e --arg authorization "$authorization_volume" \
-       '[.[0].Mounts[] | select(.Type == "volume" and .Name == $authorization)] | length == 1' >/dev/null; then
-    docker rm "$app_container" >/dev/null
+  stale_app_state=$(container_running_state "$app_container") ||
+    die 'could not classify the app container before stale authorization cleanup'
+  if [[ "$stale_app_state" != absent ]]; then
+    stale_app_inspect=$(docker container inspect "$app_container") ||
+      die 'could not inspect the app container before stale authorization cleanup'
+    if jq -e --arg authorization "$authorization_volume" \
+      '[.[0].Mounts[] | select(.Type == "volume" and .Name == $authorization)] | length == 1' \
+      <<< "$stale_app_inspect" >/dev/null; then
+      docker container rm "$app_container" >/dev/null
+    fi
   fi
   [[ -z $(authorization_volume_consumers) ]] || die 'stale authorization volume remained consumed after database stop'
   docker volume rm "$authorization_volume" >/dev/null
@@ -1357,6 +1956,9 @@ rollback_maintenance="noosphere-a2b-rollback-$run_id"
 final_maintenance="noosphere-a2b-final-$run_id"
 restore_container="noosphere-a2b-restore-$run_id"
 restore_volume="noosphere_a2b_restore_${run_id//-/_}"
+schema_reparse_container="noosphere-a2b-schema-reparse-$run_id"
+schema_reparse_volume="noosphere_a2b_schema_reparse_${run_id//-/_}"
+live_schema_dump="$run_dir/live-schema-dump.sql"
 
 start_maintenance "$source_maintenance" "$SOURCE_IMAGE"
 assert_image_identity "$source_maintenance" "$SOURCE_IMAGE" source
@@ -1365,8 +1967,17 @@ expected_schema=$(schema_signature "$source_maintenance")
 expected_migrations=$(migration_signature "$source_maintenance")
 expected_database=$(database_identity "$source_maintenance")
 
+# The restore rehearsal below cannot compare raw schema bytes against the live
+# baseline: a dump/restore round-trip canonically re-groups nested boolean
+# CHECK-constraint parens (issue #298), so a restored digest can never equal
+# the live one. Capture the live schema text now so the rehearsal can normalize
+# it through the same re-parse path instead.
+normalized_dump "$source_maintenance" --schema-only > "$live_schema_dump"
+[[ -s "$live_schema_dump" ]] || die 'live schema dump is empty'
+fsync_path "$live_schema_dump"
+
 backup_temp="$run_dir/.noosphere.dump.tmp"
-docker exec "$source_maintenance" pg_dump -U noosphere -d noosphere -Fc --no-owner --no-privileges > "$backup_temp"
+create_logical_backup "$source_maintenance" "$backup_temp"
 [[ -s "$backup_temp" ]] || die 'logical backup is empty'
 docker exec -i "$source_maintenance" pg_restore --list < "$backup_temp" >/dev/null
 fsync_path "$backup_temp"
@@ -1375,10 +1986,12 @@ fsync_path "$run_dir"
 backup_sha=$(sha256sum "$backup_file" | awk '{print $1}')
 
 temp=$(mktemp "$backup_dir/.journal.XXXXXX")
-jq --arg phase baseline-recorded --arg data "$expected_data" --arg schema "$expected_schema" \
+jq --arg phase baseline-recorded --argjson dataSignatureVersion "$DATA_SIGNATURE_VERSION" \
+  --arg data "$expected_data" --arg schema "$expected_schema" \
   --arg migrations "$expected_migrations" --arg database "$expected_database" --arg backup "$backup_file" \
   --arg backupSha256 "$backup_sha" \
-  '.phase=$phase | .dataSignature=$data | .schemaSignature=$schema | .migrationSignature=$migrations |
+  '.phase=$phase | .dataSignatureVersion=$dataSignatureVersion |
+   .dataSignature=$data | .schemaSignature=$schema | .migrationSignature=$migrations |
    .databaseIdentity=$database | .backup=$backup | .backupSha256=$backupSha256' "$journal" > "$temp"
 write_json_atomic "$journal" "$temp"
 rm -f "$temp"
@@ -1391,31 +2004,54 @@ docker run -d --name "$restore_container" --label "$LABEL_KEY=$run_id" --platfor
   -v "$restore_volume:/var/lib/postgresql/data" "$CANDIDATE_IMAGE" >/dev/null
 wait_postgres "$restore_container"
 assert_image_identity "$restore_container" "$CANDIDATE_IMAGE" candidate
-docker exec -i "$restore_container" pg_restore -U noosphere -d noosphere --clean --if-exists --no-owner --no-privileges < "$backup_file"
+docker exec "$restore_container" psql -Xq -v ON_ERROR_STOP=1 -U noosphere -d noosphere -c \
+  'CREATE ROLE noosphere_migrator LOGIN NOSUPERUSER; ALTER DATABASE noosphere OWNER TO noosphere_migrator; ALTER SCHEMA public OWNER TO noosphere_migrator;'
+docker exec -i "$restore_container" pg_restore -U noosphere -d noosphere --role=noosphere_migrator \
+  --clean --if-exists --no-owner --no-privileges < "$backup_file"
 [[ $(data_signature "$restore_container") == "$expected_data" ]] || die 'restored backup data digest mismatch'
-[[ $(schema_signature "$restore_container") == "$expected_schema" ]] || die 'restored backup schema digest mismatch'
+
+# Re-parse-normalize the live schema baseline for the restore rehearsal. The
+# restored catalog re-parsed the dumped DDL once, so its canonical deparse
+# differs from the live baseline whenever constraints carry nested boolean
+# parens (issue #298); pushing the same live dump text through the identical
+# re-parse path yields the byte-stable comparison form. The backup restore runs
+# as the migrator role, so this load does too.
+docker volume create --driver local --label "$LABEL_KEY=$run_id" "$schema_reparse_volume" >/dev/null
+docker run -d --name "$schema_reparse_container" --label "$LABEL_KEY=$run_id" --platform "$platform" --network none \
+  -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_USER=noosphere -e POSTGRES_DB=noosphere \
+  -v "$schema_reparse_volume:/var/lib/postgresql/data" "$SOURCE_IMAGE" >/dev/null
+wait_postgres "$schema_reparse_container"
+assert_image_identity "$schema_reparse_container" "$SOURCE_IMAGE" source
+docker exec "$schema_reparse_container" psql -Xq -v ON_ERROR_STOP=1 -U noosphere -d noosphere -c \
+  'CREATE ROLE noosphere_migrator LOGIN NOSUPERUSER; ALTER DATABASE noosphere OWNER TO noosphere_migrator; ALTER SCHEMA public OWNER TO noosphere_migrator;'
+docker exec -i "$schema_reparse_container" psql -Xq -v ON_ERROR_STOP=1 -U noosphere_migrator -d noosphere < "$live_schema_dump"
+expected_schema_restore=$(schema_signature "$schema_reparse_container")
+if [[ ${NOOSPHERE_A2B_TEST_FORCE_RESTORE_SCHEMA_MISMATCH:-} == true ]]; then
+  expected_schema_restore=0000000000000000000000000000000000000000000000000000000000000000
+fi
+[[ $(schema_signature "$restore_container") == "$expected_schema_restore" ]] || die 'restored backup schema digest mismatch'
 [[ $(migration_signature "$restore_container") == "$expected_migrations" ]] || die 'restored backup migration mismatch'
 [[ $(database_identity "$restore_container") == "$expected_database" ]] || die 'restored backup database identity mismatch'
-docker stop --time 60 "$restore_container" >/dev/null
-docker rm "$restore_container" >/dev/null
-docker volume rm "$restore_volume" >/dev/null
+cleanup_rehearsal_resources \
+  "$restore_container" "$schema_reparse_container" \
+  "$restore_volume" "$schema_reparse_volume"
 update_journal backup-restored
 
 start_maintenance "$candidate_maintenance" "$CANDIDATE_IMAGE"
 assert_image_identity "$candidate_maintenance" "$CANDIDATE_IMAGE" candidate
-assert_baseline "$candidate_maintenance" "$expected_volume" "$expected_data" "$expected_schema" "$expected_migrations" "$expected_database"
+assert_baseline "$candidate_maintenance" "$expected_volume" "$expected_data" "$expected_schema" "$expected_migrations" "$expected_database" "$DATA_SIGNATURE_VERSION"
 stop_remove "$candidate_maintenance"
 update_journal candidate-verified
 
 start_maintenance "$rollback_maintenance" "$SOURCE_IMAGE"
 assert_image_identity "$rollback_maintenance" "$SOURCE_IMAGE" source
-assert_baseline "$rollback_maintenance" "$expected_volume" "$expected_data" "$expected_schema" "$expected_migrations" "$expected_database"
+assert_baseline "$rollback_maintenance" "$expected_volume" "$expected_data" "$expected_schema" "$expected_migrations" "$expected_database" "$DATA_SIGNATURE_VERSION"
 stop_remove "$rollback_maintenance"
 update_journal source-rollback-verified
 
 start_maintenance "$final_maintenance" "$CANDIDATE_IMAGE"
 assert_image_identity "$final_maintenance" "$CANDIDATE_IMAGE" candidate
-assert_baseline "$final_maintenance" "$expected_volume" "$expected_data" "$expected_schema" "$expected_migrations" "$expected_database"
+assert_baseline "$final_maintenance" "$expected_volume" "$expected_data" "$expected_schema" "$expected_migrations" "$expected_database" "$DATA_SIGNATURE_VERSION"
 stop_remove "$final_maintenance"
 update_journal final-candidate-maintenance-verified
 
@@ -1430,7 +2066,7 @@ phase_checkpoint candidate-authorized
 
 compose_up_db "$candidate_compose"
 assert_image_identity "$db_container" "$CANDIDATE_IMAGE" candidate
-assert_baseline "$db_container" "$expected_volume" "$expected_data" "$expected_schema" "$expected_migrations" "$expected_database"
+assert_baseline "$db_container" "$expected_volume" "$expected_data" "$expected_schema" "$expected_migrations" "$expected_database" "$DATA_SIGNATURE_VERSION"
 update_journal candidate-online-verified
 
 staged="$compose_file.phase-a2b-$run_id"

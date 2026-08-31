@@ -1,8 +1,14 @@
 # Automatic Memory Capture and Recall Enrichment ADR
 
-**Status:** Proposed
+**Status:** Accepted — Phase 0 and Phase A implemented; Phases B through E pending
 **Date:** 2026-07-14
+**Last status review:** 2026-08-24
 **Scope:** Noosphere server, OpenClaw memory plugin, recall providers, and curation lifecycle
+
+Implementation and rollout status is tracked in the
+[memory revamp status matrix](MEMORY-REVAMP-STATUS.md). The decision sections
+retain prospective wording for phases that have not landed. Acceptance does not
+enable automatic ingestion or make proposed Phase C configuration keys live.
 
 Current implemented OpenClaw settings are documented in the
 [official plugin setup guide](OPENCLAW-OFFICIAL-PLUGIN-SETUP.md). Configuration
@@ -14,7 +20,8 @@ Noosphere should add two connected but independently deployable capabilities:
 
 1. **Recall enrichment:** generate a short factual recall summary plus separate
    search terms for each article. Lexical search indexes both fields, while the
-   planned pgvector/RRF work remains the primary semantic-retrieval path.
+   merged, default-off pgvector/RRF implementation remains the primary
+   semantic-retrieval path.
 2. **Automatic event capture:** an opt-in OpenClaw `agent_end` hook submits a
    bounded turn envelope to an agent-isolated, private-scope, TTL-bound capture
    inbox. A separate extraction step converts useful events into searchable
@@ -39,7 +46,7 @@ hard-coded synonym groups. This works when the query and article share words,
 but ordinary paraphrases can still miss the correct article and force an agent
 to search manually.
 
-The [proposed hybrid-retrieval ADR](HYBRID-RETRIEVAL-ADR.md) addresses the
+The [accepted hybrid-retrieval ADR](HYBRID-RETRIEVAL-ADR.md) addresses the
 broader semantic problem with embeddings and reciprocal-rank fusion. Recall
 enrichment remains useful because:
 
@@ -54,14 +61,15 @@ enrichment remains useful because:
 
 The OpenClaw plugin currently exposes `noosphere_save` and injects instructions
 that tell an agent when to use it. The agent must still choose to call the tool.
-Before the Phase 0 fix in this change set, those instructions were only injected
-when auto-recall returned non-empty prompt text. A turn containing genuinely new
+Before Phase 0 in PR #281, those instructions were only injected when
+auto-recall returned non-empty prompt text. A turn containing genuinely new
 information could therefore receive no capture reminder at all.
 
-Noosphere also contains pure promotion and synthesis modules, but recall
-statistics, candidates, and synthesis jobs are not persisted or wired into the
-live recall path. The scheduler CLI currently runs only a health job. Existing
-documentation describes the intended abstractions, not a completed automatic
+Phase A persists private captures, candidate state, and durable cleanup jobs,
+and the scheduler CLI runs both health and expiry/privacy maintenance. Durable
+final-selection statistics, candidate synthesis/promotion workers, and their
+live recall-path integration remain unimplemented. Existing promotion and
+synthesis modules therefore describe foundations, not a completed automatic
 promotion service.
 
 ## 3. Goals
@@ -590,9 +598,9 @@ promotion until resolved. A newer statement is not automatically more correct.
 - add provenance-graph deletion, tombstone, and revocation-generation jobs;
 - keep all new ingestion behavior disabled by default.
 
-Phase A implementation status in this change: complete pending PR review. It
-includes principal administration, creation-time key binding, safe credential
-rotation, private capture persistence, content-free recall caches with locked DB
+Phase A merged in PR #282. It includes principal administration,
+creation-time key binding, safe credential rotation, private capture persistence,
+content-free recall caches with locked DB
 rehydration, durable expiry/privacy jobs, and capture/candidate/job/tombstone/
 privacy-review inspection APIs. Exact private-scope arrays are non-null at the
 database boundary; database triggers require canonical raw-capture lineage,

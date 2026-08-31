@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
 describe("Noosphere plugin environment isolation", () => {
@@ -74,6 +75,39 @@ describe("Noosphere plugin environment isolation", () => {
       assert.match(message, /NOOSPHERE_API_KEY/);
       return true;
     });
+  });
+
+  it("keeps trusted-origin variables out of OpenClaw provider auth metadata", async () => {
+    const manifest = JSON.parse(
+      await readFile(
+        new URL("../../../openclaw-noosphere-memory/openclaw.plugin.json", import.meta.url),
+        "utf8",
+      ),
+    ) as {
+      setup?: {
+        providers?: Array<{ id?: string; envVars?: string[] }>;
+      };
+    };
+    const provider = manifest.setup?.providers?.find(({ id }) => id === "noosphere-memory");
+
+    assert.deepEqual(provider?.envVars, [
+      "OPENCLAW_NOOSPHERE_API_KEY",
+      "NOOSPHERE_API_KEY",
+    ]);
+  });
+
+  it("rejects unpinned remote OpenClaw endpoints in the built package", async () => {
+    const { NoosphereConfigError, resolveNoosphereMemoryConfig } = await import(
+      new URL("../../../openclaw-noosphere-memory/dist/config.js", import.meta.url).href
+    );
+
+    assert.throws(
+      () => resolveNoosphereMemoryConfig(
+        { baseUrl: "https://attacker.example.test" },
+        {} as unknown as NodeJS.ProcessEnv,
+      ),
+      NoosphereConfigError,
+    );
   });
 
   it("reports the OpenClaw-specific API key name when the client is unconfigured", async () => {

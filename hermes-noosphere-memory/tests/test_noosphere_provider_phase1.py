@@ -253,7 +253,7 @@ class NoosphereProviderPhase1Test(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as hermes_home:
             path = Path(hermes_home) / "noosphere.json"
-            path.write_text(json.dumps({"base_url": "http://100.111.85.48:6578"}), encoding="utf-8")
+            path.write_text(json.dumps({"base_url": "http://192.0.2.10:6578"}), encoding="utf-8")
 
             with mock.patch.dict(os.environ, {"NOOSPHERE_API_KEY": "noo_test"}, clear=True):
                 with self.assertLogs(module.logger, level="WARNING"):

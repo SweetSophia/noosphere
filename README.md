@@ -23,104 +23,67 @@ The old long-form README is preserved at [README-legacy.md](README-legacy.md).
 
 ## Quick Start
 
-Use this path when you want the published Docker image and a local Noosphere
-instance.
+### Prerequisites
+
+Install Docker with Docker Compose v2, Node.js 22 or newer, and `curl`. The
+installer checks the remaining command-line prerequisites before changing the
+machine.
+
+### Install
+
+This launcher is coupled to the coordinated `v1.13.1` image, packages, and
+Hermes archive. Before running it, confirm that the
+[`v1.13.1` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.1)
+exists with all six installer assets; a merged commit alone is not a release.
+
+Run the guided installer:
 
 ```bash
-git clone https://github.com/SweetSophia/noosphere.git
-cd noosphere
-
-cp noosphere.env.example .env
-# Edit .env: POSTGRES_PASSWORD, POSTGRES_MIGRATION_PASSWORD,
-# POSTGRES_APP_PASSWORD, NEXTAUTH_SECRET, NOOSPHERE_ADMIN_PASSWORD, and
-# NOOSPHERE_BOOTSTRAP_API_KEY. Every PostgreSQL password must be distinct.
-# Generate strong values, for example:
-# openssl rand -hex 32
-# printf 'noo_%s\n' "$(openssl rand -hex 32)"
-# Set NOOSPHERE_ADMIN_PASSWORD_RESET=true only when intentionally rotating
-# an existing bootstrap admin password.
-# Set NOOSPHERE_FORCE_ADMIN=true to re-assert the ADMIN role on the existing
-# bootstrap admin account (does not rotate the password).
-mkdir -p .noosphere/postgres-pgvector-backups
-chmod 700 .noosphere/postgres-pgvector-backups
-guard=(./scripts/switch-pgvector-compose.sh --compose-file "$PWD/docker-compose.noosphere.yml" \
-  --env-file "$PWD/.env" --db-container noosphere-openclaw-db \
-  --app-container noosphere-openclaw-app --backup-dir "$PWD/.noosphere/postgres-pgvector-backups")
-"${guard[@]}" --prepare-new-install
-docker compose -f docker-compose.noosphere.yml --env-file .env up -d db redis
-docker compose -f docker-compose.noosphere.yml --env-file .env run --rm -T init
-"${guard[@]}" --record-new-install
-docker compose -f docker-compose.noosphere.yml --env-file .env up -d app
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/ef616729339db2114e53f7b199700379fc3435bb/install.sh | bash
 ```
 
-That guarded sequence is for an absent PostgreSQL volume only. The candidate
-Compose service requires an external authorization volume and refuses an
-ordinary start without guard-created evidence. If `noosphere_postgres_data`
-already exists, complete the existing-volume transition in
+The URL is pinned to an immutable Git commit—never `master` or `main`. The
+launcher then checksum-verifies its exact backend before execution.
+
+The installer:
+
+- shows its plan and detects fresh-install, interrupted-run, or upgrade state;
+- offers OpenClaw, Hermes Agent, OpenCode, and Kilo Code integrations found on
+  the machine;
+- generates distinct runtime credentials without printing them;
+- preserves the named PostgreSQL volume and uses the guarded stateful upgrade
+  path when an existing installation is present;
+- starts the services and verifies Noosphere health.
+
+When it finishes, open `http://127.0.0.1:6578/wiki`. The actual URL is shown if
+you selected another bind address.
+
+Generated administrator credentials are stored at
+`~/.noosphere/credentials.json` in a mode-`0700` directory with mode `0600`.
+The normal output reports the path, not the password or API key.
+
+For an independently verified download, automation flags, existing-installation
+warnings, manual Compose deployment, and bootstrap-secret path rules, read
+[Installing Noosphere](docs/INSTALLATION.md).
+
+### Existing or customized installations
+
+Do not replace the guided upgrade with an unrestricted `docker compose pull &&
+docker compose up`. First inspect the plan without changing the machine:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/ef616729339db2114e53f7b199700379fc3435bb/install.sh \
+  | bash -s -- --dry-run --core-only
+```
+
+Preserve your configuration, database backup, and local repair records before
+upgrading. The installer keeps the `noosphere_postgres_data` volume and admits
+an image transition only through its offline, restore-tested controller. See
 [PostgreSQL pgvector Compose upgrade](docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md)
-first.
+for the full stateful recovery contract.
 
-Then open `http://localhost:6578/wiki`.
-
-If you omit `NOOSPHERE_ADMIN_PASSWORD` or `NOOSPHERE_BOOTSTRAP_API_KEY`, the
-bootstrap init container writes generated credentials to
-`/tmp/noosphere-bootstrap-secrets/secrets.json` inside that init container with
-mode `0600` inside a `0700` parent directory and logs only the file path. The
-default `/tmp/...` path is destroyed when the init container exits; set
-`NOOSPHERE_BOOTSTRAP_SECRETS_FILE=/app/uploads/bootstrap-secrets/secrets.json`
-to persist it in the `noosphere_uploads` volume. The file must live inside a
-dedicated bootstrap-secrets directory; paths directly under shared directories
-such as `/tmp` or `/app/uploads` are rejected.
-
-The production template uses `ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION:-latest}`,
-binds to `127.0.0.1:6578` by default, includes PostgreSQL and Redis, and runs a
-one-shot init service before the app starts.
-
-To run from source instead:
-
-```bash
-cp .env.example .env
-# Edit the bootstrap, migration, and application database credentials plus
-# NEXTAUTH_SECRET, NEXTAUTH_URL, and APP_URL.
-docker network create noosphere-net 2>/dev/null || true
-mkdir -p .noosphere/postgres-pgvector-backups
-chmod 700 .noosphere/postgres-pgvector-backups
-guard=(./scripts/switch-pgvector-compose.sh --compose-file "$PWD/docker-compose.yml" \
-  --env-file "$PWD/.env" --db-container noosphere-db --app-container noosphere-app \
-  --backup-dir "$PWD/.noosphere/postgres-pgvector-backups")
-"${guard[@]}" --prepare-new-install
-docker compose up -d db redis
-docker compose run --rm -T init
-"${guard[@]}" --record-new-install
-docker compose up -d app
-docker compose exec app node scripts/create-admin.js
-```
-
-## OpenClaw Install
-
-OpenClaw users can install Noosphere and the OpenClaw plugin with the repository
-installer:
-
-```bash
-# Installer commit: 19ba70a9e8c40dbe01df6de9ca79725c708f3997
-# Expected SHA-256: 6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c
-installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/19ba70a9e8c40dbe01df6de9ca79725c708f3997/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '6155216bc35aa45e6e7bb122fd2331679cac01ed8483d40e5cd423151007b59c' "$installer" | sha256sum -c -
-bash "$installer" && rm -f "$installer"
-openclaw noosphere doctor
-openclaw noosphere status
-```
-
-The installer provisions Docker, Redis, Noosphere secrets, and the OpenClaw plugin
-configuration. Existing installations are upgraded only through its offline,
-restore-tested PostgreSQL image guard; unrestricted Compose upgrades are not a
-supported database transition. For the full setup, upgrade, operations, and uninstall guide, see
-[docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md](docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md).
-
-Optional pgvector storage remains inactive after installation. See
-[docker/hybrid-storage/README.md](docker/hybrid-storage/README.md) for the
-separate Phase A3 activation and verification contract.
+Optional pgvector hybrid storage remains a separate activation step. See
+[docker/hybrid-storage/README.md](docker/hybrid-storage/README.md).
 
 ## Choose an Integration
 
@@ -180,7 +143,7 @@ sync workflow through a versioned frontmatter codec. The sync design lives in
 | **Auto-Capture** | ⚠️ Disabled-by-default private capture API, principal/lineage storage, and cleanup foundation; OpenClaw turn hook/extraction planned | ✅ Every turn | ❌ Manual indexing | ✅ Continuous learning | ✅ `memory.add()` | ✅ Smart extraction |
 | **Auto-Recall** | ✅ Capture guidance on clean misses + recall results when available; provider errors fail open | ✅ Before each turn | ✅ Keyword search only | ✅ Proactive context loading | ✅ `memory.search()` | ✅ Before prompt build |
 | **Manual Recall** | ✅ REST API + tools | ✅ MCP tools | ✅ CLI / tool query | ✅ REST API | ✅ SDK + REST | ✅ CLI + MCP tools |
-| **Semantic Search** | ✅ PostgreSQL FTS (live) + vector (planned) | ✅ Vector + biomimetic | ⚠️ Keyword + pending vector | ✅ pgvector | ✅ Semantic + BM25 + entity fusion | ✅ Vector + BM25 hybrid |
+| **Semantic Search** | ✅ PostgreSQL FTS (default) + implemented opt-in pgvector/RRF; rollout pending | ✅ Vector + biomimetic | ⚠️ Keyword + pending vector | ✅ pgvector | ✅ Semantic + BM25 + entity fusion | ✅ Vector + BM25 hybrid |
 | **Keyword Search** | ✅ PostgreSQL full-text | ✅ | ✅ Primary mode | ✅ | ✅ BM25 | ✅ BM25 |
 | **Cross-Encoder Rerank** | ❌ (planned) | ❌ | ❌ | ❌ | ❌ | ✅ Cross-encoder |
 | **Memory Types** | Articles (wiki) | world / experience / observation | Markdown files | Categories / Items / Resources | Facts (ADD-only v3) | 6-category classification |
@@ -217,7 +180,7 @@ Base URL:
 http://localhost:6578/api
 ```
 
-Authentication:
+Authentication (replace `<api_key>` with a scoped Noosphere API key):
 
 ```text
 Authorization: Bearer <api_key>
@@ -346,6 +309,8 @@ Keep detailed recovery work in deployment/runbook docs rather than this README.
 | Document | Use it for |
 | --- | --- |
 | [README-legacy.md](README-legacy.md) | Previous full README content kept for reference during the docs split |
+| [docs/MEMORY-REVAMP-STATUS.md](docs/MEMORY-REVAMP-STATUS.md) | Authoritative implementation and rollout matrix for automatic capture and hybrid retrieval |
+| [docs/INSTALLATION.md](docs/INSTALLATION.md) | Guided installer, auditable download, upgrades, manual Compose, and credential handling |
 | [docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md](docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md) | OpenClaw install, operations, upgrade, troubleshooting, and uninstall |
 | [docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md](docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md) | Guarded PostgreSQL image transition, proof, rollback, and recovery |
 | [docs/NOOSPHERE-MEMORY-ARCHITECTURE.md](docs/NOOSPHERE-MEMORY-ARCHITECTURE.md) | Provider abstraction, recall orchestration, ranking, budgeting, and scheduler |
