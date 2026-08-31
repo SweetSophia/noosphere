@@ -84,7 +84,7 @@ function normalizeBaseUrl(value) {
     if (url.username || url.password) {
         throw new NoosphereConfigError("Noosphere base URL must not contain credentials.");
     }
-    if (url.search || url.hash) {
+    if (trimmed.includes("?") || trimmed.includes("#")) {
         throw new NoosphereConfigError("Noosphere base URL must not contain a query string or fragment.");
     }
     if (isBlockedInternalHost(url.hostname)) {

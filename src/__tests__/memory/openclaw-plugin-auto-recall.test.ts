@@ -177,7 +177,9 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
     const cases: Array<[baseUrl: string, expected: RegExp]> = [
       ["https://user:pass@noosphere.example.test", /must not contain credentials/],
       ["https://noosphere.example.test?x=1", /must not contain a query string or fragment/],
+      ["https://noosphere.example.test?", /must not contain a query string or fragment/],
       ["https://noosphere.example.test#frag", /must not contain a query string or fragment/],
+      ["https://noosphere.example.test#", /must not contain a query string or fragment/],
     ];
 
     for (const [baseUrl, expected] of cases) {
