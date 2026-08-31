@@ -308,7 +308,7 @@ value used by the plugin when no config is supplied. "Installer value" is what
 
 | Field | Plugin default | Installer value | Notes |
 | --- | --- | --- | --- |
-| `baseUrl` | `http://localhost:3000` | `http://127.0.0.1:6578` | Noosphere server base URL. Config wins; otherwise `OPENCLAW_NOOSPHERE_BASE_URL`, then `NOOSPHERE_BASE_URL`, then default. |
+| `baseUrl` | `http://localhost:3000` | `http://127.0.0.1:6578` | Noosphere server base URL. Config wins; otherwise `OPENCLAW_NOOSPHERE_BASE_URL`, then `NOOSPHERE_BASE_URL`, then default. A remote HTTPS URL must match the exact origin in the protected `OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN` environment variable (`NOOSPHERE_TRUSTED_ORIGIN` fallback). |
 | `apiKey` | unset | file secret reference | Default API key. Used when no per-agent key matches. String, `{ value }`, or OpenClaw file secret reference. Env fallback is `OPENCLAW_NOOSPHERE_API_KEY`, then `NOOSPHERE_API_KEY`. Required for memory APIs. |
 | `apiKeys` | unset | unset | Per-agent API key map `{ [agentId]: keyString }`. Takes precedence over `apiKey` for matching agents. Use env vars for secret keys (see below). |
 | `timeoutMs` | `5000` | default | Explicit HTTP request timeout. Max `30000`. |
@@ -356,6 +356,7 @@ memory capture instructions are not injected into prompts.
 - **API keys are permission-scoped**. READ is enough for recall/get/topic lookup; WRITE is required for save; ADMIN is required for status/settings/admin operations.
 - **Scoped saves stay scoped**. If a scoped WRITE key saves without `restrictedTags`, Noosphere applies the key's allowed scopes by default. Scoped keys cannot assign scopes they do not have.
 - **Secrets live outside the repo**. The installer writes OpenClaw secrets to `~/.openclaw/secrets/noosphere-memory.json` and runtime values to `~/.noosphere/.env`.
+- **Remote credentials are origin-bound**. Loopback needs no pin. A remote URL must match a singular public HTTPS origin from the protected process environment. Missing, malformed, or mismatched pins stop initialization, and the HTTP client rejects redirects so request bodies cannot cross to another origin.
 - **Auto-recall fails open**. If Noosphere is unavailable, OpenClaw continues without injected memory.
 - **`noosphere_save` creates draft candidates only**. It never auto-publishes curated knowledge.
 - **Release tags are coordinated by surface**. Use `v-openclaw-*` for both `@sweetsophia/noosphere-injected-memory` (published first) and `@sweetsophia/openclaw-noosphere-memory`, `v-opencode-*` for `@sweetsophia/opencode-noosphere-memory`, and `v-kilocode-*` for `@sweetsophia/kilocode-noosphere-memory`.

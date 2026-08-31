@@ -86,6 +86,30 @@ Use `OPENCLAW_NOOSPHERE_*` for OpenClaw-wide defaults on machines that also run
 Opencode, Kilo Code, or Hermes. The generic `NOOSPHERE_*` variables remain
 compatibility fallbacks.
 
+### Remote origin binding
+
+Loopback deployments (`localhost`, `127.0.0.0/8`, or `::1`) need no additional
+configuration. For a remote deployment, bind the API credential to the exact
+HTTPS origin in the protected OpenClaw process environment:
+
+```bash
+OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN=https://memory.example.com
+```
+
+The value is a single origin: scheme, host, and optional port only—no path,
+query, fragment, or credentials. `NOOSPHERE_TRUSTED_ORIGIN` is the compatibility
+fallback. The OpenClaw-specific variable takes precedence when both are set.
+
+Keep this variable with the API key in the service environment. If you use
+another administrator-controlled secret/configuration source, it must inject
+the variable into the protected OpenClaw process environment. Do not put it in
+plugin configuration: an actor able to change `config.baseUrl` must not also
+authorize the replacement destination. Missing, malformed, or mismatched remote
+origin configuration stops plugin initialization with a configuration error; it
+never silently redirects authenticated requests to localhost. The client also
+rejects HTTP redirects so credentialed request bodies cannot cross to another
+origin.
+
 ## Tools
 
 - `noosphere_recall` searches durable memory.
