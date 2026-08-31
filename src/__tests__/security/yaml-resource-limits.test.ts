@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import yaml from "js-yaml";
+import { parseNoosphereMarkdown } from "@/lib/markdown/noosphere-markdown";
 
 function buildMergeChain(levels: number): string {
   const lines = ["m0: &m0 { k0: 0 }"];
@@ -25,4 +26,15 @@ test("js-yaml bounds total work for chained merge keys", () => {
       return true;
     },
   );
+});
+
+test("markdown import rejects chained merge-key payloads", () => {
+  const result = parseNoosphereMarkdown(
+    `---\n${buildMergeChain(160)}\n---\nbody`,
+  );
+
+  assert.deepEqual(result, {
+    ok: false,
+    error: "Invalid YAML frontmatter",
+  });
 });
