@@ -158,10 +158,6 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
       "https://[fd12:3456::1]",
       "https://[fe80::1]",
       "http://noosphere.example.test",
-      "https://noosphere.example.test?x=1",
-      "https://noosphere.example.test#frag",
-      "https://user:pass@noosphere.example.test",
-      "https://[fe80::1%25eth0]",
     ]) {
       assert.throws(
         () => resolveNoosphereMemoryConfig({ baseUrl }, {} as NodeJS.ProcessEnv),
@@ -172,6 +168,45 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
         },
       );
     }
+  });
+
+  it("rejects credentials, queries, and fragments even when the remote origin is pinned", () => {
+    const env = {
+      OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN: "https://noosphere.example.test",
+    } as unknown as NodeJS.ProcessEnv;
+    const cases: Array<[baseUrl: string, expected: RegExp]> = [
+      ["https://user:pass@noosphere.example.test", /must not contain credentials/],
+      ["https://noosphere.example.test?x=1", /must not contain a query string or fragment/],
+      ["https://noosphere.example.test#frag", /must not contain a query string or fragment/],
+    ];
+
+    for (const [baseUrl, expected] of cases) {
+      assert.throws(
+        () => resolveNoosphereMemoryConfig({ baseUrl }, env),
+        (error: unknown) => {
+          assert.ok(error instanceof NoosphereConfigError);
+          assert.match(error.message, expected);
+          return true;
+        },
+      );
+    }
+  });
+
+  it("rejects scoped IPv6 zone identifiers as invalid URL syntax", () => {
+    assert.throws(
+      () => resolveNoosphereMemoryConfig(
+        { baseUrl: "https://[fe80::1%25eth0]" },
+        {} as NodeJS.ProcessEnv,
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof NoosphereConfigError);
+        assert.equal(
+          error.message,
+          "Noosphere base URL must be a valid HTTP or HTTPS URL.",
+        );
+        return true;
+      },
+    );
   });
 
   it("rejects IPv4-mapped private hosts after URL canonicalization", () => {
