@@ -35,7 +35,9 @@
         "id": "noosphere-memory",
         "envVars": [
           "OPENCLAW_NOOSPHERE_API_KEY",
-          "NOOSPHERE_API_KEY"
+          "NOOSPHERE_API_KEY",
+          "OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN",
+          "NOOSPHERE_TRUSTED_ORIGIN"
         ]
       }
     ]

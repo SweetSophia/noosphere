@@ -158,6 +158,10 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
       "https://[fd12:3456::1]",
       "https://[fe80::1]",
       "http://noosphere.example.test",
+      "https://noosphere.example.test?x=1",
+      "https://noosphere.example.test#frag",
+      "https://user:pass@noosphere.example.test",
+      "https://[fe80::1%25eth0]",
     ]) {
       assert.throws(
         () => resolveNoosphereMemoryConfig({ baseUrl }, {} as NodeJS.ProcessEnv),
@@ -317,6 +321,44 @@ describe("OpenClaw Noosphere plugin auto-recall", () => {
         },
       );
     }
+  });
+
+  it("matches IDN baseUrl hosts against a punycode trusted origin", () => {
+    const config = resolveNoosphereMemoryConfig(
+      { baseUrl: "https://b\u00fccher.example.test" },
+      {
+        OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN: "https://xn--bcher-kva.example.test",
+      } as unknown as NodeJS.ProcessEnv,
+    );
+    assert.equal(config.baseUrl, "https://xn--bcher-kva.example.test");
+  });
+
+  it("treats default HTTPS port 443 as the same origin as the pin", () => {
+    const config = resolveNoosphereMemoryConfig(
+      { baseUrl: "https://noosphere.example.test:443" },
+      {
+        OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN: "https://noosphere.example.test",
+      } as unknown as NodeJS.ProcessEnv,
+    );
+    assert.equal(config.baseUrl, "https://noosphere.example.test");
+  });
+
+  it("canonicalizes dword and short IPv4 loopback literals before the pin check", () => {
+    assert.equal(
+      resolveNoosphereMemoryConfig({ baseUrl: "http://2130706433" }, {} as NodeJS.ProcessEnv)
+        .baseUrl,
+      "http://127.0.0.1",
+    );
+    assert.equal(
+      resolveNoosphereMemoryConfig({ baseUrl: "http://0177.0.0.1" }, {} as NodeJS.ProcessEnv)
+        .baseUrl,
+      "http://127.0.0.1",
+    );
+    assert.equal(
+      resolveNoosphereMemoryConfig({ baseUrl: "http://127.1" }, {} as NodeJS.ProcessEnv)
+        .baseUrl,
+      "http://127.0.0.1",
+    );
   });
 
   it("uses OpenClaw-specific default env vars before generic Noosphere env vars", () => {
