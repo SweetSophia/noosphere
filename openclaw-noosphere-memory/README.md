@@ -9,18 +9,34 @@ supplement.
 Use OpenClaw's plugin installer:
 
 ```bash
-openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory
+openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.13.1 --pin
 ```
 
-For the full local Noosphere + OpenClaw setup, use the repository installer:
+For the full local Noosphere + OpenClaw setup, first confirm that the
+coordinated [`v1.13.1` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.1)
+exists with all six installer assets. Source merge alone does not publish the
+image, package, or release assets. Then use the checksum-verifying download form
+below; it runs the guided `1.13.1` launcher non-interactively for OpenClaw.
+
+It verifies the reviewed launcher and backend before configuring OpenClaw through
+its protected file secret provider. For the full lifecycle and auditable download,
+see [Installing Noosphere](../docs/INSTALLATION.md). Guided setup creates a
+separate OpenClaw WRITE key, never the bootstrap ADMIN key. The key is
+unrestricted across corpus scopes by default so ordinary saves without
+`restrictedTags` work; apply restricted scopes only together with matching
+integration tags.
 
 ```bash
-# Installer commit: 5a94ef3530cd232265c53699ee15f37d9ec89e04
-# Expected SHA-256: 46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b
-installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5a94ef3530cd232265c53699ee15f37d9ec89e04/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b' "$installer" | sha256sum -c -
-bash "$installer" && rm -f "$installer"
+# Installer commit: ef616729339db2114e53f7b199700379fc3435bb
+# Expected SHA-256: ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2
+(
+  set -e
+  installer="$(mktemp)"
+  trap 'rm -f "$installer"' EXIT
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/ef616729339db2114e53f7b199700379fc3435bb/install.sh -o "$installer"
+  printf '%s  %s\n' 'ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2' "$installer" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.1}" bash "$installer" --non-interactive --with openclaw
+)
 ```
 
 ## Configuration
@@ -69,6 +85,30 @@ The plugin resolves keys in this order:
 Use `OPENCLAW_NOOSPHERE_*` for OpenClaw-wide defaults on machines that also run
 Opencode, Kilo Code, or Hermes. The generic `NOOSPHERE_*` variables remain
 compatibility fallbacks.
+
+### Remote origin binding
+
+Loopback deployments (`localhost`, `127.0.0.0/8`, or `::1`) need no additional
+configuration. For a remote deployment, bind the API credential to the exact
+HTTPS origin in the protected OpenClaw process environment:
+
+```bash
+OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN=https://memory.example.com
+```
+
+The value is a single origin: scheme, host, and optional port only—no path,
+query, fragment, or credentials. `NOOSPHERE_TRUSTED_ORIGIN` is the compatibility
+fallback. The OpenClaw-specific variable takes precedence when both are set.
+
+Keep this variable with the API key in the service environment. If you use
+another administrator-controlled secret/configuration source, it must inject
+the variable into the protected OpenClaw process environment. Do not put it in
+plugin configuration: an actor able to change `config.baseUrl` must not also
+authorize the replacement destination. Missing, malformed, or mismatched remote
+origin configuration stops plugin initialization with a configuration error; it
+never silently redirects authenticated requests to localhost. The client also
+rejects HTTP redirects so credentialed request bodies cannot cross to another
+origin.
 
 ## Tools
 
@@ -133,8 +173,12 @@ exclude private agent/project memory that other agents must not see.
 Package releases use package-specific tag prefixes so independent packages do
 not trigger each other's publish jobs:
 
-- `v-openclaw-1.5.7` publishes `@sweetsophia/openclaw-noosphere-memory`
-- `v-opencode-0.1.0` publishes `@sweetsophia/opencode-noosphere-memory`
+- `v-openclaw-1.13.1` publishes `@sweetsophia/openclaw-noosphere-memory@1.13.1`
+- `v-opencode-1.13.1` publishes `@sweetsophia/opencode-noosphere-memory@1.13.1`
+- `v-kilocode-1.13.1` publishes `@sweetsophia/kilocode-noosphere-memory@1.13.1`
+- `v-hermes-1.13.1` produces the deterministic Hermes workflow artifact; the
+  trusted release publisher attaches that archive and checksum to `v1.13.1`
+  after independent readback
 
 New plugin packages should add their own `v-{package}-*` tag prefix in CI before
 they are published.

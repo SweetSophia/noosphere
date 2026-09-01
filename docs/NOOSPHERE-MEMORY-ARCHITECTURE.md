@@ -8,7 +8,14 @@ configuration model used by the memory modules.
 
 Related issue: [#18 — Document architecture and config model](https://github.com/SweetSophia/noosphere/issues/18)
 
-Planned semantic retrieval is specified separately in the [authorization-safe hybrid retrieval ADR](HYBRID-RETRIEVAL-ADR.md) for [issue #261](https://github.com/SweetSophia/noosphere/issues/261). The ADR is proposed and does not describe current runtime behavior.
+Optional semantic retrieval is specified in the accepted
+[authorization-safe hybrid retrieval ADR](HYBRID-RETRIEVAL-ADR.md) for
+[issue #261](https://github.com/SweetSophia/noosphere/issues/261). Phases A1
+through C are implemented. Current Compose templates select the guarded
+pgvector image, while feature-schema activation, provider/worker operation,
+backfill, and hybrid retrieval remain explicit opt-in actions. Deployment and
+serving state are tracked separately in the
+[memory revamp status matrix](MEMORY-REVAMP-STATUS.md).
 
 ---
 

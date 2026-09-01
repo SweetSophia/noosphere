@@ -74,6 +74,7 @@ export class NoosphereMemoryClient {
         try {
             const response = await fetch(`${this.config.baseUrl}${path}`, {
                 ...init,
+                redirect: "error",
                 signal: controller.signal,
                 headers: {
                     authorization: `Bearer ${this.config.apiKey}`,

@@ -39,15 +39,21 @@ Docker administrator access is an explicit trust boundary. The lock serializes t
 
 ## OpenClaw installer deployments
 
-Install and upgrade through the same command:
+Install and upgrade through the same command, but only after the coordinated
+[`v1.13.1` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.1)
+exists with all six installer assets. Source merge alone does not publish them:
 
 ```bash
-# Installer commit: 5a94ef3530cd232265c53699ee15f37d9ec89e04
-# Expected SHA-256: 46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b
-installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5a94ef3530cd232265c53699ee15f37d9ec89e04/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b' "$installer" | sha256sum -c -
-bash "$installer" && rm -f "$installer"
+# Installer commit: ef616729339db2114e53f7b199700379fc3435bb
+# Expected SHA-256: ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2
+(
+  set -e
+  installer="$(mktemp)"
+  trap 'rm -f "$installer"' EXIT
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/ef616729339db2114e53f7b199700379fc3435bb/install.sh -o "$installer"
+  printf '%s  %s\n' 'ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2' "$installer" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.1}" bash "$installer" --non-interactive --with openclaw
+)
 ```
 
 On an existing supported source install, the installer downloads checksum-pinned guard and deploy-verification scripts, writes the fail-closed candidate Compose gate while leaving the running source container unchanged, performs the full offline transition with writer restart deferred to the installer, then runs bootstrap, application health, exact image/volume/version/extension verification, and minimum data checks. If interrupted after writing Compose but before authorization, an accidental candidate recreation exits before PostgreSQL can touch the source volume.

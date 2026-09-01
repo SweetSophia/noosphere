@@ -3,7 +3,20 @@ set -euo pipefail
 trap 'echo "Installer failed near line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
 
 NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
+NOOSPHERE_INSTALL_OPENCLAW="${NOOSPHERE_INSTALL_OPENCLAW:-true}"
+NOOSPHERE_SHOW_CREDENTIALS="${NOOSPHERE_SHOW_CREDENTIALS:-false}"
+NOOSPHERE_CREDENTIALS_FILE="${NOOSPHERE_CREDENTIALS_FILE:-$NOOSPHERE_HOME/credentials.json}"
 NOOSPHERE_PORT="${NOOSPHERE_PORT:-}"
+if [[ -n ${NOOSPHERE_VERSION:-} ]]; then
+  NOOSPHERE_VERSION_WAS_EXPLICIT=1
+else
+  NOOSPHERE_VERSION_WAS_EXPLICIT=0
+fi
+if [[ -n ${NOOSPHERE_IMAGE:-} ]]; then
+  NOOSPHERE_IMAGE_WAS_EXPLICIT=1
+else
+  NOOSPHERE_IMAGE_WAS_EXPLICIT=0
+fi
 NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-}"
 NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-}"
 APP_URL="${APP_URL:-}"
@@ -38,15 +51,17 @@ NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH="${NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH:-}"
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH="${NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH:-}"
 NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS="${NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS:-}"
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS="${NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS:-}"
-PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory}"
+PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.1}"
 SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$HOME/.openclaw/secrets}"
 SECRETS_FILE="${NOOSPHERE_SECRETS_FILE:-$SECRETS_DIR/noosphere-memory.json}"
 SECRET_PROVIDER_ID="${NOOSPHERE_SECRET_PROVIDER_ID:-noosphere-memory}"
 PLUGIN_ID="noosphere-memory"
-POSTGRES_SWITCH_SCRIPT_SHA256='edcc6490b2237d9f5d5c9ad146f82250957e1bb7b1e1cee778e7abf79afc28f9'
-POSTGRES_SWITCH_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/4a7033214d8509419ff1d50ddcfa4e92fdfd9adc/scripts/switch-pgvector-compose.sh'
-POSTGRES_VERIFY_SCRIPT_SHA256='e6751d338f84e3c51cb2e5dd8691e372e704dbd20fb8cc9e960420e81d20b2fd'
-POSTGRES_VERIFY_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/4a7033214d8509419ff1d50ddcfa4e92fdfd9adc/scripts/verify-deploy.sh'
+POSTGRES_CONTROLLER_SCRIPT_SHA256='996c7a96b4b3be91db3754d7fdef92a00f7943340316b124e6932abc505770aa'
+POSTGRES_CONTROLLER_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/9da4af0a7b2275aa91eecd102095e0e470bbb0e3/scripts/run-pgvector-transition-controller.sh'
+POSTGRES_SWITCH_SCRIPT_SHA256='aa364a1d3344905972d87d02c1c0b6954558b4fbd610474a02ebf730861fb479'
+POSTGRES_SWITCH_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/9da4af0a7b2275aa91eecd102095e0e470bbb0e3/scripts/switch-pgvector-compose.sh'
+POSTGRES_VERIFY_SCRIPT_SHA256='1f17bf84739a5d9d2c4c25b456d72a2e987b1a5ede3b22370e817160fb850134'
+POSTGRES_VERIFY_SCRIPT_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/9da4af0a7b2275aa91eecd102095e0e470bbb0e3/scripts/verify-deploy.sh'
 EXPLICIT_POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
 EXPLICIT_POSTGRES_MIGRATION_PASSWORD="${POSTGRES_MIGRATION_PASSWORD:-}"
 EXPLICIT_POSTGRES_APP_PASSWORD="${POSTGRES_APP_PASSWORD:-}"
@@ -63,6 +78,24 @@ need() {
   fi
 }
 
+run_openclaw() {
+  env \
+    -u POSTGRES_PASSWORD \
+    -u POSTGRES_MIGRATION_PASSWORD \
+    -u POSTGRES_APP_PASSWORD \
+    -u POSTGRES_HYBRID_ADMIN_PASSWORD \
+    -u POSTGRES_HYBRID_WORKER_PASSWORD \
+    -u NEXTAUTH_SECRET \
+    -u REDIS_URL \
+    -u NOOSPHERE_ADMIN_PASSWORD \
+    -u NOOSPHERE_BOOTSTRAP_API_KEY \
+    -u NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON \
+    -u NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 \
+    -u NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_JSON \
+    -u NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64 \
+    openclaw "$@"
+}
+
 random_secret() {
   node -e "console.log(require('crypto').randomBytes(Number(process.argv[1])).toString('base64url'))" "$1"
 }
@@ -71,6 +104,208 @@ json_get() {
   local file="$1"
   local key="$2"
   JSON_GET_FILE="$file" JSON_GET_KEY="$key" node -e 'try { const fs=require("fs"); const p=process.env.JSON_GET_FILE; const k=process.env.JSON_GET_KEY; if (!p || !k || !fs.existsSync(p)) process.exit(0); const data=JSON.parse(fs.readFileSync(p,"utf8")); if (typeof data[k] === "string") process.stdout.write(data[k]); } catch { process.exit(0); }'
+}
+
+assert_no_symlink_path_components() {
+  local target=$1 label=$2
+  TARGET_PATH="$target" TARGET_LABEL="$label" node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    let current = path.resolve(process.env.TARGET_PATH);
+    while (true) {
+      try {
+        if (fs.lstatSync(current).isSymbolicLink()) {
+          throw new Error(`Refusing symlinked ${process.env.TARGET_LABEL} path component: ${current}`);
+        }
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  '
+}
+
+write_credentials_json() {
+  local target=$1 include_runtime=${2:-false} include_bootstrap=${3:-true} parent temp
+  parent=$(dirname "$target")
+  assert_no_symlink_path_components "$target" credential || return 1
+  install -d -m 700 "$parent"
+  assert_no_symlink_path_components "$target" credential || return 1
+  [[ ! -L "$target" ]] || {
+    echo "Refusing symlinked credential target: $target" >&2
+    return 1
+  }
+  temp=$(mktemp "$parent/.credentials.XXXXXX")
+  CREDENTIALS_EXISTING_TARGET="$target" \
+  CREDENTIALS_BASE_URL="$APP_URL" \
+  CREDENTIALS_API_KEY="$INTEGRATION_API_KEY" \
+  CREDENTIALS_BOOTSTRAP_API_KEY="$API_KEY" \
+  CREDENTIALS_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
+  CREDENTIALS_POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+  CREDENTIALS_POSTGRES_MIGRATION_PASSWORD="$POSTGRES_MIGRATION_PASSWORD" \
+  CREDENTIALS_POSTGRES_APP_PASSWORD="$POSTGRES_APP_PASSWORD" \
+  CREDENTIALS_POSTGRES_HYBRID_ADMIN_PASSWORD="$POSTGRES_HYBRID_ADMIN_PASSWORD" \
+  CREDENTIALS_POSTGRES_HYBRID_WORKER_PASSWORD="$POSTGRES_HYBRID_WORKER_PASSWORD" \
+  CREDENTIALS_NEXTAUTH_SECRET="$NEXTAUTH_SECRET" \
+  CREDENTIALS_INCLUDE_RUNTIME="$include_runtime" \
+  CREDENTIALS_INCLUDE_BOOTSTRAP="$include_bootstrap" \
+    node -e '
+      const fs = require("node:fs");
+      const target = process.argv[1];
+      let integrationApiKeys = {};
+      const existingTarget = process.env.CREDENTIALS_EXISTING_TARGET;
+      if (existingTarget && fs.existsSync(existingTarget)) {
+        const existing = JSON.parse(fs.readFileSync(existingTarget, "utf8"));
+        if (existing.integrationApiKeys && typeof existing.integrationApiKeys === "object" && !Array.isArray(existing.integrationApiKeys)) {
+          integrationApiKeys = Object.fromEntries(Object.entries(existing.integrationApiKeys).filter(
+            ([name, key]) => /^[a-z0-9-]+$/.test(name) && typeof key === "string" && /^noo_[A-Za-z0-9_-]+$/.test(key),
+          ));
+        }
+      }
+      const data = {
+        baseUrl: process.env.CREDENTIALS_BASE_URL,
+        apiKey: process.env.CREDENTIALS_API_KEY,
+        integrationApiKeys,
+        adminEmail: "admin@noosphere.local",
+        adminPassword: process.env.CREDENTIALS_ADMIN_PASSWORD,
+      };
+      if (process.env.CREDENTIALS_INCLUDE_BOOTSTRAP === "true") {
+        data.bootstrapApiKey = process.env.CREDENTIALS_BOOTSTRAP_API_KEY;
+      }
+      if (process.env.CREDENTIALS_INCLUDE_RUNTIME === "true") {
+        Object.assign(data, {
+          postgresPassword: process.env.CREDENTIALS_POSTGRES_PASSWORD,
+          postgresMigrationPassword: process.env.CREDENTIALS_POSTGRES_MIGRATION_PASSWORD,
+          postgresAppPassword: process.env.CREDENTIALS_POSTGRES_APP_PASSWORD,
+          postgresHybridAdminPassword: process.env.CREDENTIALS_POSTGRES_HYBRID_ADMIN_PASSWORD,
+          postgresHybridWorkerPassword: process.env.CREDENTIALS_POSTGRES_HYBRID_WORKER_PASSWORD,
+          nextAuthSecret: process.env.CREDENTIALS_NEXTAUTH_SECRET,
+        });
+      }
+      fs.writeFileSync(target, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
+    ' "$temp"
+  chmod 600 "$temp"
+  assert_no_symlink_path_components "$target" credential || return 1
+  mv "$temp" "$target"
+}
+
+validated_local_app_url() {
+  APP_URL_INPUT=$1 EXPECTED_PORT=$NOOSPHERE_PORT node -e '
+    const os = require("node:os");
+    const input = process.env.APP_URL_INPUT;
+    const expectedPort = String(process.env.EXPECTED_PORT || "");
+    const url = new URL(input);
+    const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    const local = new Set(["localhost", "127.0.0.1", "::1"]);
+    for (const entries of Object.values(os.networkInterfaces())) {
+      for (const entry of entries || []) local.add(String(entry.address).toLowerCase());
+    }
+    if (url.protocol !== "http:" || url.username || url.password ||
+        url.pathname !== "/" || url.search || url.hash || !url.port ||
+        url.port !== expectedPort || !local.has(host)) {
+      throw new Error("Noosphere application URL is not the expected local endpoint");
+    }
+    process.stdout.write(url.origin);
+  '
+}
+
+local_no_proxy_curl() {
+  curl --disable --noproxy '*' --connect-timeout 5 --max-time 15 "$@"
+}
+
+api_http_status_with_key() {
+  local key=$1 endpoint=$2 config status base_url
+  [[ "$key" =~ ^noo_[A-Za-z0-9_-]+$ ]] || {
+    printf '000'
+    return 0
+  }
+  base_url=$(validated_local_app_url "$APP_URL") || {
+    printf '000'
+    return 0
+  }
+  config=$(mktemp)
+  chmod 600 "$config"
+  printf 'silent\nshow-error\nheader = "Authorization: Bearer %s"\n' "$key" > "$config"
+  status=$(local_no_proxy_curl --config "$config" --output /dev/null --write-out '%{http_code}' \
+    "$base_url$endpoint" 2>/dev/null || true)
+  rm -f "$config"
+  printf '%s' "${status:-000}"
+}
+
+api_write_probe_status_with_key() {
+  local key=$1 config body status base_url
+  [[ "$key" =~ ^noo_[A-Za-z0-9_-]+$ ]] || { printf '000'; return 0; }
+  base_url=$(validated_local_app_url "$APP_URL") || { printf '000'; return 0; }
+  config=$(mktemp)
+  body=$(mktemp)
+  chmod 600 "$config" "$body"
+  printf 'silent\nshow-error\nheader = "Authorization: Bearer %s"\n' "$key" > "$config"
+  printf '{}\n' > "$body"
+  status=$(local_no_proxy_curl --config "$config" --request POST --header 'Content-Type: application/json' \
+    --data-binary "@$body" --output /dev/null --write-out '%{http_code}' \
+    "$base_url/api/articles" 2>/dev/null || true)
+  rm -f "$config" "$body"
+  printf '%s' "${status:-000}"
+}
+
+integration_key_is_safe() {
+  local key=$1 write_status admin_status
+  [[ -n "$key" ]] || return 1
+  write_status=$(api_write_probe_status_with_key "$key")
+  admin_status=$(api_http_status_with_key "$key" '/api/keys')
+  if [[ "$write_status" == 000 || "$admin_status" == 000 ]]; then
+    return 2
+  fi
+  [[ "$write_status" == 400 && "$admin_status" == 403 ]]
+}
+
+create_scoped_integration_key() {
+  local label=$1 config body response name raw base_url
+  [[ "$API_KEY" =~ ^noo_[A-Za-z0-9_-]+$ ]] || {
+    echo 'Bootstrap API key has an unexpected format.' >&2
+    return 1
+  }
+  name="guided-${label}-$(date +%s)-${RANDOM}"
+  base_url=$(validated_local_app_url "$APP_URL") || {
+    echo 'Refusing to send the bootstrap API key to a non-local Noosphere URL.' >&2
+    return 1
+  }
+  config=$(mktemp)
+  body=$(mktemp)
+  response=$(mktemp)
+  chmod 600 "$config" "$body" "$response"
+  printf 'silent\nshow-error\nfail-with-body\nheader = "Authorization: Bearer %s"\n' "$API_KEY" > "$config"
+  printf '{"name":"%s","permissions":"WRITE","allowedScopes":[]}\n' "$name" > "$body"
+  if ! local_no_proxy_curl --config "$config" --request POST --header 'Content-Type: application/json' \
+    --data-binary "@$body" --output "$response" "$base_url/api/keys"; then
+    rm -f "$config" "$body" "$response"
+    echo "Failed to create a scoped ${label} API key." >&2
+    return 1
+  fi
+  raw=$(json_get "$response" key)
+  rm -f "$config" "$body" "$response"
+  [[ "$raw" =~ ^noo_[A-Za-z0-9_-]+$ ]] || {
+    echo "Noosphere returned an invalid scoped ${label} API key." >&2
+    return 1
+  }
+  printf '%s' "$raw"
+}
+
+select_scoped_integration_key() {
+  local existing=$1 label=$2 status
+  if integration_key_is_safe "$existing"; then
+    printf '%s' "$existing"
+    return 0
+  else
+    status=$?
+  fi
+  if [[ "$status" == 2 ]]; then
+    echo "Could not verify the existing scoped ${label} API key; refusing to rotate it after a transport failure." >&2
+    return 1
+  fi
+  create_scoped_integration_key "$label"
 }
 
 env_get() {
@@ -311,8 +546,15 @@ resolve_runtime_config() {
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-$(env_get "$runtime_env" NOOSPHERE_PORT)}"
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-$(env_get "$runtime_env" NOOSPHERE_VERSION)}"
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-latest}"
-  NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-$(env_get "$runtime_env" NOOSPHERE_IMAGE)}"
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.1}"
+  if ((NOOSPHERE_VERSION_WAS_EXPLICIT == 1 && NOOSPHERE_IMAGE_WAS_EXPLICIT == 0)); then
+    # A version-bound public upgrade must not inherit an installer-persisted
+    # image from the previous release. Operators retaining a custom registry or
+    # image must pass NOOSPHERE_IMAGE explicitly alongside the release version.
+    NOOSPHERE_IMAGE=''
+  else
+    NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-$(env_get "$runtime_env" NOOSPHERE_IMAGE)}"
+  fi
   APP_URL="${APP_URL:-$(env_get "$runtime_env" APP_URL)}"
   BIND_ADDRESS="${BIND_ADDRESS:-$(env_get "$runtime_env" BIND_ADDRESS)}"
   REDIS_URL="${REDIS_URL:-$(env_get "$runtime_env" REDIS_URL)}"
@@ -358,63 +600,574 @@ prepare_guard_script() {
   rm -f "$temp"
 }
 
-acquire_postgres_operation_lock() {
-  local docker_context docker_host docker_socket engine_id lock_root lock_key lock_path
-  docker_host=''
+fsync_installer_path() {
+  node -e '
+    const fs = require("node:fs");
+    const fd = fs.openSync(process.argv[1], "r");
+    try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  ' "$1"
+}
+
+assert_installer_owned_regular_file() {
+  local path=$1 mode
+  [[ -f "$path" && ! -L "$path" ]] || {
+    echo "Installer artifact is missing, non-regular, or a symlink: $path" >&2
+    return 1
+  }
+  [[ $(stat -c '%u' "$path") == "$(id -u)" ]] || {
+    echo "Installer artifact has an unexpected owner: $path" >&2
+    return 1
+  }
+  mode=$(stat -c '%a' "$path")
+  (( (8#$mode & 8#022) == 0 )) || {
+    echo "Installer artifact permits group/world writes: $path" >&2
+    return 1
+  }
+}
+
+resolve_local_docker_endpoint() {
+  local docker_context docker_host docker_socket
   if [[ -n ${DOCKER_CONTEXT:-} ]]; then
     docker_context=$DOCKER_CONTEXT
     docker_host=$(docker context inspect "$docker_context" --format '{{(index .Endpoints "docker").Host}}') || {
       echo "Could not inspect Docker context $docker_context" >&2
-      exit 1
+      return 1
     }
   elif [[ -n ${DOCKER_HOST:-} ]]; then
     docker_host=$DOCKER_HOST
   else
     docker_context=$(docker context show) || {
       echo 'Could not determine the active Docker context.' >&2
-      exit 1
+      return 1
     }
     docker_host=$(docker context inspect "$docker_context" --format '{{(index .Endpoints "docker").Host}}') || {
       echo "Could not inspect Docker context $docker_context" >&2
-      exit 1
+      return 1
     }
   fi
   [[ "$docker_host" == unix://* ]] || {
     echo "Refusing non-local Docker endpoint: $docker_host" >&2
-    exit 1
+    return 1
   }
   docker_socket=${docker_host#unix://}
   [[ "$docker_socket" == /* ]] || {
     echo "Docker Unix endpoint must use an absolute path: $docker_host" >&2
-    exit 1
+    return 1
   }
-  docker_host="unix://$(realpath -m "$docker_socket")"
+  printf 'unix://%s\n' "$(realpath -m "$docker_socket")"
+}
+
+prepare_postgres_controller_runtime() {
+  local config_temp
+  POSTGRES_CONTROLLER_ROOT="$NOOSPHERE_HOME/postgres-transition-controller"
+  POSTGRES_CONTROLLER_HOME="$POSTGRES_CONTROLLER_ROOT/home"
+  POSTGRES_CONTROLLER_MANIFEST="$POSTGRES_CONTROLLER_ROOT/manifest.json"
+  POSTGRES_CONTROLLER_STATE="$POSTGRES_CONTROLLER_ROOT/state.json"
+  POSTGRES_CONTROLLER_CANDIDATE="$POSTGRES_CONTROLLER_ROOT/candidate-compose.yml"
+  POSTGRES_CONTROLLER_SOURCE="$POSTGRES_CONTROLLER_ROOT/source-compose.yml"
+  POSTGRES_CONTROLLER_SCRIPT="$POSTGRES_CONTROLLER_ROOT/run-pgvector-transition-controller.sh"
+  POSTGRES_SWITCH_SCRIPT="$POSTGRES_CONTROLLER_ROOT/switch-pgvector-compose.sh"
+  POSTGRES_VERIFY_SCRIPT="$POSTGRES_CONTROLLER_ROOT/verify-deploy.sh"
+  export POSTGRES_CONTROLLER_ROOT POSTGRES_CONTROLLER_HOME POSTGRES_CONTROLLER_MANIFEST
+  export POSTGRES_CONTROLLER_STATE POSTGRES_CONTROLLER_CANDIDATE POSTGRES_CONTROLLER_SOURCE
+  export POSTGRES_CONTROLLER_SCRIPT POSTGRES_SWITCH_SCRIPT POSTGRES_VERIFY_SCRIPT
+
+  install -d -m 700 "$NOOSPHERE_HOME" "$POSTGRES_CONTROLLER_ROOT" \
+    "$POSTGRES_CONTROLLER_HOME" "$POSTGRES_CONTROLLER_HOME/docker" "$POSTGRES_BACKUP_DIR"
+  prepare_guard_script scripts/run-pgvector-transition-controller.sh \
+    "$POSTGRES_CONTROLLER_SCRIPT_URL" "$POSTGRES_CONTROLLER_SCRIPT_SHA256" \
+    "$POSTGRES_CONTROLLER_SCRIPT"
+  prepare_guard_script scripts/switch-pgvector-compose.sh \
+    "$POSTGRES_SWITCH_SCRIPT_URL" "$POSTGRES_SWITCH_SCRIPT_SHA256" \
+    "$POSTGRES_SWITCH_SCRIPT"
+  prepare_guard_script scripts/verify-deploy.sh \
+    "$POSTGRES_VERIFY_SCRIPT_URL" "$POSTGRES_VERIFY_SCRIPT_SHA256" \
+    "$POSTGRES_VERIFY_SCRIPT"
+  fsync_installer_path "$POSTGRES_CONTROLLER_SCRIPT"
+  fsync_installer_path "$POSTGRES_SWITCH_SCRIPT"
+  fsync_installer_path "$POSTGRES_VERIFY_SCRIPT"
+
+  config_temp=$(mktemp "$POSTGRES_CONTROLLER_ROOT/.docker-config.XXXXXX")
+  printf '{}\n' > "$config_temp"
+  chmod 0600 "$config_temp"
+  fsync_installer_path "$config_temp"
+  install -m 600 "$config_temp" "$POSTGRES_CONTROLLER_HOME/docker/config.json"
+  rm -f "$config_temp"
+  fsync_installer_path "$POSTGRES_CONTROLLER_HOME/docker/config.json"
+  fsync_installer_path "$POSTGRES_CONTROLLER_HOME/docker"
+  fsync_installer_path "$POSTGRES_CONTROLLER_HOME"
+  fsync_installer_path "$POSTGRES_CONTROLLER_ROOT"
+}
+
+sanitize_postgres_controller_environment() {
+  local docker_host=$1 fixed_path=$2 controller_home=$3 ambient_name
+  while IFS= read -r ambient_name; do
+    case "$ambient_name" in
+      DOCKER_*|COMPOSE_*) unset "$ambient_name" ;;
+    esac
+  done < <(compgen -v)
+  unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy
+  unset BASH_ENV ENV CDPATH GLOBIGNORE
+  unset NOOSPHERE_A2B_LOCK_FD NOOSPHERE_A2B_LOCK_PATH
+  unset NOOSPHERE_CONTROLLER_FIXTURE_ROOT
+  unset NOOSPHERE_CONTROLLER_TEST_INTERRUPT_AFTER_INTENT
+  unset NOOSPHERE_CONTROLLER_TEST_SIGNAL_AFTER_GUARD_SPAWN
+  unset NOOSPHERE_CONTROLLER_TEST_FAIL_EVIDENCE
+  unset NOOSPHERE_CONTROLLER_TEST_SIGNAL_AFTER_AUTHORIZATION
+  unset NOOSPHERE_CONTROLLER_TEST_SIGNAL_BEFORE_COMPLETE
+  unset NOOSPHERE_CONTROLLER_TEST_SIGNAL_BEFORE_GUARD
+  export HOME=$controller_home
+  export DOCKER_CONFIG="$controller_home/docker"
+  export DOCKER_HOST=$docker_host
+  export COMPOSE_DISABLE_ENV_FILE=1
+  export PATH=$fixed_path
+}
+
+postgres_controller_compose_version_signature() (
+  local docker_host=$1 docker_path=$2 fixed_path=$3 controller_home=$4
+  sanitize_postgres_controller_environment "$docker_host" "$fixed_path" "$controller_home"
+  "$docker_path" compose version --short | sha256sum | awk '{print $1}'
+)
+
+postgres_controller_compose_model_signature() (
+  local docker_host=$1 docker_path=$2 candidate=$3 env_file=$4
+  local fixed_path=$5 controller_home=$6
+  sanitize_postgres_controller_environment "$docker_host" "$fixed_path" "$controller_home"
+  "$docker_path" compose --project-directory "$NOOSPHERE_HOME" \
+    --env-file "$env_file" -f "$candidate" config --no-interpolate |
+    sha256sum | awk '{print $1}'
+)
+
+postgres_controller_verification_url() {
+  local host=${BIND_ADDRESS:-127.0.0.1}
+  [[ "$host" != 0.0.0.0 ]] || host=127.0.0.1
+  is_valid_ipv4 "$host" || {
+    echo "Controller verification requires an IPv4 bind address, found: $host" >&2
+    return 1
+  }
+  printf 'http://%s:%s\n' "$host" "$NOOSPHERE_PORT"
+}
+
+assert_postgres_controller_bootstrap_node() {
+  local bootstrap_path='/usr/sbin:/usr/bin:/sbin:/bin' node_path node_mode
+  node_path=$(PATH="$bootstrap_path" command -v node 2>/dev/null || true)
+  [[ -n "$node_path" ]] || {
+    echo 'Existing-volume upgrade requires Node on the controller bootstrap PATH (/usr/sbin:/usr/bin:/sbin:/bin).' >&2
+    echo 'Install the distribution Node package, then rerun the same checksum-pinned installer command.' >&2
+    return 1
+  }
+  node_path=$(realpath "$node_path")
+  [[ -f "$node_path" && ! -L "$node_path" && $(stat -c '%u' "$node_path") == 0 ]] || {
+    echo "Controller bootstrap Node is not a root-owned regular file: $node_path" >&2
+    return 1
+  }
+  node_mode=$(stat -c '%a' "$node_path")
+  (( (8#$node_mode & 8#022) == 0 )) || {
+    echo "Controller bootstrap Node permits group/world writes: $node_path" >&2
+    return 1
+  }
+  PATH="$bootstrap_path" node -e 'process.exit(0)'
+}
+
+write_postgres_controller_manifest() {
+  local docker_path docker_host engine_id plugin_path platform fixed_path lock_root
+  local compose_version_sha effective_compose_sha manifest_temp app_url config_file
+  local bound_input
+  for bound_input in \
+    "$POSTGRES_CONTROLLER_SCRIPT" \
+    "$POSTGRES_SWITCH_SCRIPT" \
+    "$POSTGRES_VERIFY_SCRIPT" \
+    "$POSTGRES_CONTROLLER_SOURCE" \
+    "$POSTGRES_CONTROLLER_CANDIDATE" \
+    "$NOOSPHERE_HOME/.env" \
+    "$POSTGRES_CONTROLLER_HOME/docker/config.json"; do
+    assert_installer_owned_regular_file "$bound_input"
+    fsync_installer_path "$bound_input"
+  done
+  fsync_installer_path "$NOOSPHERE_HOME"
+  fsync_installer_path "$POSTGRES_CONTROLLER_HOME/docker"
+  fsync_installer_path "$POSTGRES_CONTROLLER_ROOT"
+  docker_path=$(realpath "$(command -v docker)")
+  docker_host=$(resolve_local_docker_endpoint)
+  config_file="$POSTGRES_CONTROLLER_HOME/docker/config.json"
+  engine_id=$(DOCKER_CONFIG="$POSTGRES_CONTROLLER_HOME/docker" DOCKER_HOST="$docker_host" \
+    "$docker_path" info --format '{{.ID}}')
+  [[ -n "$engine_id" ]] || {
+    echo 'Could not determine the Docker engine ID for controller preparation.' >&2
+    return 1
+  }
+  platform=$(DOCKER_CONFIG="$POSTGRES_CONTROLLER_HOME/docker" DOCKER_HOST="$docker_host" \
+    "$docker_path" info --format '{{.OSType}}/{{.Architecture}}')
+  case "$platform" in
+    linux/x86_64) platform=linux/amd64 ;;
+    linux/aarch64) platform=linux/arm64 ;;
+    linux/amd64|linux/arm64) ;;
+    *) echo "Unsupported Docker engine platform for controller execution: $platform" >&2; return 1 ;;
+  esac
+  plugin_path=$(DOCKER_HOST="$docker_host" \
+    "$docker_path" info --format '{{json .ClientInfo.Plugins}}' |
+    jq -er '[.[] | select(.Name == "compose") | .Path] | if length == 1 then .[0] else error("Compose plugin identity is ambiguous") end')
+  plugin_path=$(realpath "$plugin_path")
+  [[ -f "$plugin_path" && -x "$plugin_path" && ! -L "$plugin_path" ]] || {
+    echo "Docker Compose plugin is unavailable or unsafe: $plugin_path" >&2
+    return 1
+  }
+  fixed_path='/usr/sbin:/usr/bin:/sbin:/bin'
+  compose_version_sha=$(postgres_controller_compose_version_signature \
+    "$docker_host" "$docker_path" "$fixed_path" "$POSTGRES_CONTROLLER_HOME")
+  effective_compose_sha=$(postgres_controller_compose_model_signature \
+    "$docker_host" "$docker_path" "$POSTGRES_CONTROLLER_CANDIDATE" \
+    "$NOOSPHERE_HOME/.env" "$fixed_path" "$POSTGRES_CONTROLLER_HOME")
   lock_root=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+  app_url=$(postgres_controller_verification_url)
+  manifest_temp=$(mktemp "$POSTGRES_CONTROLLER_ROOT/.manifest.XXXXXX")
+  trap 'rm -f "$manifest_temp"' RETURN
+  jq -n \
+    --arg engineId "$engine_id" \
+    --arg dockerEndpoint "$docker_host" \
+    --arg liveCompose "$NOOSPHERE_HOME/docker-compose.yml" \
+    --arg sourceSnapshot "$POSTGRES_CONTROLLER_SOURCE" \
+    --arg sourceSnapshotSha256 "$(sha256sum "$POSTGRES_CONTROLLER_SOURCE" | awk '{print $1}')" \
+    --arg candidateCompose "$POSTGRES_CONTROLLER_CANDIDATE" \
+    --arg candidateComposeSha256 "$(sha256sum "$POSTGRES_CONTROLLER_CANDIDATE" | awk '{print $1}')" \
+    --arg envFile "$NOOSPHERE_HOME/.env" \
+    --arg envFileSha256 "$(sha256sum "$NOOSPHERE_HOME/.env" | awk '{print $1}')" \
+    --arg controllerPath "$POSTGRES_CONTROLLER_SCRIPT" \
+    --arg controllerSha256 "$POSTGRES_CONTROLLER_SCRIPT_SHA256" \
+    --arg guard "$POSTGRES_SWITCH_SCRIPT" \
+    --arg guardSha256 "$POSTGRES_SWITCH_SCRIPT_SHA256" \
+    --arg verifier "$POSTGRES_VERIFY_SCRIPT" \
+    --arg verifierSha256 "$POSTGRES_VERIFY_SCRIPT_SHA256" \
+    --arg dockerPath "$docker_path" \
+    --arg dockerSha256 "$(sha256sum "$docker_path" | awk '{print $1}')" \
+    --arg dockerComposeVersionSha256 "$compose_version_sha" \
+    --arg composePluginPath "$plugin_path" \
+    --arg composePluginSha256 "$(sha256sum "$plugin_path" | awk '{print $1}')" \
+    --arg dockerConfigSha256 "$(sha256sum "$config_file" | awk '{print $1}')" \
+    --arg effectiveComposeSha256 "$effective_compose_sha" \
+    --arg backupDir "$POSTGRES_BACKUP_DIR" \
+    --arg lockRoot "$lock_root" \
+    --arg controllerHome "$POSTGRES_CONTROLLER_HOME" \
+    --arg fixedPath "$fixed_path" \
+    --arg platform "$platform" \
+    --arg appUrl "$app_url" \
+    --arg guardJournal "$POSTGRES_BACKUP_DIR/noosphere_postgres_data.phase-a2b.json" '
+      {
+        version:1, phase:"prepared", engineId:$engineId,
+        dockerEndpoint:$dockerEndpoint, volume:"noosphere_postgres_data",
+        liveCompose:$liveCompose, sourceSnapshot:$sourceSnapshot,
+        sourceSnapshotSha256:$sourceSnapshotSha256,
+        candidateCompose:$candidateCompose,
+        candidateComposeSha256:$candidateComposeSha256,
+        envFile:$envFile, envFileSha256:$envFileSha256,
+        guard:$guard, guardSha256:$guardSha256,
+        controllerPath:$controllerPath, controllerSha256:$controllerSha256,
+        guardArgs:[
+          "--compose-file",$liveCompose,
+          "--env-file",$envFile,
+          "--db-container","noosphere-openclaw-db",
+          "--app-container","noosphere-openclaw-app",
+          "--volume","noosphere_postgres_data",
+          "--authorization-volume","noosphere_postgres_authorization",
+          "--backup-dir",$backupDir,
+          "--platform",$platform,
+          "--defer-app-restart"
+        ],
+        verifier:$verifier, verifierSha256:$verifierSha256,
+        dockerPath:$dockerPath, dockerSha256:$dockerSha256,
+        dockerComposeVersionSha256:$dockerComposeVersionSha256,
+        composePluginPath:$composePluginPath,
+        composePluginSha256:$composePluginSha256,
+        dockerConfigSha256:$dockerConfigSha256,
+        effectiveComposeSha256:$effectiveComposeSha256,
+        backupDir:$backupDir, lockRoot:$lockRoot,
+        controllerHome:$controllerHome, fixedPath:$fixedPath,
+        dbContainer:"noosphere-openclaw-db",
+        appContainer:"noosphere-openclaw-app",
+        authorizationVolume:"noosphere_postgres_authorization",
+        platform:$platform, appUrl:$appUrl,
+        guardJournal:$guardJournal
+      }
+    ' > "$manifest_temp"
+  chmod 0600 "$manifest_temp"
+  fsync_installer_path "$manifest_temp"
+  install -m 600 "$manifest_temp" "$POSTGRES_CONTROLLER_MANIFEST"
+  fsync_installer_path "$POSTGRES_CONTROLLER_MANIFEST"
+  fsync_installer_path "$POSTGRES_CONTROLLER_ROOT"
+  rm -f "$manifest_temp"
+  trap - RETURN
+}
+
+release_postgres_operation_lock() {
+  local fd=${NOOSPHERE_A2B_LOCK_FD:-}
+  if [[ -n "$fd" ]]; then
+    [[ "$fd" =~ ^[0-9]+$ ]] || {
+      echo 'PostgreSQL operation lock descriptor is malformed.' >&2
+      return 1
+    }
+    eval "exec ${fd}>&-"
+  fi
+  unset NOOSPHERE_A2B_LOCK_FD NOOSPHERE_A2B_LOCK_PATH
+}
+
+ensure_persistent_user_manager() {
+  local runtime_dir uid
+  need systemd-run
+  need systemctl
+  need loginctl
+  uid=$(id -u)
+  if [[ $(loginctl show-user "$uid" -p Linger --value 2>/dev/null || true) != yes ]]; then
+    if command -v sudo >/dev/null 2>&1; then
+      sudo loginctl enable-linger "$USER"
+    else
+      loginctl enable-linger "$USER"
+    fi
+  fi
+  [[ $(loginctl show-user "$uid" -p Linger --value 2>/dev/null || true) == yes ]] || {
+    echo "Persistent user manager is required. Run: sudo loginctl enable-linger $USER" >&2
+    return 1
+  }
+
+  runtime_dir=${XDG_RUNTIME_DIR:-/run/user/$uid}
+  if [[ -S "$runtime_dir/bus" ]]; then
+    export XDG_RUNTIME_DIR="$runtime_dir"
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus"
+  fi
+  if ! systemctl --user show-environment >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
+    sudo systemctl start "user@$uid.service"
+    export XDG_RUNTIME_DIR="$runtime_dir"
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus"
+  fi
+  systemctl --user show-environment >/dev/null 2>&1 || {
+    echo "The persistent user manager is not reachable for $USER." >&2
+    echo "Start user@$uid.service, then rerun the same checksum-pinned installer command." >&2
+    return 1
+  }
+}
+
+run_existing_postgres_controller_transition() {
+  local phase unit_base unit unit_load_state systemd_status=0 property
+  local -a systemd_args=()
+  release_postgres_operation_lock
+  if [[ ! -e "$POSTGRES_CONTROLLER_STATE" ]]; then
+    "$POSTGRES_CONTROLLER_SCRIPT" --prepare \
+      --manifest "$POSTGRES_CONTROLLER_MANIFEST" \
+      --state "$POSTGRES_CONTROLLER_STATE"
+  fi
+  phase=$(jq -er '.phase' "$POSTGRES_CONTROLLER_STATE")
+  [[ "$phase" != complete ]] || return 0
+  [[ "$phase" != incident ]] || {
+    echo "PostgreSQL transition is in terminal incident state: $POSTGRES_CONTROLLER_STATE" >&2
+    return 1
+  }
+
+  ensure_persistent_user_manager
+  unit_base="noosphere-pgvector-transition-$(date -u +%Y%m%dT%H%M%S)-$$"
+  unit="$unit_base.service"
+  unit_load_state=$(systemctl --user show "$unit" -p LoadState --value) || {
+    echo "Could not query transient controller unit state: $unit" >&2
+    return 1
+  }
+  if [[ "$unit_load_state" != not-found ]]; then
+    echo "Refusing existing transient controller unit: $unit" >&2
+    return 1
+  fi
+  systemd_args=(
+    systemd-run --user --unit="$unit_base" --wait --collect --quiet
+    --setenv="CONTROLLER_UNIT=$unit"
+  )
+  if [[ -n ${XDG_STATE_HOME:-} ]]; then
+    systemd_args+=(--setenv="XDG_STATE_HOME=$XDG_STATE_HOME")
+  fi
+  while IFS= read -r property; do
+    systemd_args+=(--property="$property")
+  done < <(bash -p -c 'source "$1"; systemd_properties "$2"' \
+    _ "$POSTGRES_CONTROLLER_SCRIPT" "$NOOSPHERE_HOME")
+  systemd_args+=("$POSTGRES_CONTROLLER_SCRIPT" --execute --state "$POSTGRES_CONTROLLER_STATE")
+  "${systemd_args[@]}" || systemd_status=$?
+  ((systemd_status == 0)) || return "$systemd_status"
+  phase=$(jq -er '.phase' "$POSTGRES_CONTROLLER_STATE")
+  [[ "$phase" == complete ]] || {
+    echo "PostgreSQL transition controller exited without complete state: $phase" >&2
+    return 1
+  }
+}
+
+provision_existing_postgres_roles_for_controller() {
+  local docker_host=$1 docker_path=$2 provision_log provision_exit=0 db_network role_env
+  db_network=$(DOCKER_HOST="$docker_host" "$docker_path" inspect noosphere-openclaw-db |
+    jq -er '
+      .[0].NetworkSettings.Networks
+      | to_entries
+      | map(select((.value.Aliases // []) | index("db")))
+      | if length == 1 then .[0].key else error("database Compose network is ambiguous") end
+    ') || {
+    echo 'Could not identify the existing PostgreSQL Compose network for role provisioning.' >&2
+    return 1
+  }
+  role_env=$(mktemp)
+  provision_log=$(mktemp) || {
+    rm -f "$role_env"
+    return 1
+  }
+  chmod 0600 "$role_env" "$provision_log"
+  printf '%s\n' \
+    "NOOSPHERE_BOOTSTRAP_DATABASE_URL=postgresql://noosphere:${POSTGRES_PASSWORD}@db:5432/noosphere" \
+    "DATABASE_URL=postgresql://noosphere_migrator:${POSTGRES_MIGRATION_PASSWORD}@db:5432/noosphere" \
+    "NOOSPHERE_APP_DATABASE_URL=postgresql://noosphere_app:${POSTGRES_APP_PASSWORD}@db:5432/noosphere" \
+    > "$role_env"
+  DOCKER_HOST="$docker_host" "$docker_path" run --rm --pull never \
+    --network "$db_network" \
+    --env-file "$role_env" \
+    --entrypoint node \
+    "$NOOSPHERE_IMAGE" docker/provision-database-roles.mjs \
+    < /dev/null >"$provision_log" 2>&1 || provision_exit=$?
+  if ((provision_exit != 0)); then
+    echo "Database role provisioning for the existing PostgreSQL transition failed with exit code $provision_exit:" >&2
+    cat "$provision_log" >&2
+    rm -f "$role_env" "$provision_log"
+    return "$provision_exit"
+  fi
+  cat "$provision_log"
+  rm -f "$role_env" "$provision_log"
+}
+
+route_postgres_install_transition() {
+  local docker_host docker_path
+  if [[ "$existing_switch_required" == true ]]; then
+    assert_postgres_controller_bootstrap_node
+    docker_host=$(resolve_local_docker_endpoint)
+    docker_path=$(realpath "$(command -v docker)")
+    DOCKER_HOST="$docker_host" "$docker_path" compose \
+      --project-directory "$NOOSPHERE_HOME" \
+      --env-file "$NOOSPHERE_HOME/.env" \
+      -f "$POSTGRES_CONTROLLER_CANDIDATE" pull
+    provision_existing_postgres_roles_for_controller "$docker_host" "$docker_path"
+    write_postgres_controller_manifest
+    run_existing_postgres_controller_transition
+    reacquire_postgres_operation_lock_from_manifest || return 1
+    controller_transition_completed=true
+    return 0
+  fi
+
+  if [[ "$new_install_required" == true ]]; then
+    "$POSTGRES_SWITCH_SCRIPT" --prepare-new-install \
+      --compose-file "$NOOSPHERE_HOME/docker-compose.yml" \
+      --env-file "$NOOSPHERE_HOME/.env" \
+      --db-container noosphere-openclaw-db \
+      --app-container noosphere-openclaw-app \
+      --backup-dir "$POSTGRES_BACKUP_DIR"
+  fi
+}
+
+reconcile_postgres_controller_before_configuration() {
+  local controller_phase guard_evidence expected_guard_evidence expected_guard_sha actual_guard_sha
+  [[ -e "$POSTGRES_CONTROLLER_STATE" ]] || return 0
+  assert_installer_owned_regular_file "$POSTGRES_CONTROLLER_STATE" || return 1
+  controller_phase=$(jq -er '.phase' "$POSTGRES_CONTROLLER_STATE") || return 1
+  case "$controller_phase" in
+    complete)
+      guard_evidence="$POSTGRES_BACKUP_DIR/noosphere_postgres_data.phase-a2b.json"
+      jq -e '
+        (.guardJournalEvidence.path | type == "string" and startswith("/")) and
+        (.guardJournalEvidence.sha256 | type == "string" and test("^[a-f0-9]{64}$")) and
+        .guardJournalEvidence.phase == "complete"
+      ' "$POSTGRES_CONTROLLER_STATE" >/dev/null 2>&1 || {
+        echo 'Controller state is complete but its durable guard-journal binding is malformed.' >&2
+        echo "Controller state: $POSTGRES_CONTROLLER_STATE" >&2
+        return 1
+      }
+      expected_guard_evidence=$(jq -er '.guardJournalEvidence.path' "$POSTGRES_CONTROLLER_STATE")
+      expected_guard_sha=$(jq -er '.guardJournalEvidence.sha256' "$POSTGRES_CONTROLLER_STATE")
+      [[ $(realpath -m "$expected_guard_evidence") == "$(realpath -m "$guard_evidence")" ]] &&
+        assert_installer_owned_regular_file "$guard_evidence" >/dev/null 2>&1 &&
+        actual_guard_sha=$(sha256sum "$guard_evidence" | awk '{print $1}') &&
+        [[ "$actual_guard_sha" == "$expected_guard_sha" ]] &&
+        jq -e '.mode == "switch" and .phase == "complete"' "$guard_evidence" >/dev/null 2>&1 || {
+        echo 'Controller state is complete but durable switch closure evidence is missing or incomplete.' >&2
+        echo "Controller state: $POSTGRES_CONTROLLER_STATE" >&2
+        echo "Guard evidence: $guard_evidence" >&2
+        return 1
+      }
+      reacquire_postgres_operation_lock_from_manifest || return 1
+      controller_transition_completed=true
+      ;;
+    incident)
+      echo "PostgreSQL transition is in terminal incident state: $POSTGRES_CONTROLLER_STATE" >&2
+      return 1
+      ;;
+    *)
+      echo "Resuming PostgreSQL transition controller state: $controller_phase"
+      assert_postgres_controller_bootstrap_node || return 1
+      run_existing_postgres_controller_transition || return 1
+      reacquire_postgres_operation_lock_from_manifest || return 1
+      controller_transition_completed=true
+      ;;
+  esac
+}
+
+acquire_postgres_operation_lock() {
+  local expected_docker_host=${1:-} expected_engine_id=${2:-} expected_lock_root=${3:-}
+  local docker_host engine_id ambient_lock_root lock_root lock_key lock_path
+  docker_host=$(resolve_local_docker_endpoint) || return 1
+  [[ -z "$expected_docker_host" || "$docker_host" == "$expected_docker_host" ]] || {
+    echo 'Docker endpoint changed while the PostgreSQL transition controller was active.' >&2
+    return 1
+  }
+  ambient_lock_root=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+  lock_root=$ambient_lock_root
+  if [[ -n "$expected_lock_root" ]]; then
+    [[ "$expected_lock_root" == /* ]] || {
+      echo 'Manifest runtime lock directory is not absolute.' >&2
+      return 1
+    }
+    [[ $(realpath -m "$ambient_lock_root") == "$(realpath -m "$expected_lock_root")" ]] || {
+      echo 'Runtime lock directory changed while the PostgreSQL transition controller was active.' >&2
+      return 1
+    }
+    lock_root=$expected_lock_root
+  fi
   [[ "$lock_root" == /* && -d "$lock_root" && ! -L "$lock_root" ]] || {
     echo "Runtime lock directory is unavailable or unsafe: $lock_root" >&2
-    exit 1
+    return 1
   }
   [[ $(stat -c '%u' "$lock_root") == "$(id -u)" ]] || {
     echo 'Runtime lock directory is not owned by the current user.' >&2
-    exit 1
+    return 1
   }
-  engine_id=$(docker info --format '{{.ID}}') || {
+  engine_id=$(DOCKER_HOST="$docker_host" docker info --format '{{.ID}}') || {
     echo 'Could not determine the Docker engine ID.' >&2
-    exit 1
+    return 1
   }
   [[ -n "$engine_id" ]] || {
     echo 'Docker engine ID is empty.' >&2
-    exit 1
+    return 1
+  }
+  [[ -z "$expected_engine_id" || "$engine_id" == "$expected_engine_id" ]] || {
+    echo 'Docker engine identity changed while the PostgreSQL transition controller was active.' >&2
+    return 1
   }
   lock_key=$(printf '%s\0%s' "$engine_id" noosphere_postgres_data | sha256sum | awk '{print $1}')
   lock_path="$lock_root/noosphere-pgvector-switch-$lock_key.lock"
   exec 8>"$lock_path"
   flock -w 5 8 || {
     echo 'Another installer or PostgreSQL image switch is active for noosphere_postgres_data.' >&2
-    exit 1
+    return 1
   }
   export NOOSPHERE_A2B_LOCK_FD=8
   export NOOSPHERE_A2B_LOCK_PATH="$lock_path"
+}
+
+reacquire_postgres_operation_lock_from_manifest() {
+  local expected_docker_host expected_engine_id expected_lock_root
+  assert_installer_owned_regular_file "$POSTGRES_CONTROLLER_MANIFEST" || return 1
+  expected_docker_host=$(jq -er '.dockerEndpoint | select(type == "string" and length > 0)' \
+    "$POSTGRES_CONTROLLER_MANIFEST") || return 1
+  expected_engine_id=$(jq -er '.engineId | select(type == "string" and length > 0)' \
+    "$POSTGRES_CONTROLLER_MANIFEST") || return 1
+  expected_lock_root=$(jq -er '.lockRoot | select(type == "string" and startswith("/"))' \
+    "$POSTGRES_CONTROLLER_MANIFEST") || return 1
+  acquire_postgres_operation_lock "$expected_docker_host" "$expected_engine_id" "$expected_lock_root"
 }
 
 extract_bootstrap_json() {
@@ -635,7 +1388,7 @@ wait_for_http_health() {
   local url="$1"
   local attempts="${2:-60}"
   for _ in $(seq 1 "$attempts"); do
-    if curl -fsS "$url/api/health" >/dev/null 2>&1; then
+    if local_no_proxy_curl -fsS "$url/api/health" >/dev/null 2>&1; then
       return 0
     fi
     sleep 2
@@ -645,10 +1398,21 @@ wait_for_http_health() {
   exit 1
 }
 
+main() {
+case "$NOOSPHERE_INSTALL_OPENCLAW" in
+  true|false) ;;
+  *) echo 'NOOSPHERE_INSTALL_OPENCLAW must be exactly true or false.' >&2; exit 1 ;;
+esac
+case "$NOOSPHERE_SHOW_CREDENTIALS" in
+  true|false) ;;
+  *) echo 'NOOSPHERE_SHOW_CREDENTIALS must be exactly true or false.' >&2; exit 1 ;;
+esac
 need docker
 need node
 need curl
-need openclaw
+if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then
+  need openclaw
+fi
 need jq
 need sha256sum
 need flock
@@ -659,19 +1423,20 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
-acquire_postgres_operation_lock
-
-mkdir -p "$NOOSPHERE_HOME" "$SECRETS_DIR"
-chmod 700 "$SECRETS_DIR" || true
-resolve_runtime_config
-
-POSTGRES_SWITCH_SCRIPT="$NOOSPHERE_HOME/switch-pgvector-compose.sh"
-POSTGRES_VERIFY_SCRIPT="$NOOSPHERE_HOME/verify-deploy.sh"
+mkdir -p "$NOOSPHERE_HOME"
+if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then
+  mkdir -p "$SECRETS_DIR"
+  chmod 700 "$SECRETS_DIR" || true
+fi
 POSTGRES_BACKUP_DIR="$NOOSPHERE_HOME/backups/postgres-pgvector"
-prepare_guard_script scripts/switch-pgvector-compose.sh "$POSTGRES_SWITCH_SCRIPT_URL" \
-  "$POSTGRES_SWITCH_SCRIPT_SHA256" "$POSTGRES_SWITCH_SCRIPT"
-prepare_guard_script scripts/verify-deploy.sh "$POSTGRES_VERIFY_SCRIPT_URL" \
-  "$POSTGRES_VERIFY_SCRIPT_SHA256" "$POSTGRES_VERIFY_SCRIPT"
+controller_transition_completed=false
+acquire_postgres_operation_lock
+resolve_runtime_config
+prepare_postgres_controller_runtime
+
+# Resume or reconcile controller-owned state before prompts or runtime-config
+# writes can change bound inputs.
+reconcile_postgres_controller_before_configuration
 
 # Detect whether prompts can be shown. In `curl | bash`, stdin is the
 # installer pipe, so use /dev/tty when a controlling terminal is available.
@@ -742,6 +1507,8 @@ POSTGRES_HYBRID_WORKER_PASSWORD="${POSTGRES_HYBRID_WORKER_PASSWORD:-$(env_get_se
 NEXTAUTH_SECRET="${NEXTAUTH_SECRET:-$(env_get_secret "$NOOSPHERE_HOME/.env" NEXTAUTH_SECRET)}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_ADMIN_PASSWORD)}"
 API_KEY="${API_KEY:-$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_API_KEY)}"
+EXISTING_INTEGRATION_API_KEY="$(json_get "$NOOSPHERE_CREDENTIALS_FILE" apiKey)"
+INTEGRATION_API_KEY=""
 NOOSPHERE_BOOTSTRAP_SECRETS_FILE="${NOOSPHERE_BOOTSTRAP_SECRETS_FILE:-$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_SECRETS_FILE)}"
 
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(json_get "$SECRETS_FILE" postgresPassword)}"
@@ -894,6 +1661,7 @@ postgres_evidence="$POSTGRES_BACKUP_DIR/noosphere_postgres_data.phase-a2b.json"
 incomplete_new_install=false
 incomplete_switch=false
 resume_recovered_switch=false
+postgres_transition_complete=false
 if [[ -f "$postgres_evidence" ]] &&
    jq -e '.mode == "new-install" and (.phase == "claim-created" or .phase == "provisioning")' \
      "$postgres_evidence" >/dev/null 2>&1; then
@@ -907,11 +1675,24 @@ if [[ -f "$postgres_evidence" ]] &&
    jq -e '.mode == "switch" and .phase == "recovered"' "$postgres_evidence" >/dev/null 2>&1; then
   resume_recovered_switch=true
 fi
+if [[ -f "$postgres_evidence" ]] &&
+   jq -e '(.mode == "switch" or .mode == "new-install") and .phase == "complete"' \
+     "$postgres_evidence" >/dev/null 2>&1; then
+  postgres_transition_complete=true
+fi
+if [[ -e "$POSTGRES_CONTROLLER_STATE" ]] &&
+   jq -e '.phase == "complete"' "$POSTGRES_CONTROLLER_STATE" >/dev/null 2>&1 &&
+   [[ "$postgres_transition_complete" != true ]]; then
+  echo 'Controller state is complete but the bound PostgreSQL guard journal is not; refusing to continue.' >&2
+  exit 1
+fi
 
 if docker inspect noosphere-openclaw-db >/dev/null 2>&1; then
   if [[ "$incomplete_new_install" == true ]]; then
     new_install_required=true
     docker stop --time 60 noosphere-openclaw-app >/dev/null 2>&1 || true
+  elif [[ "$postgres_transition_complete" == true ]]; then
+    existing_switch_required=false
   else
     [[ -f "$NOOSPHERE_HOME/docker-compose.yml" ]] || {
       echo 'Existing database container has no installer-managed Compose file; refusing an unguarded upgrade.' >&2
@@ -961,7 +1742,15 @@ if [[ "$resume_recovered_switch" == true ]]; then
   exit "$recovered_exit"
 fi
 
-cat > "$NOOSPHERE_HOME/docker-compose.yml" <<YAML
+compose_target="$NOOSPHERE_HOME/docker-compose.yml"
+if [[ "$existing_switch_required" == true ]]; then
+  install -m 600 "$NOOSPHERE_HOME/docker-compose.yml" "$POSTGRES_CONTROLLER_SOURCE"
+  fsync_installer_path "$POSTGRES_CONTROLLER_SOURCE"
+  fsync_installer_path "$POSTGRES_CONTROLLER_ROOT"
+  compose_target="$POSTGRES_CONTROLLER_CANDIDATE"
+fi
+
+cat > "$compose_target" <<YAML
 name: noosphere
 
 services:
@@ -1175,30 +1964,24 @@ volumes:
     name: noosphere_redis_data
     driver: local
 YAML
+chmod 0600 "$compose_target"
+fsync_installer_path "$compose_target"
+fsync_installer_path "$(dirname "$compose_target")"
 
-if [[ "$existing_switch_required" == true ]]; then
-  # Publish the fail-closed candidate gate before invoking the transition.
-  # The existing source container keeps running unchanged, while any
-  # accidental Compose recreation is refused until the guard authorizes it.
-  "$POSTGRES_SWITCH_SCRIPT" \
-    --compose-file "$NOOSPHERE_HOME/docker-compose.yml" \
-    --env-file "$NOOSPHERE_HOME/.env" \
-    --db-container noosphere-openclaw-db \
-    --app-container noosphere-openclaw-app \
-    --backup-dir "$POSTGRES_BACKUP_DIR" \
-    --defer-app-restart
-fi
+# Route only real source transitions through the controller. New installs keep
+# a direct guard claim; already-complete installations need neither pre-step.
+route_postgres_install_transition
 
-if [[ "$new_install_required" == true ]]; then
-  "$POSTGRES_SWITCH_SCRIPT" --prepare-new-install \
-    --compose-file "$NOOSPHERE_HOME/docker-compose.yml" \
-    --env-file "$NOOSPHERE_HOME/.env" \
-    --db-container noosphere-openclaw-db \
-    --app-container noosphere-openclaw-app \
-    --backup-dir "$POSTGRES_BACKUP_DIR"
-fi
-
+# Whether the PostgreSQL image was already current or the controller just
+# completed a real source transition, schema/bootstrap work still runs against
+# the candidate with the application stopped. This is what upgrades released
+# v1.11 data and is intentionally idempotent on rerun.
 cd "$NOOSPHERE_HOME"
+if docker inspect noosphere-openclaw-app >/dev/null 2>&1 &&
+   [[ "$(docker inspect noosphere-openclaw-app --format '{{.State.Running}}')" == true ]]; then
+  echo "Stopping Noosphere app before schema/bootstrap work..."
+  docker stop --time 60 noosphere-openclaw-app >/dev/null
+fi
 echo "Starting Noosphere at ${APP_URL}..."
 docker compose pull
 docker compose up -d db redis
@@ -1233,22 +2016,6 @@ rm -f "$BOOTSTRAP_TMP"
 
 echo "Bootstrap completed successfully."
 
-install -m 600 /dev/null "$SECRETS_FILE"
-cat > "$SECRETS_FILE" <<JSON
-{
-  "baseUrl": "${APP_URL}",
-  "apiKey": "${API_KEY}",
-  "adminEmail": "admin@noosphere.local",
-  "adminPassword": "${ADMIN_PASSWORD}",
-  "postgresPassword": "${POSTGRES_PASSWORD}",
-  "postgresMigrationPassword": "${POSTGRES_MIGRATION_PASSWORD}",
-  "postgresAppPassword": "${POSTGRES_APP_PASSWORD}",
-  "postgresHybridAdminPassword": "${POSTGRES_HYBRID_ADMIN_PASSWORD}",
-  "postgresHybridWorkerPassword": "${POSTGRES_HYBRID_WORKER_PASSWORD}",
-  "nextAuthSecret": "${NEXTAUTH_SECRET}"
-}
-JSON
-
 if [[ "$new_install_required" == true ]]; then
   "$POSTGRES_SWITCH_SCRIPT" --record-new-install \
     --compose-file "$NOOSPHERE_HOME/docker-compose.yml" \
@@ -1269,22 +2036,33 @@ docker compose up -d app
 wait_for_container_healthy noosphere-openclaw-app 30
 wait_for_http_health "$APP_URL" 60
 
+verify_min_articles=1
+if [[ "$new_install_required" == true ]]; then
+  verify_min_articles=0
+fi
 NOOSPHERE_APP_URL="$APP_URL" \
 NOOSPHERE_DB_CONTAINER=noosphere-openclaw-db \
 NOOSPHERE_EXPECTED_DB_VOLUME=noosphere_postgres_data \
 NOOSPHERE_EXPECTED_POSTGRES_IMAGE_MODE=candidate \
+NOOSPHERE_MIN_ARTICLES="$verify_min_articles" \
 NOOSPHERE_POSTGRES_EVIDENCE="$POSTGRES_BACKUP_DIR/noosphere_postgres_data.phase-a2b.json" \
   "$POSTGRES_VERIFY_SCRIPT"
 
-echo "Installing OpenClaw plugin: ${PLUGIN_SPEC}"
-if openclaw plugins inspect "$PLUGIN_ID" >/dev/null 2>&1; then
-  openclaw plugins update "$PLUGIN_ID" || openclaw plugins install "$PLUGIN_SPEC" --force
-else
-  openclaw plugins install "$PLUGIN_SPEC"
-fi
+INTEGRATION_API_KEY=$(select_scoped_integration_key "$EXISTING_INTEGRATION_API_KEY" default)
+write_credentials_json "$NOOSPHERE_CREDENTIALS_FILE"
 
-PATCH_FILE="$(mktemp)"
-cat > "$PATCH_FILE" <<JSON5
+if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then
+  write_credentials_json "$SECRETS_FILE" true false
+
+  echo "Installing OpenClaw plugin: ${PLUGIN_SPEC}"
+  PLUGIN_INSTALL_ARGS=(plugins install "$PLUGIN_SPEC" --force)
+  if [[ "$PLUGIN_SPEC" == npm:* ]]; then
+    PLUGIN_INSTALL_ARGS+=(--pin)
+  fi
+  run_openclaw "${PLUGIN_INSTALL_ARGS[@]}"
+
+  PATCH_FILE="$(mktemp)"
+  cat > "$PATCH_FILE" <<JSON5
 {
   secrets: {
     providers: {
@@ -1318,40 +2096,43 @@ cat > "$PATCH_FILE" <<JSON5
 }
 JSON5
 
-openclaw config patch --file "$PATCH_FILE"
-rm -f "$PATCH_FILE"
+  run_openclaw config patch --file "$PATCH_FILE"
+  rm -f "$PATCH_FILE"
 
-if openclaw gateway status >/dev/null 2>&1; then
-  echo "Restarting OpenClaw Gateway..."
-  openclaw gateway restart
-else
-  echo "OpenClaw Gateway is not running or status is unavailable; start/restart it when ready."
+  if run_openclaw gateway status >/dev/null 2>&1; then
+    echo "Restarting OpenClaw Gateway..."
+    run_openclaw gateway restart
+  else
+    echo "OpenClaw Gateway is not running or status is unavailable; start/restart it when ready."
+  fi
 fi
 
 cat <<DONE
 
 ╔══════════════════════════════════════════════════════════════════════╗
-║              Noosphere OpenClaw Setup Complete                       ║
+║                    Noosphere Setup Complete                           ║
 ╠══════════════════════════════════════════════════════════════════════╣
 ║                                                                      ║
 ║  Noosphere URL:    ${APP_URL}
 ║  Admin email:      admin@noosphere.local
-║  Admin password:   ${ADMIN_PASSWORD}
 ║                                                                      ║
-║  ────────────────────────────────────────────────────────────────   ║
-║  🔑 API KEY (save this - it will not be shown again):               ║
-║     ${API_KEY}
-║  ────────────────────────────────────────────────────────────────   ║
-║                                                                      ║
-║  Credentials also saved in: ${SECRETS_FILE}
+║  Credentials saved in: ${NOOSPHERE_CREDENTIALS_FILE}
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
 
 Verify:
   curl -fsS ${APP_URL}/api/health
-  openclaw plugins inspect ${PLUGIN_ID} --runtime --json
-
 DONE
+
+if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then
+  printf '  openclaw plugins inspect %s --runtime --json\n\n' "$PLUGIN_ID"
+fi
+if [[ "$NOOSPHERE_SHOW_CREDENTIALS" == true ]]; then
+  printf 'Admin password: %s\nDefault WRITE API key: %s\nBootstrap ADMIN API key: %s\n\n' \
+    "$ADMIN_PASSWORD" "$INTEGRATION_API_KEY" "$API_KEY"
+else
+  printf 'Credentials were not printed. Read the mode-0600 file above when needed.\n\n'
+fi
 
 # ── Per-Agent API Keys ──────────────────────────────────────────────────────────
 #
@@ -1387,3 +2168,8 @@ DONE
 # CURRENT KEYS ON THIS HOST:
 #   Run: grep NOOSPHERE_API_KEY /proc/$(pgrep -f openclaw.*gateway | head -1)/environ
 #   Or:  openclaw noosphere status
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  main "$@"
+fi

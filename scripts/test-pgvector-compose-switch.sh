@@ -102,6 +102,61 @@ test_legacy_recovered_authorization_binding_mutation() (
 test_legacy_recovered_authorization_binding_mutation
 [[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == legacy-recovered-authorization-binding ]] && exit 0
 
+test_recovery_writer_stop_classification_fails_closed() (
+  local fixture_dir switch_script probe_mode
+  fixture_dir=$(mktemp -d)
+  trap 'rm -rf "$fixture_dir"' EXIT
+  switch_script=${PGVECTOR_SWITCH_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}
+  app_container=fixture-app
+
+  eval "$(
+    awk '
+      /^container_running_state\(\) \{/ { emit = 1 }
+      emit { print }
+      emit && /^}$/ { exit }
+    ' "$switch_script"
+  )"
+  eval "$(
+    awk '
+      /^stop_app_writer_for_recovery\(\) \{/ { emit = 1 }
+      emit { print }
+      emit && /^}$/ { exit }
+    ' "$switch_script"
+  )"
+  die() { printf 'fixture: %s\n' "$*" >&2; return 1; }
+  docker() {
+    if [[ ${1:-} == container && ${2:-} == inspect ]]; then
+      return 1
+    fi
+    if [[ ${1:-} == container && ${2:-} == ls ]]; then
+      [[ "$probe_mode" != list-failure ]] || return 75
+      return 0
+    fi
+    printf 'unexpected Docker command: %s\n' "$*" >&2
+    return 99
+  }
+
+  probe_mode=list-failure
+  if (stop_app_writer_for_recovery) >"$fixture_dir/failure.out" 2>"$fixture_dir/failure.err"; then
+    echo 'Recovery writer-stop accepted a failed container classification as absence' >&2
+    exit 1
+  fi
+  grep -F 'could not classify the app container at the recovery boundary' \
+    "$fixture_dir/failure.err" >/dev/null || {
+    echo 'Recovery writer-stop classification failure lacked its fail-closed diagnostic' >&2
+    exit 1
+  }
+
+  probe_mode=absent
+  stop_app_writer_for_recovery || {
+    echo 'Recovery writer-stop rejected exact-name-confirmed container absence' >&2
+    exit 1
+  }
+)
+
+test_recovery_writer_stop_classification_fails_closed
+[[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == recovery-writer-stop-classification ]] && exit 0
+
 test_data_signature_version_dispatch() (
   local fixture_dir switch_script journal
   fixture_dir=$(mktemp -d)
@@ -349,17 +404,17 @@ test_rehearsal_cleanup_continues_after_failure
 [[ ${PGVECTOR_SWITCH_FIXTURE_ONLY:-} == rehearsal-cleanup ]] && exit 0
 
 test_migrator_producer_authority() (
-  local switch_script definition helper
+  local switch_script definition helper expected_role
   switch_script=${PGVECTOR_SWITCH_FIXTURE_SCRIPT:-"$ROOT_DIR/scripts/switch-pgvector-compose.sh"}
 
-  for helper in migrator_sql migration_signature create_logical_backup; do
+  for helper in digest_role migrator_sql migration_signature create_logical_backup; do
     definition=$(awk -v signature="${helper}() {" '
       $0 == signature { emit = 1 }
       emit { print }
       emit && $0 == "}" { exit }
     ' "$switch_script")
     [[ -n "$definition" ]] || {
-      echo "Missing migrator-authority helper: $helper" >&2
+      echo "Missing digest-authority helper: $helper" >&2
       exit 1
     }
     eval "$definition"
@@ -372,8 +427,12 @@ test_migrator_producer_authority() (
 
   docker() {
     local invocation=" $* "
-    [[ "$invocation" == *" -U noosphere_migrator "* ]] || {
-      echo "Digest or backup producer used bootstrap authority: $*" >&2
+    if [[ "$invocation" == *"SELECT CASE"* ]]; then
+      printf '%s\n' "$expected_role"
+      return 0
+    fi
+    [[ "$invocation" == *" -U $expected_role "* ]] || {
+      echo "Digest or backup producer used unexpected authority: $*" >&2
       return 97
     }
     if [[ "$invocation" == *" psql "* ]]; then
@@ -383,8 +442,10 @@ test_migrator_producer_authority() (
     fi
   }
 
-  migration_signature fixture-container >/dev/null
-  create_logical_backup fixture-container /dev/null
+  for expected_role in noosphere_migrator noosphere; do
+    migration_signature fixture-container >/dev/null
+    create_logical_backup fixture-container /dev/null
+  done
 )
 
 test_migrator_producer_authority
@@ -399,6 +460,7 @@ safe_id=${safe_id,,}
 project="noosphere-a2b-test-$safe_id"
 db_container="$project-db"
 app_container="$project-app"
+app_collision_image="$app_container:latest"
 volume="noosphere_a2b_test_${safe_id//-/_}"
 probe_volume="${volume}_mount_probe"
 authorization_volume="${volume}_authorization"
@@ -466,6 +528,7 @@ cleanup() {
     docker rm "$id" >/dev/null 2>&1 || true
   done
   docker rm -f "$db_container" "$app_container" "$new_db_container" "$new_app_container" >/dev/null 2>&1 || true
+  docker image rm -f "$app_collision_image" >/dev/null 2>&1 || true
   for id in $(docker volume ls -q --filter "label=io.noosphere.pgvector-switch-run=$run_id"); do
     docker volume rm "$id" >/dev/null 2>&1 || true
   done
@@ -1506,13 +1569,24 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 [[ $(docker inspect "$app_container" --format '{{.State.ExitCode}}') == 78 ]]
+# Reproduce the production topology: the guard removed the stopped app
+# container because it consumed stale authorization state, while a same-named
+# image remains. Generic `docker inspect` resolves that image and has no State;
+# container-only identity must classify the app as absent, authorize the
+# writer, and let Compose recreate it.
+docker rm "$app_container" >/dev/null
+docker image tag "$CANDIDATE_IMAGE" "$app_collision_image"
+! docker container inspect "$app_container" >/dev/null 2>&1
+docker image inspect "$app_collision_image" >/dev/null
 NOOSPHERE_A2B_LOCK_FD=8 NOOSPHERE_A2B_LOCK_PATH="$installer_lock_path" \
   "$ROOT_DIR/scripts/switch-pgvector-compose.sh" --authorize-writer "${switch_args[@]}" >> "$log_file" 2>&1
 exec 8>&-
+! docker container inspect "$app_container" >/dev/null 2>&1
 assert_marker_contract "$db_container" candidate-authorized "$CANDIDATE_IMAGE"
 assert_marker_contract "$db_container" writer-authorized "$CANDIDATE_IMAGE"
 docker compose -f "$compose_file" up -d --force-recreate app
 [[ $(docker inspect "$app_container" --format '{{.State.Running}}') == true ]]
+docker image rm "$app_collision_image" >/dev/null
 [[ $(docker exec "$db_container" psql -XAtq -U noosphere -d noosphere -c 'SELECT count(*) FROM "Topic";') == 3 ]]
 
 # A candidate that already contains an upgraded source volume cannot be blessed

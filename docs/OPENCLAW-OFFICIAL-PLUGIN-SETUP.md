@@ -18,9 +18,13 @@ Install these on the machine running OpenClaw Gateway:
 - Docker
 - Docker Compose v2 (`docker compose`)
 - Node.js 22+
+- `iproute2` (`ip`) when binding Noosphere to a non-loopback IPv4 address
+- For an existing-volume upgrade, Node must also resolve from the root-trusted
+  system PATH (`/usr/sbin:/usr/bin:/sbin:/bin`); nvm-only Node is not admitted
+  inside the transient transition authority.
 - OpenClaw CLI
 - `curl`
-- `jq`, `sha256sum`, and `flock`
+- `jq`, `sha256sum`, `flock`, `systemd-run`, `systemctl`, and `loginctl`
 
 Verify:
 
@@ -37,15 +41,36 @@ flock --version
 
 ## Quick install
 
-Use the installer from the repository:
+Before running any pinned `1.13.1` installer command on this page, confirm that
+the coordinated [`v1.13.1` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.1)
+exists with all six installer assets. Source merge alone does not publish the
+image, package, or release assets.
+
+Use the guided launcher, selecting OpenClaw explicitly:
 
 ```bash
-# Installer commit: 5a94ef3530cd232265c53699ee15f37d9ec89e04
-# Expected SHA-256: 46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b
-installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5a94ef3530cd232265c53699ee15f37d9ec89e04/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b' "$installer" | sha256sum -c -
-bash "$installer" && rm -f "$installer"
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/ef616729339db2114e53f7b199700379fc3435bb/install.sh \
+  | bash -s -- --with openclaw
+```
+
+The launcher stores generated credentials in protected files and reports only
+their paths. For a download-first checksum verification, see
+[Installing Noosphere](INSTALLATION.md#auditable-download).
+
+The checksum-verifying download form below runs the same guided `1.13.1`
+launcher non-interactively for OpenClaw:
+
+```bash
+# Installer commit: ef616729339db2114e53f7b199700379fc3435bb
+# Expected SHA-256: ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2
+(
+  set -e
+  installer="$(mktemp)"
+  trap 'rm -f "$installer"' EXIT
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/ef616729339db2114e53f7b199700379fc3435bb/install.sh -o "$installer"
+  printf '%s  %s\n' 'ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2' "$installer" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.1}" bash "$installer" --non-interactive --with openclaw
+)
 ```
 
 The installer:
@@ -53,16 +78,18 @@ The installer:
 1. **Prompts for IP address selection** — detects available network interfaces (localhost, Tailscale, local network IPs) and lets you choose which address Noosphere will bind to. You can also select `0.0.0.0` (all interfaces) or enter a custom IP.
 2. Creates `~/.noosphere/`.
 3. Generates local secrets.
-4. For an existing install, takes an exclusive operation lock and writes a fail-closed candidate Compose gate while the source container keeps running unchanged.
-5. Runs the offline, restore-tested PostgreSQL image switch; candidate recreation remains blocked until the guard creates exact authorization.
-6. For a new database, durably claims the still-absent named volume, creates it with provenance labels, then starts PostgreSQL and Redis on the rehearsed candidate.
-7. Runs Prisma migrations through `docker/migrate-or-baseline.mjs`.
-8. Runs repeatable bootstrap through `docker/bootstrap.mjs` using the same generated admin/API credentials that are later written to `.env` and OpenClaw secrets.
-9. Finalizes new-install provenance before starting Noosphere (or validates completed switch evidence), then runs full deployment verification.
-10. Writes `~/.openclaw/secrets/noosphere-memory.json`.
-11. Installs or updates `noosphere-memory` in OpenClaw.
-12. Patches OpenClaw config with the Noosphere base URL, API key secret reference, and `hooks.allowPromptInjection: true`.
-13. Restarts OpenClaw Gateway when available.
+4. Installs the checksum-pinned transition controller, guard, and verifier privately with mode `0700`.
+5. For an existing install, keeps live Compose bytes unchanged, binds a private source snapshot, candidate, environment, Docker/Compose tooling, and verifier target, then prepares controller state under the inherited engine-plus-volume lock.
+   Caller `DOCKER_*`, `COMPOSE_*`, proxy, and shell-startup controls are removed while hashing the Compose version and effective model, matching controller revalidation exactly.
+6. Releases that lock descriptor and runs the existing-volume transition under a collected transient user-systemd unit. The controller owns the offline restore rehearsal, candidate publication, Compose `init` dependency, writer authorization, app activation, and full verification. If interrupted, rerunning the same installer command resumes the durable controller state before touching its bound inputs.
+7. For a new database, durably claims the still-absent named volume, creates it with provenance labels, then starts PostgreSQL and Redis on the rehearsed candidate.
+8. Runs Prisma migrations through `docker/migrate-or-baseline.mjs`.
+9. Runs repeatable bootstrap through `docker/bootstrap.mjs` using the same generated admin/API credentials that are later written to `.env` and OpenClaw secrets.
+10. Finalizes new-install provenance before starting Noosphere (or validates completed switch evidence), then runs full deployment verification.
+11. Writes `~/.openclaw/secrets/noosphere-memory.json`.
+12. Installs or updates `noosphere-memory` in OpenClaw.
+13. Patches OpenClaw config with the Noosphere base URL, API key secret reference, and `hooks.allowPromptInjection: true`.
+14. Restarts OpenClaw Gateway when available.
 
 > **Note:** The installer can still prompt when run through `curl | bash` by reading from `/dev/tty` if a controlling terminal is available. The interactive IP prompt is skipped when `APP_URL` is set, or when no interactive terminal is available (for example CI/cron/background automation). In non-interactive mode, the script auto-detects the best available IP (Tailscale > localhost). Set `APP_URL` beforehand to force a specific address in any mode.
 
@@ -74,7 +101,7 @@ Bootstrap completed successfully.
 Installing OpenClaw plugin: ...
 ```
 
-By default, the plugin line ends with `npm:@sweetsophia/openclaw-noosphere-memory`; it differs only when `NOOSPHERE_PLUGIN_SPEC` is overridden.
+By default, the plugin line ends with `npm:@sweetsophia/openclaw-noosphere-memory@1.13.1`; it differs only when `NOOSPHERE_PLUGIN_SPEC` is overridden.
 
 Verify after install. Use the exact Noosphere URL printed by the installer, or the `APP_URL` value you supplied, for the health check. For a default localhost install:
 
@@ -93,7 +120,7 @@ Set these environment variables before running the installer when you need non-d
 | --- | --- | --- |
 | `NOOSPHERE_HOME` | `~/.noosphere` | Runtime directory for Compose files and `.env`. |
 | `NOOSPHERE_PORT` | `6578` | Localhost port exposed by the app. |
-| `NOOSPHERE_VERSION` | `latest` | GHCR image tag. |
+| `NOOSPHERE_VERSION` | `1.13.1` (or persisted value on rerun) | GHCR image tag. |
 | `NOOSPHERE_IMAGE` | `ghcr.io/sweetsophia/noosphere:${NOOSPHERE_VERSION}` | Full image reference override. |
 | `REDIS_URL` | `redis://redis:6379` | Redis connection string used inside Compose. Leave default for the bundled Redis service. |
 | `PG_POOL_MAX` | `20` | Maximum application PostgreSQL pool size. |
@@ -105,7 +132,7 @@ Set these environment variables before running the installer when you need non-d
 | `NOOSPHERE_ADMIN_PASSWORD_RESET` | `false` | Forwarded into the generated `.env`; set to `true` only when intentionally rotating an existing bootstrap admin password. |
 | `NOOSPHERE_FORCE_ADMIN` | `false` | Forwarded into the generated `.env`; set to `true` to re-assert the ADMIN role on the existing bootstrap admin account without rotating its password. |
 | `NOOSPHERE_BOOTSTRAP_SECRETS_FILE` | `/tmp/noosphere-bootstrap-secrets/secrets.json` | Container path where bootstrap writes any auto-generated admin/API credentials with mode `0600` inside a `0700` parent directory; logs include only this path, not the secret values. Use `/app/uploads/bootstrap-secrets/secrets.json` to persist the file in the uploads volume. Paths directly under shared directories such as `/tmp` or `/app/uploads` are rejected. |
-| `NOOSPHERE_PLUGIN_SPEC` | `npm:@sweetsophia/openclaw-noosphere-memory` | Plugin install spec. Useful for testing local tarballs. |
+| `NOOSPHERE_PLUGIN_SPEC` | `npm:@sweetsophia/openclaw-noosphere-memory@1.13.1` | Plugin install spec. Useful for testing local tarballs. |
 | `OPENCLAW_SECRETS_DIR` | `~/.openclaw/secrets` | OpenClaw secret directory. |
 | `NOOSPHERE_SECRETS_FILE` | `${OPENCLAW_SECRETS_DIR}/noosphere-memory.json` | Secret file written by installer. |
 | `NOOSPHERE_SECRET_PROVIDER_ID` | `noosphere-memory` | OpenClaw secret provider ID used in config. |
@@ -115,7 +142,7 @@ By default the installer enables Noosphere auto-recall for all OpenClaw agents a
 Example using a pinned image tag and custom port:
 
 ```bash
-NOOSPHERE_VERSION=v1.3.0 \
+NOOSPHERE_VERSION=1.13.1 \
 NOOSPHERE_PORT=6678 \
 APP_URL=http://127.0.0.1:6678 \
 bash install-openclaw.sh
@@ -209,7 +236,7 @@ These manual start commands are for a new database volume. Before upgrading an e
 Install the plugin package:
 
 ```bash
-openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory
+openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.13.1 --pin
 ```
 
 Create an OpenClaw secret file. Use an ADMIN-scoped Noosphere API key when you want `openclaw noosphere doctor` and `openclaw noosphere status` to pass; READ/WRITE-only keys can still work for narrower recall/save tools but will fail authenticated status checks. Do not paste real API keys into shared docs or commits:
@@ -281,7 +308,7 @@ value used by the plugin when no config is supplied. "Installer value" is what
 
 | Field | Plugin default | Installer value | Notes |
 | --- | --- | --- | --- |
-| `baseUrl` | `http://localhost:3000` | `http://127.0.0.1:6578` | Noosphere server base URL. Config wins; otherwise `OPENCLAW_NOOSPHERE_BASE_URL`, then `NOOSPHERE_BASE_URL`, then default. |
+| `baseUrl` | `http://localhost:3000` | `http://127.0.0.1:6578` | Noosphere server base URL. Config wins; otherwise `OPENCLAW_NOOSPHERE_BASE_URL`, then `NOOSPHERE_BASE_URL`, then default. A remote HTTPS URL must match the exact origin in the protected `OPENCLAW_NOOSPHERE_TRUSTED_ORIGIN` environment variable (`NOOSPHERE_TRUSTED_ORIGIN` fallback). |
 | `apiKey` | unset | file secret reference | Default API key. Used when no per-agent key matches. String, `{ value }`, or OpenClaw file secret reference. Env fallback is `OPENCLAW_NOOSPHERE_API_KEY`, then `NOOSPHERE_API_KEY`. Required for memory APIs. |
 | `apiKeys` | unset | unset | Per-agent API key map `{ [agentId]: keyString }`. Takes precedence over `apiKey` for matching agents. Use env vars for secret keys (see below). |
 | `timeoutMs` | `5000` | default | Explicit HTTP request timeout. Max `30000`. |
@@ -329,10 +356,11 @@ memory capture instructions are not injected into prompts.
 - **API keys are permission-scoped**. READ is enough for recall/get/topic lookup; WRITE is required for save; ADMIN is required for status/settings/admin operations.
 - **Scoped saves stay scoped**. If a scoped WRITE key saves without `restrictedTags`, Noosphere applies the key's allowed scopes by default. Scoped keys cannot assign scopes they do not have.
 - **Secrets live outside the repo**. The installer writes OpenClaw secrets to `~/.openclaw/secrets/noosphere-memory.json` and runtime values to `~/.noosphere/.env`.
+- **Remote credentials are origin-bound**. Loopback needs no pin. A remote URL must match a singular public HTTPS origin from the protected process environment. Missing, malformed, or mismatched pins stop initialization, and the HTTP client rejects redirects so request bodies cannot cross to another origin.
 - **Auto-recall fails open**. If Noosphere is unavailable, OpenClaw continues without injected memory.
 - **`noosphere_save` creates draft candidates only**. It never auto-publishes curated knowledge.
-- **Release tags are package-specific**. Use `v-openclaw-*` for `@sweetsophia/openclaw-noosphere-memory`, `v-opencode-*` for `@sweetsophia/opencode-noosphere-memory`, and `v-kilocode-*` for `@sweetsophia/kilocode-noosphere-memory`; add a new `v-{package}-*` CI prefix before introducing another package.
-- **Injected-memory stripping is bundled-only**. `@sweetsophia/noosphere-injected-memory` is a private internal helper package. It is still built and packed in CI, but it is not published under its own npm tag because the OpenClaw plugin bundles it.
+- **Release tags are coordinated by surface**. Use `v-openclaw-*` for both `@sweetsophia/noosphere-injected-memory` (published first) and `@sweetsophia/openclaw-noosphere-memory`, `v-opencode-*` for `@sweetsophia/opencode-noosphere-memory`, and `v-kilocode-*` for `@sweetsophia/kilocode-noosphere-memory`.
+- **Injected-memory stripping remains bundled for consumers**. `@sweetsophia/noosphere-injected-memory` is published and integrity-read back before OpenClaw, but the OpenClaw package still bundles it so users do not need a separate install.
 - **Prompt injection is explicit but broad by default in the installer**. OpenClaw requires `hooks.allowPromptInjection: true` before plugin hook text can enter the prompt; the installer enables it with no `enabledAgents` or `allowedChatTypes` allowlist.
 
 ## Restricting auto-recall scope
@@ -417,13 +445,17 @@ curl -s https://<host>/api/memory/status \
 Use the guarded installer for upgrades as well as first-time setup:
 
 ```bash
-# Installer commit: 5a94ef3530cd232265c53699ee15f37d9ec89e04
-# Expected SHA-256: 46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b
-installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5a94ef3530cd232265c53699ee15f37d9ec89e04/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b' "$installer" | sha256sum -c -
-bash "$installer" && rm -f "$installer"
-openclaw noosphere doctor
+# Installer commit: ef616729339db2114e53f7b199700379fc3435bb
+# Expected SHA-256: ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2
+(
+  set -e
+  installer="$(mktemp)"
+  trap 'rm -f "$installer"' EXIT
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/ef616729339db2114e53f7b199700379fc3435bb/install.sh -o "$installer"
+  printf '%s  %s\n' 'ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2' "$installer" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.1}" bash "$installer" --non-interactive --with openclaw
+  openclaw noosphere doctor
+)
 ```
 
 Do not replace this with an unrestricted `docker compose pull && docker compose up`. The installer preserves the existing `.env`, proves backup restoration and exact source rollback with writers stopped, promotes the candidate database image only after invariants pass, then runs migration/bootstrap and deployment verification. Existing bootstrap admin accounts keep their current password unless `NOOSPHERE_ADMIN_PASSWORD_RESET=true`; `NOOSPHERE_FORCE_ADMIN=true` re-asserts the ADMIN role without rotating the password.
@@ -550,12 +582,16 @@ then the install did not complete. A healthy run must continue with `Bootstrap c
 First use the reviewed installer revision and verify its checksum before execution:
 
 ```bash
-# Installer commit: 5a94ef3530cd232265c53699ee15f37d9ec89e04
-# Expected SHA-256: 46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b
-installer="$(mktemp)"
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5a94ef3530cd232265c53699ee15f37d9ec89e04/install-openclaw.sh -o "$installer"
-printf '%s  %s\n' '46f7809e3298bb3add7cd6f9ac5a2c55624dd8519417684dac0caa1d6ec86b6b' "$installer" | sha256sum -c -
-bash "$installer" && rm -f "$installer"
+# Installer commit: ef616729339db2114e53f7b199700379fc3435bb
+# Expected SHA-256: ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2
+(
+  set -e
+  installer="$(mktemp)"
+  trap 'rm -f "$installer"' EXIT
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/ef616729339db2114e53f7b199700379fc3435bb/install.sh -o "$installer"
+  printf '%s  %s\n' 'ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2' "$installer" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.1}" bash "$installer" --non-interactive --with openclaw
+)
 ```
 
 The current installer protects `curl | bash` runs by redirecting the bootstrap container's stdin from `/dev/null`, so Docker Compose cannot consume the remaining installer script before app/plugin setup. If the issue persists, inspect the partial state before retrying:
@@ -615,7 +651,7 @@ If sessions are invalid and users cannot log in, recover or regenerate the secre
 
 ```bash
 # Option 1: Re-run installer (preserves .env if it exists)
-cd ~/github/noosphere && ./install-openclaw.sh
+cd ~/github/noosphere && ./install.sh
 
 # Option 2: Generate new secret (invalidates all active sessions)
 openssl rand -base64 32

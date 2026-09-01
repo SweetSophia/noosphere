@@ -63,10 +63,12 @@ jobs:
         working-directory: ${{ matrix.package.dir }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -113,8 +115,93 @@ jobs:
       - name: Pack dry run
         run: npm pack --dry-run
 
-  publish_openclaw:
+  publish_helper:
     needs: package-check
+    runs-on: ubuntu-latest
+    if: |
+      startsWith(github.ref, 'refs/tags/v-openclaw-') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_openclaw)
+    defaults:
+      run:
+        working-directory: noosphere-injected-memory
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: noosphere-injected-memory/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate coordinated release tag
+        if: startsWith(github.ref, 'refs/tags/v-openclaw-')
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          const tagVersion = (process.env.GITHUB_REF_NAME ?? "").replace(/^v-openclaw-/, "");
+          if (tagVersion !== pkg.version) {
+            console.error(`OpenClaw release tag does not match injected-memory version ${pkg.version}`);
+            process.exit(1);
+          }
+          NODE
+
+      - name: Build and pack exact helper artifact
+        id: pack
+        run: |
+          npm run build
+          git diff --exit-code -- dist
+          npm pack --json > "$RUNNER_TEMP/injected-pack.json"
+          filename=$(node -e 'const p=require(process.argv[1]); process.stdout.write(p[0].filename)' "$RUNNER_TEMP/injected-pack.json")
+          integrity=$(node -e 'const p=require(process.argv[1]); process.stdout.write(p[0].integrity)' "$RUNNER_TEMP/injected-pack.json")
+          test -f "$filename"
+          echo "filename=$filename" >> "$GITHUB_OUTPUT"
+          echo "integrity=$integrity" >> "$GITHUB_OUTPUT"
+
+      - name: Publish helper or verify exact prior publication
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          LOCAL_INTEGRITY: ${{ steps.pack.outputs.integrity }}
+          TARBALL: ${{ steps.pack.outputs.filename }}
+        run: |
+          package=$(node -p 'require("./package.json").name')
+          version=$(node -p 'require("./package.json").version')
+          remote_json=$(npm view "${package}@${version}" dist.integrity --json 2>/dev/null || true)
+          remote_integrity=$(node -e 'try { const value=JSON.parse(process.argv[1]); if (typeof value === "string") process.stdout.write(value); } catch {}' "$remote_json")
+          if [[ -n "$remote_integrity" ]]; then
+            if [[ "$remote_integrity" != "$LOCAL_INTEGRITY" ]]; then
+              printf 'Existing %s@%s integrity does not match this release artifact.\n' "$package" "$version" >&2
+              exit 1
+            fi
+            printf '%s@%s is already published with matching integrity; continuing.\n' "$package" "$version"
+          else
+            npm publish "$TARBALL" --access public --provenance
+          fi
+          published_integrity=
+          for attempt in {1..10}; do
+            published_json=$(npm view "${package}@${version}" dist.integrity --json 2>/dev/null || true)
+            published_integrity=$(node -e 'try { const value=JSON.parse(process.argv[1]); if (typeof value === "string") process.stdout.write(value); } catch {}' "$published_json")
+            if [[ "$published_integrity" == "$LOCAL_INTEGRITY" ]]; then
+              break
+            fi
+            if [[ -n "$published_integrity" ]]; then
+              printf 'Readback integrity for %s@%s does not match this release artifact.\n' "$package" "$version" >&2
+              exit 1
+            fi
+            sleep 3
+          done
+          test "$published_integrity" = "$LOCAL_INTEGRITY"
+
+  publish_openclaw:
+    needs: [package-check, publish_helper]
     runs-on: ubuntu-latest
     if: |
       startsWith(github.ref, 'refs/tags/v-openclaw-') ||
@@ -124,10 +211,12 @@ jobs:
         working-directory: openclaw-noosphere-memory
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -194,10 +283,12 @@ jobs:
         working-directory: opencode-noosphere-memory
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -264,10 +355,12 @@ jobs:
         working-directory: kilocode-noosphere-memory
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
