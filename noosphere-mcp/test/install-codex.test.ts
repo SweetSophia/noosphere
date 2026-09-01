@@ -242,6 +242,51 @@ test("refuses a symlinked Codex home before inspection or mutation", async () =>
   );
 });
 
+test("default Codex runner binds the explicitly selected Codex home", async () => {
+  const value = fixture();
+  const binDirectory = join(value.root, "bin");
+  const codexExecutable = join(binDirectory, "codex");
+  mkdirSync(binDirectory);
+  writeFileSync(
+    codexExecutable,
+    [
+      "#!/usr/bin/env node",
+      'const fs = require("node:fs");',
+      'const path = require("node:path");',
+      'fs.writeFileSync(path.join(process.env.CODEX_HOME, "seen-home"), process.env.CODEX_HOME);',
+      'process.stderr.write("synthetic inspect failure\\n");',
+      "process.exitCode = 2;",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  chmodSync(codexExecutable, 0o755);
+  const previousPath = process.env.PATH;
+  const previousCodexHome = process.env.CODEX_HOME;
+  process.env.PATH = `${binDirectory}:${previousPath ?? ""}`;
+  process.env.CODEX_HOME = join(value.root, "wrong-codex-home");
+  try {
+    await assert.rejects(
+      () => installCodexIntegration({
+        homeDir: value.home,
+        codexHomeDir: value.codexHome,
+        packageVersion: "1.13.1",
+        skillSourceFile: value.source,
+      }),
+      /synthetic inspect failure/,
+    );
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
+  }
+  assert.equal(
+    readFileSync(join(value.codexHome, "seen-home"), "utf8"),
+    value.codexHome,
+  );
+});
+
 test("rolls back when a multiline TOML string mimics the noosphere section", async () => {
   const value = fixture();
   const codex = fakeCodex(
@@ -623,6 +668,36 @@ test("rollback preserves the original Codex config mode", async () => {
     /synthetic post-write failure/,
   );
   assert.equal(lstatSync(value.configFile).mode & 0o777, 0o640);
+});
+
+test("atomic rollback preserves group-write mode under a restrictive umask", async () => {
+  const value = fixture();
+  const current = server(
+    "npx",
+    ["-y", "@sweetsophia/noosphere-mcp@1.13.1"],
+  );
+  const codex = fakeCodex(value.configFile, current);
+  chmodSync(value.configFile, 0o660);
+  let gets = 0;
+  const run: RunCodex = (args) => {
+    if (args.join(" ") === "mcp get noosphere --json") {
+      gets += 1;
+      if (gets === 2) {
+        return { code: 0, stdout: JSON.stringify(current), stderr: "" };
+      }
+    }
+    return codex.run(args);
+  };
+  const previousUmask = process.umask(0o022);
+  try {
+    await assert.rejects(
+      () => installCodexIntegration(installOptions(value, run)),
+      /readback did not match/,
+    );
+  } finally {
+    process.umask(previousUmask);
+  }
+  assert.equal(lstatSync(value.configFile).mode & 0o777, 0o660);
 });
 
 test("rollback does not replace an identical concurrent Codex config", async () => {

@@ -109,12 +109,13 @@ export class CodexInstallError extends Error {
 export async function installCodexIntegration(
   options: CodexInstallOptions,
 ): Promise<CodexInstallResult> {
-  const runCodex = options.runCodex ?? runCodexCommand;
   const packageSpec = `${PACKAGE_NAME}@${options.packageVersion}`;
   const desiredCommand = "npx";
   const desiredArgs = ["-y", packageSpec];
   const codexHomeDir =
     options.codexHomeDir ?? process.env.CODEX_HOME ?? join(options.homeDir, ".codex");
+  const runCodex = options.runCodex ??
+    ((args: string[]) => runCodexCommand(args, codexHomeDir));
   assertSafeDirectoryPath(codexHomeDir, "Codex home");
   const existing = inspectServer(runCodex);
   const plannedServerAction = classifyServer(existing, desiredCommand, desiredArgs);
@@ -582,6 +583,7 @@ function writeTextAtomically(
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
     writeFileSync(temporary, content, { encoding: "utf8", mode });
+    chmodSync(temporary, mode);
     renameSync(temporary, path);
   } finally {
     if (existsSync(temporary)) unlinkSync(temporary);
@@ -761,9 +763,10 @@ function samePlainManagedLauncher(
     stringArrayEquals(current.transport?.args, previous.transport?.args as string[]);
 }
 
-function runCodexCommand(args: string[]): CommandResult {
+function runCodexCommand(args: string[], codexHomeDir: string): CommandResult {
   const result = spawnSync("codex", args, {
     encoding: "utf8",
+    env: { ...process.env, CODEX_HOME: codexHomeDir },
     maxBuffer: 1_000_000,
     timeout: CODEX_COMMAND_TIMEOUT_MS,
   });
