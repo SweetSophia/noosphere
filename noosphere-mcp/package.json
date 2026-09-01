@@ -1,0 +1,60 @@
+{
+  "name": "@sweetsophia/noosphere-mcp",
+  "version": "1.13.1",
+  "private": false,
+  "description": "Model Context Protocol server for Noosphere, with a guided Codex CLI integration.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "noosphere-mcp": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "skills/",
+    "LICENSE",
+    "NOTICE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p build-tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "prepack": "npm run test && npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "tsx": "^4.23.13",
+    "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "overrides": {
+    "@hono/node-server": "2.1.1",
+    "hono": "4.13.5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SweetSophia/noosphere.git",
+    "directory": "noosphere-mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/SweetSophia/noosphere/issues"
+  },
+  "homepage": "https://github.com/SweetSophia/noosphere#readme"
+}

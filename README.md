@@ -5,7 +5,7 @@ Agents use it to recall, save, and organize durable and detailed project knowled
 the same data as a browsable Markdown wiki with topics, revisions, scoped access,
 and Obsidian-friendly export/import.  
 
-**All agent systems and humans access the same memory data. You can start in Openclaw and continue in OpenCode and add new data yourself via web browser.** 
+**All agent systems and humans access the same memory data. You can start in OpenClaw, continue in Codex CLI or OpenCode, and add new data yourself through the web UI.**
 The system is database PostgreSQL based with Redis for fast recall. Markdown import and export is possible by the user and agents.
  
 
@@ -16,8 +16,9 @@ It sits between a chat transcript and a full documentation site:
 - **Human wiki**: browse, edit, review, restore, and search Markdown articles.
 - **Scoped access**: give agents or users narrow API keys for only the knowledge
   they should read or write.
-- **Integration-first design**: OpenClaw, Hermes Agent, Opencode, Kilo Code, and
-  any REST client can use the same Noosphere instance.
+- **Integration-first design**: OpenClaw, Codex CLI, Hermes Agent, Opencode,
+  Kilo Code, any MCP client, and any REST client can use the same Noosphere
+  instance.
 
 The old long-form README is preserved at [README-legacy.md](README-legacy.md).
 
@@ -90,6 +91,7 @@ Optional pgvector hybrid storage remains a separate activation step. See
 | System | What it gets | Start here |
 | --- | --- | --- |
 | OpenClaw | Explicit tools, optional prompt-time auto-recall, memory corpus supplement, CLI helpers | [openclaw-noosphere-memory/README.md](openclaw-noosphere-memory/README.md) |
+| Codex CLI / MCP | Five native MCP tools, a Codex skill, and a secret-safe guided installer | [noosphere-mcp/README.md](noosphere-mcp/README.md) |
 | Hermes Agent | First-class Hermes `MemoryProvider`, recall/get/topics/save tools, optional memory mirroring | [hermes-noosphere-memory/README.md](hermes-noosphere-memory/README.md) |
 | Opencode | Prompt-time auto-recall, optional idle auto-save, manual memory tools | [opencode-noosphere-memory/README.md](opencode-noosphere-memory/README.md) |
 | Kilo Code | Prompt-time auto-recall, optional idle auto-save, manual memory tools | [kilocode-noosphere-memory/README.md](kilocode-noosphere-memory/README.md) |
@@ -97,9 +99,20 @@ Optional pgvector hybrid storage remains a separate activation step. See
 
 Use integration-specific environment variables when multiple tools run on one
 machine, for example `OPENCLAW_NOOSPHERE_API_KEY`,
-`HERMES_NOOSPHERE_API_KEY`, `OPENCODE_NOOSPHERE_API_KEY`, or
-`KILOCODE_NOOSPHERE_API_KEY`. The generic `NOOSPHERE_API_KEY` fallback remains
-available for simple single-tool setups.
+`CODEX_NOOSPHERE_API_KEY`, `HERMES_NOOSPHERE_API_KEY`,
+`OPENCODE_NOOSPHERE_API_KEY`, or `KILOCODE_NOOSPHERE_API_KEY`. The generic
+`NOOSPHERE_API_KEY` fallback remains available for simple single-tool setups.
+
+Install the Codex CLI integration independently of the core Docker installer:
+
+```bash
+npx -y @sweetsophia/noosphere-mcp@1.13.1 install-codex
+```
+
+The command stores the MCP launcher, skill, and approved environment-variable
+names; it never writes the API key or any other environment-variable value. See
+the integration guide for runtime environment and remote HTTPS-origin
+configuration.
 
 ## Core Concepts
 

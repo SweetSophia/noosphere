@@ -308,6 +308,11 @@ const injectedPackage = readJson(`${policy.helper.dir}/package.json`);
 const injectedLock = readJson(`${policy.helper.dir}/package-lock.json`);
 const openclawPackage = readJson(`${policy.openclaw.dir}/package.json`);
 const openclawLock = readJson(`${policy.openclaw.dir}/package-lock.json`);
+const mcpPackage = readJson("noosphere-mcp/package.json");
+const rootLicense = readText("LICENSE");
+const mcpLicense = readText("noosphere-mcp/LICENSE");
+const rootNotice = readText("NOTICE");
+const mcpNotice = readText("noosphere-mcp/NOTICE");
 const npmPublishWorkflow = readText(policy.npmPublishWorkflow);
 const npmPublishWorkflowLines = workflowLines(npmPublishWorkflow);
 const dockerPublishWorkflow = readText(policy.dockerPublishWorkflow);
@@ -402,6 +407,27 @@ for (const relativePath of workflowPolicyPaths) {
     `${relativePath} must disable persisted checkout credentials for every checkout step.`,
   );
 }
+
+expect(
+  mcpPackage.license === "Apache-2.0",
+  "The Noosphere MCP package must inherit the repository Apache-2.0 license identifier.",
+);
+expect(
+  Array.isArray(mcpPackage.files) && mcpPackage.files.includes("LICENSE"),
+  "The Noosphere MCP package tarball must include its LICENSE file.",
+);
+expect(
+  mcpLicense === rootLicense,
+  "The Noosphere MCP package LICENSE must match the repository LICENSE byte-for-byte.",
+);
+expect(
+  Array.isArray(mcpPackage.files) && mcpPackage.files.includes("NOTICE"),
+  "The Noosphere MCP package tarball must include its NOTICE file.",
+);
+expect(
+  mcpNotice === rootNotice,
+  "The Noosphere MCP package NOTICE must match the repository NOTICE byte-for-byte.",
+);
 
 expect(
   injectedPackage.private !== true,
