@@ -3,6 +3,9 @@ import * as z from "zod/v4";
 const confidence = z.enum(["low", "medium", "high"]);
 const status = z.enum(["draft", "reviewed", "published"]);
 const nonEmpty = z.string().trim().min(1);
+const canonicalArticleRef = nonEmpty
+    .max(512)
+    .regex(/^noosphere:article:[^:\s]+$/, "Use a canonical reference like noosphere:article:<id>.");
 const saveTags = z.array(nonEmpty.max(64)).max(12).optional();
 const articleTags = z.array(nonEmpty.max(100)).max(100).optional();
 const restrictedTags = z.array(nonEmpty.max(64)).max(16).optional();
@@ -10,7 +13,7 @@ const articleContent = nonEmpty
     .max(1_048_576)
     .refine((value) => new TextEncoder().encode(value).byteLength <= 1_048_576, "Content must not exceed 1048576 UTF-8 bytes.");
 const searchArticlesSchema = {
-    query: z.string().trim().max(256).optional().describe("Full-text query. Omit to list recent accessible articles."),
+    query: nonEmpty.max(256).optional().describe("Full-text query. Omit to list recent accessible articles."),
     topic: nonEmpty.max(100).optional().describe("Topic slug filter."),
     tag: nonEmpty.max(100).optional().describe("Tag slug filter."),
     status: status.optional(),
@@ -20,7 +23,7 @@ const searchArticlesSchema = {
 };
 const getArticleSchema = z.object({
     articleId: nonEmpty.max(512).optional().describe("Noosphere article ID."),
-    canonicalRef: nonEmpty.max(512).optional().describe("Canonical reference such as noosphere:article:<id>."),
+    canonicalRef: canonicalArticleRef.optional().describe("Canonical reference such as noosphere:article:<id>."),
 }).refine((value) => Number(Boolean(value.articleId)) + Number(Boolean(value.canonicalRef)) === 1, {
     message: "Provide exactly one of articleId or canonicalRef.",
 });
@@ -38,9 +41,9 @@ const saveMemorySchema = {
 const recallMemorySchema = {
     query: nonEmpty.max(1_000),
     resultCap: z.number().int().min(1).max(10).optional(),
-    tokenBudget: z.number().int().min(100).max(2_000).optional(),
+    tokenBudget: z.number().int().min(1).max(2_000).optional(),
     scope: z.string().trim().max(500).optional(),
-    providers: z.array(nonEmpty.max(100)).max(20).optional(),
+    providers: z.array(nonEmpty.max(100)).min(1).max(20).optional(),
 };
 const createArticleSchema = {
     title: nonEmpty.max(200),

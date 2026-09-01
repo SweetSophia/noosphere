@@ -1,5 +1,4 @@
 const MAX_RESPONSE_BODY_BYTES = 1_000_000;
-const MAX_ERROR_MESSAGE_CHARS = 2_000;
 
 export interface NoosphereClientConfig {
   baseUrl: string;
@@ -139,7 +138,7 @@ export class NoosphereClient {
       const payload = await parseResponseBody(response);
       if (!response.ok) {
         throw new NoosphereClientError(
-          extractError(payload) ?? `Noosphere request failed with HTTP ${response.status}`,
+          `Noosphere request failed with HTTP ${response.status}.`,
           response.status,
         );
       }
@@ -157,7 +156,7 @@ export class NoosphereClient {
           `Noosphere request timed out after ${this.config.timeoutMs}ms.`,
         );
       }
-      throw new NoosphereClientError(safeMessage(error));
+      throw new NoosphereClientError("Noosphere request failed.");
     } finally {
       clearTimeout(timeout);
     }
@@ -179,7 +178,7 @@ async function parseResponseBody(response: Response): Promise<unknown> {
 
   const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
   if (!contentType.includes("application/json")) {
-    if (!response.ok) return { error: truncate(text) };
+    if (!response.ok) return { error: text };
     throw new NoosphereClientError(
       "Noosphere returned a non-JSON response.",
       response.status,
@@ -189,7 +188,7 @@ async function parseResponseBody(response: Response): Promise<unknown> {
   try {
     return JSON.parse(text) as unknown;
   } catch {
-    if (!response.ok) return { error: truncate(text) };
+    if (!response.ok) return { error: text };
     throw new NoosphereClientError(
       "Noosphere returned invalid JSON.",
       response.status,
@@ -255,25 +254,6 @@ async function cancelResponseBody(response: Response): Promise<void> {
   } catch {
     // A failed cancellation must not replace the body-size rejection.
   }
-}
-
-function extractError(payload: unknown): string | undefined {
-  if (!isRecord(payload)) return undefined;
-  for (const key of ["error", "message"]) {
-    const value = payload[key];
-    if (typeof value === "string" && value.trim()) return truncate(value.trim());
-  }
-  return undefined;
-}
-
-function safeMessage(error: unknown): string {
-  return truncate(error instanceof Error ? error.message : String(error));
-}
-
-function truncate(value: string): string {
-  return value.length <= MAX_ERROR_MESSAGE_CHARS
-    ? value
-    : `${value.slice(0, MAX_ERROR_MESSAGE_CHARS)}…`;
 }
 
 function isAbortError(error: unknown): boolean {

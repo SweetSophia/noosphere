@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import {
+  chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -13,25 +15,20 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
+import { NOOSPHERE_FORWARDED_ENV_VARS } from "../src/config.js";
+
 import {
   CodexInstallError,
   installCodexIntegration,
+  readNoosphereEnvVarsFromConfig,
   type CommandResult,
   type RunCodex,
 } from "../src/install-codex.js";
 
-const FORWARDED_ENV_VARS = [
-  "CODEX_NOOSPHERE_API_KEY",
-  "CODEX_NOOSPHERE_BASE_URL",
-  "CODEX_NOOSPHERE_TRUSTED_ORIGIN",
-  "CODEX_NOOSPHERE_TIMEOUT_MS",
-  "NOOSPHERE_API_KEY",
-  "NOOSPHERE_BASE_URL",
-  "NOOSPHERE_TRUSTED_ORIGIN",
-  "NOOSPHERE_TIMEOUT_MS",
-];
+const FORWARDED_ENV_VARS = [...NOOSPHERE_FORWARDED_ENV_VARS];
 
 interface StoredServer {
+  name: "noosphere";
   enabled: boolean;
   transport: {
     type: "stdio";
@@ -46,6 +43,7 @@ interface StoredServer {
   startup_timeout_sec: number | null;
   tool_timeout_sec: number | null;
   disabled_reason: string | null;
+  auth_status: "unsupported";
 }
 
 function server(
@@ -54,6 +52,7 @@ function server(
   envVars: string[] = [],
 ): StoredServer {
   return {
+    name: "noosphere",
     enabled: true,
     transport: {
       type: "stdio",
@@ -68,6 +67,7 @@ function server(
     startup_timeout_sec: null,
     tool_timeout_sec: null,
     disabled_reason: null,
+    auth_status: "unsupported",
   };
 }
 
@@ -75,6 +75,8 @@ function fakeCodex(
   configFile: string,
   initial?: StoredServer,
   addFailure: false | "before" | "after" = false,
+  readEnvVars: (configFile: string) => string[] = readForwardedEnvVars,
+  onAddFailureAfterMutation?: () => void,
 ): {
   run: RunCodex;
   calls: string[][];
@@ -93,12 +95,12 @@ function fakeCodex(
       calls.push([...args]);
       if (args.join(" ") === "mcp get noosphere --json") {
         if (current && existsSync(configFile)) {
-          current.transport.env_vars = readForwardedEnvVars(configFile);
+          current.transport.env_vars = readEnvVars(configFile);
         }
         return current
           ? {
               code: 0,
-              stdout: JSON.stringify({ name: "noosphere", ...current }),
+              stdout: JSON.stringify(current),
               stderr: "",
             }
           : {
@@ -115,6 +117,7 @@ function fakeCodex(
         current = server(args[separator + 1], args.slice(separator + 2));
         writeFakeConfig(configFile, current);
         if (addFailure === "after") {
+          onAddFailureAfterMutation?.();
           return { code: 1, stdout: "", stderr: "synthetic post-write failure" };
         }
         return {
@@ -150,9 +153,19 @@ function writeFakeConfig(configFile: string, value: StoredServer): void {
 }
 
 function readForwardedEnvVars(configFile: string): string[] {
-  const match = /^env_vars\s*=\s*(\[[^\n]*\])$/m.exec(
-    readFileSync(configFile, "utf8"),
-  );
+  try {
+    return readNoosphereEnvVarsFromConfig(readFileSync(configFile, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+function readLastNoosphereEnvVars(configFile: string): string[] {
+  const config = readFileSync(configFile, "utf8");
+  const marker = "[mcp_servers.noosphere]";
+  const sectionStart = config.lastIndexOf(marker);
+  if (sectionStart < 0) return [];
+  const match = /^env_vars\s*=\s*(\[[^\n]*\])$/m.exec(config.slice(sectionStart));
   return match ? JSON.parse(match[1]) as string[] : [];
 }
 
@@ -184,6 +197,102 @@ function installOptions(
     runCodex,
   };
 }
+
+test("reads environment forwarding only from the noosphere MCP section", () => {
+  const config = [
+    "# unrelated: \"CODEX_NOOSPHERE_API_KEY\"",
+    "[mcp_servers.other]",
+    `env_vars = ${JSON.stringify(FORWARDED_ENV_VARS)}`,
+    "[mcp_servers.noosphere]",
+    'env_vars = ["NOOSPHERE_API_KEY"]',
+    "",
+  ].join("\n");
+
+  assert.deepEqual(readNoosphereEnvVarsFromConfig(config), ["NOOSPHERE_API_KEY"]);
+  assert.throws(
+    () => readNoosphereEnvVarsFromConfig(
+      `[mcp_servers.other]\nenv_vars = ${JSON.stringify(FORWARDED_ENV_VARS)}\n`,
+    ),
+    /must contain exactly one unambiguous \[mcp_servers\.noosphere\] section/,
+  );
+});
+
+test("refuses a symlinked Codex home before inspection or mutation", async () => {
+  const value = fixture();
+  const externalCodexHome = join(value.root, "external-codex-home");
+  renameSync(value.codexHome, externalCodexHome);
+  symlinkSync(externalCodexHome, value.codexHome, "dir");
+  const codex = fakeCodex(
+    value.configFile,
+    server("npx", ["-y", "@sweetsophia/noosphere-mcp@1.13.1"]),
+  );
+  const externalConfig = join(externalCodexHome, "config.toml");
+  const before = readFileSync(externalConfig, "utf8");
+
+  await assert.rejects(
+    installCodexIntegration(installOptions(value, codex.run)),
+    /Codex home.*real directory/,
+  );
+
+  assert.deepEqual(codex.calls, []);
+  assert.equal(readFileSync(externalConfig, "utf8"), before);
+  assert.equal(
+    existsSync(join(value.home, ".agents", "skills", "noosphere-memory", "SKILL.md")),
+    false,
+  );
+});
+
+test("rolls back when a multiline TOML string mimics the noosphere section", async () => {
+  const value = fixture();
+  const codex = fakeCodex(
+    value.configFile,
+    server("npx", ["-y", "@sweetsophia/noosphere-mcp@1.13.1"]),
+    false,
+    readLastNoosphereEnvVars,
+  );
+  const original = [
+    'model_instructions = """',
+    "[mcp_servers.noosphere]",
+    'text = "not a real table"',
+    '"""',
+    "",
+    "[mcp_servers.noosphere]",
+    'command = "npx"',
+    'args = ["-y", "@sweetsophia/noosphere-mcp@1.13.1"]',
+    "",
+  ].join("\n");
+  writeFileSync(value.configFile, original, "utf8");
+
+  await assert.rejects(
+    installCodexIntegration(installOptions(value, codex.run)),
+    /noosphere.*section|readback/i,
+  );
+  assert.equal(readFileSync(value.configFile, "utf8"), original);
+  assert.equal(
+    existsSync(join(value.home, ".agents", "skills", "noosphere-memory", "SKILL.md")),
+    false,
+  );
+});
+
+test("refuses duplicate forwarded environment names without changing state", async () => {
+  const value = fixture();
+  const duplicateEnvVars = [...FORWARDED_ENV_VARS, FORWARDED_ENV_VARS[0]];
+  const codex = fakeCodex(
+    value.configFile,
+    server("npx", ["-y", "@sweetsophia/noosphere-mcp@1.13.1"], duplicateEnvVars),
+  );
+  const before = readFileSync(value.configFile, "utf8");
+
+  await assert.rejects(
+    installCodexIntegration(installOptions(value, codex.run)),
+    /duplicate|not a plain/i,
+  );
+  assert.equal(readFileSync(value.configFile, "utf8"), before);
+  assert.equal(
+    existsSync(join(value.home, ".agents", "skills", "noosphere-memory", "SKILL.md")),
+    false,
+  );
+});
 
 test("installs a value-free launcher, environment forwarding, and the Codex skill", async () => {
   const value = fixture();
@@ -336,6 +445,47 @@ test("refuses to upgrade a managed launcher with unknown Codex settings", async 
   assert.equal(customized.future_setting, 1);
 });
 
+test("refuses managed readback when required Codex metadata is missing", async () => {
+  const missingFields: Array<{
+    name: string;
+    remove: (value: StoredServer) => void;
+  }> = [
+    { name: "name", remove: (value) => { delete (value as unknown as Record<string, unknown>).name; } },
+    { name: "transport.env", remove: (value) => { delete (value.transport as unknown as Record<string, unknown>).env; } },
+    { name: "transport.cwd", remove: (value) => { delete (value.transport as unknown as Record<string, unknown>).cwd; } },
+    ...[
+      "enabled_tools",
+      "disabled_tools",
+      "startup_timeout_sec",
+      "tool_timeout_sec",
+      "disabled_reason",
+    ].map((name) => ({
+      name,
+      remove: (value: StoredServer) => {
+        delete (value as unknown as Record<string, unknown>)[name];
+      },
+    })),
+  ];
+
+  for (const missing of missingFields) {
+    const value = fixture();
+    const incomplete = server(
+      "npx",
+      ["-y", "@sweetsophia/noosphere-mcp@1.13.1"],
+      FORWARDED_ENV_VARS,
+    );
+    missing.remove(incomplete);
+    const codex = fakeCodex(value.configFile, incomplete);
+
+    await assert.rejects(
+      () => installCodexIntegration(installOptions(value, codex.run)),
+      /not a plain @sweetsophia\/noosphere-mcp launcher/,
+      missing.name,
+    );
+    assert.equal(codex.calls.some((args) => args[1] === "add"), false, missing.name);
+  }
+});
+
 test("refuses to overwrite an unrelated noosphere server or a modified skill", async () => {
   const first = fixture();
   const conflictingServer = fakeCodex(
@@ -424,6 +574,119 @@ test("rolls back a newly written skill when codex mcp add fails", async () => {
     ),
     false,
   );
+  assert.equal(existsSync(join(value.home, ".agents")), false);
+});
+
+test("refuses managed readback when transport env_vars is missing", async () => {
+  const value = fixture();
+  const incomplete = server(
+    "npx",
+    ["-y", "@sweetsophia/noosphere-mcp@1.13.1"],
+    FORWARDED_ENV_VARS,
+  );
+  writeFakeConfig(value.configFile, incomplete);
+  delete (incomplete.transport as unknown as Record<string, unknown>).env_vars;
+  const calls: string[][] = [];
+  const run: RunCodex = (args) => {
+    calls.push([...args]);
+    return {
+      code: 0,
+      stdout: JSON.stringify(incomplete),
+      stderr: "",
+    };
+  };
+
+  await assert.rejects(
+    () => installCodexIntegration(installOptions(value, run)),
+    /not a plain @sweetsophia\/noosphere-mcp launcher/,
+  );
+  assert.equal(calls.length, 1);
+});
+
+test("rollback preserves the original Codex config mode", async () => {
+  const value = fixture();
+  const codex = fakeCodex(
+    value.configFile,
+    server(
+      "npx",
+      ["-y", "@sweetsophia/noosphere-mcp@1.12.0"],
+      FORWARDED_ENV_VARS,
+    ),
+    "after",
+    readForwardedEnvVars,
+    () => chmodSync(value.configFile, 0o600),
+  );
+  chmodSync(value.configFile, 0o640);
+
+  await assert.rejects(
+    () => installCodexIntegration(installOptions(value, codex.run)),
+    /synthetic post-write failure/,
+  );
+  assert.equal(lstatSync(value.configFile).mode & 0o777, 0o640);
+});
+
+test("rollback does not replace an identical concurrent Codex config", async () => {
+  const value = fixture();
+  const current = server(
+    "npx",
+    ["-y", "@sweetsophia/noosphere-mcp@1.13.1"],
+  );
+  const codex = fakeCodex(value.configFile, current);
+  const original = readFileSync(value.configFile, "utf8");
+  const parked = `${value.configFile}.installer-copy`;
+  let gets = 0;
+  let replacementInode: bigint | undefined;
+  const run: RunCodex = (args) => {
+    if (args.join(" ") === "mcp get noosphere --json") {
+      gets += 1;
+      if (gets === 2) {
+        renameSync(value.configFile, parked);
+        writeFileSync(value.configFile, original, { encoding: "utf8", mode: 0o640 });
+        replacementInode = lstatSync(value.configFile, { bigint: true }).ino;
+      }
+    }
+    return codex.run(args);
+  };
+
+  await assert.rejects(
+    () => installCodexIntegration(installOptions(value, run)),
+    /readback did not match/,
+  );
+  assert.equal(lstatSync(value.configFile, { bigint: true }).ino, replacementInode);
+  assert.equal(lstatSync(value.configFile).mode & 0o777, 0o640);
+  assert.equal(readFileSync(value.configFile, "utf8"), original);
+});
+
+test("rollback refuses to replace a different concurrent Codex config", async () => {
+  const value = fixture();
+  const current = server(
+    "npx",
+    ["-y", "@sweetsophia/noosphere-mcp@1.13.1"],
+  );
+  const codex = fakeCodex(value.configFile, current);
+  const parked = `${value.configFile}.installer-copy`;
+  const sentinel = "# concurrent user-owned config\n";
+  let gets = 0;
+  let replacementInode: bigint | undefined;
+  const run: RunCodex = (args) => {
+    if (args.join(" ") === "mcp get noosphere --json") {
+      gets += 1;
+      if (gets === 2) {
+        renameSync(value.configFile, parked);
+        writeFileSync(value.configFile, sentinel, { encoding: "utf8", mode: 0o640 });
+        replacementInode = lstatSync(value.configFile, { bigint: true }).ino;
+      }
+    }
+    return codex.run(args);
+  };
+
+  await assert.rejects(
+    () => installCodexIntegration(installOptions(value, run)),
+    /Rollback also failed:.*identity or contents changed/,
+  );
+  assert.equal(lstatSync(value.configFile, { bigint: true }).ino, replacementInode);
+  assert.equal(lstatSync(value.configFile).mode & 0o777, 0o640);
+  assert.equal(readFileSync(value.configFile, "utf8"), sentinel);
 });
 
 test("rolls back a server that mutates before codex reports add failure", async () => {
@@ -439,6 +702,111 @@ test("rolls back a server that mutates before codex reports add failure", async 
   assert.equal(
     existsSync(join(value.home, ".agents", "skills", "noosphere-memory", "SKILL.md")),
     false,
+  );
+});
+
+test("rollback refuses to remove a concurrent user-owned MCP server", async () => {
+  const value = fixture();
+  const userOwned = server("user-launcher", ["--preserve"]);
+  const sentinel = "# concurrent user-owned server config\n";
+  let current: StoredServer | undefined;
+  let removeCalled = false;
+  const run: RunCodex = (args) => {
+    if (args.join(" ") === "mcp get noosphere --json") {
+      return current
+        ? { code: 0, stdout: JSON.stringify(current), stderr: "" }
+        : {
+            code: 1,
+            stdout: "",
+            stderr: "Error: No MCP server named 'noosphere' found.",
+          };
+    }
+    if (args[0] === "mcp" && args[1] === "add") {
+      current = userOwned;
+      writeFileSync(value.configFile, sentinel, "utf8");
+      return { code: 1, stdout: "", stderr: "failure after concurrent replacement" };
+    }
+    if (args.join(" ") === "mcp remove noosphere") {
+      removeCalled = true;
+      current = undefined;
+      return { code: 0, stdout: "Removed.", stderr: "" };
+    }
+    return { code: 2, stdout: "", stderr: `Unexpected args: ${args.join(" ")}` };
+  };
+
+  await assert.rejects(
+    () => installCodexIntegration(installOptions(value, run)),
+    /Rollback also failed:.*current launcher is not the installer-owned launcher/,
+  );
+  assert.equal(current, userOwned);
+  assert.equal(removeCalled, false);
+  assert.equal(readFileSync(value.configFile, "utf8"), sentinel);
+});
+
+test("refuses a symlink swap before Codex rollback touches external state", async () => {
+  const value = fixture();
+  const parkedHome = `${value.codexHome}.parked`;
+  const externalHome = `${value.codexHome}.external`;
+  mkdirSync(externalHome, { recursive: true });
+  const externalConfig = join(externalHome, "config.toml");
+  const sentinel = "# external sentinel\n";
+  writeFileSync(externalConfig, sentinel, "utf8");
+
+  const codex = fakeCodex(
+    value.configFile,
+    undefined,
+    "after",
+    readForwardedEnvVars,
+    () => {
+      renameSync(value.codexHome, parkedHome);
+      symlinkSync(externalHome, value.codexHome, "dir");
+    },
+  );
+
+  await assert.rejects(
+    () => installCodexIntegration(installOptions(value, codex.run)),
+    /Rollback also failed:.*Codex home.*real directory/,
+  );
+  assert.equal(readFileSync(externalConfig, "utf8"), sentinel);
+  assert.equal(
+    existsSync(join(value.home, ".agents", "skills", "noosphere-memory", "SKILL.md")),
+    false,
+  );
+});
+
+test("refuses a skill-directory swap before rollback unlinks external state", async () => {
+  const value = fixture();
+  const skillDirectory = join(value.home, ".agents", "skills", "noosphere-memory");
+  const parkedDirectory = `${skillDirectory}.parked`;
+  const externalDirectory = `${skillDirectory}.external`;
+  const externalSkill = join(externalDirectory, "SKILL.md");
+  const sourceSkill = readFileSync(value.source, "utf8");
+
+  const codex = fakeCodex(
+    value.configFile,
+    undefined,
+    "after",
+    readForwardedEnvVars,
+    () => {
+      renameSync(skillDirectory, parkedDirectory);
+      mkdirSync(externalDirectory, { recursive: true });
+      writeFileSync(externalSkill, sourceSkill, "utf8");
+      symlinkSync(externalDirectory, skillDirectory, "dir");
+    },
+  );
+
+  let installError: unknown;
+  try {
+    await installCodexIntegration(installOptions(value, codex.run));
+    assert.fail("Expected the installer to reject the skill-directory swap.");
+  } catch (error) {
+    installError = error;
+  }
+  assert.equal(existsSync(externalSkill), true);
+  assert.equal(readFileSync(externalSkill, "utf8"), sourceSkill);
+  assert.match(
+    installError instanceof Error ? installError.message : String(installError),
+    /Rollback also failed:.*Codex skill directory.*real directory/,
   );
 });
 
@@ -466,6 +834,36 @@ test("does not delete a concurrently replaced skill during rollback", async () =
     /failure after skill replacement/,
   );
   assert.equal(readFileSync(skillFile, "utf8"), replacement);
+});
+
+test("does not delete an identical-byte replacement during rollback", async () => {
+  const value = fixture();
+  const codex = fakeCodex(value.configFile);
+  const skillFile = join(
+    value.home,
+    ".agents",
+    "skills",
+    "noosphere-memory",
+    "SKILL.md",
+  );
+  const parkedSkill = `${skillFile}.installer-copy`;
+  const replacement = readFileSync(value.source, "utf8");
+  const run: RunCodex = (args) => {
+    if (args[0] === "mcp" && args[1] === "add") {
+      renameSync(skillFile, parkedSkill);
+      writeFileSync(skillFile, replacement, "utf8");
+      return { code: 1, stdout: "", stderr: "failure after same-byte skill replacement" };
+    }
+    return codex.run(args);
+  };
+
+  await assert.rejects(
+    () => installCodexIntegration(installOptions(value, run)),
+    /failure after same-byte skill replacement/,
+  );
+  assert.equal(existsSync(skillFile), true);
+  assert.equal(readFileSync(skillFile, "utf8"), replacement);
+  assert.equal(existsSync(parkedSkill), true);
 });
 
 test("refuses a symlinked Codex skill directory before mutation", async () => {

@@ -16,7 +16,7 @@ It sits between a chat transcript and a full documentation site:
 - **Human wiki**: browse, edit, review, restore, and search Markdown articles.
 - **Scoped access**: give agents or users narrow API keys for only the knowledge
   they should read or write.
-- **Integration-first design**: OpenClaw, Codex CLI, Hermes Agent, Opencode,
+- **Integration-first design**: OpenClaw, Codex CLI, Hermes Agent, OpenCode,
   Kilo Code, any MCP client, and any REST client can use the same Noosphere
   instance.
 
@@ -342,11 +342,11 @@ Keep detailed recovery work in deployment/runbook docs rather than this README.
 Apache 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 The Apache License 2.0 applies to all source code in this repository and to
-the four plugins (`openclaw-noosphere-memory`, `opencode-noosphere-memory`,
-`hermes-noosphere-memory`, `kilocode-noosphere-memory`). It does **not**
+the five integrations (`openclaw-noosphere-memory`, `opencode-noosphere-memory`,
+`hermes-noosphere-memory`, `kilocode-noosphere-memory`, `noosphere-mcp`). It does **not**
 govern the article content stored inside a Noosphere wiki instance — content
 licensing is a separate decision left to the wiki operator.
 
-If you distribute or host a Noosphere-based service, the NOTICE file
-specifies the attribution form that must be preserved (e.g. a "Powered by
-Noosphere" link in the UI footer).
+Redistributions must preserve the applicable attribution notices as described
+by Apache License 2.0 Section 4(d). The NOTICE file is informational and does
+not add a UI-credit or hosted-service condition.

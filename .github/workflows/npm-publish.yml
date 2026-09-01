@@ -97,8 +97,7 @@ jobs:
       - name: Test package when available
         run: npm run test --if-present
 
-      - name: Audit MCP package dependencies
-        if: matrix.package.dir == 'noosphere-mcp'
+      - name: Audit package dependencies
         run: npm audit --audit-level=low
 
       - name: Validate package metadata
@@ -125,7 +124,9 @@ jobs:
         run: npm run build
 
       - name: Verify committed dist is current
-        run: git diff --exit-code -- dist
+        run: |
+          git diff --exit-code -- dist
+          test -z "$(git ls-files --others --exclude-standard -- dist)"
 
       - name: Pack dry run
         run: npm pack --dry-run
@@ -174,6 +175,7 @@ jobs:
         run: |
           npm run build
           git diff --exit-code -- dist
+          test -z "$(git ls-files --others --exclude-standard -- dist)"
           npm pack --json > "$RUNNER_TEMP/injected-pack.json"
           filename=$(node -e 'const p=require(process.argv[1]); process.stdout.write(p[0].filename)' "$RUNNER_TEMP/injected-pack.json")
           integrity=$(node -e 'const p=require(process.argv[1]); process.stdout.write(p[0].integrity)' "$RUNNER_TEMP/injected-pack.json")
@@ -280,7 +282,9 @@ jobs:
         run: npm run build
 
       - name: Verify committed dist is current
-        run: git diff --exit-code -- dist
+        run: |
+          git diff --exit-code -- dist
+          test -z "$(git ls-files --others --exclude-standard -- dist)"
 
       - name: Publish to npm
         env:
@@ -352,7 +356,9 @@ jobs:
         run: npm run build
 
       - name: Verify committed dist is current
-        run: git diff --exit-code -- dist
+        run: |
+          git diff --exit-code -- dist
+          test -z "$(git ls-files --others --exclude-standard -- dist)"
 
       - name: Publish to npm
         env:
@@ -424,7 +430,9 @@ jobs:
         run: npm run build
 
       - name: Verify committed dist is current
-        run: git diff --exit-code -- dist
+        run: |
+          git diff --exit-code -- dist
+          test -z "$(git ls-files --others --exclude-standard -- dist)"
 
       - name: Publish to npm
         env:
@@ -436,7 +444,10 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       startsWith(github.ref, 'refs/tags/v-mcp-') ||
-      (github.event_name == 'workflow_dispatch' && inputs.publish_mcp)
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish_mcp)
+    concurrency:
+      group: npm-publish-noosphere-mcp
+      cancel-in-progress: false
     defaults:
       run:
         working-directory: noosphere-mcp
@@ -502,7 +513,9 @@ jobs:
         run: npm run build
 
       - name: Verify committed dist is current
-        run: git diff --exit-code -- dist
+        run: |
+          git diff --exit-code -- dist
+          test -z "$(git ls-files --others --exclude-standard -- dist)"
 
       - name: Publish to npm
         env:

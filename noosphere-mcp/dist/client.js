@@ -1,5 +1,4 @@
 const MAX_RESPONSE_BODY_BYTES = 1_000_000;
-const MAX_ERROR_MESSAGE_CHARS = 2_000;
 export class NoosphereClientError extends Error {
     status;
     constructor(message, status) {
@@ -66,7 +65,7 @@ export class NoosphereClient {
             });
             const payload = await parseResponseBody(response);
             if (!response.ok) {
-                throw new NoosphereClientError(extractError(payload) ?? `Noosphere request failed with HTTP ${response.status}`, response.status);
+                throw new NoosphereClientError(`Noosphere request failed with HTTP ${response.status}.`, response.status);
             }
             if (!isRecord(payload)) {
                 throw new NoosphereClientError("Noosphere returned an empty or non-object JSON response.", response.status);
@@ -79,7 +78,7 @@ export class NoosphereClient {
             if (isAbortError(error)) {
                 throw new NoosphereClientError(`Noosphere request timed out after ${this.config.timeoutMs}ms.`);
             }
-            throw new NoosphereClientError(safeMessage(error));
+            throw new NoosphereClientError("Noosphere request failed.");
         }
         finally {
             clearTimeout(timeout);
@@ -98,7 +97,7 @@ async function parseResponseBody(response) {
     const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
     if (!contentType.includes("application/json")) {
         if (!response.ok)
-            return { error: truncate(text) };
+            return { error: text };
         throw new NoosphereClientError("Noosphere returned a non-JSON response.", response.status);
     }
     try {
@@ -106,7 +105,7 @@ async function parseResponseBody(response) {
     }
     catch {
         if (!response.ok)
-            return { error: truncate(text) };
+            return { error: text };
         throw new NoosphereClientError("Noosphere returned invalid JSON.", response.status);
     }
 }
@@ -160,24 +159,6 @@ async function cancelResponseBody(response) {
     catch {
         // A failed cancellation must not replace the body-size rejection.
     }
-}
-function extractError(payload) {
-    if (!isRecord(payload))
-        return undefined;
-    for (const key of ["error", "message"]) {
-        const value = payload[key];
-        if (typeof value === "string" && value.trim())
-            return truncate(value.trim());
-    }
-    return undefined;
-}
-function safeMessage(error) {
-    return truncate(error instanceof Error ? error.message : String(error));
-}
-function truncate(value) {
-    return value.length <= MAX_ERROR_MESSAGE_CHARS
-        ? value
-        : `${value.slice(0, MAX_ERROR_MESSAGE_CHARS)}…`;
 }
 function isAbortError(error) {
     return error instanceof Error && error.name === "AbortError";

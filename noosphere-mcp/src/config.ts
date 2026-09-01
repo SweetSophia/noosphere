@@ -18,24 +18,37 @@ export const MAX_NOOSPHERE_TIMEOUT_MS = 30_000;
 
 type Environment = Record<string, string | undefined>;
 
+export const NOOSPHERE_ENV_NAMES = {
+  apiKey: ["CODEX_NOOSPHERE_API_KEY", "NOOSPHERE_API_KEY"],
+  baseUrl: ["CODEX_NOOSPHERE_BASE_URL", "NOOSPHERE_BASE_URL"],
+  trustedOrigin: [
+    "CODEX_NOOSPHERE_TRUSTED_ORIGIN",
+    "NOOSPHERE_TRUSTED_ORIGIN",
+  ],
+  timeout: ["CODEX_NOOSPHERE_TIMEOUT_MS", "NOOSPHERE_TIMEOUT_MS"],
+} as const;
+
+export const NOOSPHERE_FORWARDED_ENV_VARS = [
+  ...NOOSPHERE_ENV_NAMES.apiKey,
+  ...NOOSPHERE_ENV_NAMES.baseUrl,
+  ...NOOSPHERE_ENV_NAMES.trustedOrigin,
+  ...NOOSPHERE_ENV_NAMES.timeout,
+] as const;
+
 export function resolveNoosphereConfig(
   env: Environment = process.env,
 ): ResolvedNoosphereConfig {
   const baseUrl = normalizeBaseUrl(
-    readString(env.CODEX_NOOSPHERE_BASE_URL) ??
-      readString(env.NOOSPHERE_BASE_URL) ??
+    readFirstEnvironmentValue(env, NOOSPHERE_ENV_NAMES.baseUrl) ??
       DEFAULT_NOOSPHERE_BASE_URL,
   );
   assertTrustedDestination(baseUrl, env);
 
   return {
     baseUrl,
-    apiKey:
-      readString(env.CODEX_NOOSPHERE_API_KEY) ??
-      readString(env.NOOSPHERE_API_KEY),
+    apiKey: readFirstEnvironmentValue(env, NOOSPHERE_ENV_NAMES.apiKey),
     timeoutMs: resolveTimeout(
-      readString(env.CODEX_NOOSPHERE_TIMEOUT_MS) ??
-        readString(env.NOOSPHERE_TIMEOUT_MS),
+      readFirstEnvironmentValue(env, NOOSPHERE_ENV_NAMES.timeout),
     ),
   };
 }
@@ -83,9 +96,10 @@ function assertTrustedDestination(baseUrl: string, env: Environment): void {
   const base = new URL(baseUrl);
   if (isLoopbackHost(base.hostname)) return;
 
-  const rawTrustedOrigin =
-    readString(env.CODEX_NOOSPHERE_TRUSTED_ORIGIN) ??
-    readString(env.NOOSPHERE_TRUSTED_ORIGIN);
+  const rawTrustedOrigin = readFirstEnvironmentValue(
+    env,
+    NOOSPHERE_ENV_NAMES.trustedOrigin,
+  );
   if (!rawTrustedOrigin) {
     throw new NoosphereConfigError(
       "Remote Noosphere base URL requires CODEX_NOOSPHERE_TRUSTED_ORIGIN (or NOOSPHERE_TRUSTED_ORIGIN) in the process environment.",
@@ -188,4 +202,15 @@ function readString(value: string | undefined): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+function readFirstEnvironmentValue(
+  env: Environment,
+  names: readonly string[],
+): string | undefined {
+  for (const name of names) {
+    const value = readString(env[name]);
+    if (value !== undefined) return value;
+  }
+  return undefined;
 }

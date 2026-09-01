@@ -95,6 +95,16 @@ test("routes validated MCP arguments to the Noosphere API", async (t) => {
     pagination: { page: 1 },
   });
   assert.deepEqual(api.calls, [["searchArticles", { query: "codex", limit: 10 }]]);
+
+  const recall = await client.callTool({
+    name: "recall_memory",
+    arguments: { query: "codex", tokenBudget: 1 },
+  });
+  assert.equal(recall.isError, undefined);
+  assert.deepEqual(api.calls, [
+    ["searchArticles", { query: "codex", limit: 10 }],
+    ["recallMemory", { query: "codex", tokenBudget: 1 }],
+  ]);
 });
 
 test("rejects invalid arguments before any write call", async (t) => {
@@ -123,6 +133,14 @@ test("rejects REST-invalid boundary values before any API call", async (t) => {
 
   const cases = [
     {
+      name: "get_article",
+      arguments: { canonicalRef: "not-a-canonical-reference" },
+    },
+    {
+      name: "search_articles",
+      arguments: { query: "   " },
+    },
+    {
       name: "search_articles",
       arguments: { query: "q".repeat(257) },
     },
@@ -149,6 +167,10 @@ test("rejects REST-invalid boundary values before any API call", async (t) => {
     {
       name: "recall_memory",
       arguments: { query: "codex", resultCap: 11 },
+    },
+    {
+      name: "recall_memory",
+      arguments: { query: "codex", providers: [] },
     },
     {
       name: "create_article",

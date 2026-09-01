@@ -7,7 +7,8 @@
 Prerequisites:
 
 - Node.js 22 or newer
-- Codex CLI with MCP support
+- Codex CLI with MCP support, installed from a trusted source and available as
+  `codex` on a trusted `PATH`
 - A running Noosphere deployment and a permission-scoped API key
 
 Install the MCP launcher and user-level Codex skill:
@@ -80,6 +81,12 @@ Pass credentials through the MCP process environment; do not embed them in repos
 - Responses are limited to 1 MB and requests time out after 5 seconds by default (bounded to 0.5–30 seconds).
 - Successful responses must be JSON objects; error text is bounded.
 - The server uses stdio only and does not open a listening port.
+- The guided installer invokes the `codex` executable resolved from the caller's
+  `PATH`; run it from the same trusted shell used for Codex administration.
+- The installer rejects symlinked Codex-home and skill-destination path
+  components before inspection or mutation.
+- Installation succeeds only when both the raw TOML section and final
+  `codex mcp get` readback contain the complete unique environment-name set.
 
 ## Environment variables
 

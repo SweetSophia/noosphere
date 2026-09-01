@@ -176,7 +176,68 @@ test("HTTP errors are bounded and do not expose the bearer credential", async ()
     (error: unknown) =>
       error instanceof NoosphereClientError &&
       error.status === 403 &&
-      error.message === "denied" &&
+      error.message === "Noosphere request failed with HTTP 403." &&
       !JSON.stringify(error).includes("synthetic-test-key"),
+  );
+
+  const credential = config.apiKey!;
+  const echoingServer = new NoosphereClient(config, async () =>
+    jsonResponse({ error: `denied Authorization: Bearer ${credential}` }, { status: 403 }),
+  );
+  await assert.rejects(
+    () => echoingServer.searchArticles({}),
+    (error: unknown) =>
+      error instanceof NoosphereClientError &&
+      error.status === 403 &&
+      !error.message.includes(credential) &&
+      error.message === "Noosphere request failed with HTTP 403.",
+  );
+
+  const credentialFragment = credential.slice(0, 10);
+  const fragmentEchoingServer = new NoosphereClient(config, async () =>
+    jsonResponse({ error: `rejected key prefix ${credentialFragment}` }, { status: 403 }),
+  );
+  await assert.rejects(
+    () => fragmentEchoingServer.searchArticles({}),
+    (error: unknown) =>
+      error instanceof NoosphereClientError &&
+      !error.message.includes(credentialFragment) &&
+      error.message === "Noosphere request failed with HTTP 403.",
+  );
+
+  const boundaryEcho = new NoosphereClient(config, async () =>
+    jsonResponse({ error: `${"x".repeat(1_995)}${credential}` }, { status: 403 }),
+  );
+  await assert.rejects(
+    () => boundaryEcho.searchArticles({}),
+    (error: unknown) =>
+      error instanceof NoosphereClientError &&
+      !error.message.includes(credential.slice(0, 5)) &&
+      error.message === "Noosphere request failed with HTTP 403.",
+  );
+
+  const plainTextBoundaryEcho = new NoosphereClient(config, async () =>
+    new Response(`${"x".repeat(1_988)}${credential}`, {
+      status: 403,
+      headers: { "content-type": "text/plain" },
+    }),
+  );
+  await assert.rejects(
+    () => plainTextBoundaryEcho.searchArticles({}),
+    (error: unknown) =>
+      error instanceof NoosphereClientError &&
+      !error.message.includes(credential.slice(0, 5)) &&
+      error.message === "Noosphere request failed with HTTP 403.",
+  );
+
+  const throwingTransport = new NoosphereClient(config, async () => {
+    throw new Error(`diagnostic Authorization: Bearer ${credential}`);
+  });
+  await assert.rejects(
+    () => throwingTransport.searchArticles({}),
+    (error: unknown) =>
+      error instanceof NoosphereClientError &&
+      !error.message.includes(credential) &&
+      error.message === "Noosphere request failed.",
   );
 });
