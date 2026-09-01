@@ -1,6 +1,6 @@
 export interface NoosphereMemoryConfig {
     baseUrl?: string;
-    /** Single API key (string or secret ref) used as default for all agents. */
+    /** Default API key. OpenClaw resolves SecretRef inputs before plugin execution. */
     apiKey?: string | {
         value?: string;
     } | SecretRefInput;
@@ -44,8 +44,8 @@ export declare function resolveNoosphereMemoryConfig(rawConfig: unknown, env?: N
  * Priority:
  *   1. NOOSPHERE_API_KEY_<AGENT_ID> env var (e.g. NOOSPHERE_API_KEY_SHODAN)
  *   2. apiKeys[agentId] from plugin config (plain text, for multi-agent setups)
- *   3. Default apiKey (resolved from string, secret ref, env.OPENCLAW_NOOSPHERE_API_KEY,
- *      or env.NOOSPHERE_API_KEY)
+ *   3. Default apiKey (host-resolved runtime value, legacy value wrapper,
+ *      env.OPENCLAW_NOOSPHERE_API_KEY, or env.NOOSPHERE_API_KEY)
  */
 export declare function resolveApiKeyForAgent(rawConfig: unknown, env?: NodeJS.ProcessEnv, rootConfig?: unknown, agentId?: string): string | undefined;
 export declare function redactSecret(value: string | undefined): string | undefined;

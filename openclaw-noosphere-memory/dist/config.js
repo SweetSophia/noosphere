@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
 export class NoosphereConfigError extends Error {
     constructor(message) {
         super(message);
@@ -12,13 +10,17 @@ export const MAX_NOOSPHERE_TIMEOUT_MS = 30_000;
 export const DEFAULT_AUTO_RECALL_TIMEOUT_MS = 1_500;
 export const MAX_AUTO_RECALL_TIMEOUT_MS = 5_000;
 export function resolveNoosphereMemoryConfig(rawConfig, env = process.env, rootConfig) {
+    // Retained for call-site compatibility only. OpenClaw hydrates manifest-declared
+    // secretInputs before plugin execution; rereading source providers here would
+    // bypass the host's ownership, permission, size, and timeout policy.
+    void rootConfig;
     const config = isRecord(rawConfig) ? rawConfig : {};
     const baseUrl = normalizeBaseUrl(readString(config.baseUrl) ||
         readString(env.OPENCLAW_NOOSPHERE_BASE_URL) ||
         readString(env.NOOSPHERE_BASE_URL) ||
         DEFAULT_NOOSPHERE_BASE_URL);
     assertTrustedRemoteOrigin(baseUrl, env);
-    const defaultApiKey = readSecret(config.apiKey, rootConfig) ||
+    const defaultApiKey = readSecret(config.apiKey) ||
         readString(env.OPENCLAW_NOOSPHERE_API_KEY) ||
         readString(env.NOOSPHERE_API_KEY);
     const timeoutMs = clampTimeout(config.timeoutMs ??
@@ -36,10 +38,13 @@ export function resolveNoosphereMemoryConfig(rawConfig, env = process.env, rootC
  * Priority:
  *   1. NOOSPHERE_API_KEY_<AGENT_ID> env var (e.g. NOOSPHERE_API_KEY_SHODAN)
  *   2. apiKeys[agentId] from plugin config (plain text, for multi-agent setups)
- *   3. Default apiKey (resolved from string, secret ref, env.OPENCLAW_NOOSPHERE_API_KEY,
- *      or env.NOOSPHERE_API_KEY)
+ *   3. Default apiKey (host-resolved runtime value, legacy value wrapper,
+ *      env.OPENCLAW_NOOSPHERE_API_KEY, or env.NOOSPHERE_API_KEY)
  */
 export function resolveApiKeyForAgent(rawConfig, env = process.env, rootConfig, agentId) {
+    // See resolveNoosphereMemoryConfig: source provider configuration is not a
+    // runtime credential authority inside the plugin.
+    void rootConfig;
     const config = isRecord(rawConfig) ? rawConfig : {};
     // 1. Per-agent env var (highest priority, keeps keys secret)
     if (agentId) {
@@ -55,8 +60,8 @@ export function resolveApiKeyForAgent(rawConfig, env = process.env, rootConfig, 
             return perAgentKey.trim();
         }
     }
-    // 3. Default key (resolved from string, secret ref, or env.NOOSPHERE_API_KEY)
-    return (readSecret(config.apiKey, rootConfig) ||
+    // 3. Default key (host-resolved runtime value, legacy wrapper, or env fallback)
+    return (readSecret(config.apiKey) ||
         readString(env.OPENCLAW_NOOSPHERE_API_KEY) ||
         readString(env.NOOSPHERE_API_KEY));
 }
@@ -258,72 +263,18 @@ function isPrivateOrReservedIpv6(hostname) {
         discardOnly ||
         documentation);
 }
-function readSecret(value, rootConfig) {
+function readSecret(value) {
     if (typeof value === "string" && value.trim())
         return value.trim();
     if (!isRecord(value))
         return undefined;
+    if ("source" in value || "provider" in value || "id" in value) {
+        throw new NoosphereConfigError("Noosphere API key SecretRefs must be resolved by OpenClaw before plugin initialization.");
+    }
     if (typeof value.value === "string" && value.value.trim()) {
         return value.value.trim();
     }
-    return readFileSecretRef(value, rootConfig);
-}
-function readFileSecretRef(value, rootConfig) {
-    if (value.source !== "file")
-        return undefined;
-    const providerId = readString(value.provider);
-    const secretId = readString(value.id);
-    if (!providerId || !secretId || !isRecord(rootConfig))
-        return undefined;
-    const providers = getRecord(rootConfig, "secrets", "providers");
-    const provider = providers ? providers[providerId] : undefined;
-    if (!isRecord(provider) || provider.source !== "file")
-        return undefined;
-    const rawPath = readString(provider.path);
-    if (!rawPath)
-        return undefined;
-    const filePath = expandHome(rawPath);
-    const fileContent = readFileSync(filePath, "utf8");
-    if (provider.mode === "json") {
-        const parsed = JSON.parse(fileContent);
-        const resolved = readJsonPointer(parsed, secretId);
-        return typeof resolved === "string" && resolved.trim()
-            ? resolved.trim()
-            : undefined;
-    }
-    const trimmed = fileContent.trim();
-    return trimmed || undefined;
-}
-function getRecord(value, ...path) {
-    let current = value;
-    for (const segment of path) {
-        if (!isRecord(current))
-            return undefined;
-        current = current[segment];
-    }
-    return isRecord(current) ? current : undefined;
-}
-function expandHome(input) {
-    if (input === "~")
-        return homedir();
-    if (input.startsWith("~/"))
-        return `${homedir()}${input.slice(1)}`;
-    return input;
-}
-function readJsonPointer(value, pointer) {
-    if (!pointer || pointer === "/")
-        return value;
-    const parts = pointer
-        .split("/")
-        .slice(1)
-        .map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
-    let current = value;
-    for (const part of parts) {
-        if (!isRecord(current))
-            return undefined;
-        current = current[part];
-    }
-    return current;
+    return undefined;
 }
 export function readString(value) {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
