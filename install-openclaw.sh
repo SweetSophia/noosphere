@@ -51,7 +51,7 @@ NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH="${NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH:-}"
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH="${NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH:-}"
 NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS="${NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS:-}"
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS="${NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS:-}"
-PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.1}"
+PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.2}"
 SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$HOME/.openclaw/secrets}"
 SECRETS_FILE="${NOOSPHERE_SECRETS_FILE:-$SECRETS_DIR/noosphere-memory.json}"
 SECRET_PROVIDER_ID="${NOOSPHERE_SECRET_PROVIDER_ID:-noosphere-memory}"
@@ -546,7 +546,7 @@ resolve_runtime_config() {
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-$(env_get "$runtime_env" NOOSPHERE_PORT)}"
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-$(env_get "$runtime_env" NOOSPHERE_VERSION)}"
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.1}"
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.2}"
   if ((NOOSPHERE_VERSION_WAS_EXPLICIT == 1 && NOOSPHERE_IMAGE_WAS_EXPLICIT == 0)); then
     # A version-bound public upgrade must not inherit an installer-persisted
     # image from the previous release. Operators retaining a custom registry or
@@ -1398,6 +1398,27 @@ wait_for_http_health() {
   exit 1
 }
 
+capture_article_verification_floor() {
+  local db_container=$1 fresh_install=$2 count=''
+  if [[ "$fresh_install" == true ]]; then
+    printf '0\n'
+    return 0
+  fi
+  count="$(
+    docker exec "$db_container" psql -XAtq -v ON_ERROR_STOP=1 \
+      -U noosphere -d noosphere \
+      -c 'SELECT count(*) FROM "Article" WHERE "deletedAt" IS NULL;'
+  )" || {
+    echo 'Failed to capture the pre-install article-count preservation floor.' >&2
+    return 1
+  }
+  [[ "$count" =~ ^[0-9]+$ ]] || {
+    echo 'Pre-install article count is not a non-negative integer.' >&2
+    return 1
+  }
+  printf '%s\n' "$count"
+}
+
 main() {
 case "$NOOSPHERE_INSTALL_OPENCLAW" in
   true|false) ;;
@@ -1987,6 +2008,9 @@ docker compose pull
 docker compose up -d db redis
 wait_for_container_healthy noosphere-openclaw-db 60
 wait_for_container_healthy noosphere-openclaw-redis 30
+verify_min_articles="$(
+  capture_article_verification_floor noosphere-openclaw-db "$new_install_required"
+)"
 
 echo "Applying database schema and bootstrap data..."
 # Run bootstrap to a temp file so we can check exit status separately.
@@ -2036,10 +2060,6 @@ docker compose up -d app
 wait_for_container_healthy noosphere-openclaw-app 30
 wait_for_http_health "$APP_URL" 60
 
-verify_min_articles=1
-if [[ "$new_install_required" == true ]]; then
-  verify_min_articles=0
-fi
 NOOSPHERE_APP_URL="$APP_URL" \
 NOOSPHERE_DB_CONTAINER=noosphere-openclaw-db \
 NOOSPHERE_EXPECTED_DB_VOLUME=noosphere_postgres_data \

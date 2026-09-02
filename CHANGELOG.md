@@ -8,6 +8,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.2] - 2026-09-02
+
+Patch release publishing the Codex MCP integration and the security and recall
+hardening merged since `1.13.1`.
+
+### Added
+
+- **Codex CLI integration through `@sweetsophia/noosphere-mcp`
+  ([#313](https://github.com/SweetSophia/noosphere/pull/313))**: ships a bounded
+  stdio MCP server with five Noosphere tools, a guided Codex installer, a
+  packaged memory skill, environment-name-only credential forwarding, and
+  ownership-safe rollback.
+
+### Security
+
+- **OpenClaw credential-origin binding
+  ([#312](https://github.com/SweetSophia/noosphere/pull/312))**: requires a
+  protected exact HTTPS origin pin for remote endpoints, rejects malformed or
+  internal destinations, and prevents authenticated redirect following.
+- **Host-owned OpenClaw SecretRef resolution
+  ([#301](https://github.com/SweetSophia/noosphere/pull/301))**: removes
+  plugin-side secret-file and JSON-pointer reads and rejects unresolved secret
+  references before fallback.
+- **Dependency and parser hardening
+  ([#293](https://github.com/SweetSophia/noosphere/pull/293),
+  [#294](https://github.com/SweetSophia/noosphere/pull/294))**: updates
+  NextAuth, Next.js, js-yaml, Prisma, Sharp, PostCSS, and related locked
+  dependencies, with malformed-token, bounded-YAML, and image-runtime
+  regressions.
+
+### Fixed
+
+- **Bounded MCP recall
+  ([#314](https://github.com/SweetSophia/noosphere/pull/314))**: forces
+  `recall_memory` into API `auto` mode, prevents caller-controlled serialization
+  hooks and provider mutation from replacing the request contract, documents
+  the bounded behavior, and includes the MCP package in the coordinated release
+  and Docker tag-exclusion policies.
+- **Guided installer rerun preservation floor**: captures the exact live article
+  count before existing-install schema/bootstrap work and verifies that the
+  post-run count does not regress, while permitting a legitimate zero-article
+  fresh install to be rerun immediately.
+
 ## [1.13.1] - 2026-08-30
 
 Patch release restoring cross-environment reproducibility for the coordinated
@@ -365,7 +408,8 @@ changes.
   backfill pipeline, and the memory provider refactor. Refer to the commit
   history (`git log v1.8.0..v1.9.0`) for the full set of changes.
 
-[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.13.1...HEAD
+[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.13.2...HEAD
+[1.13.2]: https://github.com/SweetSophia/noosphere/compare/v1.13.1...v1.13.2
 [1.13.1]: https://github.com/SweetSophia/noosphere/compare/v1.13.0...v1.13.1
 [1.13.0]: https://github.com/SweetSophia/noosphere/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/SweetSophia/noosphere/compare/v1.11.0...v1.12.0

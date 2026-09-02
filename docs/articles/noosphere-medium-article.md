@@ -352,18 +352,18 @@ The plugin provides explicit tools:
 It also supports automatic prompt-time recall through OpenClaw's before_prompt_build hook.
 
 Quick install on the machine running OpenClaw Gateway—after confirming that the
-coordinated [v1.13.1 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.1)
+coordinated [v1.13.2 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.2)
 exists with all six installer assets (source merge alone does not publish them):
 
-    # Installer commit: ef616729339db2114e53f7b199700379fc3435bb
-    # Expected SHA-256: ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2
+    # Installer commit: 5c84a170a5b48754791e57b7e98191df5fbed5b8
+    # Expected SHA-256: 1b98ea75fbcc15d224d4ab188d6f6958380321d98dc412816e3780937473e951
     (
       set -e
       installer="$(mktemp)"
       trap 'rm -f "$installer"' EXIT
-      curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/ef616729339db2114e53f7b199700379fc3435bb/install.sh -o "$installer"
-      printf '%s  %s\n' 'ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2' "$installer" | sha256sum -c -
-      NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.1}" bash "$installer" --non-interactive --with openclaw
+      curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5c84a170a5b48754791e57b7e98191df5fbed5b8/install.sh -o "$installer"
+      printf '%s  %s\n' '1b98ea75fbcc15d224d4ab188d6f6958380321d98dc412816e3780937473e951' "$installer" | sha256sum -c -
+      NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.2}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.2}" bash "$installer" --non-interactive --with openclaw
       openclaw noosphere doctor
       openclaw noosphere status
     )
@@ -375,13 +375,13 @@ Default runtime locations:
     Noosphere runtime: ~/.noosphere
     OpenClaw secret file: ~/.openclaw/secrets/noosphere-memory.json
     Default app URL: http://127.0.0.1:6578
-    Docker image: ghcr.io/sweetsophia/noosphere:1.13.1
+    Docker image: ghcr.io/sweetsophia/noosphere:1.13.2
 
 The direct installer defaults to the same coordinated release contract. To
 state that contract explicitly while preserving override support:
 
-    NOOSPHERE_VERSION=1.13.1 \
-    NOOSPHERE_PLUGIN_SPEC=npm:@sweetsophia/openclaw-noosphere-memory@1.13.1 \
+    NOOSPHERE_VERSION=1.13.2 \
+    NOOSPHERE_PLUGIN_SPEC=npm:@sweetsophia/openclaw-noosphere-memory@1.13.2 \
     NOOSPHERE_PORT=6578 \
     APP_URL=http://127.0.0.1:6578 \
     bash install-openclaw.sh

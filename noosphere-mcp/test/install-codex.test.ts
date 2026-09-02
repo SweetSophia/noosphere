@@ -193,7 +193,7 @@ function installOptions(
   return {
     homeDir: value.home,
     codexHomeDir: value.codexHome,
-    packageVersion: "1.13.1",
+    packageVersion: "1.13.2",
     skillSourceFile: value.source,
     runCodex,
   };
@@ -225,7 +225,7 @@ test("refuses a symlinked Codex home before inspection or mutation", async () =>
   symlinkSync(externalCodexHome, value.codexHome, "dir");
   const codex = fakeCodex(
     value.configFile,
-    server("npx", ["-y", "@sweetsophia/noosphere-mcp@1.13.1"]),
+    server("npx", ["-y", "@sweetsophia/noosphere-mcp@1.13.2"]),
   );
   const externalConfig = join(externalCodexHome, "config.toml");
   const before = readFileSync(externalConfig, "utf8");
@@ -281,7 +281,7 @@ test("default Codex runner binds the explicitly selected Codex home", async () =
       () => installCodexIntegration({
         homeDir: value.home,
         codexHomeDir: value.codexHome,
-        packageVersion: "1.13.1",
+        packageVersion: "1.13.2",
         skillSourceFile: value.source,
       }),
       /synthetic inspect failure/,
@@ -337,7 +337,7 @@ test("rolls back when a multiline TOML string mimics the noosphere section", asy
   const value = fixture();
   const codex = fakeCodex(
     value.configFile,
-    server("npx", ["-y", "@sweetsophia/noosphere-mcp@1.13.1"]),
+    server("npx", ["-y", "@sweetsophia/noosphere-mcp@1.13.2"]),
     false,
     readLastNoosphereEnvVars,
   );
@@ -349,7 +349,7 @@ test("rolls back when a multiline TOML string mimics the noosphere section", asy
     "",
     "[mcp_servers.noosphere]",
     'command = "npx"',
-    'args = ["-y", "@sweetsophia/noosphere-mcp@1.13.1"]',
+    'args = ["-y", "@sweetsophia/noosphere-mcp@1.13.2"]',
     "",
   ].join("\n");
   writeFileSync(value.configFile, original, "utf8");
@@ -370,7 +370,7 @@ test("refuses duplicate forwarded environment names without changing state", asy
   const duplicateEnvVars = [...FORWARDED_ENV_VARS, FORWARDED_ENV_VARS[0]];
   const codex = fakeCodex(
     value.configFile,
-    server("npx", ["-y", "@sweetsophia/noosphere-mcp@1.13.1"], duplicateEnvVars),
+    server("npx", ["-y", "@sweetsophia/noosphere-mcp@1.13.2"], duplicateEnvVars),
   );
   const before = readFileSync(value.configFile, "utf8");
 
@@ -396,7 +396,7 @@ test("installs a value-free launcher, environment forwarding, and the Codex skil
   assert.deepEqual(codex.current?.transport, {
     type: "stdio",
     command: "npx",
-    args: ["-y", "@sweetsophia/noosphere-mcp@1.13.1"],
+    args: ["-y", "@sweetsophia/noosphere-mcp@1.13.2"],
     env: null,
     env_vars: FORWARDED_ENV_VARS,
     cwd: null,
@@ -428,7 +428,7 @@ test("is idempotent for the exact launcher, forwarding, and skill", async () => 
     value.configFile,
     server(
       "npx",
-      ["-y", "@sweetsophia/noosphere-mcp@1.13.1"],
+      ["-y", "@sweetsophia/noosphere-mcp@1.13.2"],
       FORWARDED_ENV_VARS,
     ),
   );
@@ -454,7 +454,7 @@ test("accepts Codex stdio readback that omits optional auth_status", async () =>
   writeFileSync(join(destination, "SKILL.md"), readFileSync(value.source));
   const current = server(
     "npx",
-    ["-y", "@sweetsophia/noosphere-mcp@1.13.1"],
+    ["-y", "@sweetsophia/noosphere-mcp@1.13.2"],
     FORWARDED_ENV_VARS,
   );
   delete (current as { auth_status?: unknown }).auth_status;
@@ -473,7 +473,7 @@ test("configures forwarding on an exact launcher that lacks it", async () => {
   const value = fixture();
   const codex = fakeCodex(
     value.configFile,
-    server("npx", ["-y", "@sweetsophia/noosphere-mcp@1.13.1"]),
+    server("npx", ["-y", "@sweetsophia/noosphere-mcp@1.13.2"]),
   );
 
   const result = await installCodexIntegration(installOptions(value, codex.run));
@@ -489,7 +489,7 @@ test("refuses an exact launcher with unapproved environment forwarding", async (
     value.configFile,
     server(
       "npx",
-      ["-y", "@sweetsophia/noosphere-mcp@1.13.1"],
+      ["-y", "@sweetsophia/noosphere-mcp@1.13.2"],
       ["AWS_SECRET_ACCESS_KEY"],
     ),
   );
@@ -522,7 +522,7 @@ test("upgrades only a plain launcher managed by this package", async () => {
   assert.equal(result.serverAction, "upgraded");
   assert.deepEqual(codex.current?.transport.args, [
     "-y",
-    "@sweetsophia/noosphere-mcp@1.13.1",
+    "@sweetsophia/noosphere-mcp@1.13.2",
   ]);
   assert.deepEqual(codex.current?.transport.env_vars, FORWARDED_ENV_VARS);
 });
@@ -589,7 +589,7 @@ test("refuses managed readback when required Codex metadata is missing", async (
     const value = fixture();
     const incomplete = server(
       "npx",
-      ["-y", "@sweetsophia/noosphere-mcp@1.13.1"],
+      ["-y", "@sweetsophia/noosphere-mcp@1.13.2"],
       FORWARDED_ENV_VARS,
     );
     missing.remove(incomplete);
@@ -663,7 +663,7 @@ test("refuses symlinked durable installer files before mutation", async () => {
     configCase.configFile,
     server(
       "npx",
-      ["-y", "@sweetsophia/noosphere-mcp@1.13.1"],
+      ["-y", "@sweetsophia/noosphere-mcp@1.13.2"],
       FORWARDED_ENV_VARS,
     ),
   );
@@ -699,7 +699,7 @@ test("refuses managed readback when transport env_vars is missing", async () => 
   const value = fixture();
   const incomplete = server(
     "npx",
-    ["-y", "@sweetsophia/noosphere-mcp@1.13.1"],
+    ["-y", "@sweetsophia/noosphere-mcp@1.13.2"],
     FORWARDED_ENV_VARS,
   );
   writeFakeConfig(value.configFile, incomplete);
@@ -747,7 +747,7 @@ test("atomic rollback preserves group-write mode under a restrictive umask", asy
   const value = fixture();
   const current = server(
     "npx",
-    ["-y", "@sweetsophia/noosphere-mcp@1.13.1"],
+    ["-y", "@sweetsophia/noosphere-mcp@1.13.2"],
   );
   const codex = fakeCodex(value.configFile, current);
   chmodSync(value.configFile, 0o660);
@@ -777,7 +777,7 @@ test("rollback does not replace an identical concurrent Codex config", async () 
   const value = fixture();
   const current = server(
     "npx",
-    ["-y", "@sweetsophia/noosphere-mcp@1.13.1"],
+    ["-y", "@sweetsophia/noosphere-mcp@1.13.2"],
   );
   const codex = fakeCodex(value.configFile, current);
   const original = readFileSync(value.configFile, "utf8");
@@ -809,7 +809,7 @@ test("rollback refuses to replace a different concurrent Codex config", async ()
   const value = fixture();
   const current = server(
     "npx",
-    ["-y", "@sweetsophia/noosphere-mcp@1.13.1"],
+    ["-y", "@sweetsophia/noosphere-mcp@1.13.2"],
   );
   const codex = fakeCodex(value.configFile, current);
   const parked = `${value.configFile}.installer-copy`;

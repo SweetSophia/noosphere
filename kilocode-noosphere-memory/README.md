@@ -16,20 +16,20 @@ You need two things before this plugin will do anything useful:
    `http://127.0.0.1:6578`. For a guided local install that also configures
    Kilo Code, run:
 
-   Before running this pinned `1.13.1` command, confirm that the coordinated
-   [`v1.13.1` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.1)
+   Before running this pinned `1.13.2` command, confirm that the coordinated
+   [`v1.13.2` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.2)
    exists with all six installer assets. Source merge alone does not publish the
    image, package, or release assets.
 
    ```bash
-   # Installer commit: ef616729339db2114e53f7b199700379fc3435bb
-   # Expected SHA-256: ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2
+   # Installer commit: 5c84a170a5b48754791e57b7e98191df5fbed5b8
+   # Expected SHA-256: 1b98ea75fbcc15d224d4ab188d6f6958380321d98dc412816e3780937473e951
    (
      set -e
      installer="$(mktemp)"
      trap 'rm -f "$installer"' EXIT
-     curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/ef616729339db2114e53f7b199700379fc3435bb/install.sh -o "$installer"
-     printf '%s  %s\n' 'ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2' "$installer" | sha256sum -c -
+     curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5c84a170a5b48754791e57b7e98191df5fbed5b8/install.sh -o "$installer"
+     printf '%s  %s\n' '1b98ea75fbcc15d224d4ab188d6f6958380321d98dc412816e3780937473e951' "$installer" | sha256sum -c -
      bash "$installer" --non-interactive --with kilocode
    )
    ```
@@ -63,7 +63,7 @@ You need two things before this plugin will do anything useful:
 ## Install
 
 ```bash
-npm install -g @sweetsophia/kilocode-noosphere-memory@1.13.1
+npm install -g @sweetsophia/kilocode-noosphere-memory@1.13.2
 ```
 
 Add it to `~/.config/kilo/kilo.json`:
@@ -71,7 +71,7 @@ Add it to `~/.config/kilo/kilo.json`:
 ```json
 {
   "plugin": [
-    "@sweetsophia/kilocode-noosphere-memory@1.13.1"
+    "@sweetsophia/kilocode-noosphere-memory@1.13.2"
   ]
 }
 ```
@@ -79,7 +79,7 @@ Add it to `~/.config/kilo/kilo.json`:
 You can also install it with Kilo's plugin command:
 
 ```bash
-kilo plugin @sweetsophia/kilocode-noosphere-memory@1.13.1 --global
+kilo plugin @sweetsophia/kilocode-noosphere-memory@1.13.2 --global
 ```
 
 Or configure it with explicit options:
@@ -88,7 +88,7 @@ Or configure it with explicit options:
 {
   "plugin": [
     [
-      "@sweetsophia/kilocode-noosphere-memory@1.13.1",
+      "@sweetsophia/kilocode-noosphere-memory@1.13.2",
       {
         "baseUrl": "http://127.0.0.1:6578",
         "autoRecall": true,

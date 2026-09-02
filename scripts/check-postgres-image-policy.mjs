@@ -14,10 +14,10 @@ const verifyReleaseArtifacts = process.argv.includes("--verify-release-assets");
 const verifyReleaseFiles = process.argv.includes("--verify-release-files");
 const releaseRoot = resolve(process.cwd());
 const immutableHelperRef = "9da4af0a7b2275aa91eecd102095e0e470bbb0e3";
-const guidedInstallerRef = "ef616729339db2114e53f7b199700379fc3435bb";
-const guidedInstallerSha256 = "ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2";
-const guidedBackendRef = "9195733bd59756d21d51d6d3b34e33ca3c8c674b";
-const guidedBackendSha256 = "91784b96fb6a699555f35cb87cf5d5800644a2a1761956d537d9e7c32bafa973";
+const guidedInstallerRef = "5c84a170a5b48754791e57b7e98191df5fbed5b8";
+const guidedInstallerSha256 = "1b98ea75fbcc15d224d4ab188d6f6958380321d98dc412816e3780937473e951";
+const guidedBackendRef = "53d47df53515babf1c93ae42d17062f7b6fce589";
+const guidedBackendSha256 = "258bcfdf0ef30acda08e4b7b51618b441fbfe2c0177bc2ab15e9102af2afbea0";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
@@ -812,11 +812,16 @@ expect(
   "install-openclaw.sh must default app and plugin to one release, force deterministic reinstall, and pin npm specs",
 );
 expect(
-  installer.includes("verify_min_articles=1") &&
-    installer.includes('if [[ "$new_install_required" == true ]]') &&
-    installer.includes("verify_min_articles=0") &&
+  installer.includes("capture_article_verification_floor()") &&
+    installer.includes('if [[ "$fresh_install" == true ]]') &&
+    installer.includes('-c \'SELECT count(*) FROM "Article" WHERE "deletedAt" IS NULL;\'') &&
+    installer.includes('[[ "$count" =~ ^[0-9]+$ ]]') &&
+    installer.includes(
+      'capture_article_verification_floor noosphere-openclaw-db "$new_install_required"',
+    ) &&
+    !installer.includes("verify_min_articles=1") &&
     installer.includes('NOOSPHERE_MIN_ARTICLES="$verify_min_articles"'),
-  "install-openclaw.sh must allow zero articles only for a proven new install",
+  "install-openclaw.sh must bind post-run article verification to the pre-bootstrap live count while allowing a fresh zero-article install",
 );
 const mainTransitionRouteCall = installer.lastIndexOf("\nroute_postgres_install_transition\n");
 const mainStopBeforeBootstrap = installer.indexOf(
@@ -827,9 +832,20 @@ const mainBootstrap = installer.indexOf(
   'echo "Applying database schema and bootstrap data..."',
   mainTransitionRouteCall,
 );
+const mainDatabaseHealthy = installer.indexOf(
+  "wait_for_container_healthy noosphere-openclaw-db 60",
+  mainStopBeforeBootstrap,
+);
+const mainArticleFloorCapture = installer.indexOf(
+  'verify_min_articles="$(',
+  mainDatabaseHealthy,
+);
 expect(
   mainTransitionRouteCall >= 0 &&
     mainStopBeforeBootstrap > mainTransitionRouteCall &&
+    mainDatabaseHealthy > mainStopBeforeBootstrap &&
+    mainArticleFloorCapture > mainDatabaseHealthy &&
+    mainArticleFloorCapture < mainBootstrap &&
     mainBootstrap > mainStopBeforeBootstrap &&
     !installer.includes('if [[ "$controller_transition_completed" != true ]]'),
   "controller completion must still stop the app and run idempotent schema/bootstrap work before final activation",

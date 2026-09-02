@@ -14,7 +14,7 @@ Prerequisites:
 Install the MCP launcher and user-level Codex skill:
 
 ```bash
-npx -y @sweetsophia/noosphere-mcp@1.13.1 install-codex
+npx -y @sweetsophia/noosphere-mcp@1.13.2 install-codex
 ```
 
 The installer:
@@ -72,7 +72,7 @@ Run the server directly through an MCP client that supports stdio:
 
 ```text
 command: npx
-args: -y @sweetsophia/noosphere-mcp@1.13.1
+args: -y @sweetsophia/noosphere-mcp@1.13.2
 ```
 
 Pass credentials through the MCP process environment; do not embed them in repository configuration.
