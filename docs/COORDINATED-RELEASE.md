@@ -1,6 +1,6 @@
 # Coordinated Noosphere Release
 
-This repository releases the application and four integration surfaces from one
+This repository releases the application and five integration surfaces from one
 reviewed commit. Do not publish an individual plugin ahead of the coordinated
 release.
 
@@ -13,6 +13,7 @@ For version `X.Y.Z`, all of these must identify the same merge commit:
   then `@sweetsophia/openclaw-noosphere-memory` after exact-integrity readback
 - `v-opencode-X.Y.Z` — `@sweetsophia/opencode-noosphere-memory`
 - `v-kilocode-X.Y.Z` — `@sweetsophia/kilocode-noosphere-memory`
+- `v-mcp-X.Y.Z` — `@sweetsophia/noosphere-mcp`
 - `v-hermes-X.Y.Z` — deterministic Hermes provider bundle attached to `vX.Y.Z`
 
 `VERSION`, all npm package manifests/lockfiles, the Hermes `plugin.yaml`, the
@@ -22,7 +23,7 @@ any tag is created.
 ## Pre-publication gate
 
 1. Merge the release PR normally after exact-head local and hosted gates pass.
-2. Verify all five proposed tags are absent locally and remotely.
+2. Verify all six proposed tags are absent locally and remotely.
 3. Build every npm tarball with `npm pack --dry-run` and inspect its file list.
 4. Build the Hermes bundle and six-file installer asset set twice; require
    byte-identical archives, launchers, backends, and checksum files.
@@ -43,7 +44,7 @@ publish registry tags. Only the canonical application release tag may move
    by the merge itself.
 2. Create and push annotated `vX.Y.Z` at the exact reviewed merge commit. Wait
    for the canonical Docker publication and record its digest.
-3. Create the four annotated plugin tags at that same commit, preferably one at
+3. Create the five annotated integration tags at that same commit, preferably one at
    a time, and wait for each npm/Hermes workflow. The Hermes and installer
    workflows produce read-only Actions artifacts; neither mutates a GitHub
    Release.
@@ -80,11 +81,11 @@ Verify independently of workflow exit status:
 - GitHub release target commit, notes, all six installer assets, asset names,
   launcher/backend/Hermes checksum files, and independently recomputed hashes;
 - npm registry versions, provenance, tarball URLs, downloaded tarball manifests,
-  and version-bound public commands for injected memory, OpenClaw, Opencode,
-  and Kilo Code;
+  and version-bound public commands for injected memory, OpenClaw,
+  Opencode, Kilo Code, and MCP;
 - GHCR `X.Y.Z` and `latest` index digest, both `linux/amd64` and `linux/arm64`
   manifests, OCI version label, and an AMD64 runtime health smoke test;
-- all five tag object targets equal the reviewed release commit;
+- all six tag object targets equal the reviewed release commit;
 - checksum-pinned installer bytes remain retrievable and match their advertised
   SHA-256.
 

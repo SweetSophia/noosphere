@@ -857,6 +857,15 @@ expect(
   "Every hosted CI job must use immutable Actions, disable checkout credential persistence, and retain the installer gate.",
 );
 expect(
+  coordinatedReleaseGuide.includes("application and five integration surfaces") &&
+    coordinatedReleaseGuide.includes("`v-mcp-X.Y.Z` — `@sweetsophia/noosphere-mcp`") &&
+    coordinatedReleaseGuide.includes("all six proposed tags") &&
+    coordinatedReleaseGuide.includes("Create the five annotated integration tags") &&
+    coordinatedReleaseGuide.includes("Opencode, Kilo Code, and MCP") &&
+    coordinatedReleaseGuide.includes("all six tag object targets"),
+  "The coordinated release guide must include the MCP tag in publication and public readback.",
+);
+expect(
   coordinatedReleaseGuide.includes("attach the complete\n   six-file installer artifact") &&
     coordinatedReleaseGuide.includes("install.sh` and `install.sh.sha256") &&
     coordinatedReleaseGuide.includes("install-openclaw.sh` and `install-openclaw.sh.sha256") &&
