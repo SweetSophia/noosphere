@@ -812,11 +812,16 @@ expect(
   "install-openclaw.sh must default app and plugin to one release, force deterministic reinstall, and pin npm specs",
 );
 expect(
-  installer.includes("verify_min_articles=1") &&
-    installer.includes('if [[ "$new_install_required" == true ]]') &&
-    installer.includes("verify_min_articles=0") &&
+  installer.includes("capture_article_verification_floor()") &&
+    installer.includes('if [[ "$fresh_install" == true ]]') &&
+    installer.includes('-c \'SELECT count(*) FROM "Article" WHERE "deletedAt" IS NULL;\'') &&
+    installer.includes('[[ "$count" =~ ^[0-9]+$ ]]') &&
+    installer.includes(
+      'capture_article_verification_floor noosphere-openclaw-db "$new_install_required"',
+    ) &&
+    !installer.includes("verify_min_articles=1") &&
     installer.includes('NOOSPHERE_MIN_ARTICLES="$verify_min_articles"'),
-  "install-openclaw.sh must allow zero articles only for a proven new install",
+  "install-openclaw.sh must bind post-run article verification to the pre-bootstrap live count while allowing a fresh zero-article install",
 );
 const mainTransitionRouteCall = installer.lastIndexOf("\nroute_postgres_install_transition\n");
 const mainStopBeforeBootstrap = installer.indexOf(
@@ -827,9 +832,20 @@ const mainBootstrap = installer.indexOf(
   'echo "Applying database schema and bootstrap data..."',
   mainTransitionRouteCall,
 );
+const mainDatabaseHealthy = installer.indexOf(
+  "wait_for_container_healthy noosphere-openclaw-db 60",
+  mainStopBeforeBootstrap,
+);
+const mainArticleFloorCapture = installer.indexOf(
+  'verify_min_articles="$(',
+  mainDatabaseHealthy,
+);
 expect(
   mainTransitionRouteCall >= 0 &&
     mainStopBeforeBootstrap > mainTransitionRouteCall &&
+    mainDatabaseHealthy > mainStopBeforeBootstrap &&
+    mainArticleFloorCapture > mainDatabaseHealthy &&
+    mainArticleFloorCapture < mainBootstrap &&
     mainBootstrap > mainStopBeforeBootstrap &&
     !installer.includes('if [[ "$controller_transition_completed" != true ]]'),
   "controller completion must still stop the app and run idempotent schema/bootstrap work before final activation",

@@ -27,6 +27,43 @@ if (source.includes("API KEY (save this - it will not be shown again)")) {
 NODE
 
 source "$backend"
+
+assert_article_verification_floor_behavior() (
+  local floor
+  docker() {
+    [[ "$*" == *'exec noosphere-openclaw-db psql -XAtq -v ON_ERROR_STOP=1 -U noosphere -d noosphere'* ]]
+    printf '%s\n' "${FIXTURE_ARTICLE_COUNT:?}"
+  }
+
+  FIXTURE_ARTICLE_COUNT=not-called
+  floor=$(capture_article_verification_floor noosphere-openclaw-db true)
+  [[ "$floor" == 0 ]]
+
+  FIXTURE_ARTICLE_COUNT=0
+  floor=$(capture_article_verification_floor noosphere-openclaw-db false)
+  [[ "$floor" == 0 ]]
+
+  FIXTURE_ARTICLE_COUNT=7
+  floor=$(capture_article_verification_floor noosphere-openclaw-db false)
+  [[ "$floor" == 7 ]]
+
+  FIXTURE_ARTICLE_COUNT=invalid
+  if capture_article_verification_floor noosphere-openclaw-db false >/dev/null 2>&1; then
+    return 1
+  fi
+)
+
+assert_article_verification_floor_behavior
+if (
+  capture_article_verification_floor() {
+    if [[ "$2" == true ]]; then printf '0\n'; else printf '1\n'; fi
+  }
+  assert_article_verification_floor_behavior
+); then
+  echo 'constant existing-install article floor sabotage unexpectedly passed' >&2
+  exit 1
+fi
+
 fixture_value() {
   node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))'
 }
@@ -239,4 +276,4 @@ if "$0" "$tmp/sabotaged.sh" >/dev/null 2>&1; then
   exit 1
 fi
 
-printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 scoped_keys=yes read_key_rejected=yes transport_rotation=blocked local_bootstrap_destination=yes proxy_bypass=yes secret_argv=clean child_env=clean credential_parent_symlink=blocked sabotage=red\n'
+printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 scoped_keys=yes read_key_rejected=yes transport_rotation=blocked local_bootstrap_destination=yes article_floor=preserved proxy_bypass=yes secret_argv=clean child_env=clean credential_parent_symlink=blocked sabotage=red\n'

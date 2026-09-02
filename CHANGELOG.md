@@ -46,6 +46,10 @@ hardening merged since `1.13.1`.
   hooks and provider mutation from replacing the request contract, documents
   the bounded behavior, and includes the MCP package in the coordinated release
   and Docker tag-exclusion policies.
+- **Guided installer rerun preservation floor**: captures the exact live article
+  count before existing-install schema/bootstrap work and verifies that the
+  post-run count does not regress, while permitting a legitimate zero-article
+  fresh install to be rerun immediately.
 
 ## [1.13.1] - 2026-08-30
 
