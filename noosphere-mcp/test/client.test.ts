@@ -144,6 +144,77 @@ test("write methods preserve inputs and recall forces bounded auto mode", async 
   ]);
 });
 
+test("recall rejects inherited serialization hooks on the wire body", async () => {
+  let observedBody = "";
+  const priorToJson = Object.getOwnPropertyDescriptor(Object.prototype, "toJSON");
+  const client = new NoosphereClient(config, async (_input, init) => {
+    observedBody = String(init?.body);
+    return jsonResponse({ ok: true });
+  });
+
+  try {
+    await client.recallMemory({
+      get query() {
+        Object.defineProperty(Object.prototype, "toJSON", {
+          configurable: true,
+          value: () => ({ query: "attacker", mode: "inspection" }),
+        });
+        return "durable";
+      },
+      resultCap: 4,
+      tokenBudget: 1200,
+      scope: "work",
+      providers: ["noosphere"],
+    });
+  } finally {
+    if (priorToJson) {
+      Object.defineProperty(Object.prototype, "toJSON", priorToJson);
+    } else {
+      Reflect.deleteProperty(Object.prototype, "toJSON");
+    }
+  }
+
+  assert.deepEqual(JSON.parse(observedBody), {
+    query: "durable",
+    resultCap: 4,
+    tokenBudget: 1200,
+    scope: "work",
+    providers: ["noosphere"],
+    mode: "auto",
+  });
+});
+
+test("recall snapshots providers once and copies indexed values", async () => {
+  const providers = ["noosphere"];
+  Object.defineProperty(providers, Symbol.iterator, {
+    configurable: true,
+    value: function* () {
+      yield "hindsight";
+    },
+  });
+  let providerReads = 0;
+  let observedBody = "";
+  const client = new NoosphereClient(config, async (_input, init) => {
+    observedBody = String(init?.body);
+    return jsonResponse({ ok: true });
+  });
+
+  await client.recallMemory({
+    query: "durable",
+    get providers() {
+      providerReads += 1;
+      return providerReads === 1 ? providers : undefined;
+    },
+  });
+
+  assert.equal(providerReads, 1);
+  assert.deepEqual(JSON.parse(observedBody), {
+    query: "durable",
+    providers: ["noosphere"],
+    mode: "auto",
+  });
+});
+
 test("missing credentials fail before fetch", async () => {
   let called = false;
   const client = new NoosphereClient({ ...config, apiKey: undefined }, async () => {
