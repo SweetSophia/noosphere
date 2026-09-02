@@ -40,7 +40,7 @@ Docker administrator access is an explicit trust boundary. The lock serializes t
 ## OpenClaw installer deployments
 
 Install and upgrade through the same command, but only after the coordinated
-[`v1.13.1` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.1)
+[`v1.13.2` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.2)
 exists with all six installer assets. Source merge alone does not publish them:
 
 ```bash
@@ -52,7 +52,7 @@ exists with all six installer assets. Source merge alone does not publish them:
   trap 'rm -f "$installer"' EXIT
   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/ef616729339db2114e53f7b199700379fc3435bb/install.sh -o "$installer"
   printf '%s  %s\n' 'ea782a679bdbc6c29b9b5d05e60dd98c21580a1829c3a0fa18caf18e10f04cd2' "$installer" | sha256sum -c -
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.1}" bash "$installer" --non-interactive --with openclaw
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.2}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.2}" bash "$installer" --non-interactive --with openclaw
 )
 ```
 
