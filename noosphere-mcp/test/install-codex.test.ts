@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import test from "node:test";
 
 import { NOOSPHERE_FORWARDED_ENV_VARS } from "../src/config.js";
@@ -21,6 +21,7 @@ import {
   CodexInstallError,
   installCodexIntegration,
   readNoosphereEnvVarsFromConfig,
+  runCodexCommand,
   type CommandResult,
   type RunCodex,
 } from "../src/install-codex.js";
@@ -245,14 +246,17 @@ test("refuses a symlinked Codex home before inspection or mutation", async () =>
 test("default Codex runner binds the explicitly selected Codex home", async () => {
   const value = fixture();
   const binDirectory = join(value.root, "bin");
-  const codexExecutable = join(binDirectory, "codex");
+  const codexFixture = join(binDirectory, "codex-fixture.mjs");
+  const codexExecutable = join(
+    binDirectory,
+    process.platform === "win32" ? "codex.cmd" : "codex",
+  );
   mkdirSync(binDirectory);
   writeFileSync(
-    codexExecutable,
+    codexFixture,
     [
-      "#!/usr/bin/env node",
-      'const fs = require("node:fs");',
-      'const path = require("node:path");',
+      'import fs from "node:fs";',
+      'import path from "node:path";',
       'fs.writeFileSync(path.join(process.env.CODEX_HOME, "seen-home"), process.env.CODEX_HOME);',
       'process.stderr.write("synthetic inspect failure\\n");',
       "process.exitCode = 2;",
@@ -260,10 +264,17 @@ test("default Codex runner binds the explicitly selected Codex home", async () =
     ].join("\n"),
     "utf8",
   );
+  writeFileSync(
+    codexExecutable,
+    process.platform === "win32"
+      ? `@echo off\r\n"${process.execPath}" "${codexFixture}" %*\r\n`
+      : `#!/bin/sh\nexec "${process.execPath}" "${codexFixture}" "$@"\n`,
+    "utf8",
+  );
   chmodSync(codexExecutable, 0o755);
   const previousPath = process.env.PATH;
   const previousCodexHome = process.env.CODEX_HOME;
-  process.env.PATH = `${binDirectory}:${previousPath ?? ""}`;
+  process.env.PATH = `${binDirectory}${delimiter}${previousPath ?? ""}`;
   process.env.CODEX_HOME = join(value.root, "wrong-codex-home");
   try {
     await assert.rejects(
@@ -285,6 +296,41 @@ test("default Codex runner binds the explicitly selected Codex home", async () =
     readFileSync(join(value.codexHome, "seen-home"), "utf8"),
     value.codexHome,
   );
+});
+
+test("default Codex runner enforces a hard subprocess deadline", {
+  skip: process.platform === "win32",
+}, () => {
+  const value = fixture();
+  const binDirectory = join(value.root, "bin");
+  const codexExecutable = join(binDirectory, "codex");
+  mkdirSync(binDirectory);
+  writeFileSync(
+    codexExecutable,
+    [
+      "#!/usr/bin/env node",
+      'process.on("SIGTERM", () => {',
+      "  setTimeout(() => process.exit(0), 750);",
+      "});",
+      "setInterval(() => {}, 1_000);",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  chmodSync(codexExecutable, 0o755);
+
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${binDirectory}${delimiter}${previousPath ?? ""}`;
+  try {
+    const startedAt = Date.now();
+    const result = runCodexCommand([], value.codexHome, 50);
+    const elapsedMs = Date.now() - startedAt;
+    assert.equal(result.code, -1);
+    assert.ok(elapsedMs < 500, `Codex timeout took ${elapsedMs} ms`);
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
 });
 
 test("rolls back when a multiline TOML string mimics the noosphere section", async () => {

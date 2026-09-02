@@ -763,12 +763,17 @@ function samePlainManagedLauncher(
     stringArrayEquals(current.transport?.args, previous.transport?.args as string[]);
 }
 
-function runCodexCommand(args: string[], codexHomeDir: string): CommandResult {
+export function runCodexCommand(
+  args: string[],
+  codexHomeDir: string,
+  timeoutMs = CODEX_COMMAND_TIMEOUT_MS,
+): CommandResult {
   const result = spawnSync("codex", args, {
     encoding: "utf8",
     env: { ...process.env, CODEX_HOME: codexHomeDir },
     maxBuffer: 1_000_000,
-    timeout: CODEX_COMMAND_TIMEOUT_MS,
+    timeout: timeoutMs,
+    killSignal: "SIGKILL",
   });
   if (result.error) {
     return { code: -1, stdout: result.stdout ?? "", stderr: result.error.message };

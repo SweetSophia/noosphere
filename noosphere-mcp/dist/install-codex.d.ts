@@ -20,4 +20,5 @@ export declare class CodexInstallError extends Error {
 }
 export declare function installCodexIntegration(options: CodexInstallOptions): Promise<CodexInstallResult>;
 export declare function readNoosphereEnvVarsFromConfig(config: string): string[];
+export declare function runCodexCommand(args: string[], codexHomeDir: string, timeoutMs?: number): CommandResult;
 //# sourceMappingURL=install-codex.d.ts.map
