@@ -31,7 +31,7 @@ source "$backend"
 assert_article_verification_floor_behavior() (
   local floor
   docker() {
-    [[ "$*" == *'exec noosphere-openclaw-db psql -XAtq -v ON_ERROR_STOP=1 -U noosphere -d noosphere'* ]]
+    [[ "$*" == *'exec noosphere-openclaw-db psql -XAtq -v ON_ERROR_STOP=1 -U noosphere -d noosphere'* ]] || return 1
     printf '%s\n' "${FIXTURE_ARTICLE_COUNT:?}"
   }
 
