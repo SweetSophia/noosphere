@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -207,8 +208,14 @@ function indentation(line) {
 
 function yamlNamedBlock(text, key, indent) {
   const lines = text.split(/\r?\n/);
-  const header = `${" ".repeat(indent)}${key}:`;
-  const start = lines.findIndex((line) => line === header || line.startsWith(`${header} `));
+  const indentationPrefix = " ".repeat(indent);
+  const headers = [
+    `${indentationPrefix}${key}:`,
+    `${indentationPrefix}"${key}":`,
+    `${indentationPrefix}'${key}':`,
+  ];
+  const start = lines.findIndex((line) =>
+    headers.some((header) => line === header || line.startsWith(`${header} `)));
   if (start < 0) return "";
   let end = lines.length;
   for (let index = start + 1; index < lines.length; index += 1) {
@@ -220,6 +227,14 @@ function yamlNamedBlock(text, key, indent) {
     }
   }
   return lines.slice(start, end).join("\n");
+}
+
+function yamlKeysAtIndent(text, indent) {
+  const pattern = new RegExp(`^ {${indent}}([A-Za-z0-9_-]+):\\s*(?:#.*)?$`);
+  return text
+    .split(/\r?\n/)
+    .map((line) => pattern.exec(line)?.[1])
+    .filter((key) => key !== undefined);
 }
 
 function yamlStepBlock(jobBlock, name) {
@@ -244,6 +259,17 @@ function exactBlockLines(block, expected) {
   return lines.length === expected.length && expected.every((line, index) => lines[index] === line);
 }
 
+function noticeSection(text, heading) {
+  const normalized = text.replace(/\r\n/g, "\n");
+  const divider = "=".repeat(80);
+  const marker = `${divider}\n${heading}\n${divider}\n`;
+  const start = normalized.indexOf(marker);
+  if (start < 0) return "";
+  const contentStart = start + marker.length;
+  const end = normalized.indexOf(`\n${divider}\n`, contentStart);
+  return (end < 0 ? normalized.slice(contentStart) : normalized.slice(contentStart, end)).trim();
+}
+
 function hasConsecutiveRawLines(block, expected) {
   const lines = block.split(/\r?\n/).map((line) => line.trim());
   return lines.some((_, start) =>
@@ -252,8 +278,14 @@ function hasConsecutiveRawLines(block, expected) {
 }
 
 function yamlScalarLine(block, name, indent) {
-  const prefix = `${" ".repeat(indent)}${name}:`;
-  return block.split("\n").find((line) => line.startsWith(prefix))?.trim() ?? "";
+  const indentationPrefix = " ".repeat(indent);
+  const prefixes = [
+    `${indentationPrefix}${name}:`,
+    `${indentationPrefix}"${name}":`,
+    `${indentationPrefix}'${name}':`,
+  ];
+  return block.split("\n").find((line) =>
+    prefixes.some((prefix) => line.startsWith(prefix)))?.trim() ?? "";
 }
 
 function hasExactNativeDockerMatrix(block) {
@@ -308,8 +340,70 @@ const injectedPackage = readJson(`${policy.helper.dir}/package.json`);
 const injectedLock = readJson(`${policy.helper.dir}/package-lock.json`);
 const openclawPackage = readJson(`${policy.openclaw.dir}/package.json`);
 const openclawLock = readJson(`${policy.openclaw.dir}/package-lock.json`);
+const mcpPackage = readJson("noosphere-mcp/package.json");
+const rootReadme = readText("README.md");
+const rootLicense = readText("LICENSE");
+const mcpLicense = readText("noosphere-mcp/LICENSE");
+const rootNotice = readText("NOTICE");
+const mcpNotice = readText("noosphere-mcp/NOTICE");
 const npmPublishWorkflow = readText(policy.npmPublishWorkflow);
 const npmPublishWorkflowLines = workflowLines(npmPublishWorkflow);
+const npmPackageCheckJob = yamlNamedBlock(npmPublishWorkflow, "package-check", 2);
+const npmPublishHelperJob = yamlNamedBlock(npmPublishWorkflow, "publish_helper", 2);
+const npmPublishOpenclawJob = yamlNamedBlock(npmPublishWorkflow, "publish_openclaw", 2);
+const npmPublishOpencodeJob = yamlNamedBlock(npmPublishWorkflow, "publish_opencode", 2);
+const npmPublishKilocodeJob = yamlNamedBlock(npmPublishWorkflow, "publish_kilocode", 2);
+const npmPublishMcpJob = yamlNamedBlock(npmPublishWorkflow, "publish_mcp", 2);
+const npmJobsBlock = yamlNamedBlock(npmPublishWorkflow, "jobs", 0);
+const npmPushTrigger = yamlNamedBlock(npmPublishWorkflow, "push", 2);
+const npmJobNames = yamlKeysAtIndent(npmJobsBlock, 2);
+const npmPackageCheckIf = yamlNamedBlock(npmPackageCheckJob, "if", 4);
+const npmPackageCheckContinueOnError = yamlScalarLine(
+  npmPackageCheckJob,
+  "continue-on-error",
+  4,
+);
+const npmAuditStep = yamlStepBlock(npmPackageCheckJob, "Audit package dependencies");
+const npmPublishMcpCondition = yamlNamedBlock(npmPublishMcpJob, "if", 4);
+const npmPublishMcpConcurrency = yamlNamedBlock(npmPublishMcpJob, "concurrency", 4);
+const expectedNoticeAttribution = [
+  "When redistributing this Work or a Derivative Work, preserve the applicable",
+  "attribution notices as required by Section 4(d) of the Apache License 2.0.",
+  "This NOTICE is informational and does not add license conditions.",
+  "",
+  "If your Derivative Work modifies this software, mark modified files as",
+  "required by Section 4(b). The Apache License 2.0 does not grant trademark",
+  "rights, so do not imply endorsement when using Noosphere marks.",
+].join("\n");
+const expectedNoticeSha256 = "4a04ec21f01d68561240285bc61a9080f0e4a07c5f12f55ddab0f77347ba5c6a";
+const expectedNpmJobNames = [
+  "package-check",
+  "publish_helper",
+  "publish_openclaw",
+  "publish_opencode",
+  "publish_kilocode",
+  "publish_mcp",
+];
+const expectedNpmMatrixPackages = [
+  ["noosphere-injected-memory", "@sweetsophia/noosphere-injected-memory"],
+  ["openclaw-noosphere-memory", "@sweetsophia/openclaw-noosphere-memory"],
+  ["opencode-noosphere-memory", "@sweetsophia/opencode-noosphere-memory"],
+  ["kilocode-noosphere-memory", "@sweetsophia/kilocode-noosphere-memory"],
+  ["noosphere-mcp", "@sweetsophia/noosphere-mcp"],
+];
+const npmPackageCheckLines = workflowLines(npmPackageCheckJob);
+const npmMatrixDirectoryCount = npmPackageCheckLines.filter(
+  (line) => yamlKeyValue(line)?.key === "dir",
+).length;
+const trackedDistCheck = "git diff --exit-code -- dist";
+const untrackedDistCheck = 'test -z "$(git ls-files --others --exclude-standard -- dist)"';
+const npmDistVerificationJobs = [
+  npmPackageCheckJob,
+  npmPublishOpenclawJob,
+  npmPublishOpencodeJob,
+  npmPublishKilocodeJob,
+  npmPublishMcpJob,
+];
 const dockerPublishWorkflow = readText(policy.dockerPublishWorkflow);
 const dockerPublishWorkflowLines = workflowLines(dockerPublishWorkflow);
 const dockerPushTrigger = yamlNamedBlock(dockerPublishWorkflow, "push", 2);
@@ -402,6 +496,111 @@ for (const relativePath of workflowPolicyPaths) {
     `${relativePath} must disable persisted checkout credentials for every checkout step.`,
   );
 }
+
+expect(
+  mcpPackage.license === "Apache-2.0",
+  "The Noosphere MCP package must inherit the repository Apache-2.0 license identifier.",
+);
+expect(
+  Array.isArray(mcpPackage.files) && mcpPackage.files.includes("LICENSE"),
+  "The Noosphere MCP package tarball must include its LICENSE file.",
+);
+expect(
+  mcpLicense === rootLicense,
+  "The Noosphere MCP package LICENSE must match the repository LICENSE byte-for-byte.",
+);
+expect(
+  Array.isArray(mcpPackage.files) && mcpPackage.files.includes("NOTICE"),
+  "The Noosphere MCP package tarball must include its NOTICE file.",
+);
+expect(
+  mcpNotice === rootNotice,
+  "The Noosphere MCP package NOTICE must match the repository NOTICE byte-for-byte.",
+);
+expect(
+  noticeSection(rootNotice, "ATTRIBUTION") === expectedNoticeAttribution,
+  "The repository NOTICE must describe Apache attribution without adding UI-credit conditions.",
+);
+expect(
+  createHash("sha256").update(rootNotice).digest("hex") === expectedNoticeSha256,
+  "The repository NOTICE must match the canonical Apache-compatible text exactly.",
+);
+expect(
+  rootReadme.includes("the five integrations") &&
+    /does\s+not add a UI-credit or hosted-service condition/.test(rootReadme) &&
+    !rootReadme.includes("the four plugins") &&
+    !rootReadme.includes('"Powered by Noosphere" link'),
+  "The root README must describe all five integrations without reviving a UI-attribution condition.",
+);
+expect(
+  JSON.stringify(npmJobNames) === JSON.stringify(expectedNpmJobNames),
+  "The npm publish workflow must contain exactly the approved job set.",
+);
+expect(
+  npmPackageCheckIf.trim() === "",
+  "The package-check job must not have a job-level execution guard.",
+);
+expect(
+  npmPackageCheckContinueOnError === "",
+  "The package-check job must not soften failures with continue-on-error.",
+);
+expect(
+  npmMatrixDirectoryCount === expectedNpmMatrixPackages.length &&
+    expectedNpmMatrixPackages.every(([directory, name]) =>
+      hasMatrixPackage(npmPackageCheckLines, directory, name)),
+  "The package-check matrix must contain exactly the five approved publishable packages.",
+);
+expect(
+  exactBlockLines(npmPushTrigger, [
+    "push:",
+    'tags: ["v-openclaw-*", "v-opencode-*", "v-kilocode-*", "v-mcp-*"]',
+  ]),
+  "The npm publish workflow must retain every approved release-tag trigger, including v-mcp-*.",
+);
+expect(
+  npmPublishWorkflowLines.filter((line) => line === trackedDistCheck).length === 6 &&
+    npmPublishWorkflowLines.filter((line) => line === untrackedDistCheck).length === 6,
+  "Every committed-dist gate must reject both tracked differences and untracked generated files.",
+);
+expect(
+  npmDistVerificationJobs.every((job) =>
+    exactBlockLines(yamlStepBlock(job, "Verify committed dist is current"), [
+      "- name: Verify committed dist is current",
+      "run: |",
+      trackedDistCheck,
+      untrackedDistCheck,
+    ])),
+  "Each package-check and direct publish job must own its exact tracked-and-untracked dist gate.",
+);
+expect(
+  hasConsecutiveRawLines(npmPublishHelperJob, [
+    "npm run build",
+    trackedDistCheck,
+    untrackedDistCheck,
+    'npm pack --json > "$RUNNER_TEMP/injected-pack.json"',
+  ]),
+  "The bundled-helper publish job must verify tracked and untracked dist immediately before packing.",
+);
+expect(
+  exactBlockLines(npmAuditStep, [
+    "- name: Audit package dependencies",
+    "run: npm audit --audit-level=low",
+  ]),
+  "Every package-check matrix entry must run the dependency audit.",
+);
+expect(
+  exactBlockLines(npmPublishMcpCondition, [
+    "if: |",
+    "startsWith(github.ref, 'refs/tags/v-mcp-') ||",
+    "(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish_mcp)",
+  ]) &&
+    exactBlockLines(npmPublishMcpConcurrency, [
+      "concurrency:",
+      "group: npm-publish-noosphere-mcp",
+      "cancel-in-progress: false",
+    ]),
+  "Manual MCP publication must be master-only and MCP releases must be serialized without cancellation.",
+);
 
 expect(
   injectedPackage.private !== true,
