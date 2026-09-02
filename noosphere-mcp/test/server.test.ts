@@ -57,6 +57,10 @@ test("advertises exactly issue #260's five tools with truthful annotations", asy
     listed.tools.map((tool) => tool.name),
     ["search_articles", "get_article", "save_memory", "recall_memory", "create_article"],
   );
+  assert.match(
+    listed.tools.find((tool) => tool.name === "recall_memory")?.description ?? "",
+    /bounded automatic mode/i,
+  );
 
   const annotations = Object.fromEntries(
     listed.tools.map((tool) => [tool.name, tool.annotations]),

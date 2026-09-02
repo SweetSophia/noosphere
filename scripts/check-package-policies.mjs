@@ -418,7 +418,7 @@ const dockerPrBuildStep = yamlStepBlock(dockerPrPlatformJob, "Build target platf
 const dockerPublishBuildStep = yamlStepBlock(dockerPublishPlatformJob, "Build and push target platform by digest");
 const dockerAssembleStep = yamlStepBlock(dockerPublishIndexJob, "Assemble and verify multi-platform image");
 const dockerFinalStep = yamlStepBlock(dockerFinalJob, "Require every applicable Docker gate");
-const pluginTagExclusions = ["v-openclaw-", "v-opencode-", "v-kilocode-", "v-hermes-"]
+const pluginTagExclusions = ["v-openclaw-", "v-opencode-", "v-kilocode-", "v-hermes-", "v-mcp-"]
   .map((tag) => `!startsWith(github.ref, 'refs/tags/${tag}')`)
   .join(" && ");
 const dockerValidateCondition = `if: "${pluginTagExclusions}"`;
@@ -855,6 +855,15 @@ expect(
       (ciWorkflow.match(/persist-credentials: false/g)?.length ?? 0) &&
     ciWorkflow.includes("npm run installer:check"),
   "Every hosted CI job must use immutable Actions, disable checkout credential persistence, and retain the installer gate.",
+);
+expect(
+  coordinatedReleaseGuide.includes("application and five integration surfaces") &&
+    coordinatedReleaseGuide.includes("`v-mcp-X.Y.Z` — `@sweetsophia/noosphere-mcp`") &&
+    coordinatedReleaseGuide.includes("all six proposed tags") &&
+    coordinatedReleaseGuide.includes("Create the five annotated integration tags") &&
+    coordinatedReleaseGuide.includes("Opencode, Kilo Code, and MCP") &&
+    coordinatedReleaseGuide.includes("all six tag object targets"),
+  "The coordinated release guide must include the MCP tag in publication and public readback.",
 );
 expect(
   coordinatedReleaseGuide.includes("attach the complete\n   six-file installer artifact") &&

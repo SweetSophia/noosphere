@@ -1,4 +1,9 @@
 const MAX_RESPONSE_BODY_BYTES = 1_000_000;
+const stringifyJson = JSON.stringify;
+const createObject = Object.create;
+const setPrototypeOf = Object.setPrototypeOf;
+const isArray = Array.isArray;
+const ArrayConstructor = Array;
 export class NoosphereClientError extends Error {
     status;
     constructor(message, status) {
@@ -35,7 +40,21 @@ export class NoosphereClient {
         return this.postJson("/api/memory/save", input);
     }
     async recallMemory(input) {
-        return this.postJson("/api/memory/recall", input);
+        // Inspection mode includes conflict evidence that can exceed the bounded MCP response size.
+        // Build an allowlisted body so caller-owned serialization hooks cannot override that mode.
+        const body = createObject(null);
+        const query = input.query;
+        const resultCap = input.resultCap;
+        const tokenBudget = input.tokenBudget;
+        const scope = input.scope;
+        const providers = copyRecallProviders(input.providers);
+        body.query = query;
+        body.resultCap = resultCap;
+        body.tokenBudget = tokenBudget;
+        body.scope = scope;
+        body.providers = providers;
+        body.mode = "auto";
+        return this.postJson("/api/memory/recall", body);
     }
     async createArticle(input) {
         return this.postJson("/api/articles", input);
@@ -44,7 +63,7 @@ export class NoosphereClient {
         return this.request(`${this.config.baseUrl}${path}`, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify(body),
+            body: stringifyJson(body),
         });
     }
     async request(url, init) {
@@ -84,6 +103,24 @@ export class NoosphereClient {
             clearTimeout(timeout);
         }
     }
+}
+function copyRecallProviders(providers) {
+    if (providers === undefined)
+        return undefined;
+    if (!isArray(providers)) {
+        throw new NoosphereClientError("Recall providers must be an array of strings.");
+    }
+    const length = providers.length;
+    const copy = new ArrayConstructor(length);
+    for (let index = 0; index < length; index += 1) {
+        const provider = providers[index];
+        if (typeof provider !== "string") {
+            throw new NoosphereClientError(`Recall providers[${index}] must be a string.`);
+        }
+        copy[index] = provider;
+    }
+    setPrototypeOf(copy, null);
+    return copy;
 }
 function appendQuery(url, name, value) {
     if (value === undefined || value === "")

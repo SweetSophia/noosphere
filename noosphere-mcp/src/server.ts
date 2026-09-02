@@ -148,7 +148,7 @@ export function createNoosphereMcpServer(
     "recall_memory",
     {
       title: "Recall Noosphere memory",
-      description: "Run provider-aware Noosphere recall with optional result and token budgets.",
+      description: "Run provider-aware Noosphere recall in bounded automatic mode with optional result and token budgets.",
       inputSchema: recallMemorySchema,
       annotations: { title: "Recall Noosphere memory", ...readOnlyAnnotations },
     },

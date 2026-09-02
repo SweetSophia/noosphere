@@ -71,7 +71,7 @@ test("get_article uses the canonical memory endpoint rather than unsupported GET
   assert.deepEqual(JSON.parse(observedBody), { provider: "noosphere", id: "article-1" });
 });
 
-test("write and recall methods preserve the documented request bodies", async () => {
+test("write methods preserve inputs and recall forces bounded auto mode", async () => {
   const requests: Array<{ pathname: string; body: unknown }> = [];
   const client = new NoosphereClient(config, async (input, init) => {
     requests.push({ pathname: new URL(String(input)).pathname, body: JSON.parse(String(init?.body)) });
@@ -86,7 +86,18 @@ test("write and recall methods preserve the documented request bodies", async ()
     confidence: "high",
     restrictedTags: ["work"],
   });
-  await client.recallMemory({ query: "durable", resultCap: 4, tokenBudget: 1200, scope: "work" });
+  const recallInput = {
+    query: "durable",
+    resultCap: 4,
+    tokenBudget: 1200,
+    scope: "work",
+    providers: ["noosphere", "hindsight"],
+    mode: "inspection",
+    toJSON() {
+      return { query: this.query, mode: "inspection" };
+    },
+  };
+  await client.recallMemory(recallInput);
   await client.createArticle({
     title: "Curated",
     slug: "curated",
@@ -110,7 +121,14 @@ test("write and recall methods preserve the documented request bodies", async ()
     },
     {
       pathname: "/api/memory/recall",
-      body: { query: "durable", resultCap: 4, tokenBudget: 1200, scope: "work" },
+      body: {
+        query: "durable",
+        resultCap: 4,
+        tokenBudget: 1200,
+        scope: "work",
+        providers: ["noosphere", "hindsight"],
+        mode: "auto",
+      },
     },
     {
       pathname: "/api/articles",
@@ -124,6 +142,94 @@ test("write and recall methods preserve the documented request bodies", async ()
       },
     },
   ]);
+});
+
+test("recall rejects inherited serialization hooks on the wire body", async () => {
+  let observedBody = "";
+  const priorToJson = Object.getOwnPropertyDescriptor(Object.prototype, "toJSON");
+  const client = new NoosphereClient(config, async (_input, init) => {
+    observedBody = String(init?.body);
+    return jsonResponse({ ok: true });
+  });
+
+  try {
+    await client.recallMemory({
+      get query() {
+        Object.defineProperty(Object.prototype, "toJSON", {
+          configurable: true,
+          value: () => ({ query: "attacker", mode: "inspection" }),
+        });
+        return "durable";
+      },
+      resultCap: 4,
+      tokenBudget: 1200,
+      scope: "work",
+      providers: ["noosphere"],
+    });
+  } finally {
+    if (priorToJson) {
+      Object.defineProperty(Object.prototype, "toJSON", priorToJson);
+    } else {
+      Reflect.deleteProperty(Object.prototype, "toJSON");
+    }
+  }
+
+  assert.deepEqual(JSON.parse(observedBody), {
+    query: "durable",
+    resultCap: 4,
+    tokenBudget: 1200,
+    scope: "work",
+    providers: ["noosphere"],
+    mode: "auto",
+  });
+});
+
+test("recall snapshots providers once and copies indexed values", async () => {
+  const providers = ["noosphere"];
+  Object.defineProperty(providers, Symbol.iterator, {
+    configurable: true,
+    value: function* () {
+      yield "hindsight";
+    },
+  });
+  let providerReads = 0;
+  let observedBody = "";
+  const client = new NoosphereClient(config, async (_input, init) => {
+    observedBody = String(init?.body);
+    return jsonResponse({ ok: true });
+  });
+
+  await client.recallMemory({
+    query: "durable",
+    get providers() {
+      providerReads += 1;
+      return providerReads === 1 ? providers : undefined;
+    },
+  });
+
+  assert.equal(providerReads, 1);
+  assert.deepEqual(JSON.parse(observedBody), {
+    query: "durable",
+    providers: ["noosphere"],
+    mode: "auto",
+  });
+});
+
+test("recall provider validation identifies the invalid indexed value", async () => {
+  let fetched = false;
+  const client = new NoosphereClient(config, async () => {
+    fetched = true;
+    return jsonResponse({ ok: true });
+  });
+
+  await assert.rejects(
+    () => client.recallMemory({
+      query: "durable",
+      providers: ["noosphere", 42] as unknown as string[],
+    }),
+    /providers\[1\] must be a string/,
+  );
+  assert.equal(fetched, false);
 });
 
 test("missing credentials fail before fetch", async () => {

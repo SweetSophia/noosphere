@@ -56,10 +56,15 @@ codex
 - `search_articles` — search/filter articles or list recent accessible articles
 - `get_article` — fetch a normalized article by ID or canonical reference
 - `save_memory` — save durable knowledge as a draft memory candidate
-- `recall_memory` — run provider-aware recall with optional result/token budgets
+- `recall_memory` — run provider-aware recall in bounded automatic mode with optional result/token budgets
 - `create_article` — create an intentional curated wiki article
 
 The MCP annotations mark search/get/recall as read-only and save/create as additive writes.
+
+`recall_memory` always requests the Noosphere API's `auto` mode. It does not expose
+inspection mode because inspection conflict evidence can exceed the client's 1 MB
+response limit. Use the Noosphere HTTP API directly when that diagnostic evidence is
+required.
 
 ## Other MCP clients
 
