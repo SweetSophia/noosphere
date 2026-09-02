@@ -101,7 +101,15 @@ export class NoosphereClient {
 
   async recallMemory(input: RecallMemoryInput): Promise<NoosphereResponse> {
     // Inspection mode includes conflict evidence that can exceed the bounded MCP response size.
-    return this.postJson("/api/memory/recall", { ...input, mode: "auto" });
+    // Build an allowlisted body so caller-owned serialization hooks cannot override that mode.
+    return this.postJson("/api/memory/recall", {
+      query: input.query,
+      resultCap: input.resultCap,
+      tokenBudget: input.tokenBudget,
+      scope: input.scope,
+      providers: input.providers ? [...input.providers] : undefined,
+      mode: "auto",
+    });
   }
 
   async createArticle(input: CreateArticleInput): Promise<NoosphereResponse> {

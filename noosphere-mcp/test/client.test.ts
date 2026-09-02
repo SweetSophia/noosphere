@@ -91,7 +91,11 @@ test("write methods preserve inputs and recall forces bounded auto mode", async 
     resultCap: 4,
     tokenBudget: 1200,
     scope: "work",
+    providers: ["noosphere", "hindsight"],
     mode: "inspection",
+    toJSON() {
+      return { query: this.query, mode: "inspection" };
+    },
   };
   await client.recallMemory(recallInput);
   await client.createArticle({
@@ -122,6 +126,7 @@ test("write methods preserve inputs and recall forces bounded auto mode", async 
         resultCap: 4,
         tokenBudget: 1200,
         scope: "work",
+        providers: ["noosphere", "hindsight"],
         mode: "auto",
       },
     },
