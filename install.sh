@@ -3,8 +3,8 @@ set -euo pipefail
 trap 'printf "Installer failed near line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 RELEASE_VERSION='1.13.2'
-BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/bb19a7da7ad737715086b70705c6a0f09b34cb04/install-openclaw.sh'
-BACKEND_SHA256='ce59af00912274e2925044a903f10da95cc4d0ee0b2fb1dab821001eaf714c0e'
+BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/53d47df53515babf1c93ae42d17062f7b6fce589/install-openclaw.sh'
+BACKEND_SHA256='258bcfdf0ef30acda08e4b7b51618b441fbfe2c0177bc2ab15e9102af2afbea0'
 HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.13.2/hermes-noosphere-memory-1.13.2.tar.gz'
 HERMES_BUNDLE_SHA256='f22e00101a0744b2f3bfcb3e49107d885655456ae6c23ddc2b1eaffd04fa00b2'
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
