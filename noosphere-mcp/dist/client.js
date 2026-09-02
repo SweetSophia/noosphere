@@ -115,7 +115,7 @@ function copyRecallProviders(providers) {
     for (let index = 0; index < length; index += 1) {
         const provider = providers[index];
         if (typeof provider !== "string") {
-            throw new NoosphereClientError("Recall providers must be an array of strings.");
+            throw new NoosphereClientError(`Recall providers[${index}] must be a string.`);
         }
         copy[index] = provider;
     }

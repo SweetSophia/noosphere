@@ -215,6 +215,23 @@ test("recall snapshots providers once and copies indexed values", async () => {
   });
 });
 
+test("recall provider validation identifies the invalid indexed value", async () => {
+  let fetched = false;
+  const client = new NoosphereClient(config, async () => {
+    fetched = true;
+    return jsonResponse({ ok: true });
+  });
+
+  await assert.rejects(
+    () => client.recallMemory({
+      query: "durable",
+      providers: ["noosphere", 42] as unknown as string[],
+    }),
+    /providers\[1\] must be a string/,
+  );
+  assert.equal(fetched, false);
+});
+
 test("missing credentials fail before fetch", async () => {
   let called = false;
   const client = new NoosphereClient({ ...config, apiKey: undefined }, async () => {
