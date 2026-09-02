@@ -35,7 +35,8 @@ export class NoosphereClient {
         return this.postJson("/api/memory/save", input);
     }
     async recallMemory(input) {
-        return this.postJson("/api/memory/recall", input);
+        // Inspection mode includes conflict evidence that can exceed the bounded MCP response size.
+        return this.postJson("/api/memory/recall", { ...input, mode: "auto" });
     }
     async createArticle(input) {
         return this.postJson("/api/articles", input);

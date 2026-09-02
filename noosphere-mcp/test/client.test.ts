@@ -71,7 +71,7 @@ test("get_article uses the canonical memory endpoint rather than unsupported GET
   assert.deepEqual(JSON.parse(observedBody), { provider: "noosphere", id: "article-1" });
 });
 
-test("write and recall methods preserve the documented request bodies", async () => {
+test("write methods preserve inputs and recall forces bounded auto mode", async () => {
   const requests: Array<{ pathname: string; body: unknown }> = [];
   const client = new NoosphereClient(config, async (input, init) => {
     requests.push({ pathname: new URL(String(input)).pathname, body: JSON.parse(String(init?.body)) });
@@ -86,7 +86,14 @@ test("write and recall methods preserve the documented request bodies", async ()
     confidence: "high",
     restrictedTags: ["work"],
   });
-  await client.recallMemory({ query: "durable", resultCap: 4, tokenBudget: 1200, scope: "work" });
+  const recallInput = {
+    query: "durable",
+    resultCap: 4,
+    tokenBudget: 1200,
+    scope: "work",
+    mode: "inspection",
+  };
+  await client.recallMemory(recallInput);
   await client.createArticle({
     title: "Curated",
     slug: "curated",
@@ -110,7 +117,13 @@ test("write and recall methods preserve the documented request bodies", async ()
     },
     {
       pathname: "/api/memory/recall",
-      body: { query: "durable", resultCap: 4, tokenBudget: 1200, scope: "work" },
+      body: {
+        query: "durable",
+        resultCap: 4,
+        tokenBudget: 1200,
+        scope: "work",
+        mode: "auto",
+      },
     },
     {
       pathname: "/api/articles",

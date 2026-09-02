@@ -418,7 +418,7 @@ const dockerPrBuildStep = yamlStepBlock(dockerPrPlatformJob, "Build target platf
 const dockerPublishBuildStep = yamlStepBlock(dockerPublishPlatformJob, "Build and push target platform by digest");
 const dockerAssembleStep = yamlStepBlock(dockerPublishIndexJob, "Assemble and verify multi-platform image");
 const dockerFinalStep = yamlStepBlock(dockerFinalJob, "Require every applicable Docker gate");
-const pluginTagExclusions = ["v-openclaw-", "v-opencode-", "v-kilocode-", "v-hermes-"]
+const pluginTagExclusions = ["v-openclaw-", "v-opencode-", "v-kilocode-", "v-hermes-", "v-mcp-"]
   .map((tag) => `!startsWith(github.ref, 'refs/tags/${tag}')`)
   .join(" && ");
 const dockerValidateCondition = `if: "${pluginTagExclusions}"`;
