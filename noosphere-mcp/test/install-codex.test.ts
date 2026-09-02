@@ -396,6 +396,33 @@ test("is idempotent for the exact launcher, forwarding, and skill", async () => 
   assert.equal(codex.calls.filter((args) => args[1] === "add").length, 0);
 });
 
+test("accepts Codex stdio readback that omits optional auth_status", async () => {
+  const value = fixture();
+  const destination = join(
+    value.home,
+    ".agents",
+    "skills",
+    "noosphere-memory",
+  );
+  mkdirSync(destination, { recursive: true });
+  writeFileSync(join(destination, "SKILL.md"), readFileSync(value.source));
+  const current = server(
+    "npx",
+    ["-y", "@sweetsophia/noosphere-mcp@1.13.1"],
+    FORWARDED_ENV_VARS,
+  );
+  delete (current as { auth_status?: unknown }).auth_status;
+  const codex = fakeCodex(value.configFile, current);
+
+  const result = await installCodexIntegration(installOptions(value, codex.run));
+
+  assert.deepEqual(result, {
+    serverAction: "unchanged",
+    skillAction: "unchanged",
+  });
+  assert.equal(codex.calls.filter((args) => args[1] === "add").length, 0);
+});
+
 test("configures forwarding on an exact launcher that lacks it", async () => {
   const value = fixture();
   const codex = fakeCodex(
