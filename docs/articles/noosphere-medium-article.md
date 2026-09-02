@@ -355,14 +355,14 @@ Quick install on the machine running OpenClaw Gateway—after confirming that th
 coordinated [v1.13.2 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.2)
 exists with all six installer assets (source merge alone does not publish them):
 
-    # Installer commit: e71f46b39d27fc56842fc43bbbcb3df845953b88
-    # Expected SHA-256: aa8f28adc8aa0bed97b4a7833be65a57cacb8eff3f39d4d631dcf486e6da5bfc
+    # Installer commit: 5c84a170a5b48754791e57b7e98191df5fbed5b8
+    # Expected SHA-256: 1b98ea75fbcc15d224d4ab188d6f6958380321d98dc412816e3780937473e951
     (
       set -e
       installer="$(mktemp)"
       trap 'rm -f "$installer"' EXIT
-      curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/e71f46b39d27fc56842fc43bbbcb3df845953b88/install.sh -o "$installer"
-      printf '%s  %s\n' 'aa8f28adc8aa0bed97b4a7833be65a57cacb8eff3f39d4d631dcf486e6da5bfc' "$installer" | sha256sum -c -
+      curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5c84a170a5b48754791e57b7e98191df5fbed5b8/install.sh -o "$installer"
+      printf '%s  %s\n' '1b98ea75fbcc15d224d4ab188d6f6958380321d98dc412816e3780937473e951' "$installer" | sha256sum -c -
       NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.2}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.2}" bash "$installer" --non-interactive --with openclaw
       openclaw noosphere doctor
       openclaw noosphere status
