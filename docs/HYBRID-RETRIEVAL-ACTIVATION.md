@@ -36,9 +36,12 @@ here.
    `POSTGRES_MIGRATION_PASSWORD`, `POSTGRES_APP_PASSWORD`,
    `POSTGRES_HYBRID_ADMIN_PASSWORD`, `POSTGRES_HYBRID_WORKER_PASSWORD`) and
    `NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false`.
-4. `llama-server` listening where Docker can reach it (verified:
-   `172.17.0.1:8741`, mapped inside Compose as `host.docker.internal`).
-5. `jq`, `openssl`, `pg_dump`/`pg_restore`, Docker Compose, Node enough to run
+4. `llama-server` listening where Docker can reach it. Defaults (override with
+   `NOOSPHERE_HYBRID_EMBED_HOST` / `NOOSPHERE_HYBRID_EMBED_PORT` /
+   `NOOSPHERE_HYBRID_PROFILE_ENDPOINT`): host bind `172.17.0.1:8741`, container
+   URL `http://host.docker.internal:8741/v1/embeddings`. Bind the Docker
+   bridge, not LAN `0.0.0.0`.
+5. `jq`, `curl`, `pg_dump`/`pg_restore`, Docker Compose, Node enough to run
    the repo `npm run hybrid-*` scripts (`npm ci` if `node_modules` is absent).
 
 ## Embeddings contract
@@ -170,6 +173,12 @@ docker compose up -d --no-deps --force-recreate app
 - **Do not repair A/B/C by hand.** Repeat activation is validate-only.
 
 ## Rollback
+
+Stop the app and hybrid-worker first so they cannot write during restore:
+
+```bash
+docker compose --profile hybrid stop app hybrid-worker
+```
 
 Restore the pre-activation `pg_dump`, set
 `NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false`, recreate the app with `--no-deps`.

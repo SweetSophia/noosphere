@@ -160,16 +160,18 @@ generation before the newly eligible restricted set may serve.
 
 ### Configure and run the worker
 
-Pass the provider mapping to the installer as JSON. The installer validates it,
-base64-encodes the bytes to avoid Compose interpolation, and persists only
-`NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64` in the mode-0600 runtime `.env`. A remote
-mapping must include an API key. Local mappings may omit it, but both HTTP and
-HTTPS local endpoints must use loopback or the pinned
-`host.docker.internal:host-gateway` mapping.
+Pass the provider mapping as compact JSON, base64-encode it so Compose cannot
+interpolate `$` or `#`, and persist only `NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64`
+in the mode-0600 runtime `.env`. Do not leave
+`NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON` set at the same time (the worker
+refuses both). A remote mapping must include an API key. Local mappings may
+omit it, but both HTTP and HTTPS local endpoints must use loopback or the
+pinned `host.docker.internal:host-gateway` mapping.
 
-```dotenv
-POSTGRES_HYBRID_WORKER_PASSWORD=<worker-role-password>
-NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON='[{"profileId":"<profile-uuid>","locality":"local","endpoint":"http://host.docker.internal:8741/v1/embeddings","apiKey":""}]'
+```bash
+json='[{"profileId":"<profile-uuid>","locality":"local","endpoint":"http://host.docker.internal:8741/v1/embeddings","apiKey":""}]'
+printf '%s' "$json" | base64 -w0
+# write the result to NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 in .env
 ```
 
 The worker is behind a disabled Compose profile:
