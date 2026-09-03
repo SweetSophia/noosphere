@@ -134,7 +134,7 @@ npm run --silent hybrid:backfill -- --profile "$profile_id" --chunk 100
 7. Start the worker **without** `init`:
 
 ```bash
-docker compose --profile hybrid up -d --no-deps hybrid-worker
+docker compose --profile hybrid up -d --no-deps --force-recreate hybrid-worker
 ```
 
 8. Wait until `hybrid:profile status` coverage is at least 0.95, then
@@ -151,13 +151,13 @@ docker compose up -d --no-deps --force-recreate app
 10. Confirm keyword recall still works (`/api/health`, wiki 200).
 11. Set `NOOSPHERE_HYBRID_RETRIEVAL_ENABLED` to the exact string `true` and
     recreate the app again.
-12. Prove hybrid: `POST /api/recall` returns results and the app logs contain
+12. Prove hybrid: `POST /api/memory/recall` returns results and the app logs contain
     **zero** `[hybrid-retrieval] lexical fallback` lines for that request.
 
 ## Pitfalls (verified)
 
 - **No GUI.** The app role has no hybrid-schema access.
-- **`--no-deps` on worker and app recreate.** Omitting it can re-run `init`.
+- **`--no-deps --force-recreate` on worker and app recreate.** Omitting `--no-deps` can re-run `init`. Omitting `--force-recreate` can leave a running worker on a stale empty provider mapping.
 - **llama.cpp default ubatch 512 / ctx 2048.** Long articles get HTTP 400,
   which the worker treats as terminal. Set `-c 8192 -b 8192 -ub 8192` and YaRN
   (`--rope-scaling yarn --yarn-orig-ctx 2048 --rope-scale 4`).

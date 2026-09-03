@@ -32,7 +32,7 @@ Commands:
   snapshot      pg_dump -Fc and mode-0600 .env backup
   activate-sql  Phase A then B then C (existing activators)
   profile       Create/prepare/backfill local llama.cpp profile
-  worker        docker compose --profile hybrid up -d --no-deps hybrid-worker
+  worker        docker compose --profile hybrid up -d --no-deps --force-recreate hybrid-worker
   enable-flag   HMAC + two app recreates (false, then true)
   all           snapshot → activate-sql → profile → worker → enable-flag
 
@@ -95,7 +95,45 @@ is_loopback_host() {
   esac
 }
 
+validate_profile_endpoint() {
+  need python3
+  python3 - "$PROFILE_ENDPOINT" "$EMBED_PORT" <<'PY'
+import sys
+from urllib.parse import urlparse
+
+raw, expected_port = sys.argv[1], sys.argv[2]
+parsed = urlparse(raw)
+host = (parsed.hostname or "").lower()
+allowed = {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
+if (
+    parsed.scheme not in {"http", "https"}
+    or host not in allowed
+    or parsed.username
+    or parsed.password
+    or parsed.query
+    or parsed.fragment
+    or parsed.path.rstrip("/") != "/v1/embeddings"
+):
+    print(
+        "profile_endpoint_rejected: local providers require http(s)://"
+        "{127.0.0.1|localhost|::1|host.docker.internal}/v1/embeddings "
+        "(not the docker0 probe address 172.17.0.1)",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+port = parsed.port or (443 if parsed.scheme == "https" else 80)
+if str(port) != str(expected_port):
+    print(
+        f"profile_endpoint_port_mismatch endpoint_port={port} embed_port={expected_port}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+print(f"profile_endpoint_ok host={host} port={port}")
+PY
+}
+
 export_role_urls() {
+  need python3
   load_env_file
   resolve_settings
   [[ -n "${POSTGRES_PASSWORD:-}" ]] || die "POSTGRES_PASSWORD is unset"
@@ -104,11 +142,24 @@ export_role_urls() {
   [[ -n "${POSTGRES_HYBRID_ADMIN_PASSWORD:-}" ]] || die "POSTGRES_HYBRID_ADMIN_PASSWORD is unset"
   [[ -n "${POSTGRES_HYBRID_WORKER_PASSWORD:-}" ]] || die "POSTGRES_HYBRID_WORKER_PASSWORD is unset"
   if is_loopback_host "$DB_HOST"; then
-    export NOOSPHERE_BOOTSTRAP_DATABASE_URL="postgresql://noosphere:${POSTGRES_PASSWORD}@${DB_HOST}:${DB_PORT}/noosphere"
-    export DATABASE_URL="postgresql://noosphere_migrator:${POSTGRES_MIGRATION_PASSWORD}@${DB_HOST}:${DB_PORT}/noosphere"
-    export NOOSPHERE_APP_DATABASE_URL="postgresql://noosphere_app:${POSTGRES_APP_PASSWORD}@${DB_HOST}:${DB_PORT}/noosphere"
-    export NOOSPHERE_HYBRID_ADMIN_DATABASE_URL="postgresql://noosphere_hybrid_admin_login:${POSTGRES_HYBRID_ADMIN_PASSWORD}@${DB_HOST}:${DB_PORT}/noosphere"
-    export NOOSPHERE_HYBRID_WORKER_DATABASE_URL="postgresql://noosphere_hybrid_worker_login:${POSTGRES_HYBRID_WORKER_PASSWORD}@${DB_HOST}:${DB_PORT}/noosphere"
+    eval "$(python3 - "$DB_HOST" "$DB_PORT" <<'PY'
+import os, sys, urllib.parse
+
+host, port = sys.argv[1], sys.argv[2]
+
+def enc(name: str) -> str:
+    return urllib.parse.quote(os.environ[name], safe="")
+
+def line(var: str, user: str, pw_env: str) -> str:
+    return f"export {var}='postgresql://{user}:{enc(pw_env)}@{host}:{port}/noosphere'"
+
+print(line("NOOSPHERE_BOOTSTRAP_DATABASE_URL", "noosphere", "POSTGRES_PASSWORD"))
+print(line("DATABASE_URL", "noosphere_migrator", "POSTGRES_MIGRATION_PASSWORD"))
+print(line("NOOSPHERE_APP_DATABASE_URL", "noosphere_app", "POSTGRES_APP_PASSWORD"))
+print(line("NOOSPHERE_HYBRID_ADMIN_DATABASE_URL", "noosphere_hybrid_admin_login", "POSTGRES_HYBRID_ADMIN_PASSWORD"))
+print(line("NOOSPHERE_HYBRID_WORKER_DATABASE_URL", "noosphere_hybrid_worker_login", "POSTGRES_HYBRID_WORKER_PASSWORD"))
+PY
+)"
   else
     [[ -n "${NOOSPHERE_BOOTSTRAP_DATABASE_URL:-}" && -n "${DATABASE_URL:-}" && -n "${NOOSPHERE_APP_DATABASE_URL:-}" && -n "${NOOSPHERE_HYBRID_ADMIN_DATABASE_URL:-}" && -n "${NOOSPHERE_HYBRID_WORKER_DATABASE_URL:-}" ]] ||
       die "nonlocal DB_HOST=${DB_HOST}: set the five *DATABASE_URL values (include sslmode) instead of constructing cleartext URLs"
@@ -118,11 +169,11 @@ export_role_urls() {
 
 atomic_env_update() {
   need python3
-  python3 - "$repo_root/.env" "$@" <<'PY'
+  python3 /dev/fd/3 "$repo_root/.env" 3<<'PY'
 import json, os, pathlib, re, sys, tempfile
 
 env_path = pathlib.Path(sys.argv[1])
-payload = json.loads(sys.argv[2])
+payload = json.loads(sys.stdin.read())
 updates = payload.get("set") or {}
 deletes = payload.get("delete") or []
 text = env_path.read_text()
@@ -195,7 +246,7 @@ check_marker() {
 wait_for_app_health() {
   need curl
   local i
-  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+  for i in $(seq 1 45); do
     if curl -fsS -m 3 "$APP_HEALTH_URL" >/dev/null 2>&1; then
       printf '[hybrid-stack] app health ok\n'
       return 0
@@ -203,6 +254,24 @@ wait_for_app_health() {
     sleep 2
   done
   die "app did not become healthy at $APP_HEALTH_URL"
+}
+
+wait_for_worker_health() {
+  local id status i
+  id=$(docker compose --profile hybrid ps -q hybrid-worker)
+  [[ -n "$id" ]] || die "hybrid-worker container not found"
+  for i in $(seq 1 45); do
+    status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$id")
+    if [[ "$status" == "healthy" ]]; then
+      printf '[hybrid-stack] worker health ok\n'
+      return 0
+    fi
+    if [[ "$status" == "exited" || "$status" == "dead" ]]; then
+      die "hybrid-worker $status"
+    fi
+    sleep 2
+  done
+  die "hybrid-worker did not become healthy"
 }
 
 cmd_dry_run() {
@@ -221,11 +290,12 @@ cmd_dry_run() {
     printf '[hybrid-stack] %s present len=%s\n' "$key" "${#val}"
   done
   check_embeddings
+  validate_profile_endpoint
   printf '[hybrid-stack] dry-run plan (llama.cpp local provider; never Ollama):\n'
   printf '  1. snapshot pg_dump + .env\n'
   printf '  2. npm run hybrid-storage:activate && hybrid-worker:activate && hybrid-retrieval:activate\n'
   printf '  3. profile create --endpoint %s --model %s --dimensions %s\n' "$PROFILE_ENDPOINT" "$EMBED_MODEL" "$EMBED_DIMS"
-  printf '  4. docker compose --profile hybrid up -d --no-deps hybrid-worker\n'
+  printf '  4. docker compose --profile hybrid up -d --no-deps --force-recreate hybrid-worker\n'
   printf '  5. serve at coverage >= 0.95, then two app recreates (flag false then true)\n'
   printf '[hybrid-stack] mutate with --execute <snapshot|activate-sql|profile|worker|enable-flag|all>\n'
 }
@@ -245,9 +315,12 @@ cmd_snapshot() {
   chmod 600 "$dest/.env.bak"
   docker exec "$COMPOSE_DB_CONTAINER" pg_dump -U noosphere -d noosphere -Fc >"$dest/pre-hybrid-A.dump"
   chmod 600 "$dest/pre-hybrid-A.dump"
+  dump_bytes=$(wc -c <"$dest/pre-hybrid-A.dump")
+  [[ "$dump_bytes" -gt 0 ]] || die "snapshot dump is empty"
   toc=$(pg_restore -l "$dest/pre-hybrid-A.dump" | grep -c -v '^;' || true)
+  [[ "$toc" -gt 0 ]] || die "snapshot dump TOC is empty"
   printf '[hybrid-stack] snapshot dir=%s dump_bytes=%s toc_nonzero=%s\n' \
-    "$dest" "$(wc -c <"$dest/pre-hybrid-A.dump")" "$toc"
+    "$dest" "$dump_bytes" "$toc"
   mkdir -p "$STATE_DIR"
   chmod 700 "$STATE_DIR"
   printf '%s\n' "$dest" >"${STATE_DIR}/backup-dir"
@@ -266,13 +339,14 @@ cmd_activate_sql() {
 cmd_profile() {
   require_execute
   need jq
-  need npm
+  need node
   need python3
   load_env_file
   resolve_settings
   check_embeddings
+  validate_profile_endpoint
   export_role_urls
-  profile_json=$(npm run --silent hybrid:profile -- create \
+  profile_json=$(node scripts/hybrid-profile.mjs create \
     --locality local \
     --endpoint "$PROFILE_ENDPOINT" \
     --model "$EMBED_MODEL" \
@@ -284,57 +358,61 @@ cmd_profile() {
   printf '%s\n' "$profile_id" >"$PROFILE_ID_FILE"
   chmod 600 "$PROFILE_ID_FILE"
   printf '[hybrid-stack] profile_id=%s\n' "$profile_id"
-  b64=$(python3 - "$profile_id" "$PROFILE_ENDPOINT" <<'PY'
-import base64, json, sys
+  python3 - "$profile_id" "$PROFILE_ENDPOINT" <<'PY' | atomic_env_update
+import json, sys, base64
 cfg = [{"profileId": sys.argv[1], "locality": "local", "endpoint": sys.argv[2], "apiKey": ""}]
-print(base64.b64encode(json.dumps(cfg, separators=(",", ":")).encode()).decode())
+b64 = base64.b64encode(json.dumps(cfg, separators=(",", ":")).encode()).decode()
+print(json.dumps({"set": {"NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64": b64}, "delete": ["NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON"]}))
 PY
-)
-  payload=$(python3 -c 'import json,sys; print(json.dumps({"set":{"NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64":sys.argv[1]},"delete":["NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON"]}))' "$b64")
-  atomic_env_update "$payload"
-  unset b64 payload
-  npm run --silent hybrid:profile -- prepare --profile "$profile_id"
-  npm run --silent hybrid:backfill -- --profile "$profile_id" --chunk 100
+  node scripts/hybrid-profile.mjs prepare --profile "$profile_id"
+  node scripts/hybrid-backfill.mjs --profile "$profile_id" --chunk 100
 }
 
 cmd_worker() {
   require_execute
+  need docker
   load_env_file
   resolve_settings
   check_embeddings
-  docker compose --profile hybrid up -d --no-deps hybrid-worker
-  printf '[hybrid-stack] worker started with --no-deps (init not invoked)\n'
+  validate_profile_endpoint
+  docker compose --profile hybrid up -d --no-deps --force-recreate hybrid-worker
+  printf '[hybrid-stack] worker started with --no-deps --force-recreate (init not invoked)\n'
+  wait_for_worker_health
 }
 
 cmd_enable_flag() {
   require_execute
-  need npm
+  need node
   need python3
   need curl
+  need docker
   export_role_urls
   profile_id=${NOOSPHERE_HYBRID_QUERY_PROFILE_ID:-}
   if [[ -z "$profile_id" && -f "$PROFILE_ID_FILE" ]]; then
     profile_id=$(cat "$PROFILE_ID_FILE")
   fi
   [[ -n "$profile_id" ]] || die "NOOSPHERE_HYBRID_QUERY_PROFILE_ID is unset (run profile first)"
-  [[ "$profile_id" =~ ^[0-9a-fA-F-]{36}$ ]] || die "profile id is not a UUID"
-  status_json=$(npm run --silent hybrid:profile -- status --profile "$profile_id")
-  python3 -c "import json,sys; d=json.loads(sys.argv[1]); c=float(d['coverage']);
-print('coverage', c, 'state', d['profile_state']);
-sys.exit(0 if c>=0.95 else 1)" "$status_json" || die "coverage below 0.95; refuse to enable"
-  npm run --silent hybrid:profile -- serve --profile "$profile_id"
-  hmac_b64=$(python3 - <<'PY'
-import base64, json, secrets
+  [[ "$profile_id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]] || die "profile id is not a UUID"
+  status_json=$(node scripts/hybrid-profile.mjs status --profile "$profile_id")
+  python3 -c "import json,sys; d=json.loads(sys.argv[1]); c=float(d['coverage']); completed=bool(d.get('backfill_completed'));
+print('coverage', c, 'state', d['profile_state'], 'backfill_completed', completed);
+sys.exit(0 if c>=0.95 and completed else 1)" "$status_json" || die "coverage below 0.95 or backfill incomplete; refuse to enable"
+  node scripts/hybrid-profile.mjs serve --profile "$profile_id"
+  python3 - "$profile_id" <<'PY' | atomic_env_update
+import base64, json, secrets, sys
 key = base64.b64encode(secrets.token_bytes(32)).decode("ascii")
-print(base64.b64encode(json.dumps({"v1": key}, separators=(",", ":")).encode("ascii")).decode("ascii"))
+hmac_b64 = base64.b64encode(json.dumps({"v1": key}, separators=(",", ":")).encode("ascii")).decode("ascii")
+print(json.dumps({"set": {
+    "NOOSPHERE_HYBRID_QUERY_PROFILE_ID": sys.argv[1],
+    "NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION": "v1",
+    "NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64": hmac_b64,
+    "NOOSPHERE_HYBRID_RETRIEVAL_ENABLED": "false",
+}}))
 PY
-)
-  atomic_env_update "$(python3 -c 'import json,sys; print(json.dumps({"set":{"NOOSPHERE_HYBRID_QUERY_PROFILE_ID":sys.argv[1],"NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION":"v1","NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64":sys.argv[2],"NOOSPHERE_HYBRID_RETRIEVAL_ENABLED":"false"}}))' "$profile_id" "$hmac_b64")"
-  unset hmac_b64
   docker compose up -d --no-deps --force-recreate app
   printf '[hybrid-stack] app recreated with flag=false (keyword path)\n'
   wait_for_app_health
-  atomic_env_update '{"set":{"NOOSPHERE_HYBRID_RETRIEVAL_ENABLED":"true"}}'
+  printf '%s\n' '{"set":{"NOOSPHERE_HYBRID_RETRIEVAL_ENABLED":"true"}}' | atomic_env_update
   docker compose up -d --no-deps --force-recreate app
   printf '[hybrid-stack] app recreated with flag=true\n'
   wait_for_app_health
@@ -353,6 +431,7 @@ case "$COMMAND" in
     resolve_settings
     cmd_snapshot
     check_embeddings
+    validate_profile_endpoint
     cmd_activate_sql
     cmd_profile
     cmd_worker

@@ -170,14 +170,14 @@ pinned `host.docker.internal:host-gateway` mapping.
 
 ```bash
 json='[{"profileId":"<profile-uuid>","locality":"local","endpoint":"http://host.docker.internal:8741/v1/embeddings","apiKey":""}]'
-printf '%s' "$json" | base64 -w0
+printf '%s' "$json" | base64 | tr -d '\n'
 # write the result to NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 in .env
 ```
 
 The worker is behind a disabled Compose profile:
 
 ```bash
-docker compose --profile hybrid up -d --no-deps hybrid-worker
+docker compose --profile hybrid up -d --no-deps --force-recreate hybrid-worker
 npm run --silent hybrid:profile -- status --profile "$profile_id"
 npm run --silent hybrid:profile -- serve --profile "$profile_id"
 ```
@@ -254,7 +254,7 @@ without printing the key into shell history:
 keyring_b64="$({
   key=$(openssl rand -base64 32)
   printf '{"v1":"%s"}' "$key"
-} | base64 -w0)"
+} | base64 | tr -d '\n')"
 unset key
 
 export NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false
