@@ -4,6 +4,8 @@ Phase A3 installs the storage boundary for future hybrid retrieval. The optional
 Phase B layer adds a provider worker, consent, backfill, and lifecycle controls.
 The optional Phase C layer adds exact hybrid recall. All three activations are
 explicit, and the application feature flag remains exactly `false` by default.
+Operator how-to, including the llama.cpp local embeddings server (do not use
+Ollama): [`docs/HYBRID-RETRIEVAL-ACTIVATION.md`](../../docs/HYBRID-RETRIEVAL-ACTIVATION.md).
 
 ## What activation installs
 
@@ -132,7 +134,7 @@ export NOOSPHERE_HYBRID_ADMIN_DATABASE_URL='postgresql://noosphere_hybrid_admin_
 
 profile_json=$(npm run --silent hybrid:profile -- create \
   --locality local \
-  --endpoint http://host.docker.internal:11434/v1/embeddings \
+  --endpoint http://host.docker.internal:8741/v1/embeddings \
   --model nomic-embed-text \
   --revision operator-pinned-revision \
   --dimensions 768)
@@ -158,22 +160,24 @@ generation before the newly eligible restricted set may serve.
 
 ### Configure and run the worker
 
-Pass the provider mapping to the installer as JSON. The installer validates it,
-base64-encodes the bytes to avoid Compose interpolation, and persists only
-`NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64` in the mode-0600 runtime `.env`. A remote
-mapping must include an API key. Local mappings may omit it, but both HTTP and
-HTTPS local endpoints must use loopback or the pinned
-`host.docker.internal:host-gateway` mapping.
+Pass the provider mapping as compact JSON, base64-encode it so Compose cannot
+interpolate `$` or `#`, and persist only `NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64`
+in the mode-0600 runtime `.env`. Do not leave
+`NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON` set at the same time (the worker
+refuses both). A remote mapping must include an API key. Local mappings may
+omit it, but both HTTP and HTTPS local endpoints must use loopback or the
+pinned `host.docker.internal:host-gateway` mapping.
 
-```dotenv
-POSTGRES_HYBRID_WORKER_PASSWORD=<worker-role-password>
-NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON='[{"profileId":"<profile-uuid>","locality":"local","endpoint":"http://host.docker.internal:11434/v1/embeddings","apiKey":""}]' ./install-openclaw.sh
+```bash
+json='[{"profileId":"<profile-uuid>","locality":"local","endpoint":"http://host.docker.internal:8741/v1/embeddings","apiKey":""}]'
+printf '%s' "$json" | base64 | tr -d '\n'
+# write the result to NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 in .env
 ```
 
 The worker is behind a disabled Compose profile:
 
 ```bash
-docker compose --profile hybrid up -d hybrid-worker
+docker compose --profile hybrid up -d --no-deps --force-recreate hybrid-worker
 npm run --silent hybrid:profile -- status --profile "$profile_id"
 npm run --silent hybrid:profile -- serve --profile "$profile_id"
 ```
@@ -250,7 +254,7 @@ without printing the key into shell history:
 keyring_b64="$({
   key=$(openssl rand -base64 32)
   printf '{"v1":"%s"}' "$key"
-} | base64 -w0)"
+} | base64 | tr -d '\n')"
 unset key
 
 export NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false

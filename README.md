@@ -84,7 +84,10 @@ an image transition only through its offline, restore-tested controller. See
 [PostgreSQL pgvector Compose upgrade](docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md)
 for the full stateful recovery contract.
 
-Optional pgvector hybrid storage remains a separate activation step. See
+Optional pgvector hybrid storage remains a separate activation step. Operator
+how-to (llama.cpp local embeddings, no wiki toggle):
+[docs/HYBRID-RETRIEVAL-ACTIVATION.md](docs/HYBRID-RETRIEVAL-ACTIVATION.md).
+SQL/privilege contract:
 [docker/hybrid-storage/README.md](docker/hybrid-storage/README.md).
 
 ## Choose an Integration
