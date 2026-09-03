@@ -225,5 +225,7 @@ For a source checkout, use `noosphere.env.example`, `docker-compose.yml`, and th
 new-volume or existing-volume procedure above. The local-development commands
 remain in the repository [README](../README.md#local-development).
 
-Optional pgvector hybrid storage remains a separate activation step. See
-[docker/hybrid-storage/README.md](../docker/hybrid-storage/README.md).
+Optional pgvector hybrid storage remains a separate activation step. Operator
+how-to (llama.cpp local embeddings):
+[HYBRID-RETRIEVAL-ACTIVATION.md](HYBRID-RETRIEVAL-ACTIVATION.md). SQL/privilege
+contract: [docker/hybrid-storage/README.md](../docker/hybrid-storage/README.md).

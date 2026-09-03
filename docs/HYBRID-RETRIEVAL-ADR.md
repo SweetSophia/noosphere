@@ -255,6 +255,8 @@ Profiles default to `inactive`. Administrative transitions to `preparing` and
 dynamic consent, complete-backfill, coverage, and readiness gates. The Phase A3
 operator and verification contract is
 [`docker/hybrid-storage/README.md`](../docker/hybrid-storage/README.md).
+The operator how-to (llama.cpp local embeddings, no wiki toggle) is
+[`HYBRID-RETRIEVAL-ACTIVATION.md`](HYBRID-RETRIEVAL-ACTIVATION.md).
 
 ### Phase B implementation decision
 

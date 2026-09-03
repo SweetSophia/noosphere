@@ -32,7 +32,7 @@ const job = {
 
 test("endpoint identity excludes no mutable or credential-bearing URL components", () => {
   assert.equal(canonicalEndpointIdentity("https://EXAMPLE.com/v1/embeddings/", "remote"), "https://example.com/v1/embeddings");
-  assert.equal(canonicalEndpointIdentity("http://host.docker.internal:11434/v1/embeddings", "local"), "http://host.docker.internal:11434/v1/embeddings");
+  assert.equal(canonicalEndpointIdentity("http://host.docker.internal:8741/v1/embeddings", "local"), "http://host.docker.internal:8741/v1/embeddings");
   assert.equal(canonicalEndpointIdentity("https://localhost/v1/embeddings", "local"), "https://localhost/v1/embeddings");
   assert.equal(canonicalEndpointIdentity("http://[::1]:8080/v1/embeddings", "local"), "http://[::1]:8080/v1/embeddings");
   assert.throws(() => canonicalEndpointIdentity("https://example.com/v1/embeddings?key=secret", "remote"), /query parameters/);

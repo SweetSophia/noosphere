@@ -4,6 +4,8 @@ Phase A3 installs the storage boundary for future hybrid retrieval. The optional
 Phase B layer adds a provider worker, consent, backfill, and lifecycle controls.
 The optional Phase C layer adds exact hybrid recall. All three activations are
 explicit, and the application feature flag remains exactly `false` by default.
+Operator how-to, including the llama.cpp local embeddings server (do not use
+Ollama): [`docs/HYBRID-RETRIEVAL-ACTIVATION.md`](../../docs/HYBRID-RETRIEVAL-ACTIVATION.md).
 
 ## What activation installs
 
@@ -132,7 +134,7 @@ export NOOSPHERE_HYBRID_ADMIN_DATABASE_URL='postgresql://noosphere_hybrid_admin_
 
 profile_json=$(npm run --silent hybrid:profile -- create \
   --locality local \
-  --endpoint http://host.docker.internal:11434/v1/embeddings \
+  --endpoint http://host.docker.internal:8741/v1/embeddings \
   --model nomic-embed-text \
   --revision operator-pinned-revision \
   --dimensions 768)
@@ -167,13 +169,13 @@ HTTPS local endpoints must use loopback or the pinned
 
 ```dotenv
 POSTGRES_HYBRID_WORKER_PASSWORD=<worker-role-password>
-NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON='[{"profileId":"<profile-uuid>","locality":"local","endpoint":"http://host.docker.internal:11434/v1/embeddings","apiKey":""}]' ./install-openclaw.sh
+NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON='[{"profileId":"<profile-uuid>","locality":"local","endpoint":"http://host.docker.internal:8741/v1/embeddings","apiKey":""}]'
 ```
 
 The worker is behind a disabled Compose profile:
 
 ```bash
-docker compose --profile hybrid up -d hybrid-worker
+docker compose --profile hybrid up -d --no-deps hybrid-worker
 npm run --silent hybrid:profile -- status --profile "$profile_id"
 npm run --silent hybrid:profile -- serve --profile "$profile_id"
 ```
