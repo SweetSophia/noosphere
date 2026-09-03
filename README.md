@@ -1,4 +1,5 @@
 # Noosphere
+**Now with OpenAI Codex Support as well as optional vector retrieval and auto-capture**
 
 Noosphere is a self-hosted knowledge and memory layer for AI agents and humans.  
 Agents use it to recall, save, and organize durable and detailed project knowledge; humans use
