@@ -53,7 +53,8 @@ print("endpoint_allowlist_ok")
 PY
 
 tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
+sbx=$(mktemp -d)
+trap 'rm -rf "$tmp" "$sbx"' EXIT
 printf 'FOO=old\nFOO=stale-tail\nNOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON=stale\n' >"$tmp"
 printf '%s\n' '{"set":{"FOO":"new","NOOSPHERE_HYBRID_RETRIEVAL_ENABLED":"false"},"delete":["NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON"]}' | python3 /dev/fd/3 "$tmp" 3<<'PY'
 import json, os, pathlib, re, sys, tempfile
@@ -91,5 +92,16 @@ grep -qx 'NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false' "$tmp" || fail "atomic appen
 if grep -q 'NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON' "$tmp"; then
   fail "atomic delete left JSON"
 fi
+
+# DB_PORT guard: decimal 1-65535 before eval in export_role_urls (sandboxed repo copy)
+mkdir -p "$sbx/scripts"
+cp "$script" "$sbx/scripts/activate-hybrid-retrieval-stack.sh"
+printf 'POSTGRES_PASSWORD=x\nPOSTGRES_MIGRATION_PASSWORD=x\nPOSTGRES_APP_PASSWORD=x\nPOSTGRES_HYBRID_ADMIN_PASSWORD=x\nPOSTGRES_HYBRID_WORKER_PASSWORD=x\n' >"$sbx/.env"
+env NOOSPHERE_HYBRID_DB_HOST=127.0.0.1 NOOSPHERE_HYBRID_DB_PORT="8';touch /tmp/pwn" HOME="$sbx" \
+  bash "$sbx/scripts/activate-hybrid-retrieval-stack.sh" --execute activate-sql >"$sbx/out" 2>&1 &&
+  fail "activate-sql should die at port guard" || true
+grep -q "decimal port 1-65535" "$sbx/out" || fail "port guard did not fire: $(cat "$sbx/out")"
+grep -q "hybrid-storage:activate" "$sbx/out" && fail "port guard must fire before npm" || true
+[[ ! -e /tmp/pwn ]] || { rm -f /tmp/pwn; fail "port injection executed"; }
 
 printf 'activate-hybrid-retrieval-stack.test.sh ok\n'

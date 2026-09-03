@@ -82,7 +82,7 @@ resolve_settings() {
   EMBED_PORT=${NOOSPHERE_HYBRID_EMBED_PORT:-8741}
   EMBED_MODEL=${NOOSPHERE_HYBRID_EMBED_MODEL:-nomic-embed-text}
   EMBED_DIMS=${NOOSPHERE_HYBRID_EMBED_DIMS:-768}
-  PROFILE_ENDPOINT=${NOOSPHERE_HYBRID_PROFILE_ENDPOINT:-http://host.docker.internal:8741/v1/embeddings}
+  PROFILE_ENDPOINT=${NOOSPHERE_HYBRID_PROFILE_ENDPOINT:-http://host.docker.internal:${EMBED_PORT}/v1/embeddings}
   PROFILE_REVISION=${NOOSPHERE_HYBRID_PROFILE_REVISION:-Q8_0-b10783}
   COMPOSE_DB_CONTAINER=${NOOSPHERE_DB_CONTAINER:-noosphere-db}
   APP_HEALTH_URL=${NOOSPHERE_HYBRID_APP_HEALTH_URL:-http://127.0.0.1:6578/api/health}
@@ -136,6 +136,8 @@ export_role_urls() {
   need python3
   load_env_file
   resolve_settings
+  [[ "$DB_PORT" =~ ^[0-9]+$ ]] && (( 1 <= DB_PORT && DB_PORT <= 65535 )) ||
+    die "NOOSPHERE_HYBRID_DB_PORT must be a decimal port 1-65535 (got: $DB_PORT)"
   [[ -n "${POSTGRES_PASSWORD:-}" ]] || die "POSTGRES_PASSWORD is unset"
   [[ -n "${POSTGRES_MIGRATION_PASSWORD:-}" ]] || die "POSTGRES_MIGRATION_PASSWORD is unset"
   [[ -n "${POSTGRES_APP_PASSWORD:-}" ]] || die "POSTGRES_APP_PASSWORD is unset"
@@ -263,10 +265,13 @@ wait_for_worker_health() {
   id=$(docker compose --profile hybrid ps -q hybrid-worker)
   [[ -n "$id" ]] || die "hybrid-worker container not found"
   for i in $(seq 1 45); do
-    status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$id")
+    status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$id")
     if [[ "$status" == "healthy" ]]; then
       printf '[hybrid-stack] worker health ok\n'
       return 0
+    fi
+    if [[ "$status" == "none" ]]; then
+      die "hybrid-worker has no healthcheck; cannot verify liveness (compose file must keep the hybrid-worker healthcheck)"
     fi
     if [[ "$status" == "exited" || "$status" == "dead" ]]; then
       die "hybrid-worker $status"
@@ -412,17 +417,22 @@ print(json.dumps({"set": {
     "NOOSPHERE_HYBRID_RETRIEVAL_ENABLED": "false",
 }}))
 PY
+  # Note: re-running cmd_enable_flag rotates the v1 HMAC key (minted in the setup block above);
+  # this flag flip does not itself rotate the key. Re-enabling after a rollback mints a fresh key
+  # (embedding cache misses once), it is not add-then-retire rotation.
   docker compose up -d --no-deps --force-recreate app
   printf '[hybrid-stack] app recreated with flag=false (keyword path)\n'
   wait_for_app_health || die "app did not become healthy at $APP_HEALTH_URL (flag still false)"
-  # Re-running enable-flag mints a new v1 HMAC key (cache misses). It is not add-then-retire rotation.
   printf '%s\n' '{"set":{"NOOSPHERE_HYBRID_RETRIEVAL_ENABLED":"true"}}' | atomic_env_update
   docker compose up -d --no-deps --force-recreate app
   printf '[hybrid-stack] app recreated with flag=true\n'
   if ! wait_for_app_health; then
     printf '%s\n' '{"set":{"NOOSPHERE_HYBRID_RETRIEVAL_ENABLED":"false"}}' | atomic_env_update
-    docker compose up -d --no-deps --force-recreate app || true
-    die "app unhealthy after flag=true; restored NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false. See docs/HYBRID-RETRIEVAL-ACTIVATION.md Rollback"
+    if ! docker compose up -d --no-deps --force-recreate app; then
+      die "app unhealthy after flag=true AND rollback recreate failed; NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false is persisted in .env but the app may still run flag=true. Follow docs/HYBRID-RETRIEVAL-ACTIVATION.md Rollback."
+    fi
+    wait_for_app_health || die "app unhealthy after flag=true; flag=false app recreated but still unhealthy. Follow docs/HYBRID-RETRIEVAL-ACTIVATION.md Rollback."
+    die "app was unhealthy after flag=true; restored flag=false, recreated, and verified healthy (keyword path active)."
   fi
 }
 
