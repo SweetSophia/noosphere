@@ -180,13 +180,10 @@ text = env_path.read_text()
 for key in deletes:
     text = re.sub(rf"^{re.escape(key)}=.*\n?", "", text, flags=re.M)
 for key, value in updates.items():
-    line = f"{key}={value}"
-    if re.search(rf"^{re.escape(key)}=", text, re.M):
-        text = re.sub(rf"^{re.escape(key)}=.*$", line, text, count=1, flags=re.M)
-    else:
-        if not text.endswith("\n"):
-            text += "\n"
-        text += line + "\n"
+    text = re.sub(rf"^{re.escape(key)}=.*\n?", "", text, flags=re.M)
+    if not text.endswith("\n"):
+        text += "\n"
+    text += f"{key}={value}\n"
 fd, tmp_name = tempfile.mkstemp(prefix=".env.", dir=str(env_path.parent))
 try:
     with os.fdopen(fd, "w") as handle:
@@ -217,12 +214,16 @@ req = urllib.request.Request(url, data=body, headers={"content-type": "applicati
 try:
     with urllib.request.urlopen(req, timeout=20) as resp:
         ctype = (resp.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
-        payload = json.loads(resp.read())
+        raw = resp.read(1_000_000)
+        payload = json.loads(raw)
 except urllib.error.HTTPError as exc:
     print(f"embeddings_http_{exc.code}", file=sys.stderr)
     sys.exit(1)
 except urllib.error.URLError as exc:
     print(f"embeddings_unreachable {exc}", file=sys.stderr)
+    sys.exit(1)
+except (json.JSONDecodeError, ValueError, OSError) as exc:
+    print(f"embeddings_invalid_body {exc}", file=sys.stderr)
     sys.exit(1)
 emb = payload.get("data", [{}])[0].get("embedding") if isinstance(payload.get("data"), list) else None
 ok_type = ctype == "application/json"
@@ -253,7 +254,8 @@ wait_for_app_health() {
     fi
     sleep 2
   done
-  die "app did not become healthy at $APP_HEALTH_URL"
+  printf '[hybrid-stack] app did not become healthy at %s\n' "$APP_HEALTH_URL" >&2
+  return 1
 }
 
 wait_for_worker_health() {
@@ -317,7 +319,8 @@ cmd_snapshot() {
   chmod 600 "$dest/pre-hybrid-A.dump"
   dump_bytes=$(wc -c <"$dest/pre-hybrid-A.dump")
   [[ "$dump_bytes" -gt 0 ]] || die "snapshot dump is empty"
-  toc=$(pg_restore -l "$dest/pre-hybrid-A.dump" | grep -c -v '^;' || true)
+  toc_list=$(pg_restore -l "$dest/pre-hybrid-A.dump") || die "pg_restore -l failed (dump unreadable)"
+  toc=$(printf '%s\n' "$toc_list" | grep -c -v '^;' || true)
   [[ "$toc" -gt 0 ]] || die "snapshot dump TOC is empty"
   printf '[hybrid-stack] snapshot dir=%s dump_bytes=%s toc_nonzero=%s\n' \
     "$dest" "$dump_bytes" "$toc"
@@ -411,11 +414,16 @@ print(json.dumps({"set": {
 PY
   docker compose up -d --no-deps --force-recreate app
   printf '[hybrid-stack] app recreated with flag=false (keyword path)\n'
-  wait_for_app_health
+  wait_for_app_health || die "app did not become healthy at $APP_HEALTH_URL (flag still false)"
+  # Re-running enable-flag mints a new v1 HMAC key (cache misses). It is not add-then-retire rotation.
   printf '%s\n' '{"set":{"NOOSPHERE_HYBRID_RETRIEVAL_ENABLED":"true"}}' | atomic_env_update
   docker compose up -d --no-deps --force-recreate app
   printf '[hybrid-stack] app recreated with flag=true\n'
-  wait_for_app_health
+  if ! wait_for_app_health; then
+    printf '%s\n' '{"set":{"NOOSPHERE_HYBRID_RETRIEVAL_ENABLED":"false"}}' | atomic_env_update
+    docker compose up -d --no-deps --force-recreate app || true
+    die "app unhealthy after flag=true; restored NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false. See docs/HYBRID-RETRIEVAL-ACTIVATION.md Rollback"
+  fi
 }
 
 case "$COMMAND" in

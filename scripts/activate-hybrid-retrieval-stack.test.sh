@@ -54,7 +54,7 @@ PY
 
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
-printf 'FOO=old\nNOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON=stale\n' >"$tmp"
+printf 'FOO=old\nFOO=stale-tail\nNOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON=stale\n' >"$tmp"
 printf '%s\n' '{"set":{"FOO":"new","NOOSPHERE_HYBRID_RETRIEVAL_ENABLED":"false"},"delete":["NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON"]}' | python3 /dev/fd/3 "$tmp" 3<<'PY'
 import json, os, pathlib, re, sys, tempfile
 env_path = pathlib.Path(sys.argv[1])
@@ -65,13 +65,10 @@ text = env_path.read_text()
 for key in deletes:
     text = re.sub(rf"^{re.escape(key)}=.*\n?", "", text, flags=re.M)
 for key, value in updates.items():
-    line = f"{key}={value}"
-    if re.search(rf"^{re.escape(key)}=", text, re.M):
-        text = re.sub(rf"^{re.escape(key)}=.*$", line, text, count=1, flags=re.M)
-    else:
-        if not text.endswith("\n"):
-            text += "\n"
-        text += line + "\n"
+    text = re.sub(rf"^{re.escape(key)}=.*\n?", "", text, flags=re.M)
+    if not text.endswith("\n"):
+        text += "\n"
+    text += f"{key}={value}\n"
 fd, tmp_name = tempfile.mkstemp(prefix=".env.", dir=str(env_path.parent))
 try:
     with os.fdopen(fd, "w") as handle:
@@ -89,6 +86,7 @@ except Exception:
 print(env_path.read_text())
 PY
 grep -qx 'FOO=new' "$tmp" || fail "atomic set missed FOO"
+grep -q 'FOO=stale-tail' "$tmp" && fail "atomic set left duplicate FOO" || true
 grep -qx 'NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false' "$tmp" || fail "atomic append missed flag"
 if grep -q 'NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON' "$tmp"; then
   fail "atomic delete left JSON"
