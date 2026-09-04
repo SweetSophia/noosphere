@@ -472,9 +472,10 @@ before trusting Phase 4.6. Without the recall, empty output proves nothing.
 
 ### 4.6 Prove hybrid
 
-`POST /api/memory/recall` (not `/api/recall`) returns hits, and app logs
+`POST /api/memory/recall` returns hits, and app logs
 contain **zero** `[hybrid-retrieval] lexical fallback` lines for that
-request.
+request. (`/api/recall` is an alias of the same handler; the Hermes plugin
+uses `/api/memory/recall`.)
 
 ---
 
