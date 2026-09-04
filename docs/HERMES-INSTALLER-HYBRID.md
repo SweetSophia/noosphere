@@ -194,7 +194,7 @@ Compose commands in this phase always use:
 
 ```bash
 export NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
-compose=(docker compose --project-directory "$NOOSPHERE_HOME")
+compose=(docker compose --project-directory "$NOOSPHERE_HOME" -f "$NOOSPHERE_HOME/docker-compose.yml")
 ```
 
 Never `docker compose` from a git clone. Never re-run `init`.
@@ -326,6 +326,7 @@ magic — build it from the printed id (empty `apiKey` is valid for local):
 
 ```bash
 profile_id='00000000-0000-4000-8000-000000000000'  # paste the printed id
+test "$profile_id" != '00000000-0000-4000-8000-000000000000'
 json=$(python3 -c 'import json,sys; print(json.dumps([{"profileId":sys.argv[1],"locality":"local","endpoint":"http://host.docker.internal:8741/v1/embeddings","apiKey":""}],separators=(",",":")))' "$profile_id")
 b64=$(printf '%s' "$json" | base64 | tr -d '\n')
 test -n "$b64"
@@ -353,12 +354,13 @@ printed id (host `$profile_id` is unset):
 
 ```bash
 export NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
-compose=(docker compose --project-directory "$NOOSPHERE_HOME")
+compose=(docker compose --project-directory "$NOOSPHERE_HOME" -f "$NOOSPHERE_HOME/docker-compose.yml")
 db_id=$("${compose[@]}" ps -q db)
 network=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' "$db_id")
 test -n "$network"
 test -n "${NOOSPHERE_HYBRID_ADMIN_DATABASE_URL:-}"
 profile_id='00000000-0000-4000-8000-000000000000'  # paste the printed id
+test "$profile_id" != '00000000-0000-4000-8000-000000000000'
 docker run --rm --network "$network" \
   -v "$HOME/src/noosphere-scripts:/src" -w /src \
   -e NOOSPHERE_HYBRID_ADMIN_DATABASE_URL \
@@ -394,7 +396,7 @@ request.
 
 ```bash
 export NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
-compose=(docker compose --project-directory "$NOOSPHERE_HOME")
+compose=(docker compose --project-directory "$NOOSPHERE_HOME" -f "$NOOSPHERE_HOME/docker-compose.yml")
 "${compose[@]}" --profile hybrid stop app hybrid-worker
 ```
 
