@@ -40,9 +40,12 @@ checkout onto the work VM (it still carries owner-host defaults).
 It will look for `noosphere-db` and `127.0.0.1:5433`. Do not run it against
 an installer install.
 
-The published image does **not** ship the A/B/C activator scripts or
-`docker/hybrid-storage/*.sql`. Keep a shallow scripts checkout for those
-commands only; Compose stays in `~/.noosphere`.
+The published image does **not** ship the A/B/C **activator scripts** (only
+`hybrid-provider.mjs`, `hybrid-worker.mjs`, `check-hybrid-worker-health.mjs`).
+The `docker/hybrid-storage/*.sql` DDL **is** in the image, but the
+authoritative SQL + privilege SSOT stays in `docker/hybrid-storage/README.md`
+in the repo — keep the shallow scripts checkout for that plus the activator
+commands; Compose stays in `~/.noosphere`.
 
 ---
 
@@ -178,7 +181,7 @@ Then from the compose network. The published app image is `node:22-alpine`
 (BusyBox `wget`, no `curl`):
 
 ```bash
-docker compose --project-directory "${NOOSPHERE_HOME:-$HOME/.noosphere}" exec -T app \
+docker compose --project-directory "$NOOSPHERE_HOME" -f "$NOOSPHERE_HOME/docker-compose.yml" exec -T app \
   wget -qO- --header='content-type: application/json' \
   --post-data='{"model":"nomic-embed-text","input":"ping","encoding_format":"float"}' \
   http://host.docker.internal:8741/v1/embeddings
@@ -372,8 +375,23 @@ docker run --rm --network "$network" \
   '
 ```
 
-Write HMAC keyring + `NOOSPHERE_HYBRID_QUERY_PROFILE_ID` into
-`$NOOSPHERE_HOME/.env` with the flag still `false`. Then:
+Write the keyring + profile id into `$NOOSPHERE_HOME/.env` with the flag
+still `false` — without these the flag flip fail-closes with
+`HybridCorrectnessError` (`query_profile_invalid` / `cache_keyring_invalid`),
+not a lexical fallback:
+
+```bash
+# profile_id pasted from step 4.4; mint a 32-byte v1 key, never print it
+key_b64=$(openssl rand -base64 32)
+hmac_b64=$(printf '{"v1":"%s"}' "$key_b64" | base64 | tr -d '\n')
+# atomic write into $NOOSPHERE_HOME/.env:
+#   NOOSPHERE_HYBRID_QUERY_PROFILE_ID=<profile_id>
+#   NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION=v1
+#   NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64=$hmac_b64
+#   NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false
+```
+
+Then:
 
 ```bash
 "${compose[@]}" up -d --no-deps --force-recreate app
@@ -382,7 +400,14 @@ Write HMAC keyring + `NOOSPHERE_HYBRID_QUERY_PROFILE_ID` into
 
 `docker compose restart` does **not** reload env. Set
 `NOOSPHERE_HYBRID_RETRIEVAL_ENABLED` to the exact string `true`, recreate
-app again, health-check again.
+app again, health-check again. Then verify the gate actually opened:
+
+```bash
+"${compose[@]}" logs app 2>&1 | grep -E 'HybridCorrectnessError|query_profile_invalid|cache_keyring_invalid' || true
+```
+
+Empty output above = config valid; any hit = fix `.env` before trusting
+Phase 4.6.
 
 ### 4.6 Prove hybrid
 
@@ -421,8 +446,10 @@ recreate app with `--no-deps --force-recreate`. llama.cpp can stay installed.
 - **llama.cpp on `0.0.0.0`.** Puts embeddings on LAN/Tailscale without a key.
 - **HTTP 400 from llama.cpp.** Terminal for that job. Raise ctx/ubatch; do
   not retry.
-- **Draft-only corpus.** Agent saves are drafts by default. Unscoped recall
-  sees published articles only; admin/`['*']` sees drafts too.
+- **Draft-only corpus.** Agent saves are drafts by default. Recall does **not**
+  default to published articles: `metadata.status` is unset on the recall
+  path, so unscoped recall returns drafts too. If drafts must stay out of
+  agent recall, publish them or scope the API key.
 
 ---
 
