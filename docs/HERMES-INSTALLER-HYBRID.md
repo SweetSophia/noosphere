@@ -231,11 +231,15 @@ Compose file (`$NOOSPHERE_HOME/docker-compose.yml`), not the source-checkout
 filename `docker-compose.noosphere.yml`:
 
 ```bash
+set -euo pipefail
 marker=$("${compose[@]}" exec -T db cat /run/noosphere-pgvector/writer-authorized)
-grep -F "$marker" "$NOOSPHERE_HOME/docker-compose.yml"
+marker=$(printf '%s' "$marker" | tr -d '\r\n')
+test -n "$marker"
+grep -Fq -- "$marker" "$NOOSPHERE_HOME/docker-compose.yml"
 ```
 
-`grep` must exit 0. A mismatch means the wrong image or an incomplete
+All three must succeed. An empty marker makes `grep -F ""` match anything —
+do not skip the `test -n`. A mismatch means the wrong image or an incomplete
 new-install guard — stop.
 
 ### 4.3 Role URLs on the compose network
@@ -291,7 +295,7 @@ docker run --rm --network "$network" \
   -e NOOSPHERE_HYBRID_ADMIN_DATABASE_URL \
   -e NOOSPHERE_HYBRID_WORKER_DATABASE_URL \
   node:22-bookworm bash -ceu '
-    apt-get update -qq && apt-get install -y -qq postgresql-client >/dev/null
+    apt-get update -qq && apt-get install -y -qq postgresql-client jq >/dev/null
     npm run hybrid-storage:activate
     npm run hybrid-worker:activate
     npm run hybrid-retrieval:activate
@@ -301,7 +305,7 @@ docker run --rm --network "$network" \
       --model nomic-embed-text \
       --revision Q8_0-b10783 \
       --dimensions 768)
-    profile_id=$(printf "%s" "$profile_json" | node -e "let s=\"\";process.stdin.on(\"data\",d=>s+=d);process.stdin.on(\"end\",()=>console.log(JSON.parse(s).profileId))")
+    profile_id=$(printf "%s" "$profile_json" | jq -er .profileId)
     printf "profile_id=%s\n" "$profile_id"
     node scripts/hybrid-profile.mjs prepare --profile "$profile_id"
     node scripts/hybrid-backfill.mjs --profile "$profile_id" --chunk 100
@@ -313,17 +317,12 @@ Prefer a digest-pinned `node:22-bookworm` if your policy requires it (`docker
 image inspect --format '{{.RepoDigests}}'`). Repeat activation is
 validate-only — do not repair A/B/C by hand.
 
-Keep the printed `profile_id`. Coverage must be ≥ 0.95 before serving. Serve
-from the **same** sidecar (still on the compose network):
-
-```bash
-node scripts/hybrid-profile.mjs serve --profile "$profile_id"
-```
-
-Persist **only** `NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64` in
-`~/.noosphere/.env` (canonical base64 of compact JSON; empty `apiKey` is
-valid for local). Do not leave `NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON` set at
-the same time. Encode portably:
+Copy the printed `profile_id`. Do not expect `$profile_id` to exist in the
+host shell — the sidecar is `--rm`. Persist **only**
+`NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64` in `$NOOSPHERE_HOME/.env` (canonical
+base64 of compact JSON; empty `apiKey` is valid for local). Do not leave
+`NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON` set at the same time. Encode
+portably:
 
 ```bash
 printf '%s' "$json" | base64 | tr -d '\n'
@@ -342,9 +341,26 @@ Wait until the worker is **healthy** (compose healthcheck). Any
 `embedding_job` in `failed` fails that check — cancel over-context rows;
 they stay keyword-only.
 
-When coverage ≥ 0.95: serve the profile (sidecar command above). Write HMAC
-keyring + `NOOSPHERE_HYBRID_QUERY_PROFILE_ID` into `$NOOSPHERE_HOME/.env` with
-the flag still `false`. Then:
+Backfill only *queues* jobs. Do **not** `serve` in the create sidecar —
+coverage is still ~0 until the worker runs. When `status` shows coverage
+≥ 0.95, serve from a **second** sidecar on the same network, substituting the
+printed id (host `$profile_id` is unset):
+
+```bash
+profile_id='00000000-0000-4000-8000-000000000000'  # paste the printed id
+docker run --rm --network "$network" \
+  -v "$HOME/src/noosphere-scripts:/src" -w /src \
+  -e NOOSPHERE_HYBRID_ADMIN_DATABASE_URL \
+  -e PROFILE_ID="$profile_id" \
+  node:22-bookworm bash -ceu '
+    apt-get update -qq && apt-get install -y -qq postgresql-client >/dev/null
+    node scripts/hybrid-profile.mjs status --profile "$PROFILE_ID"
+    node scripts/hybrid-profile.mjs serve --profile "$PROFILE_ID"
+  '
+```
+
+Write HMAC keyring + `NOOSPHERE_HYBRID_QUERY_PROFILE_ID` into
+`$NOOSPHERE_HOME/.env` with the flag still `false`. Then:
 
 ```bash
 "${compose[@]}" up -d --no-deps --force-recreate app
