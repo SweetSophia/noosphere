@@ -328,6 +328,8 @@ host shell — the sidecar is `--rm`. Construct and persist **only**
 magic — build it from the printed id (empty `apiKey` is valid for local):
 
 ```bash
+set -euo pipefail
+export NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
 profile_id='00000000-0000-4000-8000-000000000000'  # paste the printed id
 uuid_re='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'
 { [[ "$profile_id" =~ $uuid_re ]] && test "$profile_id" != '00000000-0000-4000-8000-000000000000'; } \
@@ -409,6 +411,8 @@ still `false` — without these the flag flip fail-closes with
 not a lexical fallback:
 
 ```bash
+set -euo pipefail
+export NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
 # profile_id pasted from step 4.4; mint a 32-byte v1 key, never print it
 uuid_re='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'
 { test -n "$profile_id" && [[ "$profile_id" =~ $uuid_re ]] && test "$profile_id" != '00000000-0000-4000-8000-000000000000'; } \
@@ -464,10 +468,11 @@ clean until the first recall. After the recreate, run one throwaway recall
 (any Hermes key, `mode: "auto"`), then check for the fail-closed errors:
 
 ```bash
-"${compose[@]}" logs app 2>&1 | grep -E 'HybridCorrectnessError|query_profile_invalid|query_profile_missing|cache_keyring_invalid' || true
+! "${compose[@]}" logs app 2>&1 | grep -qE 'HybridCorrectnessError|query_profile_invalid|query_profile_missing|cache_keyring_invalid'
 ```
 
-Empty output **after that recall** = config valid; any hit = fix `.env`
+The fence itself must exit 0 — any fail-closed hit and the pipeline above
+exits non-zero. Empty output after that recall = config valid; any hit = fix `.env`
 before trusting Phase 4.6. Without the recall, empty output proves nothing.
 
 ### 4.6 Prove hybrid
