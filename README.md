@@ -86,7 +86,10 @@ for the full stateful recovery contract.
 
 Optional pgvector hybrid storage remains a separate activation step. Operator
 how-to (llama.cpp local embeddings, no wiki toggle):
-[docs/HYBRID-RETRIEVAL-ACTIVATION.md](docs/HYBRID-RETRIEVAL-ACTIVATION.md).
+[docs/HYBRID-RETRIEVAL-ACTIVATION.md](docs/HYBRID-RETRIEVAL-ACTIVATION.md)
+for a source Compose checkout, or
+[docs/HERMES-INSTALLER-HYBRID.md](docs/HERMES-INSTALLER-HYBRID.md) for a
+guided-installer runtime plus Hermes.
 SQL/privilege contract:
 [docker/hybrid-storage/README.md](docker/hybrid-storage/README.md).
 
@@ -328,6 +331,7 @@ Keep detailed recovery work in deployment/runbook docs rather than this README.
 | [README-legacy.md](README-legacy.md) | Previous full README content kept for reference during the docs split |
 | [docs/MEMORY-REVAMP-STATUS.md](docs/MEMORY-REVAMP-STATUS.md) | Authoritative implementation and rollout matrix for automatic capture and hybrid retrieval |
 | [docs/INSTALLATION.md](docs/INSTALLATION.md) | Guided installer, auditable download, upgrades, manual Compose, and credential handling |
+| [docs/HERMES-INSTALLER-HYBRID.md](docs/HERMES-INSTALLER-HYBRID.md) | Installer-runtime work-VM hybrid runbook (`~/.noosphere`, sidecar A/B/C, llama.cpp) |
 | [docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md](docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md) | OpenClaw install, operations, upgrade, troubleshooting, and uninstall |
 | [docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md](docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md) | Guarded PostgreSQL image transition, proof, rollback, and recovery |
 | [docs/NOOSPHERE-MEMORY-ARCHITECTURE.md](docs/NOOSPHERE-MEMORY-ARCHITECTURE.md) | Provider abstraction, recall orchestration, ranking, budgeting, and scheduler |

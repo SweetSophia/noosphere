@@ -56,6 +56,11 @@ and Hermes bundle, writes the scoped WRITE key to the mode-`0600` Hermes
 environment file, and configures the provider. Keeping the launcher command in
 the release-owned installation guide avoids a circular bundle-to-launcher pin.
 
+Work VM that already has Hermes and later wants llama.cpp hybrid retrieval on
+the installer runtime:
+https://github.com/SweetSophia/noosphere/blob/master/docs/HERMES-INSTALLER-HYBRID.md
+(the standalone Hermes tarball does not include `docs/`).
+
 ## Install the 1.13.2 Release Bundle
 
 The coordinated Noosphere release attaches a deterministic Hermes provider
