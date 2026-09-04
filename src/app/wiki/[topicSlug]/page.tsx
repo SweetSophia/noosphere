@@ -6,6 +6,8 @@ import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { EmptyState } from "@/components/wiki/EmptyState";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import { RestrictedArticleIcon } from "@/components/wiki/RestrictedArticleIcon";
+import { DeleteTopicButton } from "@/components/wiki/DeleteTopicButton";
+import { deleteTopicAction } from "@/app/wiki/admin/topics/actions";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildScopeFilter } from "@/lib/api/auth";
@@ -22,6 +24,7 @@ export default async function TopicPage({ params }: Props) {
   const session = await getServerSession(authOptions);
   const role = session?.user?.role;
   const canCreateArticle = role === "EDITOR" || role === "ADMIN";
+  const isAdmin = role === "ADMIN";
 
   const topic = await prisma.topic.findUnique({
     where: { slug: topicSlug },
@@ -60,6 +63,8 @@ export default async function TopicPage({ params }: Props) {
   });
   const hasSubtopics = topic.children.length > 0;
   const emptyArticlesState = getTopicArticlesEmptyState(hasSubtopics);
+  const articleCount = await prisma.article.count({ where: { topicId: topic.id } });
+  const canDeleteTopic = isAdmin && !hasSubtopics && articleCount === 0;
 
   return (
     <div className="wiki-content topic-page">
@@ -79,10 +84,27 @@ export default async function TopicPage({ params }: Props) {
         description={topic.description ?? "A focused collection of articles and subtopics inside the Noosphere knowledge graph."}
         className="topic-page-hero"
         actions={
-          canCreateArticle ? (
-            <Link href={`/wiki/${topic.slug}/new`} className="btn btn-primary btn-sm">
-              New Article
-            </Link>
+          canCreateArticle || isAdmin ? (
+            <div className="cluster">
+              {canCreateArticle ? (
+                <Link href={`/wiki/${topic.slug}/new`} className="btn btn-primary btn-sm">
+                  New Article
+                </Link>
+              ) : null}
+              {isAdmin ? (
+                <Link href="/wiki/admin/topics" className="btn btn-secondary btn-sm">
+                  Manage Topics
+                </Link>
+              ) : null}
+              {canDeleteTopic ? (
+                <DeleteTopicButton
+                  topicId={topic.id}
+                  topicName={topic.name}
+                  deleteAction={deleteTopicAction}
+                  next="/wiki"
+                />
+              ) : null}
+            </div>
           ) : null
         }
         meta={

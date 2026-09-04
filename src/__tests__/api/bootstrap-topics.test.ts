@@ -64,8 +64,9 @@ test("bootstrap topic tree is valid and shared by seed/bootstrap scripts", () =>
   assert.ok(topics.length > 0, "bootstrap topics should not be empty");
   for (const topic of topics) visit(topic);
   assert.ok(slugs.has("noosphere"));
-  assert.ok(slugs.has("pk-pro"));
-  assert.ok(slugs.has("ihk-study-trainer"));
+  assert.ok(slugs.has("onboarding"));
+  assert.equal(slugs.has("pk-pro"), false, "house project pk-pro must not ship as a default topic");
+  assert.equal(slugs.has("ihk-study-trainer"), false, "house project ihk-study-trainer must not ship as a default topic");
 });
 
 test("bootstrap and seed scripts load the shared topic tree file", () => {
@@ -76,6 +77,15 @@ test("bootstrap and seed scripts load the shared topic tree file", () => {
   assert.match(seedSource, /bootstrap-topics\.json/);
   assert.doesNotMatch(bootstrapSource, /const\s+TOPICS\s*=\s*\[/);
   assert.doesNotMatch(seedSource, /const\s+TOPICS\s*=\s*\[/);
+});
+
+test("wiki home labels topic admin as Manage Topics, not New Topic", () => {
+  const home = readRepoFile("src/app/wiki/page.tsx");
+  const topicPage = readRepoFile("src/app/wiki/[topicSlug]/page.tsx");
+  assert.match(home, />\s*Manage Topics\s*</);
+  assert.doesNotMatch(home, />\s*New Topic\s*</);
+  assert.match(topicPage, /DeleteTopicButton/);
+  assert.match(topicPage, />\s*Manage Topics\s*</);
 });
 
 test("bootstrap stores generated secrets out of logs", () => {
