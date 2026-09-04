@@ -330,7 +330,8 @@ magic — build it from the printed id (empty `apiKey` is valid for local):
 ```bash
 profile_id='00000000-0000-4000-8000-000000000000'  # paste the printed id
 uuid_re='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'
-[[ "$profile_id" =~ $uuid_re ]] && test "$profile_id" != '00000000-0000-4000-8000-000000000000'
+{ [[ "$profile_id" =~ $uuid_re ]] && test "$profile_id" != '00000000-0000-4000-8000-000000000000'; } \
+  || { echo "paste the real printed profile id (got: '${profile_id:-<empty>}')" >&2; exit 1; }
 json=$(python3 -c 'import json,sys; print(json.dumps([{"profileId":sys.argv[1],"locality":"local","endpoint":"http://host.docker.internal:8741/v1/embeddings","apiKey":""}],separators=(",",":")))' "$profile_id")
 b64=$(printf '%s' "$json" | base64 | tr -d '\n')
 test -n "$b64"
@@ -389,7 +390,8 @@ test -n "$network"
 test -n "${NOOSPHERE_HYBRID_ADMIN_DATABASE_URL:-}"
 profile_id='00000000-0000-4000-8000-000000000000'  # paste the printed id
 uuid_re='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'
-[[ "$profile_id" =~ $uuid_re ]] && test "$profile_id" != '00000000-0000-4000-8000-000000000000'
+{ [[ "$profile_id" =~ $uuid_re ]] && test "$profile_id" != '00000000-0000-4000-8000-000000000000'; } \
+  || { echo "paste the real printed profile id (got: '${profile_id:-<empty>}')" >&2; exit 1; }
 docker run --rm --network "$network" \
   -v "$HOME/src/noosphere-scripts:/src" -w /src \
   -e NOOSPHERE_HYBRID_ADMIN_DATABASE_URL \
@@ -409,13 +411,13 @@ not a lexical fallback:
 ```bash
 # profile_id pasted from step 4.4; mint a 32-byte v1 key, never print it
 uuid_re='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'
-test -n "$profile_id" && [[ "$profile_id" =~ $uuid_re ]] && test "$profile_id" != '00000000-0000-4000-8000-000000000000'
+{ test -n "$profile_id" && [[ "$profile_id" =~ $uuid_re ]] && test "$profile_id" != '00000000-0000-4000-8000-000000000000'; } \
+  || { echo "paste the real printed profile id (got: '${profile_id:-<empty>}')" >&2; exit 1; }
 key_b64=$(openssl rand -base64 32)
 hmac_b64=$(printf '{"v1":"%s"}' "$key_b64" | base64 | tr -d '\n')
-Both writers share the same `os.replace` core on purpose: each is self-contained
-and copy-pasteable in isolation — an operator mid-procedure should not need to
-have run (or even read) the other block first.
-
+# Both writers share the same os.replace core on purpose: each block is
+# self-contained and copy-pasteable in isolation — an operator mid-procedure
+# should not need to have run (or even read) the other block first.
 python3 - "$profile_id" "$hmac_b64" <<'PY'
 import os, sys, tempfile
 env_path = os.path.join(os.environ["NOOSPHERE_HOME"], ".env")
