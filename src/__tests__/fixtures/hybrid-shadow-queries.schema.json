@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "noosphere:hybrid-shadow-queries.v1",
+  "title": "Hybrid shadow evaluation query set",
+  "type": "object",
+  "required": ["version", "queries"],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "$schema": { "type": "string" },
+    "description": { "type": "string" },
+    "queries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "query", "relevance"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
+                  "description": "Stable slug; matches /wiki/<topic>/<slug> article slugs" },
+          "query": { "type": "string", "minLength": 3, "maxLength": 200 },
+          "docHint": { "type": "string" },
+          "note": { "type": "string" },
+          "relevance": {
+            "type": "object",
+            "description": "article slug -> graded relevance 0-3",
+            "propertyNames": { "pattern": "^[a-z0-9][a-z0-9-]*$" },
+            "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 3 }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
