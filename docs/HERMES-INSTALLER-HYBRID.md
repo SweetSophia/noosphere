@@ -154,6 +154,24 @@ Verified CPU contract (no CUDA): GGUF `nomic-embed-text-v1.5.Q8_0.gguf`
 context is 8192 with YaRN (400 is not retried; leftover `failed` jobs make the
 worker unhealthy).
 
+**Getting the pieces** (the appendix covers flags, not acquisition): build or
+download a `llama-server` binary with embeddings support from the llama.cpp
+releases for your arch, and fetch the GGUF from
+`nomic-ai/nomic-embed-text-v1.5-GGUF` on Hugging Face. Record the SHA-256
+before first start and keep it with the model:
+
+```bash
+sha256sum nomic-embed-text-v1.5.Q8_0.gguf
+# expected: 3e24342164b3d94991ba9692fdc0dd08e3fd7362e0aacc396a9a5c54a544c3b7
+```
+
+**Firewall**: `172.17.0.1` is Docker's default bridge address — if the daemon
+uses a custom `bip`, adjust the bind and the provider endpoint to match
+(`ip -4 addr show docker0`). On a ufw-enabled VM, container traffic to
+`172.17.0.1:8741` can be dropped by INPUT rules — if the in-network smoke
+(Phase 3, second block) fails while host smoke passes, check
+`sudo ufw status` / `journalctl -k` before touching anything else.
+
 ```text
 llama-server \
   -m /path/to/nomic-embed-text-v1.5.Q8_0.gguf \
