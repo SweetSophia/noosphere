@@ -51,6 +51,10 @@ http://127.0.0.1:6578/wiki
 
 The installer reports the actual URL if you selected a different bind address.
 
+A work VM that already has Hermes, and later wants llama.cpp hybrid retrieval
+against this installer runtime (Postgres is **not** on host `:5433`), follow
+[Work VM: Hermes + installer + llama.cpp hybrid](HERMES-INSTALLER-HYBRID.md).
+
 ### Credentials
 
 Generated administrator credentials are written to:
@@ -227,5 +231,7 @@ remain in the repository [README](../README.md#local-development).
 
 Optional pgvector hybrid storage remains a separate activation step. Operator
 how-to (llama.cpp local embeddings):
-[HYBRID-RETRIEVAL-ACTIVATION.md](HYBRID-RETRIEVAL-ACTIVATION.md). SQL/privilege
-contract: [docker/hybrid-storage/README.md](../docker/hybrid-storage/README.md).
+[HYBRID-RETRIEVAL-ACTIVATION.md](HYBRID-RETRIEVAL-ACTIVATION.md) for source
+Compose, or [HERMES-INSTALLER-HYBRID.md](HERMES-INSTALLER-HYBRID.md) for the
+guided-installer runtime. SQL/privilege contract:
+[docker/hybrid-storage/README.md](../docker/hybrid-storage/README.md).

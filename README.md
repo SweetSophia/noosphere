@@ -86,7 +86,10 @@ for the full stateful recovery contract.
 
 Optional pgvector hybrid storage remains a separate activation step. Operator
 how-to (llama.cpp local embeddings, no wiki toggle):
-[docs/HYBRID-RETRIEVAL-ACTIVATION.md](docs/HYBRID-RETRIEVAL-ACTIVATION.md).
+[docs/HYBRID-RETRIEVAL-ACTIVATION.md](docs/HYBRID-RETRIEVAL-ACTIVATION.md)
+for a source Compose checkout, or
+[docs/HERMES-INSTALLER-HYBRID.md](docs/HERMES-INSTALLER-HYBRID.md) for a
+guided-installer runtime plus Hermes.
 SQL/privilege contract:
 [docker/hybrid-storage/README.md](docker/hybrid-storage/README.md).
 

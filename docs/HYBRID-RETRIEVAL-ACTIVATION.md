@@ -9,8 +9,14 @@ exact string `true`.
 
 Privilege, SQL, and repeat-validation contracts live in
 [`docker/hybrid-storage/README.md`](../docker/hybrid-storage/README.md).
-This document is the operator how-to. The ADR
+This document is the operator how-to **for a source Compose checkout** (host
+Postgres on `127.0.0.1:5433`, db container `noosphere-db`). The ADR
 ([`HYBRID-RETRIEVAL-ADR.md`](HYBRID-RETRIEVAL-ADR.md)) is why, not how.
+
+If Noosphere was installed with the guided installer (`~/.noosphere`,
+containers `noosphere-openclaw-*`, Postgres only on the compose network), do
+not follow the host `:5433` steps below. Use
+[`HERMES-INSTALLER-HYBRID.md`](HERMES-INSTALLER-HYBRID.md).
 
 ## Local embeddings: llama.cpp only
 
