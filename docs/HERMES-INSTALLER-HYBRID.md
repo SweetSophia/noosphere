@@ -181,7 +181,7 @@ Then from the compose network. The published app image is `node:22-alpine`
 (BusyBox `wget`, no `curl`):
 
 ```bash
-docker compose --project-directory "$NOOSPHERE_HOME" -f "$NOOSPHERE_HOME/docker-compose.yml" exec -T app \
+docker compose --project-directory "${NOOSPHERE_HOME:-$HOME/.noosphere}" -f "${NOOSPHERE_HOME:-$HOME/.noosphere}/docker-compose.yml" exec -T app \
   wget -qO- --header='content-type: application/json' \
   --post-data='{"model":"nomic-embed-text","input":"ping","encoding_format":"float"}' \
   http://host.docker.internal:8741/v1/embeddings
@@ -333,8 +333,32 @@ test "$profile_id" != '00000000-0000-4000-8000-000000000000'
 json=$(python3 -c 'import json,sys; print(json.dumps([{"profileId":sys.argv[1],"locality":"local","endpoint":"http://host.docker.internal:8741/v1/embeddings","apiKey":""}],separators=(",",":")))' "$profile_id")
 b64=$(printf '%s' "$json" | base64 | tr -d '\n')
 test -n "$b64"
-# write NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64=$b64 into $NOOSPHERE_HOME/.env
-# (atomic replace; never echo $b64)
+python3 - "$b64" <<'PY'
+import os, sys, tempfile
+env_path = os.path.join(os.environ["NOOSPHERE_HOME"], ".env")
+b64 = sys.argv[1]
+sets = {"NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64": b64}
+out, seen = [], set()
+with open(env_path) as f:
+    for line in f:
+        key = line.split("=", 1)[0] if "=" in line else None
+        if key == "NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON":
+            continue  # strip stale JSON form
+        if key in sets:
+            out.append(key + "=" + sets[key] + "\n")
+            seen.add(key)
+        else:
+            out.append(line)
+for key, value in sets.items():
+    if key not in seen:
+        out.append(key + "=" + value + "\n")
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(env_path))
+with os.fdopen(fd, "w") as f:
+    f.writelines(out)
+    f.flush()
+    os.fsync(f.fileno())
+os.replace(tmp, env_path)
+PY
 ```
 
 ### 4.5 Worker, then two app recreates
@@ -384,11 +408,34 @@ not a lexical fallback:
 # profile_id pasted from step 4.4; mint a 32-byte v1 key, never print it
 key_b64=$(openssl rand -base64 32)
 hmac_b64=$(printf '{"v1":"%s"}' "$key_b64" | base64 | tr -d '\n')
-# atomic write into $NOOSPHERE_HOME/.env:
-#   NOOSPHERE_HYBRID_QUERY_PROFILE_ID=<profile_id>
-#   NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION=v1
-#   NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64=$hmac_b64
-#   NOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false
+python3 - "$profile_id" "$hmac_b64" <<'PY'
+import os, sys, tempfile
+env_path = os.path.join(os.environ["NOOSPHERE_HOME"], ".env")
+sets = {
+    "NOOSPHERE_HYBRID_QUERY_PROFILE_ID": sys.argv[1],
+    "NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION": "v1",
+    "NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64": sys.argv[2],
+    "NOOSPHERE_HYBRID_RETRIEVAL_ENABLED": "false",
+}
+out, seen = [], set()
+with open(env_path) as f:
+    for line in f:
+        key = line.split("=", 1)[0] if "=" in line else None
+        if key in sets:
+            out.append(key + "=" + sets[key] + "\n")
+            seen.add(key)
+        else:
+            out.append(line)
+for key, value in sets.items():
+    if key not in seen:
+        out.append(key + "=" + value + "\n")
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(env_path))
+with os.fdopen(fd, "w") as f:
+    f.writelines(out)
+    f.flush()
+    os.fsync(f.fileno())
+os.replace(tmp, env_path)
+PY
 ```
 
 Then:
