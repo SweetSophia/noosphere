@@ -50,8 +50,9 @@ commands only; Compose stays in `~/.noosphere`.
 
 ### Prerequisites
 
-Docker Compose v2, Node.js 22+, `curl`, `jq`, `sha256sum`, `tar`. Hermes CLI
-on `PATH`. If Hermes uses a named profile:
+Docker Compose v2, Node.js 22+ with `npm`, `git`, `python3`, `pg_restore`,
+`curl`, `jq`, `sha256sum`, and `tar`. Hermes CLI on `PATH`. If Hermes uses a
+named profile:
 
 ```bash
 export HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
@@ -169,21 +170,21 @@ Host smoke must return `model` = `nomic-embed-text` and 768 finite floats:
 ```bash
 curl -fsS http://172.17.0.1:8741/v1/embeddings \
   -H 'content-type: application/json' \
-  -d '{"model":"nomic-embed-text","input":"ping","encoding_format":"float"}'
+  -d '{"model":"nomic-embed-text","input":"ping","encoding_format":"float"}' |
+  jq -e '.model == "nomic-embed-text" and (.data|length==1) and (.data[0].embedding|length==768)'
 ```
 
-Then from the compose network (app/worker already have
-`extra_hosts: host.docker.internal:host-gateway`):
+Then from the compose network. The published app image is `node:22-alpine`
+(BusyBox `wget`, no `curl`):
 
 ```bash
-docker compose --project-directory "${NOOSPHERE_HOME:-$HOME/.noosphere}" run --rm --no-deps --entrypoint curl app \
-  -fsS http://host.docker.internal:8741/v1/embeddings \
-  -H 'content-type: application/json' \
-  -d '{"model":"nomic-embed-text","input":"ping","encoding_format":"float"}'
+docker compose --project-directory "${NOOSPHERE_HOME:-$HOME/.noosphere}" exec -T app \
+  wget -qO- --header='content-type: application/json' \
+  --post-data='{"model":"nomic-embed-text","input":"ping","encoding_format":"float"}' \
+  http://host.docker.internal:8741/v1/embeddings
 ```
 
-If the image has no `curl`, run the same URL from any throwaway container on
-the project network with `--add-host host.docker.internal:host-gateway`.
+App and worker already have `extra_hosts: host.docker.internal:host-gateway`.
 
 ---
 
@@ -203,18 +204,19 @@ Never `docker compose` from a git clone. Never re-run `init`.
 ```bash
 git clone --branch v1.13.2 --depth 1 https://github.com/SweetSophia/noosphere.git ~/src/noosphere-scripts
 cd ~/src/noosphere-scripts
+test "$(git rev-parse HEAD)" = 11e1be9bb07a60e1df775f33688a7e4dd3dd5645
 npm ci
 ```
 
-Pin the branch to the same release as the installer. `npm ci` is for
-activators only.
+That commit is tag `v1.13.2`. `npm ci` is for activators only. Do not run
+Compose from this clone.
 
 ### 4.2 Snapshot
 
 ```bash
 umask 077
 stamp=$(date +%Y%m%d-%H%M%S)
-dest="$HOME/.noosphere/backups/pre-hybrid-A-${stamp}"
+dest="$NOOSPHERE_HOME/backups/pre-hybrid-A-${stamp}"
 mkdir -p "$dest"
 chmod 700 "$dest"
 cp -a "$NOOSPHERE_HOME/.env" "$dest/.env.bak"
@@ -224,12 +226,17 @@ chmod 600 "$dest/pre-hybrid-A.dump"
 pg_restore -l "$dest/pre-hybrid-A.dump" >/dev/null
 ```
 
-Confirm the writer-authorization marker (must match the digest in
-`docker-compose.noosphere.yml`):
+Confirm the writer-authorization marker matches the digest in the **installer**
+Compose file (`$NOOSPHERE_HOME/docker-compose.yml`), not the source-checkout
+filename `docker-compose.noosphere.yml`:
 
 ```bash
-"${compose[@]}" exec -T db cat /run/noosphere-pgvector/writer-authorized
+marker=$("${compose[@]}" exec -T db cat /run/noosphere-pgvector/writer-authorized)
+grep -F "$marker" "$NOOSPHERE_HOME/docker-compose.yml"
 ```
+
+`grep` must exit 0. A mismatch means the wrong image or an incomplete
+new-install guard — stop.
 
 ### 4.3 Role URLs on the compose network
 
@@ -258,14 +265,26 @@ network=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}
 
 ### 4.4 A/B/C + profile, from a sidecar
 
-Host `npm run hybrid-*` cannot resolve `db`. Run the clone on that network.
-The sidecar needs Node 22 and `psql` (activators call both). Build the five
-URLs in a wrapper that never prints them, then pass them as `-e`:
+Host `npm run hybrid-*` cannot resolve hostname `db`. Bundled provenance also
+**requires Docker** (`scripts/activate-hybrid-storage.sh` inspects
+`NOOSPHERE_DB_CONTAINER`). A `node:22-bookworm` container has neither the
+Docker CLI nor the daemon socket, so A/B/C exits before SQL unless you mount
+both.
+
+The sidecar therefore needs: Node 22, `psql`, the host Docker CLI, and the
+Docker socket. Mounting the socket gives the sidecar the same Docker rights as
+the operator — treat that as trusted, local, and temporary.
+
+Build the five URLs in a wrapper that never prints them, then:
 
 ```bash
+docker_bin=$(command -v docker)
 docker run --rm --network "$network" \
   --add-host host.docker.internal:host-gateway \
+  -v "$docker_bin":/usr/bin/docker:ro \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$HOME/src/noosphere-scripts:/src" -w /src \
+  -e NOOSPHERE_DB_CONTAINER=noosphere-openclaw-db \
   -e NOOSPHERE_BOOTSTRAP_DATABASE_URL \
   -e DATABASE_URL \
   -e NOOSPHERE_APP_DATABASE_URL \
@@ -276,20 +295,30 @@ docker run --rm --network "$network" \
     npm run hybrid-storage:activate
     npm run hybrid-worker:activate
     npm run hybrid-retrieval:activate
-    node scripts/hybrid-profile.mjs create \
+    profile_json=$(node scripts/hybrid-profile.mjs create \
       --locality local \
       --endpoint http://host.docker.internal:8741/v1/embeddings \
       --model nomic-embed-text \
       --revision Q8_0-b10783 \
-      --dimensions 768
+      --dimensions 768)
+    profile_id=$(printf "%s" "$profile_json" | node -e "let s=\"\";process.stdin.on(\"data\",d=>s+=d);process.stdin.on(\"end\",()=>console.log(JSON.parse(s).profileId))")
+    printf "profile_id=%s\n" "$profile_id"
+    node scripts/hybrid-profile.mjs prepare --profile "$profile_id"
+    node scripts/hybrid-backfill.mjs --profile "$profile_id" --chunk 100
+    node scripts/hybrid-profile.mjs status --profile "$profile_id"
   '
 ```
 
-Repeat activation is validate-only — do not repair A/B/C by hand.
+Prefer a digest-pinned `node:22-bookworm` if your policy requires it (`docker
+image inspect --format '{{.RepoDigests}}'`). Repeat activation is
+validate-only — do not repair A/B/C by hand.
 
-`hybrid:profile create` prints a `profileId`. Keep it. Prepare and backfill
-with that id (`node scripts/hybrid-profile.mjs prepare|status` and
-`node scripts/hybrid-backfill.mjs`). Coverage must be ≥ 0.95 before serving.
+Keep the printed `profile_id`. Coverage must be ≥ 0.95 before serving. Serve
+from the **same** sidecar (still on the compose network):
+
+```bash
+node scripts/hybrid-profile.mjs serve --profile "$profile_id"
+```
 
 Persist **only** `NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64` in
 `~/.noosphere/.env` (canonical base64 of compact JSON; empty `apiKey` is
@@ -313,9 +342,9 @@ Wait until the worker is **healthy** (compose healthcheck). Any
 `embedding_job` in `failed` fails that check — cancel over-context rows;
 they stay keyword-only.
 
-When coverage ≥ 0.95: `hybrid:profile serve`. Write HMAC keyring +
-`NOOSPHERE_HYBRID_QUERY_PROFILE_ID` into `~/.noosphere/.env` with the flag
-still `false`. Then:
+When coverage ≥ 0.95: serve the profile (sidecar command above). Write HMAC
+keyring + `NOOSPHERE_HYBRID_QUERY_PROFILE_ID` into `$NOOSPHERE_HOME/.env` with
+the flag still `false`. Then:
 
 ```bash
 "${compose[@]}" up -d --no-deps --force-recreate app
@@ -337,6 +366,8 @@ request.
 ## Rollback
 
 ```bash
+export NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
+compose=(docker compose --project-directory "$NOOSPHERE_HOME")
 "${compose[@]}" --profile hybrid stop app hybrid-worker
 ```
 
@@ -351,6 +382,9 @@ recreate app with `--no-deps --force-recreate`. llama.cpp can stay installed.
   `--project-directory ~/.noosphere` target a different stack or nothing.
 - **Wrong DB container / port.** Installer db is `noosphere-openclaw-db`.
   There is no host `:5433`.
+- **Sidecar without Docker socket.** Bundled A/B/C inspects
+  `NOOSPHERE_DB_CONTAINER=noosphere-openclaw-db` via `docker inspect`. Omit the
+  socket/CLI mounts and activation exits before SQL.
 - **Re-running `init`.** `up -d` without `--no-deps` on worker/app can
   double-bootstrap.
 - **llama.cpp on `127.0.0.1` only.** Containers use `host.docker.internal` →
