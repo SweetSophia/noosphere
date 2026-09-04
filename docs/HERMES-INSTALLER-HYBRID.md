@@ -235,12 +235,13 @@ set -euo pipefail
 marker=$("${compose[@]}" exec -T db cat /run/noosphere-pgvector/writer-authorized)
 marker=$(printf '%s' "$marker" | tr -d '\r\n')
 test -n "$marker"
-grep -Fq -- "$marker" "$NOOSPHERE_HOME/docker-compose.yml"
+db_image=$("${compose[@]}" config --format json | jq -er '.services.db.image')
+test "$marker" = "$db_image"
 ```
 
-All three must succeed. An empty marker makes `grep -F ""` match anything —
-do not skip the `test -n`. A mismatch means the wrong image or an incomplete
-new-install guard — stop.
+Compare against `services.db.image` only. The same digest string also appears in
+the app/worker entrypoint gates; `grep` on the whole file can pass after a db
+image change. An empty marker, a `cat` failure, or a mismatch — stop.
 
 ### 4.3 Role URLs on the compose network
 
@@ -318,14 +319,18 @@ image inspect --format '{{.RepoDigests}}'`). Repeat activation is
 validate-only — do not repair A/B/C by hand.
 
 Copy the printed `profile_id`. Do not expect `$profile_id` to exist in the
-host shell — the sidecar is `--rm`. Persist **only**
-`NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64` in `$NOOSPHERE_HOME/.env` (canonical
-base64 of compact JSON; empty `apiKey` is valid for local). Do not leave
-`NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON` set at the same time. Encode
-portably:
+host shell — the sidecar is `--rm`. Construct and persist **only**
+`NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64` in `$NOOSPHERE_HOME/.env`. Do not leave
+`NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON` set at the same time. `$json` is not
+magic — build it from the printed id (empty `apiKey` is valid for local):
 
 ```bash
-printf '%s' "$json" | base64 | tr -d '\n'
+profile_id='00000000-0000-4000-8000-000000000000'  # paste the printed id
+json=$(python3 -c 'import json,sys; print(json.dumps([{"profileId":sys.argv[1],"locality":"local","endpoint":"http://host.docker.internal:8741/v1/embeddings","apiKey":""}],separators=(",",":")))' "$profile_id")
+b64=$(printf '%s' "$json" | base64 | tr -d '\n')
+test -n "$b64"
+# write NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64=$b64 into $NOOSPHERE_HOME/.env
+# (atomic replace; never echo $b64)
 ```
 
 ### 4.5 Worker, then two app recreates
@@ -347,6 +352,12 @@ coverage is still ~0 until the worker runs. When `status` shows coverage
 printed id (host `$profile_id` is unset):
 
 ```bash
+export NOOSPHERE_HOME="${NOOSPHERE_HOME:-$HOME/.noosphere}"
+compose=(docker compose --project-directory "$NOOSPHERE_HOME")
+db_id=$("${compose[@]}" ps -q db)
+network=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' "$db_id")
+test -n "$network"
+test -n "${NOOSPHERE_HYBRID_ADMIN_DATABASE_URL:-}"
 profile_id='00000000-0000-4000-8000-000000000000'  # paste the printed id
 docker run --rm --network "$network" \
   -v "$HOME/src/noosphere-scripts:/src" -w /src \
