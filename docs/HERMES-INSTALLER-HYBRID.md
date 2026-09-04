@@ -54,8 +54,8 @@ commands; Compose stays in `~/.noosphere`.
 ### Prerequisites
 
 Docker Compose v2, Node.js 22+ with `npm`, `git`, `python3`, `pg_restore`,
-`curl`, `jq`, `sha256sum`, and `tar`. Hermes CLI on `PATH`. If Hermes uses a
-named profile:
+`curl`, `jq`, `openssl`, `sha256sum`, and `tar`. Hermes CLI on `PATH`. If Hermes
+uses a named profile:
 
 ```bash
 export HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
@@ -329,7 +329,8 @@ magic — build it from the printed id (empty `apiKey` is valid for local):
 
 ```bash
 profile_id='00000000-0000-4000-8000-000000000000'  # paste the printed id
-test "$profile_id" != '00000000-0000-4000-8000-000000000000'
+uuid_re='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'
+[[ "$profile_id" =~ $uuid_re ]] && test "$profile_id" != '00000000-0000-4000-8000-000000000000'
 json=$(python3 -c 'import json,sys; print(json.dumps([{"profileId":sys.argv[1],"locality":"local","endpoint":"http://host.docker.internal:8741/v1/embeddings","apiKey":""}],separators=(",",":")))' "$profile_id")
 b64=$(printf '%s' "$json" | base64 | tr -d '\n')
 test -n "$b64"
@@ -387,7 +388,8 @@ network=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}
 test -n "$network"
 test -n "${NOOSPHERE_HYBRID_ADMIN_DATABASE_URL:-}"
 profile_id='00000000-0000-4000-8000-000000000000'  # paste the printed id
-test "$profile_id" != '00000000-0000-4000-8000-000000000000'
+uuid_re='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'
+[[ "$profile_id" =~ $uuid_re ]] && test "$profile_id" != '00000000-0000-4000-8000-000000000000'
 docker run --rm --network "$network" \
   -v "$HOME/src/noosphere-scripts:/src" -w /src \
   -e NOOSPHERE_HYBRID_ADMIN_DATABASE_URL \
@@ -406,8 +408,14 @@ not a lexical fallback:
 
 ```bash
 # profile_id pasted from step 4.4; mint a 32-byte v1 key, never print it
+uuid_re='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'
+test -n "$profile_id" && [[ "$profile_id" =~ $uuid_re ]] && test "$profile_id" != '00000000-0000-4000-8000-000000000000'
 key_b64=$(openssl rand -base64 32)
 hmac_b64=$(printf '{"v1":"%s"}' "$key_b64" | base64 | tr -d '\n')
+Both writers share the same `os.replace` core on purpose: each is self-contained
+and copy-pasteable in isolation — an operator mid-procedure should not need to
+have run (or even read) the other block first.
+
 python3 - "$profile_id" "$hmac_b64" <<'PY'
 import os, sys, tempfile
 env_path = os.path.join(os.environ["NOOSPHERE_HOME"], ".env")
@@ -447,14 +455,18 @@ Then:
 
 `docker compose restart` does **not** reload env. Set
 `NOOSPHERE_HYBRID_RETRIEVAL_ENABLED` to the exact string `true`, recreate
-app again, health-check again. Then verify the gate actually opened:
+app again, health-check again.
+
+The config is parsed per **search request**, not at boot — boot logs stay
+clean until the first recall. After the recreate, run one throwaway recall
+(any Hermes key, `mode: "auto"`), then check for the fail-closed errors:
 
 ```bash
-"${compose[@]}" logs app 2>&1 | grep -E 'HybridCorrectnessError|query_profile_invalid|cache_keyring_invalid' || true
+"${compose[@]}" logs app 2>&1 | grep -E 'HybridCorrectnessError|query_profile_invalid|query_profile_missing|cache_keyring_invalid' || true
 ```
 
-Empty output above = config valid; any hit = fix `.env` before trusting
-Phase 4.6.
+Empty output **after that recall** = config valid; any hit = fix `.env`
+before trusting Phase 4.6. Without the recall, empty output proves nothing.
 
 ### 4.6 Prove hybrid
 
