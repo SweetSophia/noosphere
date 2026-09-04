@@ -84,7 +84,7 @@ test("wiki home labels topic admin as Manage Topics, not New Topic", () => {
   const topicPage = readRepoFile("src/app/wiki/[topicSlug]/page.tsx");
   assert.match(home, />\s*Manage Topics\s*</);
   assert.doesNotMatch(home, />\s*New Topic\s*</);
-  assert.match(topicPage, /DeleteTopicButton/);
+  assert.match(topicPage, /<DeleteTopicButton\b/);
   assert.match(topicPage, />\s*Manage Topics\s*</);
 });
 

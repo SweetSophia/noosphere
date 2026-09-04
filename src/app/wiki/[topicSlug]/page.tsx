@@ -63,8 +63,14 @@ export default async function TopicPage({ params }: Props) {
   });
   const hasSubtopics = topic.children.length > 0;
   const emptyArticlesState = getTopicArticlesEmptyState(hasSubtopics);
-  const articleCount = await prisma.article.count({ where: { topicId: topic.id } });
-  const canDeleteTopic = isAdmin && !hasSubtopics && articleCount === 0;
+  const blockingArticle =
+    isAdmin && !hasSubtopics
+      ? await prisma.article.findFirst({
+          where: { topicId: topic.id },
+          select: { id: true },
+        })
+      : null;
+  const canDeleteTopic = isAdmin && !hasSubtopics && blockingArticle === null;
 
   return (
     <div className="wiki-content topic-page">
@@ -84,13 +90,11 @@ export default async function TopicPage({ params }: Props) {
         description={topic.description ?? "A focused collection of articles and subtopics inside the Noosphere knowledge graph."}
         className="topic-page-hero"
         actions={
-          canCreateArticle || isAdmin ? (
+          canCreateArticle ? (
             <div className="cluster">
-              {canCreateArticle ? (
-                <Link href={`/wiki/${topic.slug}/new`} className="btn btn-primary btn-sm">
-                  New Article
-                </Link>
-              ) : null}
+              <Link href={`/wiki/${topic.slug}/new`} className="btn btn-primary btn-sm">
+                New Article
+              </Link>
               {isAdmin ? (
                 <Link href="/wiki/admin/topics" className="btn btn-secondary btn-sm">
                   Manage Topics
