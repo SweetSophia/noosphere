@@ -66,12 +66,7 @@ export default async function WikiLayout({
                 </Link>
                 {role === "ADMIN" && (
                   <Link href="/wiki/admin/keys" className="nav-link">
-                    API Keys
-                  </Link>
-                )}
-                {role === "ADMIN" && (
-                  <Link href="/wiki/admin/settings" className="nav-link">
-                    Recall Settings
+                    Admin menu
                   </Link>
                 )}
                 {role === "ADMIN" && (

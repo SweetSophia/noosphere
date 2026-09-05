@@ -88,6 +88,28 @@ test("wiki home labels topic admin as Manage Topics, not New Topic", () => {
   assert.match(topicPage, />\s*Manage Topics\s*</);
 });
 
+test("wiki header exposes one Admin menu door into the admin console", () => {
+  const layout = readRepoFile("src/app/wiki/layout.tsx");
+  const home = readRepoFile("src/app/wiki/page.tsx");
+  assert.match(layout, /href="\/wiki\/admin\/keys"/);
+  assert.match(layout, />\s*Admin menu\s*</);
+  assert.doesNotMatch(layout, />\s*API Keys\s*</);
+  assert.doesNotMatch(layout, />\s*Recall Settings\s*</);
+  assert.match(home, />\s*Admin menu\s*</);
+  assert.doesNotMatch(home, />\s*API Keys\s*</);
+});
+
+test("wiki article pages expose Publish and an edit-form status field", () => {
+  const articlePage = readRepoFile("src/app/wiki/[topicSlug]/[articleSlug]/page.tsx");
+  const editPage = readRepoFile("src/app/wiki/[topicSlug]/[articleSlug]/edit/page.tsx");
+  const actions = readRepoFile("src/app/wiki/[topicSlug]/[articleSlug]/edit/actions.ts");
+  assert.match(articlePage, /publishArticle/);
+  assert.match(articlePage, />\s*Publish\s*</);
+  assert.match(editPage, /name="status"/);
+  assert.match(actions, /export async function publishArticle/);
+  assert.match(actions, /status must be draft, reviewed, or published/i);
+});
+
 test("bootstrap stores generated secrets out of logs", () => {
   const bootstrapSource = readRepoFile("docker/bootstrap.mjs");
   const composeSource = readRepoFile("docker-compose.noosphere.yml");
