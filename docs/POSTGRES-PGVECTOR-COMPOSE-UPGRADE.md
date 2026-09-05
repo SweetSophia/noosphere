@@ -40,19 +40,19 @@ Docker administrator access is an explicit trust boundary. The lock serializes t
 ## OpenClaw installer deployments
 
 Install and upgrade through the same command, but only after the coordinated
-[`v1.13.2` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.2)
+[`v1.13.3` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.3)
 exists with all six installer assets. Source merge alone does not publish them:
 
 ```bash
-# Installer commit: 5c84a170a5b48754791e57b7e98191df5fbed5b8
-# Expected SHA-256: 1b98ea75fbcc15d224d4ab188d6f6958380321d98dc412816e3780937473e951
+# Installer commit: 4468cbb160c1b5eb98d42662229287be013692d7
+# Expected SHA-256: 781c1f635082aefaf62910bc2d973e22809ca690ef30a1c3a7143e8c9441e283
 (
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5c84a170a5b48754791e57b7e98191df5fbed5b8/install.sh -o "$installer"
-  printf '%s  %s\n' '1b98ea75fbcc15d224d4ab188d6f6958380321d98dc412816e3780937473e951' "$installer" | sha256sum -c -
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.2}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.2}" bash "$installer" --non-interactive --with openclaw
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/4468cbb160c1b5eb98d42662229287be013692d7/install.sh -o "$installer"
+  printf '%s  %s\n' '781c1f635082aefaf62910bc2d973e22809ca690ef30a1c3a7143e8c9441e283' "$installer" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.3}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.3}" bash "$installer" --non-interactive --with openclaw
 )
 ```
 

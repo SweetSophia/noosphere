@@ -9,14 +9,14 @@ supplement.
 Use OpenClaw's plugin installer:
 
 ```bash
-openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.13.2 --pin
+openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.13.3 --pin
 ```
 
 For the full local Noosphere + OpenClaw setup, first confirm that the
-coordinated [`v1.13.2` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.2)
+coordinated [`v1.13.3` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.3)
 exists with all six installer assets. Source merge alone does not publish the
 image, package, or release assets. Then use the checksum-verifying download form
-below; it runs the guided `1.13.2` launcher non-interactively for OpenClaw.
+below; it runs the guided `1.13.3` launcher non-interactively for OpenClaw.
 
 It verifies the reviewed launcher and backend before configuring OpenClaw through
 its protected file secret provider. For the full lifecycle and auditable download,
@@ -27,15 +27,15 @@ unrestricted across corpus scopes by default so ordinary saves without
 integration tags.
 
 ```bash
-# Installer commit: 5c84a170a5b48754791e57b7e98191df5fbed5b8
-# Expected SHA-256: 1b98ea75fbcc15d224d4ab188d6f6958380321d98dc412816e3780937473e951
+# Installer commit: 4468cbb160c1b5eb98d42662229287be013692d7
+# Expected SHA-256: 781c1f635082aefaf62910bc2d973e22809ca690ef30a1c3a7143e8c9441e283
 (
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5c84a170a5b48754791e57b7e98191df5fbed5b8/install.sh -o "$installer"
-  printf '%s  %s\n' '1b98ea75fbcc15d224d4ab188d6f6958380321d98dc412816e3780937473e951' "$installer" | sha256sum -c -
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.2}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.2}" bash "$installer" --non-interactive --with openclaw
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/4468cbb160c1b5eb98d42662229287be013692d7/install.sh -o "$installer"
+  printf '%s  %s\n' '781c1f635082aefaf62910bc2d973e22809ca690ef30a1c3a7143e8c9441e283' "$installer" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.3}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.3}" bash "$installer" --non-interactive --with openclaw
 )
 ```
 
@@ -173,14 +173,14 @@ exclude private agent/project memory that other agents must not see.
 Package releases use package-specific tag prefixes so independent packages do
 not trigger each other's publish jobs:
 
-- `v-openclaw-1.13.2` publishes `@sweetsophia/noosphere-injected-memory@1.13.2`
-  first, then `@sweetsophia/openclaw-noosphere-memory@1.13.2` after exact
+- `v-openclaw-1.13.3` publishes `@sweetsophia/noosphere-injected-memory@1.13.3`
+  first, then `@sweetsophia/openclaw-noosphere-memory@1.13.3` after exact
   integrity readback
-- `v-opencode-1.13.2` publishes `@sweetsophia/opencode-noosphere-memory@1.13.2`
-- `v-kilocode-1.13.2` publishes `@sweetsophia/kilocode-noosphere-memory@1.13.2`
-- `v-mcp-1.13.2` publishes `@sweetsophia/noosphere-mcp@1.13.2`
-- `v-hermes-1.13.2` produces the deterministic Hermes workflow artifact; the
-  trusted release publisher attaches that archive and checksum to `v1.13.2`
+- `v-opencode-1.13.3` publishes `@sweetsophia/opencode-noosphere-memory@1.13.3`
+- `v-kilocode-1.13.3` publishes `@sweetsophia/kilocode-noosphere-memory@1.13.3`
+- `v-mcp-1.13.3` publishes `@sweetsophia/noosphere-mcp@1.13.3`
+- `v-hermes-1.13.3` produces the deterministic Hermes workflow artifact; the
+  trusted release publisher attaches that archive and checksum to `v1.13.3`
   after independent readback
 
 New plugin packages should add their own `v-{package}-*` tag prefix in CI before
