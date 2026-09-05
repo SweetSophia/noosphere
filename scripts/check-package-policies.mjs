@@ -880,10 +880,10 @@ expect(
   "The coordinated release guide must attach/read back all checksum-owned installer assets before publication.",
 );
 expect(
-  installer.includes("BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/53d47df53515babf1c93ae42d17062f7b6fce589/install-openclaw.sh'") &&
-    installer.includes("BACKEND_SHA256='258bcfdf0ef30acda08e4b7b51618b441fbfe2c0177bc2ab15e9102af2afbea0'") &&
-    installer.includes("HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.13.2/hermes-noosphere-memory-1.13.2.tar.gz'") &&
-    installer.includes("HERMES_BUNDLE_SHA256='f22e00101a0744b2f3bfcb3e49107d885655456ae6c23ddc2b1eaffd04fa00b2'") &&
+  installer.includes("BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/91ca29963ef980dd95e700a2e84d9b49837c4b77/install-openclaw.sh'") &&
+    installer.includes("BACKEND_SHA256='44a3005015a1530c3a0976265ecc48f32dc9397fec52078e4b9cfe60e02a2831'") &&
+    installer.includes("HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.13.3/hermes-noosphere-memory-1.13.3.tar.gz'") &&
+    installer.includes("HERMES_BUNDLE_SHA256='8648b8810e0c5501c35c61743ef8ad7d28e0f80d84fea696cb83868f9c049ee8'") &&
     installer.includes("Refusing Noosphere backend with an unexpected checksum") &&
     installer.includes("Refusing Hermes bundle with an unexpected checksum") &&
     installer.includes("--core-only") &&
