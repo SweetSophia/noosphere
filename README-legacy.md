@@ -420,7 +420,7 @@ On the machine running OpenClaw Gateway:
   trap 'rm -f "$installer"' EXIT
   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5c84a170a5b48754791e57b7e98191df5fbed5b8/install.sh -o "$installer"
   printf '%s  %s\n' '1b98ea75fbcc15d224d4ab188d6f6958380321d98dc412816e3780937473e951' "$installer" | sha256sum -c -
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.2}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.2}" bash "$installer" --non-interactive --with openclaw
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.3}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.3}" bash "$installer" --non-interactive --with openclaw
   openclaw noosphere doctor
   openclaw noosphere status
 )
@@ -590,7 +590,7 @@ scoped npm plugins from this config:
 ```json
 {
   "plugin": [
-    "@sweetsophia/opencode-noosphere-memory@1.13.2"
+    "@sweetsophia/opencode-noosphere-memory@1.13.3"
   ]
 }
 ```
@@ -598,7 +598,7 @@ scoped npm plugins from this config:
 Optional explicit global install:
 
 ```bash
-npm install -g @sweetsophia/opencode-noosphere-memory@1.13.2
+npm install -g @sweetsophia/opencode-noosphere-memory@1.13.3
 export OPENCODE_NOOSPHERE_API_KEY="noo_..."
 ```
 
@@ -609,7 +609,7 @@ install it normally and keep both Opencode plugins registered:
 {
   "plugin": [
     "oh-my-opencode-slim",
-    "@sweetsophia/opencode-noosphere-memory@1.13.2"
+    "@sweetsophia/opencode-noosphere-memory@1.13.3"
   ]
 }
 ```
@@ -640,7 +640,7 @@ Noosphere ships a Kilo Code plugin at `kilocode-noosphere-memory/`.
 ### Quick install
 
 ```bash
-npm install -g @sweetsophia/kilocode-noosphere-memory@1.13.2
+npm install -g @sweetsophia/kilocode-noosphere-memory@1.13.3
 export KILOCODE_NOOSPHERE_API_KEY="noo_..."
 ```
 
@@ -649,7 +649,7 @@ Add the package to `~/.config/kilo/kilo.json`:
 ```json
 {
   "plugin": [
-    "@sweetsophia/kilocode-noosphere-memory@1.13.2"
+    "@sweetsophia/kilocode-noosphere-memory@1.13.3"
   ]
 }
 ```
@@ -657,7 +657,7 @@ Add the package to `~/.config/kilo/kilo.json`:
 Or install it through Kilo:
 
 ```bash
-kilo plugin @sweetsophia/kilocode-noosphere-memory@1.13.2 --global
+kilo plugin @sweetsophia/kilocode-noosphere-memory@1.13.3 --global
 ```
 
 ### Kilo Code capabilities

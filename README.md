@@ -33,9 +33,9 @@ machine.
 
 ### Install
 
-This launcher is coupled to the coordinated `v1.13.2` image, packages, and
+This launcher is coupled to the coordinated `v1.13.3` image, packages, and
 Hermes archive. Before running it, confirm that the
-[`v1.13.2` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.2)
+[`v1.13.3` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.3)
 exists with all six installer assets; a merged commit alone is not a release.
 
 Run the guided installer:
@@ -113,7 +113,7 @@ machine, for example `OPENCLAW_NOOSPHERE_API_KEY`,
 Install the Codex CLI integration independently of the core Docker installer:
 
 ```bash
-npx -y @sweetsophia/noosphere-mcp@1.13.2 install-codex
+npx -y @sweetsophia/noosphere-mcp@1.13.3 install-codex
 ```
 
 The command stores the MCP launcher, skill, and approved environment-variable

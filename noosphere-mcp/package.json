@@ -1,6 +1,6 @@
 {
   "name": "@sweetsophia/noosphere-mcp",
-  "version": "1.13.2",
+  "version": "1.13.3",
   "private": false,
   "description": "Model Context Protocol server for Noosphere, with a guided Codex CLI integration.",
   "type": "module",

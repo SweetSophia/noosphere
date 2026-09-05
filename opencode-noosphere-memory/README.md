@@ -16,8 +16,8 @@ You need two things before this plugin will do anything useful:
    `http://127.0.0.1:6578`. For a guided local install that also configures
    OpenCode, run:
 
-   Before running this pinned `1.13.2` command, confirm that the coordinated
-   [`v1.13.2` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.2)
+   Before running this pinned `1.13.3` command, confirm that the coordinated
+   [`v1.13.3` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.3)
    exists with all six installer assets. Source merge alone does not publish the
    image, package, or release assets.
 
@@ -66,7 +66,7 @@ npm plugins from this config:
 ```json
 {
   "plugin": [
-    "@sweetsophia/opencode-noosphere-memory@1.13.2"
+    "@sweetsophia/opencode-noosphere-memory@1.13.3"
   ]
 }
 ```
@@ -74,7 +74,7 @@ npm plugins from this config:
 Or install the package globally first if you prefer explicit local installs:
 
 ```bash
-npm install -g @sweetsophia/opencode-noosphere-memory@1.13.2
+npm install -g @sweetsophia/opencode-noosphere-memory@1.13.3
 ```
 
 ### oh-my-opencode-slim
@@ -86,7 +86,7 @@ need a separate fork. Install both plugins and keep both entries in
 ```bash
 npx oh-my-opencode-slim@latest install
 # Optional: Opencode can also auto-install npm plugins from opencode.json.
-npm install -g @sweetsophia/opencode-noosphere-memory@1.13.2
+npm install -g @sweetsophia/opencode-noosphere-memory@1.13.3
 export OPENCODE_NOOSPHERE_API_KEY="noo_..."
 ```
 
@@ -94,7 +94,7 @@ export OPENCODE_NOOSPHERE_API_KEY="noo_..."
 {
   "plugin": [
     "oh-my-opencode-slim",
-    "@sweetsophia/opencode-noosphere-memory@1.13.2"
+    "@sweetsophia/opencode-noosphere-memory@1.13.3"
   ]
 }
 ```
@@ -111,7 +111,7 @@ Or configure it with explicit options:
 {
   "plugin": [
     [
-      "@sweetsophia/opencode-noosphere-memory@1.13.2",
+      "@sweetsophia/opencode-noosphere-memory@1.13.3",
       {
         "baseUrl": "http://127.0.0.1:6578",
         "autoRecall": true,

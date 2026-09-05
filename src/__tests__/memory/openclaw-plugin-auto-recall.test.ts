@@ -2373,7 +2373,7 @@ describe("OpenClaw Noosphere CLI helpers", () => {
     assert.match(commands[5], /sha256sum -c -/);
     assert.equal(
       commands[6],
-      '  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.2}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.13.2}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.2}" bash "$installer" --non-interactive --with openclaw',
+      '  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.3}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.13.3}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.3}" bash "$installer" --non-interactive --with openclaw',
     );
     assert.equal(commands[7], ")");
     assert.doesNotMatch(combined, /\/master\/install-openclaw\.sh|install-openclaw\.sh \| bash/);
