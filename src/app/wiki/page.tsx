@@ -169,7 +169,7 @@ export default async function WikiHomePage() {
                 Manage Topics
               </Link>
               <Link href="/wiki/admin/keys" className="btn btn-secondary btn-sm">
-                API Keys
+                Admin menu
               </Link>
             </div>
           ) : null
