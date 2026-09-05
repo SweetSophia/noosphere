@@ -33,6 +33,12 @@ since `1.13.2`.
   ([#318](https://github.com/SweetSophia/noosphere/pull/318))**: llama.cpp-only
   source-compose how-to and stack script. Do not use Ollama.
 
+### Security
+
+- **Kilo and Opencode lockfiles**: bump transitive `toml` `4.1.1` → `4.3.0` so
+  `npm audit` no longer fails those plugin package-check jobs (GHSA-82x6-q7mm-w9cf,
+  GHSA-v5mp-jgw5-2x6j).
+
 ## [1.13.2] - 2026-09-02
 
 Patch release publishing the Codex MCP integration and the security and recall
