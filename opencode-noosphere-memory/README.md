@@ -22,14 +22,14 @@ You need two things before this plugin will do anything useful:
    image, package, or release assets.
 
    ```bash
-   # Installer commit: 5c84a170a5b48754791e57b7e98191df5fbed5b8
-   # Expected SHA-256: 1b98ea75fbcc15d224d4ab188d6f6958380321d98dc412816e3780937473e951
+   # Installer commit: 4468cbb160c1b5eb98d42662229287be013692d7
+   # Expected SHA-256: 781c1f635082aefaf62910bc2d973e22809ca690ef30a1c3a7143e8c9441e283
    (
      set -e
      installer="$(mktemp)"
      trap 'rm -f "$installer"' EXIT
-     curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5c84a170a5b48754791e57b7e98191df5fbed5b8/install.sh -o "$installer"
-     printf '%s  %s\n' '1b98ea75fbcc15d224d4ab188d6f6958380321d98dc412816e3780937473e951' "$installer" | sha256sum -c -
+     curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/4468cbb160c1b5eb98d42662229287be013692d7/install.sh -o "$installer"
+     printf '%s  %s\n' '781c1f635082aefaf62910bc2d973e22809ca690ef30a1c3a7143e8c9441e283' "$installer" | sha256sum -c -
      bash "$installer" --non-interactive --with opencode
    )
    ```
