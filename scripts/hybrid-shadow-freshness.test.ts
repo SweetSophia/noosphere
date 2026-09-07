@@ -29,6 +29,10 @@ test("freshness exact lookup enforces scope, deletion and ambiguity without meta
       ('mixed', '{secret-tag}', NULL, 'secret-title', 'DRAFT'),
       ('hidden-duplicate', '{secret-tag}', NULL, 'secret-title', 'DRAFT'),
       ('hidden-duplicate', '{secret-tag}', NULL, 'secret-title', 'DRAFT')`);
+    await pool.query(`ALTER TABLE "Article" ADD COLUMN id text;
+      ALTER TABLE "Article" ADD COLUMN "recallQuarantinedAt" timestamp;
+      CREATE TEMP TABLE "MemoryLineageState" (id text, generation int, "revokedAt" timestamp);
+      CREATE TEMP TABLE "MemoryProvenanceEdge" ("articleId" text, "sourceGroupId" text, "lineageStateId" text, "generationSnapshot" int)`);
     const set: QuerySet = { version: 1, queries: [{ id: "query-one", query: "search misses everything", relevance: {
       visible: 3, hidden: 3, missing: 3, deleted: 3, "deleted-hidden": 3, duplicate: 3, mixed: 3, "hidden-duplicate": 0,
     } }] };
@@ -69,6 +73,62 @@ test("freshness exact lookup enforces scope, deletion and ambiguity without meta
     await pool.end();
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("freshness excludes quarantine and invalid provenance before duplicate aggregation", async () => {
+  assert.ok(process.env.SHADOW_TEST_DATABASE_URL, "isolated fixture database required");
+  const pool = new Pool({ connectionString: process.env.SHADOW_TEST_DATABASE_URL, max: 1 });
+  try {
+    await pool.query(`
+      CREATE TEMP TABLE "Article" (id text, slug text, "restrictedTags" text[], "deletedAt" timestamp, "recallQuarantinedAt" timestamp);
+      CREATE TEMP TABLE "MemoryLineageState" (id text, generation int, "revokedAt" timestamp);
+      CREATE TEMP TABLE "MemoryProvenanceEdge" ("articleId" text, "sourceGroupId" text, "lineageStateId" text, "generationSnapshot" int);
+      INSERT INTO "Article" VALUES
+        ('private-q', 'quarantined', '{}', NULL, now()),
+        ('private-a', 'quarantine-duplicate', '{}', NULL, NULL),
+        ('private-b', 'quarantine-duplicate', '{private-tag}', NULL, now()),
+        ('private-r', 'revoked', '{}', NULL, NULL),
+        ('private-s', 'stale', '{}', NULL, NULL),
+        ('private-g', 'valid-group', '{}', NULL, NULL),
+        ('private-m', 'mixed-group', '{}', NULL, NULL),
+        ('private-d', 'lineage-duplicate', '{}', NULL, NULL),
+        ('private-e', 'lineage-duplicate', '{}', NULL, NULL),
+        ('private-h', 'hidden-revoked', '{private-tag}', NULL, NULL),
+        ('private-n', 'no-provenance', '{}', NULL, NULL);
+      INSERT INTO "MemoryLineageState" VALUES
+        ('private-valid', 2, NULL), ('private-revoked', 2, now()), ('private-stale', 3, NULL);
+      INSERT INTO "MemoryProvenanceEdge" VALUES
+        ('private-r', 'private-group', 'private-revoked', 2),
+        ('private-s', 'private-group', 'private-stale', 2),
+        ('private-g', 'private-group', 'private-revoked', 2),
+        ('private-g', 'private-other', 'private-valid', 2),
+        ('private-m', 'private-group', 'private-valid', 2),
+        ('private-m', 'private-group', 'private-revoked', 2),
+        ('private-m', 'private-other', 'private-stale', 2),
+        ('private-e', 'private-group', 'private-revoked', 2),
+        ('private-h', 'private-group', 'private-revoked', 2);
+    `);
+    const statuses = {
+      quarantined: false, "quarantine-duplicate": true, revoked: false, stale: false,
+      "valid-group": true, "mixed-group": false, "lineage-duplicate": true,
+      "hidden-revoked": false, "no-provenance": true,
+    };
+    for (const [slug, eligible] of Object.entries(statuses)) {
+      const set: QuerySet = { version: 1, queries: [{ id: "fixture", query: "miss", relevance: { [slug]: 3 } }] };
+      const original = JSON.stringify(set);
+      for (const [scopes, adminEvidence] of [[undefined, false], [undefined, true], [["*"], false]] as const) {
+        const report = await checkFixtureFreshness(pool, set, scopes ? [...scopes] : undefined, adminEvidence);
+        assert.equal(report.judgments[0].status, eligible ? "visible" : scopes || adminEvidence ? "corpus-absent" : "unknown/not-visible", slug);
+        assert.equal(report.outcome, eligible ? "clear" : "needs-review", slug);
+        assert.doesNotMatch(JSON.stringify(report), /private-/);
+        assert.equal(JSON.stringify(set), original);
+      }
+    }
+    // Make the quarantined duplicate unrestricted too: neither scope may count it.
+    await pool.query(`UPDATE "Article" SET "restrictedTags" = '{}' WHERE id = 'private-b'`);
+    const duplicate: QuerySet = { version: 1, queries: [{ id: "fixture", query: "miss", relevance: { "quarantine-duplicate": 3 } }] };
+    assert.equal((await checkFixtureFreshness(pool, duplicate, undefined)).outcome, "clear");
+  } finally { await pool.end(); }
 });
 
 test("real CLI preflight needs no hybrid or Redis config and persists no metric report", async () => {

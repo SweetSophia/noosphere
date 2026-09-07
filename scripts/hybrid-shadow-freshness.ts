@@ -25,9 +25,25 @@ export async function checkFixtureFreshness(
   const { rows } = await db.query<{ slug: string; total: number; visible: number }>(`
     SELECT slug, count(*)::int AS total,
       count(*) FILTER (WHERE $2::boolean OR cardinality("restrictedTags") = 0)::int AS visible
-    FROM "Article"
+    FROM "Article" article
     WHERE slug = ANY($1::text[]) AND "deletedAt" IS NULL
+      AND "recallQuarantinedAt" IS NULL
       AND ($3::boolean OR cardinality("restrictedTags") = 0)
+      -- Match final recall hydration: an article is blocked only when every
+      -- provenance source group has at least one revoked or stale lineage.
+      -- No provenance is eligible; one entirely valid group is sufficient.
+      AND NOT EXISTS (
+        SELECT 1 FROM (
+          SELECT edge."sourceGroupId",
+            bool_or(lineage."revokedAt" IS NOT NULL
+              OR lineage.generation <> edge."generationSnapshot") AS invalid
+          FROM "MemoryProvenanceEdge" edge
+          JOIN "MemoryLineageState" lineage ON lineage.id = edge."lineageStateId"
+          WHERE edge."articleId" = article.id
+          GROUP BY edge."sourceGroupId"
+        ) provenance_groups
+        HAVING bool_and(invalid)
+      )
     GROUP BY slug
   `, [slugs, evaluationAdmin, inspectAll]);
   const bySlug = new Map(rows.map((row) => [row.slug, row]));
@@ -50,7 +66,7 @@ export async function checkFixtureFreshness(
     evaluationScope: evaluationAdmin ? "admin" : "unscoped",
     evidenceScope: inspectAll ? "admin" : "unscoped",
     outcome: judgments.every((j) => j.status === "visible") ? "clear" : "needs-review",
-    limitation: "Point-in-time check, not a serving acceptance decision. Soft-deleted rows are outside the corpus; all lifecycle statuses are included. Slug-only judgments can be ambiguous across topics. Unscoped evidence cannot detect hidden duplicates or distinguish absent from restricted rows. No judgments or metric denominators are changed.",
+    limitation: "Point-in-time check, not a serving acceptance decision. Soft-deleted, recall-quarantined and fully invalid provenance rows are outside the recall-eligible corpus; all lifecycle statuses are included. Lineage eligibility uses the query snapshot, not recall's serialization locks; later revocations can invalidate it. Slug-only judgments can be ambiguous across topics. Unscoped evidence cannot detect hidden duplicates or distinguish absent from restricted rows. No judgments or metric denominators are changed.",
     counts,
     judgments,
   };

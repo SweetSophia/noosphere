@@ -51,9 +51,18 @@ Judgments include grade-zero entries and are reported per query/slug:
 - `ambiguous`: more than one match in the authorized evidence, since article
   slugs are unique only within a topic. No article is silently selected.
 
-Soft-deleted articles are outside the corpus. Draft, reviewed and published
-statuses are all included, matching the provider; this is not published-only
-mode. Hidden duplicates cannot be detected by unscoped evidence: `visible` and
+The corpus here is recall-eligible: soft-deleted and recall-quarantined articles
+are excluded before aggregation, as are articles whose every provenance source
+group contains a revoked lineage or a generation/snapshot mismatch. This matches
+the final eligibility checks in both recall paths: no provenance is eligible,
+and one entirely valid source group is sufficient. A blocked duplicate cannot
+create ambiguity. `corpus-absent` means absent from this eligible corpus, not
+physical absence; no quarantine or lineage metadata/reasons are reported.
+Unscoped evidence keeps missing, restricted and privacy-ineligible rows
+indistinguishable. The single SQL statement observes a snapshot, without recall's
+serialization locks; a later revocation can invalidate this preflight.
+Draft, reviewed and published statuses are all included, matching the provider;
+this is not published-only mode. Hidden duplicates cannot be detected by unscoped evidence: `visible` and
 `clear` describe only the inspected scope. The lookup projects only fixture
 slugs and aggregate counts, not titles, tags, topic names or article IDs.
 
@@ -82,7 +91,8 @@ npm run test:hybrid-shadow
 SHADOW_TEST_DATABASE_URL=<disposable-app-role-url> npm run test:hybrid-shadow-db
 ```
 
-The database test creates a connection-local temporary Article table, includes
-restricted/deleted/duplicate fixtures, and never modifies the application corpus.
+The database tests create connection-local temporary Article and provenance tables,
+include restricted/deleted/quarantined/duplicate and lineage-revocation fixtures,
+and never modify the application corpus.
 CI runs it against its disposable database. Production retrieval quality and
 serving acceptance remain outside these tests.
