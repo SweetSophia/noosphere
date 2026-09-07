@@ -14,8 +14,10 @@
  * No article edits or corpus-vector writes are requested by this harness.
  * Reports can contain restricted article titles; keep them private.
  *
- * Usage (always dual-path; unreachable hybrid services may cause fallback):
+ * Usage (dual-path evaluation by default; --preflight-only performs only the
+ * freshness lookup and writes no metric reports — see docs/HYBRID-SHADOW-EVALUATION.md):
  *   npm run hybrid:shadow-eval -- --limit 5 --k 5 --out <dir>
+ *   npm run hybrid:shadow-eval -- --preflight-only --out <dir>
  *
  * Full dual-path run: must execute inside the compose network so the pinned
  * provider endpoint (host.docker.internal:8741) resolves, with the app-role
