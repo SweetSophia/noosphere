@@ -1,0 +1,97 @@
+{
+  "$schema": "./hybrid-shadow-queries.schema.json",
+  "version": 1,
+  "description": "Graded query set for hybrid-vs-keyword shadow evaluation (issue #319). Slugs verified against the live article corpus 2026-09-04. Relevance: 3 = on-topic core, 2 = related, 1 = background, 0 = off-topic.",
+  "queries": [
+    {
+      "id": "release-1-13-2",
+      "query": "1.13.2 release",
+      "relevance": {
+        "noosphere-1132-released-six-tags-five-npm-packages-verified-public-readback": 3,
+        "noosphere-pr-317-merged-as-11e1be9b-1132-release-candidate-on-master": 3,
+        "residential-noosphere-upgraded-to-1132-floor-preserved-health-verified": 3,
+        "noosphere-pr-318-regular-merge-and-post-merge-verification": 2
+      }
+    },
+    {
+      "id": "hybrid-retrieval-status",
+      "query": "hybrid retrieval activation llama.cpp",
+      "relevance": {
+        "noosphere-epic-261-closed-hybrid-retrieval-shipped-phase-d-gates-split-to-319": 3,
+        "noosphere-pr-318-regular-merge-and-post-merge-verification": 3,
+        "noosphere-production-pgvector-deployment-2026-08-28": 2
+      }
+    },
+    {
+      "id": "pgvector-production",
+      "query": "pgvector production deployment volume upgrade",
+      "relevance": {
+        "noosphere-production-pgvector-deployment-2026-08-28": 3,
+        "noosphere-pgvector-production-deployment-supplement": 3,
+        "residential-noosphere-upgraded-to-1132-floor-preserved-health-verified": 1
+      }
+    },
+    {
+      "id": "codex-mcp",
+      "query": "Codex CLI MCP integration",
+      "relevance": {
+        "noosphere-mcp-1131-merged-and-published": 3,
+        "noosphere-pr-313-codex-cli-mcp-support-merge-ready-at-886e6a7": 3,
+        "noosphere-pr-313-final-codex-mcp-release-gate-at-c7eed74": 2
+      }
+    },
+    {
+      "id": "pr-merge-verification",
+      "query": "regular merge post-merge verification tree identity",
+      "relevance": {
+        "noosphere-pr-318-regular-merge-and-post-merge-verification": 3,
+        "noosphere-pr-301-regular-merge-and-post-merge-verification": 3,
+        "noosphere-pr-294-regular-merge-and-post-merge-verification": 3,
+        "noosphere-pr-306-regular-merge-and-post-merge-verification": 2
+      }
+    },
+    {
+      "id": "security-repair",
+      "query": "NextAuth security vulnerability dependency repair",
+      "relevance": {
+        "noosphere-pr-293-nextauth-42415-security-repair-and-merge-readiness-receipt": 3,
+        "noosphere-pr-294-dependency-security-repair-merge-readiness-receipt": 3
+      }
+    },
+    {
+      "id": "openclaw-recovery",
+      "query": "OpenClaw gateway incident recovery root cause",
+      "relevance": {
+        "openclaw-incident-2026-08-04-cross-agent-sessions-send-semantic-loop-root-cause-": 3,
+        "openclaw-release-line-assessment-634-and-71-corrections-vs-beta7": 2,
+        "openclaw-2026-08-08-shodan-reasoning-only-text-masqueraded-as-final-answer": 2
+      }
+    },
+    {
+      "id": "backup-automation",
+      "query": "backup automation systemd timers NAS",
+      "relevance": {
+        "backup-automation-deployed-systemd-timers-for-hdd-nas-2": 3,
+        "backup-automation-deployed-systemd-timers-for-hdd-nas": 3,
+        "openclaw-repair-backups-moved-from-root-ssd-to-storage-disk-2026-08-03": 2
+      }
+    },
+    {
+      "id": "pixel-agents-prs",
+      "query": "pixel agents accessibility pull request",
+      "relevance": {
+        "openclaw-pixel-agents-pr-136-issue-105-accessibility-implementation": 3,
+        "openclaw-pixel-agents-pr-135-fagan-findings-closed-at-6b6ef1a": 2,
+        "openclaw-pixel-agents-issue-99-secure-bounded-collector-in-pr-135": 2
+      }
+    },
+    {
+      "id": "residential-upgrade",
+      "query": "residential stack upgrade article floor preserved",
+      "relevance": {
+        "residential-noosphere-upgraded-to-1132-floor-preserved-health-verified": 3,
+        "noosphere-1120-publication-and-production-adoption-receipt": 2
+      }
+    }
+  ]
+}

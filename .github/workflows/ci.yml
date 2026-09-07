@@ -162,6 +162,9 @@ jobs:
       - name: Run hybrid-provider transport tests
         run: npm run test:hybrid-provider
 
+      - name: Run hybrid shadow harness tests (no services required)
+        run: npm run test:hybrid-shadow
+
       - name: Run memory tests
         run: npm run test:memory
 
