@@ -14,8 +14,10 @@
  * No article edits or corpus-vector writes are requested by this harness.
  * Reports can contain restricted article titles; keep them private.
  *
- * Usage (always dual-path; unreachable hybrid services may cause fallback):
+ * Usage (dual-path evaluation by default; --preflight-only performs only the
+ * freshness lookup and writes no metric reports — see docs/HYBRID-SHADOW-EVALUATION.md):
  *   npm run hybrid:shadow-eval -- --limit 5 --k 5 --out <dir>
+ *   npm run hybrid:shadow-eval -- --preflight-only --out <dir>
  *
  * Full dual-path run: must execute inside the compose network so the pinned
  * provider endpoint (host.docker.internal:8741) resolves, with the app-role
@@ -46,6 +48,7 @@ import { pathToFileURL } from "node:url";
 import type { MemoryProvider } from "@/lib/memory/provider";
 import type { MemoryResult } from "@/lib/memory/types";
 import { HYBRID_MAX_WINDOW } from "@/lib/memory/hybrid-ranking";
+import { checkFixtureFreshness, type FixtureFreshness } from "./hybrid-shadow-freshness";
 
 interface GradedQuery {
   id: string;
@@ -76,9 +79,11 @@ function requireEnv(name: string): string {
   return value;
 }
 
-export function parseArgs(argv: string[]): { limit: number; k: number; outDir: string; scopes: string[] | undefined } {
-  const opts = { limit: 10, k: 5, outDir: "hybrid-shadow-reports", scopes: undefined as string[] | undefined };
+export function parseArgs(argv: string[]): { limit: number; k: number; outDir: string; scopes: string[] | undefined; preflightOnly?: boolean; freshnessAdmin?: boolean } {
+  const opts: ReturnType<typeof parseArgs> = { limit: 10, k: 5, outDir: "hybrid-shadow-reports", scopes: undefined as string[] | undefined };
   for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === "--preflight-only") { opts.preflightOnly = true; continue; }
+    if (argv[i] === "--freshness-admin") { opts.freshnessAdmin = true; continue; }
     if (!["--limit", "--k", "--out", "--scopes"].includes(argv[i])) throw new Error(`unknown argument: ${argv[i]}`);
     if (!argv[i + 1]?.trim() || argv[i + 1].startsWith("--")) throw new Error(`missing value for ${argv[i]}`);
     if (argv[i] === "--limit") opts.limit = Number(argv[++i]);
@@ -207,8 +212,9 @@ export function buildReport(
   hybridRankings: Ranking[],
   opts: ReturnType<typeof parseArgs>,
   environment: Readonly<Record<string, string | undefined>>,
+  freshness: FixtureFreshness | null = null,
 ) {
-  const metrics: Record<string, { path: string; recall: number | null; ndcg: number | null; mrr: number | null; latencyP50: number; fallbacks: number; fallbackUnknown: number }> = {};
+  const metrics: Record<string, { path: string; recall: number | null; ndcg: number | null; mrr: number | null; latencyP50: number; fallbacks: number; fallbackUnknown: number; denominators: { recall: { evaluated: number; excluded: number }; ndcg: { evaluated: number; excluded: number }; mrr: { evaluated: number; excluded: number } } }> = {};
   for (const [path, rankings] of [["keyword", keywordRankings], ["hybrid", hybridRankings]] as const) {
     let recallSum = 0, recallN = 0, ndcgSum = 0, ndcgN = 0, mrrSum = 0, fallbacks = 0, fallbackUnknown = 0;
     const latencies: number[] = [];
@@ -235,6 +241,11 @@ export function buildReport(
       latencyP50: latencies[Math.floor(latencies.length / 2)] ?? 0,
       fallbacks,
       fallbackUnknown,
+      denominators: {
+        recall: { evaluated: recallN, excluded: rankings.length - recallN },
+        ndcg: { evaluated: ndcgN, excluded: rankings.length - ndcgN },
+        mrr: { evaluated: rankings.length, excluded: 0 },
+      },
     };
   }
 
@@ -245,6 +256,7 @@ export function buildReport(
     limit: opts.limit,
     k: opts.k,
     relevanceTiers: RELEVANCE_TIERS,
+    freshness,
     observation: {
       scope: opts.scopes?.includes("*") ? "admin (all scopes, all statuses)" : "unscoped (unrestricted articles, all statuses)",
       redis: environment.REDIS_URL ? "configured" : "not configured",
@@ -282,6 +294,20 @@ export async function writeReport(report: ReturnType<typeof buildReport>, outDir
     const m = report.metrics[p];
     md.push(`| ${p} | ${m.recall?.toFixed(3) ?? "n/a"} | ${m.ndcg?.toFixed(3) ?? "n/a"} | ${m.mrr?.toFixed(3) ?? "n/a"} | ${m.latencyP50} | ${m.fallbacks} | ${m.fallbackUnknown} |`);
   }
+  md.push("", "| path | recall evaluated | recall excluded | nDCG evaluated | nDCG excluded | MRR all-query denominator | MRR excluded |",
+    "| --- | --- | --- | --- | --- | --- | --- |");
+  for (const p of ["keyword", "hybrid"]) {
+    const d = report.metrics[p].denominators;
+    md.push(`| ${p} | ${d.recall.evaluated} | ${d.recall.excluded} | ${d.ndcg.evaluated} | ${d.ndcg.excluded} | ${d.mrr.evaluated} | ${d.mrr.excluded} |`);
+  }
+  md.push("", "## Fixture freshness");
+  if (report.freshness) {
+    const f = report.freshness;
+    md.push("", `Evaluation scope: ${f.evaluationScope}; evidence scope: ${f.evidenceScope}.`,
+      `Started: ${f.startedAt}; checked: ${f.checkedAt}; outcome: ${f.outcome}.`, "", f.limitation,
+      "", ...Object.entries(f.counts).map(([status, count]) => `- ${status}: ${count}`),
+      "", "Per-judgment outcomes are in the private aggregate JSON.");
+  } else md.push("", "Not checked; not decision-grade evidence.");
   md.push(``, `Full per-query rankings: \`${path.basename(jsonl)}\``);
   md.push(`Aggregate report: \`${path.basename(aggregatePath)}\``);
   await writeFile(summaryPath, md.join("\n") + "\n", { flag: "wx", mode: 0o600 });
@@ -293,19 +319,28 @@ async function main(): Promise<void> {
   const fixturePath = path.resolve(import.meta.dirname, "../src/__tests__/fixtures/hybrid-shadow-queries.json");
   const querySet = loadQuerySet(await readFile(fixturePath, "utf8"));
   const databaseUrl = requireEnv("DATABASE_URL");
-  const baseEnv = {
+  const baseEnv = opts.preflightOnly ? process.env : {
     ...process.env,
     NOOSPHERE_HYBRID_QUERY_PROFILE_ID: requireEnv("NOOSPHERE_HYBRID_QUERY_PROFILE_ID"),
     NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION: requireEnv("NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION"),
     NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64: requireEnv("NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64"),
   };
-  // Pure imports above never initialize Prisma, Redis, or a provider.
-  const [{ PrismaClient }, { PrismaPg }, { Pool }, { createNoosphereProvider }, { closeRedisClient }] = await Promise.all([
-    import("@prisma/client"), import("@prisma/adapter-pg"), import("pg"),
-    import("@/lib/memory/noosphere"), import("@/lib/cache/redis"),
-  ]);
+  // Preflight-only never imports Prisma, Redis, or the search provider.
+  const { Pool } = await import("pg");
   const pool = new Pool({ connectionString: databaseUrl, max: 2 });
   try {
+    const freshness = await checkFixtureFreshness(pool, querySet, opts.scopes, opts.freshnessAdmin);
+    // Persist preflight even if later retrieval fails. No search/cache/embedding
+    // work is requested by preflight-only. Do not treat it as a metric report.
+    await mkdir(opts.outDir, { recursive: true, mode: 0o700 });
+    const freshnessPath = path.join(opts.outDir, `freshness-${randomUUID()}.json`);
+    await writeFile(freshnessPath, JSON.stringify({ querySetVersion: querySet.version, freshness }, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+    process.stdout.write(`freshness: ${freshness.outcome}; evidence: ${freshnessPath}\n`);
+    if (opts.preflightOnly) return;
+    const [{ PrismaClient }, { PrismaPg }, { createNoosphereProvider }, { closeRedisClient }] = await Promise.all([
+      import("@prisma/client"), import("@prisma/adapter-pg"),
+      import("@/lib/memory/noosphere"), import("@/lib/cache/redis"),
+    ]);
     const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
     try {
       const keywordProvider = createNoosphereProvider({ prisma, allowedScopes: opts.scopes,
@@ -315,13 +350,13 @@ async function main(): Promise<void> {
       process.stdout.write(`shadow eval: ${querySet.queries.length} queries, limit ${opts.limit}, k ${opts.k}, scopes ${opts.scopes ? "admin (all scopes, all statuses)" : "unscoped (unrestricted articles, all statuses)"}\n`);
       const keywordRankings = await runPath("keyword", keywordProvider, querySet, opts.limit);
       const hybridRankings = await runPath("hybrid", hybridProvider, querySet, opts.limit);
-      const files = await writeReport(buildReport(querySet, keywordRankings, hybridRankings, opts, baseEnv), opts.outDir);
+      const files = await writeReport(buildReport(querySet, keywordRankings, hybridRankings, opts, baseEnv, freshness), opts.outDir);
       process.stdout.write(`\nreport: ${files.jsonl}\naggregate: ${files.aggregatePath}\nsummary: ${files.summaryPath}\n`);
     } finally {
-      await prisma.$disconnect();
+      try { await prisma.$disconnect(); } finally { await closeRedisClient(); }
     }
   } finally {
-    try { await pool.end(); } finally { await closeRedisClient(); }
+    await pool.end();
   }
 }
 

@@ -191,6 +191,43 @@ test("rapid report writes preserve aggregate JSON, JSONL and honest secret-free 
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+test("explicit per-path denominators cover mixed, all-excluded and normal judgments", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "denominator-test-"));
+  try {
+    for (const positives of [0, 1, 3]) {
+      const set: QuerySet = { version: 1, queries: Array.from({ length: 3 }, (_, i): QuerySet["queries"][number] => ({
+        id: `query-${i}`, query: "test query", relevance: i < positives ? { relevant: 3 } : i === 1 ? {} : { relevant: 0 },
+      })) };
+      const keyword = await rankings(set, [[row("relevant")], [], [row("zero"), row("relevant")]], "keyword");
+      const hybrid = await rankings(set, [[], [], []]);
+      const report = buildReport(set, keyword, hybrid, parseArgs(["--k", "1"]), {});
+      for (const p of ["keyword", "hybrid"]) assert.deepEqual(report.metrics[p].denominators, {
+        recall: { evaluated: positives, excluded: 3 - positives },
+        ndcg: { evaluated: positives, excluded: 3 - positives },
+        mrr: { evaluated: 3, excluded: 0 },
+      });
+      assert.equal(report.metrics.keyword.recall, positives ? 1 / positives : null);
+      assert.equal(report.metrics.keyword.ndcg, positives ? 1 / positives : null);
+      assert.equal(report.metrics.keyword.mrr, positives === 3 ? 0.5 : positives ? 1 / 3 : 0);
+      assert.equal(report.metrics.hybrid.recall, positives ? 0 : null);
+      assert.equal(report.metrics.hybrid.mrr, 0);
+      const files = await writeReport(report, dir);
+      assert.deepEqual(JSON.parse(await readFile(files.aggregatePath, "utf8")).metrics, report.metrics);
+      const md = await readFile(files.summaryPath, "utf8");
+      for (const p of ["keyword", "hybrid"]) assert.ok(md.includes(`| ${p} | ${positives} | ${3 - positives} | ${positives} | ${3 - positives} | 3 | 0 |`));
+      assert.match(md, /MRR all-query denominator/);
+      assert.match(md, /Not checked; not decision-grade/);
+    }
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("preflight flags require explicit admin evidence opt-in", () => {
+  assert.equal(parseArgs([]).freshnessAdmin, undefined);
+  assert.equal(parseArgs(["--preflight-only"]).preflightOnly, true);
+  assert.equal(parseArgs(["--freshness-admin"]).freshnessAdmin, true);
+  assert.equal(parseArgs(["--freshness-admin"]).scopes, undefined);
+});
+
 test("pure import has no provider/Prisma initialization; CLI rejects arguments before runtime setup", () => {
   const script = path.resolve(import.meta.dirname, "hybrid-shadow-eval.ts");
   const env = { ...process.env, DATABASE_URL: "", NOOSPHERE_HYBRID_QUERY_PROFILE_ID: "" };
