@@ -44,6 +44,17 @@ test("mixed MRR includes misses and ranks beyond k up to the returned limit", as
   assert.equal(report.metrics.hybrid.fallbackUnknown, 1);
 });
 
+test("duplicate judged slugs earn credit once without shifting returned ranks", async () => {
+  const set = querySet();
+  const hybrid = await rankings(set, [[row("relevant"), row("relevant"), row("other")]]);
+  const report = buildReport(set, hybrid, hybrid, parseArgs(["--k", "3"]), {});
+  assert.equal(report.metrics.hybrid.recall, 1);
+  assert.equal(report.metrics.hybrid.ndcg, (3 + 1 / Math.log2(4)) / (3 + 1 / Math.log2(3)));
+  assert.equal(report.metrics.hybrid.mrr, 1);
+  assert.deepEqual(hybrid[0].results.map((r) => r.slug), ["relevant", "relevant", "other"]);
+  assert.deepEqual(hybrid[0].results.map((r) => r.grade), [3, 0, 1]);
+});
+
 test("linear-gain nDCG uses full fixture IDCG, including unretrieved judgments", async () => {
   const set = querySet();
   const hybrid = await rankings(set, [[row("other")]]);

@@ -16,7 +16,7 @@
         "required": ["id", "query", "relevance"],
         "properties": {
           "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
-                  "description": "Stable slug; matches /wiki/<topic>/<slug> article slugs" },
+                  "description": "Stable query identifier; independent of article slugs" },
           "query": { "type": "string", "minLength": 3, "maxLength": 200 },
           "docHint": { "type": "string" },
           "note": { "type": "string" },

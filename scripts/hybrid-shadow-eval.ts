@@ -177,6 +177,7 @@ export async function runPath(
     const results = await provider.search(graded.query, { limit });
     const latencyMs = Math.round(performance.now() - started);
     const meta0 = (results[0]?.metadata ?? {}) as Record<string, unknown>;
+    const judgedSlugs = new Set<string>();
     rankings.push({
       path,
       queryId: graded.id,
@@ -187,8 +188,12 @@ export async function runPath(
       hybridFallback: path === "keyword" ? false : results.length === 0 ? null : Boolean(meta0.hybridFallback),
       hybridFallbackReason: typeof meta0.hybridFallbackReason === "string" ? meta0.hybridFallbackReason : undefined,
       results: results.map((r) => {
-        const slug = slugOf(r) ?? "unknown";
-        return { slug, title: r.title ?? slug, score: r.relevanceScore ?? 0, grade: graded.relevance[slug] ?? 0 };
+        const slug = slugOf(r);
+        // Fixture judgments are per slug, but slugs are only unique per topic.
+        // Credit a slug once, preserving duplicate rows and their rank positions.
+        const grade = slug !== undefined && !judgedSlugs.has(slug) ? graded.relevance[slug] ?? 0 : 0;
+        if (slug !== undefined) judgedSlugs.add(slug);
+        return { slug: slug ?? "unknown", title: r.title ?? slug ?? "unknown", score: r.relevanceScore ?? 0, grade };
       }),
     });
     process.stdout.write(`  [${path}] ${graded.id}: ${results.length} results, ${latencyMs} ms${meta0.hybridFallback ? ` (fallback: ${String(meta0.hybridFallbackReason)})` : ""}\n`);
@@ -247,7 +252,7 @@ export function buildReport(
       order: "Keyword path ran first; it may warm the lexical cache used by hybrid fallback. Latencies are not a cold-cache comparison.",
       sideEffects: "Production searches may write lexical/hybrid caches, authorize query dispatch in the database, and call the embedding endpoint. No article edits or corpus-vector writes are requested; results are not served.",
       fallback: "Fallback is observed from returned-row metadata only. Empty hybrid results have unknown fallback (null), counted separately, not assumed successful.",
-      metrics: `Recall@${opts.k} treats grades > 0 as relevant; nDCG@${opts.k} uses linear gain (grade/log2(rank+1)) and IDCG from the full fixture. Recall/nDCG exclude queries with no positive judgments. MRR@${opts.limit} uses all queries with misses = 0 and the returned limit, not k.`,
+      metrics: `Recall@${opts.k} treats grades > 0 as relevant; nDCG@${opts.k} uses linear gain (grade/log2(rank+1)) and IDCG from the full fixture. Judgments are per slug: only its first occurrence earns credit; duplicates retain their rank with grade 0. Recall/nDCG exclude queries with no positive judgments. MRR@${opts.limit} uses all queries with misses = 0 and the returned limit, not k.`,
     },
     metrics,
     perQuery: [...keywordRankings, ...hybridRankings].map(toReportEntry),
