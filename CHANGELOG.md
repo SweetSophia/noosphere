@@ -8,6 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.3] - 2026-09-05
+
+Patch release so first-time installer images no longer seed house project
+topics, and so wiki topic delete is discoverable. Also publishes the
+installer-runtime hybrid runbook and llama.cpp operator activation merged
+since `1.13.2`.
+
+### Fixed
+
+- **Generic bootstrap topics
+  ([#322](https://github.com/SweetSophia/noosphere/pull/322))**: default
+  Projects children no longer include PK-PRO or IHK Study Trainer. Noosphere
+  remains. Wiki home admin entry is **Manage Topics**; admins can delete an
+  empty leaf topic from the topic page.
+
+### Added
+
+- **Work-VM Hermes installer hybrid runbook
+  ([#321](https://github.com/SweetSophia/noosphere/pull/321))**: operator path
+  for installer runtime (`~/.noosphere`) plus llama.cpp hybrid, distinct from
+  source-compose activation.
+- **Hybrid retrieval operator activation
+  ([#318](https://github.com/SweetSophia/noosphere/pull/318))**: llama.cpp-only
+  source-compose how-to and stack script. Do not use Ollama.
+
+### Security
+
+- **Kilo and Opencode lockfiles**: bump transitive `toml` `4.1.1` → `4.3.0` so
+  `npm audit` no longer fails those plugin package-check jobs (GHSA-82x6-q7mm-w9cf,
+  GHSA-v5mp-jgw5-2x6j).
+
 ## [1.13.2] - 2026-09-02
 
 Patch release publishing the Codex MCP integration and the security and recall
@@ -408,7 +439,8 @@ changes.
   backfill pipeline, and the memory provider refactor. Refer to the commit
   history (`git log v1.8.0..v1.9.0`) for the full set of changes.
 
-[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.13.2...HEAD
+[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.13.3...HEAD
+[1.13.3]: https://github.com/SweetSophia/noosphere/compare/v1.13.2...v1.13.3
 [1.13.2]: https://github.com/SweetSophia/noosphere/compare/v1.13.1...v1.13.2
 [1.13.1]: https://github.com/SweetSophia/noosphere/compare/v1.13.0...v1.13.1
 [1.13.0]: https://github.com/SweetSophia/noosphere/compare/v1.12.0...v1.13.0

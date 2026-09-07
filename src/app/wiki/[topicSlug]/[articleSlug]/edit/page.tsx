@@ -126,6 +126,21 @@ export default async function EditArticlePage({ params }: Props) {
           <p className="form-hint">Comma-separated tags. Existing tags are reused automatically.</p>
         </div>
 
+        <div className="form-group">
+          <label className="form-label" htmlFor="status">Status</label>
+          <select
+            id="status"
+            name="status"
+            className="form-select"
+            defaultValue={article.status || "published"}
+          >
+            <option value="draft">Draft</option>
+            <option value="reviewed">Reviewed</option>
+            <option value="published">Published</option>
+          </select>
+          <p className="form-hint">Drafts stay visible. Publish when the article should leave the draft signal.</p>
+        </div>
+
         <RestrictedTagPicker
           scopes={scopes}
           selected={article.restrictedTags ?? []}

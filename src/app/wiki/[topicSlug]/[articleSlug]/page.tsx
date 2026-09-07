@@ -9,7 +9,7 @@ import { filterVisibleRelatedArticleRows } from "@/lib/articles/relations";
 import { DeleteArticleForm } from "@/components/wiki/DeleteArticleForm";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import { WikiMarkdown } from "@/components/wiki/WikiMarkdown";
-import { deleteArticle } from "./edit/actions";
+import { deleteArticle, publishArticle } from "./edit/actions";
 
 interface Props {
   params: Promise<{ topicSlug: string; articleSlug: string }>;
@@ -96,6 +96,13 @@ export default async function ArticlePage({ params }: Props) {
                   Sign In to Edit
                 </Link>
               )}
+              {canEdit && article.status !== "published" ? (
+                <form action={publishArticle.bind(null, topic.slug, article.slug)}>
+                  <button type="submit" className="btn btn-secondary btn-sm">
+                    Publish
+                  </button>
+                </form>
+              ) : null}
               {canDelete ? (
                 <DeleteArticleForm action={deleteArticle.bind(null, topic.slug, article.slug)} articleId={article.id} />
               ) : null}

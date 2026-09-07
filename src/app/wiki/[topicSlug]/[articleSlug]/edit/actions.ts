@@ -13,6 +13,7 @@ import {
   sanitizeArticleExcerpt,
 } from "@/lib/api/article-content";
 import { detectSecretInInputs } from "@/lib/memory/api/save";
+import { isValidStatus } from "@/lib/validation";
 
 async function requireEditorSession() {
   const session = await getServerSession(authOptions);
@@ -48,10 +49,14 @@ export async function saveArticle(
   const content = String(formData.get("content") ?? "");
   const title = String(formData.get("title") ?? "");
   const excerpt = String(formData.get("excerpt") ?? "");
+  const status = String(formData.get("status") ?? "").trim();
   const tags = parseTagInput(String(formData.get("tags") ?? ""));
 
   if (!content.trim()) {
     throw new Error("Content cannot be empty.");
+  }
+  if (!isValidStatus(status)) {
+    throw new Error("Status must be draft, reviewed, or published.");
   }
   const contentSanitization = sanitizeArticleContent(content.trim());
   if (!contentSanitization.ok) {
@@ -123,6 +128,7 @@ export async function saveArticle(
         content: nextContent,
         title: nextTitle,
         excerpt: nextExcerpt,
+        status,
         restrictedTags,
         updatedAt: new Date(),
       },
@@ -203,4 +209,36 @@ export async function deleteArticle(
   revalidatePath("/wiki");
   revalidatePath("/wiki/search");
   redirect(`/wiki/${topicSlug}`);
+}
+
+export async function publishArticle(
+  topicSlug: string,
+  articleSlug: string,
+  _formData: FormData,
+): Promise<void> {
+  void _formData;
+  await requireEditorSession();
+
+  const topic = await prisma.topic.findUnique({ where: { slug: topicSlug } });
+  if (!topic) throw new Error("Topic not found.");
+
+  const article = await prisma.article.findFirst({
+    where: { topicId: topic.id, slug: articleSlug, deletedAt: null },
+  });
+
+  if (!article) throw new Error("Article not found.");
+
+  if (article.status !== "published") {
+    await prisma.article.update({
+      where: { id: article.id },
+      data: { status: "published", updatedAt: new Date() },
+    });
+    await invalidateSearchCache();
+  }
+
+  revalidatePath(`/wiki/${topicSlug}`);
+  revalidatePath(`/wiki/${topicSlug}/${articleSlug}`);
+  revalidatePath("/wiki");
+  revalidatePath("/wiki/search");
+  redirect(`/wiki/${topicSlug}/${articleSlug}`);
 }

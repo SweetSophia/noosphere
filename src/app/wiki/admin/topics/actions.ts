@@ -155,4 +155,9 @@ export async function deleteTopicAction(formData: FormData) {
 
   revalidatePath("/wiki");
   revalidatePath("/wiki/admin/topics");
+
+  const next = String(formData.get("next") ?? "").trim();
+  if (next === "/wiki") {
+    redirect("/wiki");
+  }
 }

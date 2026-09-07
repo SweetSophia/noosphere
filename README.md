@@ -33,15 +33,15 @@ machine.
 
 ### Install
 
-This launcher is coupled to the coordinated `v1.13.2` image, packages, and
+This launcher is coupled to the coordinated `v1.13.3` image, packages, and
 Hermes archive. Before running it, confirm that the
-[`v1.13.2` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.2)
+[`v1.13.3` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.13.3)
 exists with all six installer assets; a merged commit alone is not a release.
 
 Run the guided installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5c84a170a5b48754791e57b7e98191df5fbed5b8/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/4468cbb160c1b5eb98d42662229287be013692d7/install.sh | bash
 ```
 
 The URL is pinned to an immutable Git commit—never `master` or `main`. The
@@ -74,7 +74,7 @@ Do not replace the guided upgrade with an unrestricted `docker compose pull &&
 docker compose up`. First inspect the plan without changing the machine:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/5c84a170a5b48754791e57b7e98191df5fbed5b8/install.sh \
+curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/4468cbb160c1b5eb98d42662229287be013692d7/install.sh \
   | bash -s -- --dry-run --core-only
 ```
 
@@ -86,7 +86,10 @@ for the full stateful recovery contract.
 
 Optional pgvector hybrid storage remains a separate activation step. Operator
 how-to (llama.cpp local embeddings, no wiki toggle):
-[docs/HYBRID-RETRIEVAL-ACTIVATION.md](docs/HYBRID-RETRIEVAL-ACTIVATION.md).
+[docs/HYBRID-RETRIEVAL-ACTIVATION.md](docs/HYBRID-RETRIEVAL-ACTIVATION.md)
+for a source Compose checkout, or
+[docs/HERMES-INSTALLER-HYBRID.md](docs/HERMES-INSTALLER-HYBRID.md) for a
+guided-installer runtime plus Hermes.
 SQL/privilege contract:
 [docker/hybrid-storage/README.md](docker/hybrid-storage/README.md).
 
@@ -110,7 +113,7 @@ machine, for example `OPENCLAW_NOOSPHERE_API_KEY`,
 Install the Codex CLI integration independently of the core Docker installer:
 
 ```bash
-npx -y @sweetsophia/noosphere-mcp@1.13.2 install-codex
+npx -y @sweetsophia/noosphere-mcp@1.13.3 install-codex
 ```
 
 The command stores the MCP launcher, skill, and approved environment-variable
@@ -328,6 +331,7 @@ Keep detailed recovery work in deployment/runbook docs rather than this README.
 | [README-legacy.md](README-legacy.md) | Previous full README content kept for reference during the docs split |
 | [docs/MEMORY-REVAMP-STATUS.md](docs/MEMORY-REVAMP-STATUS.md) | Authoritative implementation and rollout matrix for automatic capture and hybrid retrieval |
 | [docs/INSTALLATION.md](docs/INSTALLATION.md) | Guided installer, auditable download, upgrades, manual Compose, and credential handling |
+| [docs/HERMES-INSTALLER-HYBRID.md](docs/HERMES-INSTALLER-HYBRID.md) | Installer-runtime work-VM hybrid runbook (`~/.noosphere`, sidecar A/B/C, llama.cpp) |
 | [docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md](docs/OPENCLAW-OFFICIAL-PLUGIN-SETUP.md) | OpenClaw install, operations, upgrade, troubleshooting, and uninstall |
 | [docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md](docs/POSTGRES-PGVECTOR-COMPOSE-UPGRADE.md) | Guarded PostgreSQL image transition, proof, rollback, and recovery |
 | [docs/NOOSPHERE-MEMORY-ARCHITECTURE.md](docs/NOOSPHERE-MEMORY-ARCHITECTURE.md) | Provider abstraction, recall orchestration, ranking, budgeting, and scheduler |

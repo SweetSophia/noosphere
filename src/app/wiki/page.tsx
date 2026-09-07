@@ -166,10 +166,10 @@ export default async function WikiHomePage() {
           isAdmin ? (
             <div className="cluster">
               <Link href="/wiki/admin/topics" className="btn btn-secondary btn-sm">
-                New Topic
+                Manage Topics
               </Link>
               <Link href="/wiki/admin/keys" className="btn btn-secondary btn-sm">
-                API Keys
+                Admin menu
               </Link>
             </div>
           ) : null
