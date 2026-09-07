@@ -10,6 +10,7 @@
     "test:hybrid-provider": "node --test scripts/hybrid-provider.test.mjs",
     "test:hybrid-stack": "bash scripts/activate-hybrid-retrieval-stack.test.sh",
     "hybrid:shadow-eval": "tsx scripts/hybrid-shadow-eval.ts",
+    "test:hybrid-shadow-db": "node --import tsx --test scripts/hybrid-shadow-freshness.test.ts",
     "test:hybrid-shadow": "node --import tsx --test scripts/hybrid-shadow-eval.test.ts",
     "test:memory": "node --env-file=.env.test --import tsx --test 'src/__tests__/memory/**/*.test.ts'",
     "test:wiki": "node --import tsx --test 'src/__tests__/wiki/**/*.test.ts'",
