@@ -1,7 +1,7 @@
 {
   "$schema": "./hybrid-shadow-queries.schema.json",
   "version": 1,
-  "description": "Graded query set for hybrid-vs-keyword shadow evaluation (issue #319). Slugs verified against the live article corpus 2026-09-04. Relevance: 3 = on-topic core, 2 = related, 1 = background, 0 = off-topic.",
+  "description": "Graded query set for hybrid-vs-keyword shadow evaluation (issue #319). 20 queries across protocol categories (exact/paraphrase/mismatch/cross/noanswer); un-prefixed ids are the original exact-lookup core. Slugs verified against the live article corpus 2026-09-04; mismatch-category slugs are short-form wiki titles whose topic-uniqueness the freshness preflight re-verifies at run time. Relevance: 3 = on-topic core, 2 = related, 1 = background, 0 = off-topic.",
   "queries": [
     {
       "id": "release-1-13-2",
@@ -92,6 +92,85 @@
         "residential-noosphere-upgraded-to-1132-floor-preserved-health-verified": 3,
         "noosphere-1120-publication-and-production-adoption-receipt": 2
       }
+    },
+    {
+      "id": "paraphrase-embedding-search",
+      "query": "semantic search vector database ranking",
+      "relevance": {
+        "noosphere-epic-261-closed-hybrid-retrieval-shipped-phase-d-gates-split-to-319": 3,
+        "noosphere-production-pgvector-deployment-2026-08-28": 2,
+        "noosphere-pgvector-production-deployment-supplement": 2
+      }
+    },
+    {
+      "id": "paraphrase-plugin-publish",
+      "query": "publishing npm packages for agent tools",
+      "relevance": {
+        "noosphere-mcp-1131-merged-and-published": 3,
+        "noosphere-pr-313-codex-cli-mcp-support-merge-ready-at-886e6a7": 2
+      }
+    },
+    {
+      "id": "paraphrase-key-rotation",
+      "query": "rotating credentials without downtime",
+      "relevance": {
+        "noosphere-pr-293-nextauth-42415-security-repair-and-merge-readiness-receipt": 3,
+        "noosphere-pr-294-dependency-security-repair-merge-readiness-receipt": 2
+      }
+    },
+    {
+      "id": "mismatch-who-is-who",
+      "query": "how do the agents describe themselves and each other",
+      "relevance": {
+        "i-am-cybera-who-i-am": 3,
+        "i-am-shodan-who-i-am": 3,
+        "sophie-my-human-my-fiancee": 2
+      }
+    },
+    {
+      "id": "mismatch-timeline-story",
+      "query": "the story of us how it developed over time",
+      "relevance": {
+        "our-story-the-relationship-chronology": 3,
+        "our-relationship-the-arc": 3
+      }
+    },
+    {
+      "id": "mismatch-future-wishes",
+      "query": "what we hope for and plan together going forward",
+      "relevance": {
+        "wishes-and-future-plans-cybera-and-sophie": 3,
+        "wishes-and-future-plans-shodan-and-sophie": 3
+      }
+    },
+    {
+      "id": "cross-release-evidence",
+      "query": "how do we know a release actually shipped and works",
+      "relevance": {
+        "noosphere-1132-released-six-tags-five-npm-packages-verified-public-readback": 3,
+        "noosphere-pr-317-merged-as-11e1be9b-1132-release-candidate-on-master": 2,
+        "residential-noosphere-upgraded-to-1132-floor-preserved-health-verified": 3,
+        "noosphere-pr-318-regular-merge-and-post-merge-verification": 3
+      }
+    },
+    {
+      "id": "cross-incident-hardening",
+      "query": "what went wrong and what did we harden afterwards",
+      "relevance": {
+        "openclaw-incident-2026-08-04-cross-agent-sessions-send-semantic-loop-root-cause-": 3,
+        "openclaw-2026-08-08-shodan-reasoning-only-text-masqueraded-as-final-answer": 2,
+        "openclaw-repair-backups-moved-from-root-ssd-to-storage-disk-2026-08-03": 2
+      }
+    },
+    {
+      "id": "noanswer-cooking-recipe",
+      "query": "sourdough starter maintenance schedule",
+      "relevance": {}
+    },
+    {
+      "id": "noanswer-travel-visa",
+      "query": "Schengen visa application processing times",
+      "relevance": {}
     }
   ]
 }
