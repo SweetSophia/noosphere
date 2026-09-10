@@ -30,7 +30,7 @@
  *     -e NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION \
  *     -e NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64 \
  *     -e NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 \
- *     node:22-bookworm-slim npx tsx scripts/hybrid-shadow-eval.ts --all-queries --out hybrid-shadow-reports
+ *     node:22-bookworm-slim npx tsx scripts/hybrid-shadow-eval.ts --query-ids release-1-13-2,pgvector-production,pr-merge-verification,openclaw-recovery,pixel-agents-prs,paraphrase-embedding-search,paraphrase-auth-repair,mismatch-data-safety,cross-release-evidence,noanswer-cooking-recipe --out hybrid-shadow-reports
  *
  * Environment (from .env / shell):
  *   DATABASE_URL                        app-role connection (read path)
