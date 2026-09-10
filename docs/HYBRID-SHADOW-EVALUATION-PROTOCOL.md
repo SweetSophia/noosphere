@@ -55,7 +55,9 @@ The held-out partition is searched and scored once, in its final decision run.
 Any earlier score-bearing search over a held-out ID is exposure, whether or not
 the resulting report is opened; start a new protocol revision with a new
 held-out set after such exposure. Freshness-only checks do not score queries and
-may cover the full fixture.
+may cover the full fixture. The harness refuses score-bearing runs that omit
+both `--query-ids` and the explicit `--all-queries` compatibility escape hatch;
+that escape hatch is forbidden for this protocol.
 
 **Tuning (10):**
 

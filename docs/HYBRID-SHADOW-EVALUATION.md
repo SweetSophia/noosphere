@@ -6,9 +6,11 @@ acceptance gate. Reports remain private; admin runs can include restricted
 rankings. Search may write caches, authorize dispatch, and call embeddings.
 
 Use `--query-ids <id,id,...>` to run only a pre-registered partition. Unknown or
-duplicate IDs fail closed, and selected queries retain fixture order. A run
-without this option evaluates the full fixture; do not use that mode when a
-protocol reserves held-out queries from tuning.
+duplicate IDs fail closed, and selected queries retain fixture order. A
+score-bearing run without this option also fails closed; `--all-queries` is the
+explicit compatibility escape hatch for protocols with no held-out partition.
+Do not use that escape hatch when a protocol reserves held-out queries from
+tuning. Freshness-only runs may omit both selection flags.
 
 ## Freshness before evaluation
 

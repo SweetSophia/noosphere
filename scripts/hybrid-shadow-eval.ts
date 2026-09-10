@@ -17,6 +17,7 @@
  * Usage (dual-path evaluation by default; --preflight-only performs only the
  * freshness lookup and writes no metric reports — see docs/HYBRID-SHADOW-EVALUATION.md):
  *   npm run hybrid:shadow-eval -- --limit 5 --k 5 --query-ids <id,id,...> --out <dir>
+ *   npm run hybrid:shadow-eval -- --limit 5 --k 5 --all-queries --out <dir>
  *   npm run hybrid:shadow-eval -- --preflight-only --out <dir>
  *
  * Full dual-path run: must execute inside the compose network so the pinned
@@ -29,7 +30,7 @@
  *     -e NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION \
  *     -e NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64 \
  *     -e NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 \
- *     node:22-bookworm-slim npx tsx scripts/hybrid-shadow-eval.ts --out hybrid-shadow-reports
+ *     node:22-bookworm-slim npx tsx scripts/hybrid-shadow-eval.ts --all-queries --out hybrid-shadow-reports
  *
  * Environment (from .env / shell):
  *   DATABASE_URL                        app-role connection (read path)
@@ -79,11 +80,12 @@ function requireEnv(name: string): string {
   return value;
 }
 
-export function parseArgs(argv: string[]): { limit: number; k: number; outDir: string; scopes: string[] | undefined; queryIds?: string[]; preflightOnly?: boolean; freshnessAdmin?: boolean } {
+export function parseArgs(argv: string[]): { limit: number; k: number; outDir: string; scopes: string[] | undefined; queryIds?: string[]; allQueries?: boolean; preflightOnly?: boolean; freshnessAdmin?: boolean } {
   const opts: ReturnType<typeof parseArgs> = { limit: 10, k: 5, outDir: "hybrid-shadow-reports", scopes: undefined as string[] | undefined };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--preflight-only") { opts.preflightOnly = true; continue; }
     if (argv[i] === "--freshness-admin") { opts.freshnessAdmin = true; continue; }
+    if (argv[i] === "--all-queries") { opts.allQueries = true; continue; }
     if (!["--limit", "--k", "--out", "--scopes", "--query-ids"].includes(argv[i])) throw new Error(`unknown argument: ${argv[i]}`);
     if (!argv[i + 1]?.trim() || argv[i + 1].startsWith("--")) throw new Error(`missing value for ${argv[i]}`);
     if (argv[i] === "--limit") opts.limit = Number(argv[++i]);
@@ -106,11 +108,15 @@ export function parseArgs(argv: string[]): { limit: number; k: number; outDir: s
   }
   if (!Number.isSafeInteger(opts.limit) || opts.limit < 1 || opts.limit > HYBRID_MAX_WINDOW) throw new Error(`--limit must be 1..${HYBRID_MAX_WINDOW}`);
   if (!Number.isInteger(opts.k) || opts.k < 1 || opts.k > opts.limit) throw new Error("--k must be 1..limit");
+  if (opts.queryIds && opts.allQueries) throw new Error("--query-ids and --all-queries are mutually exclusive");
   return opts;
 }
 
-export function selectQueries(querySet: QuerySet, queryIds: string[] | undefined): QuerySet {
-  if (!queryIds) return querySet;
+export function selectQueries(querySet: QuerySet, queryIds: string[] | undefined, allowAll = false): QuerySet {
+  if (!queryIds) {
+    if (!allowAll) throw new Error("score-bearing run requires --query-ids or explicit --all-queries");
+    return querySet;
+  }
   const selected = new Set(queryIds);
   const queries = querySet.queries.filter((query) => selected.has(query.id));
   if (queries.length !== selected.size) {
@@ -336,7 +342,7 @@ export async function writeReport(report: ReturnType<typeof buildReport>, outDir
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2));
   const fixturePath = path.resolve(import.meta.dirname, "../src/__tests__/fixtures/hybrid-shadow-queries.json");
-  const querySet = selectQueries(loadQuerySet(await readFile(fixturePath, "utf8")), opts.queryIds);
+  const querySet = selectQueries(loadQuerySet(await readFile(fixturePath, "utf8")), opts.queryIds, Boolean(opts.preflightOnly || opts.allQueries));
   const databaseUrl = requireEnv("DATABASE_URL");
   const baseEnv = opts.preflightOnly ? process.env : {
     ...process.env,

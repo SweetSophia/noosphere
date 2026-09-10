@@ -152,6 +152,7 @@ test("argument validation guards missing values and finite supported bounds", ()
   for (const value of ["0", "-1", "1.5", "NaN", "Infinity", "11"]) assert.throws(() => parseArgs(["--k", value]));
   assert.throws(() => parseArgs(["--unknown"]), /unknown argument/);
   assert.throws(() => parseArgs(["--scopes", "published"]), /admin or unscoped/);
+  assert.throws(() => parseArgs(["--all-queries", "--query-ids", "query-one"]), /mutually exclusive/);
   for (const value of ["query-one,,query-two", "query-one,query-one", "Bad-ID"]) {
     assert.throws(() => parseArgs(["--query-ids", value]), /unique query IDs/);
   }
@@ -159,11 +160,13 @@ test("argument validation guards missing values and finite supported bounds", ()
     { limit: 200, k: 200, outDir: "reports", scopes: ["*"] });
   assert.equal(parseArgs(["--scopes", "unscoped"]).scopes, undefined);
   assert.deepEqual(parseArgs(["--query-ids", "query-two, query-one"]).queryIds, ["query-two", "query-one"]);
+  assert.equal(parseArgs(["--all-queries"]).allQueries, true);
 });
 
 test("query selection rejects unknown IDs and preserves fixture order", () => {
   const set = querySet([one, { ...one, id: "query-two" }, { ...one, id: "query-three" }]);
-  assert.deepEqual(selectQueries(set, undefined), set);
+  assert.throws(() => selectQueries(set, undefined), /requires --query-ids or explicit --all-queries/);
+  assert.deepEqual(selectQueries(set, undefined, true), set);
   const selected = selectQueries(set, ["query-three", "query-one"]);
   assert.deepEqual(selected.queries.map((query) => query.id), ["query-one", "query-three"]);
   assert.deepEqual(buildReport(selected, [], [], parseArgs([]), {}).queryIds, ["query-one", "query-three"]);
@@ -252,4 +255,8 @@ test("pure import has no provider/Prisma initialization; CLI rejects arguments b
   assert.equal(cli.status, 1);
   assert.match(cli.stderr, /missing value for --out/);
   assert.doesNotMatch(cli.stderr, /requires DATABASE_URL|Prisma/);
+  const omittedSelection = spawnSync(process.execPath, ["--import", "tsx", script], { env, encoding: "utf8", timeout: 10000 });
+  assert.equal(omittedSelection.status, 1);
+  assert.match(omittedSelection.stderr, /score-bearing run requires --query-ids or explicit --all-queries/);
+  assert.doesNotMatch(omittedSelection.stderr, /requires DATABASE_URL|Prisma/);
 });
