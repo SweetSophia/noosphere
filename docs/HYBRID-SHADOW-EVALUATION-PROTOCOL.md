@@ -1,88 +1,158 @@
 # Phase D evaluation protocol — issue #319
 
-Pre-registered before any decision-grade run. Metrics, thresholds, and the
-category mix below are fixed before scores are seen; changing them after a run
-requires a new protocol revision and a fresh run. The harness itself is
-documented in `docs/HYBRID-SHADOW-EVALUATION.md` (measurement tooling, private
-reports, freshness preflight, denominator semantics).
+**Protocol ID:** `noosphere-hybrid-shadow-v1` (revision 1)
 
-## Scope and subjects
+This contract is pre-registered before a decision-grade run. Any change to its
+queries, judgments, metrics, thresholds, partitions, or decision rules requires
+a new committed protocol revision **before** another decision-grade run. The
+decision record cites the protocol commit/blob and fixture Git blob.
 
-- Subject: hybrid retrieval (lexical + embeddings, RRF) vs keyword-only, same
-  production `search` path, reference deployment profile
-  `nomic-embed-text-v1.5` Q8_0, 768-d (llama.cpp; Ollama excluded by policy).
-- Evaluation runs read-only against the authorized evaluation corpus
-  (unscoped by default; admin scope only with explicit operator authorization).
-- Serving posture is out of scope: this protocol produces the accept/tune/reject
-  evidence for #319; it does not itself activate or deactivate anything.
+The harness and its privacy, freshness, and denominator semantics are documented
+in [`HYBRID-SHADOW-EVALUATION.md`](HYBRID-SHADOW-EVALUATION.md).
 
-## Query set
+## Scope
 
-Versioned in `src/__tests__/fixtures/hybrid-shadow-queries.json`. Minimum 20
-queries. Categories (encoded in query id prefixes):
+- Compare hybrid retrieval (lexical + embeddings, RRF) with keyword-only through
+  the same production `search` path, using the reference profile
+  `nomic-embed-text-v1.5` Q8_0, 768-d (llama.cpp; Ollama excluded).
+- Use the authorized evaluation corpus: unscoped by default; admin only with
+  explicit operator authorization.
+- Do not change serving state. This protocol supplies evidence for #319; it does
+  not activate, deactivate, deploy, or serve either result path.
 
-- `exact-*` — near-title keyword lookup; keyword path should already do well.
-- `paraphrase-*` — same intent, different wording than article titles.
-- `mismatch-*` — vocabulary the corpus titles do not contain; the case hybrid
-  embeddings are expected to win. A large hybrid advantage here is the primary
-  signal that the capability earns its complexity.
-- `cross-*` — answers spread across several articles.
-- `noanswer-*` — nothing relevant exists; relevance is `{}`. These count in
-  the MRR denominator as zero and are excluded from recall/nDCG. They detect
-  hallucinated relevance (returning junk for unanswerable queries).
+## Query set and categories
 
-Judgments: 3 = on-topic core, 2 = related, 1 = background, 0 = off-topic.
-Judgments are per slug; slugs are unique only per topic, so duplicate-slug
-ambiguity must be resolved (or the query dropped) before a decision-grade run.
-Slugs must pass the freshness preflight (`clear`) before scores are read.
+`src/__tests__/fixtures/hybrid-shadow-queries.json` contains 20 queries. IDs
+with no recognized prefix are the original `exact` category; added queries use
+these prefixes:
 
-A held-out subset (every second query by fixture order, recorded in the run
-evidence) is reserved for the final acceptance run; tuning iterations use the
-remainder only.
+- `paraphrase-*` — same intent, different wording from the target titles.
+- `mismatch-*` — deliberate vocabulary shift; hybrid semantic retrieval should
+  earn its complexity here.
+- `cross-*` — answers distributed across several articles.
+- `noanswer-*` — no known relevant article; `relevance` is `{}`.
 
-## Run procedure
+Grades: 3 = core, 2 = related, 1 = background, 0 = off-topic. Judgments are per
+slug; duplicate-slug ambiguity must be resolved before scores are read. A
+`clear` freshness result is a precondition. Difficult judgments must not be
+removed merely to improve a score.
 
-1. Freshness preflight: `npm run hybrid:shadow-eval -- --preflight-only ...`.
-   All judgments `visible` (outcome `clear`) is a precondition. Ambiguous or
-   not-visible judgments block the run until resolved by editing the fixture
-   (never by deleting difficult judgments to improve scores).
-2. Dual-path run: `npm run hybrid:shadow-eval -- --limit 10 --k 5 ...`.
-   Record: harness commit SHA, fixture version, corpus snapshot date, scope,
-   Redis configured or not, and the keyword-first cache-warming caveat.
-3. Keep raw JSONL/JSON/Markdown private (restricted titles possible). Publish
-   only the aggregate table and per-category breakdown in the decision record.
+No-answer queries are diagnostics, not relevance metrics: empty and irrelevant
+result sets both produce recall/nDCG `null` and MRR 0. Before scoring, two
+reviewers independently inspect each path's top-five JSONL rows for both
+no-answer queries. Any genuinely relevant row invalidates that empty judgment
+and requires a committed protocol/fixture revision and fresh run. Otherwise the
+rows are recorded as diagnostic evidence and excluded from category/decision
+metrics. They are not described as detecting hallucination automatically.
 
-## Primary metrics and thresholds
+## Frozen partitions
 
-Primary: recall@5 and nDCG@5 (graded, linear gain), both paths. Secondary:
-MRR@10, p50 latency, observed/unknown fallback counts.
+Only the tuning partition may guide tuning. Its scores may be inspected during
+iterations. The held-out partition is scored once for the final decision; if a
+run accidentally exposes it early, start a new protocol revision with a new
+held-out set.
 
-| Decision | Rule |
-| --- | --- |
-| ACCEPT | hybrid nDCG@5 ≥ keyword nDCG@5, AND hybrid recall@5 ≥ keyword recall@5 − 0.05, AND no category regresses by > 0.10 nDCG@5, AND keyword-path metrics on the same run remain within 0.05 of their last accepted baseline (instrument sanity). |
-| TUNE | hybrid wins overall but one category regresses > 0.10, OR fallbackUnknown > 20% of hybrid queries. Tune, then rerun the full protocol (both subsets). |
-| REJECT | hybrid nDCG@5 < keyword nDCG@5, OR a primary category regresses > 0.20. |
+**Tuning (10):**
 
-Latency and fallback counts are reported, not gated: hybrid p50 may exceed
-keyword p50; that is an operator tradeoff, not an automatic reject.
+- `release-1-13-2`
+- `pgvector-production`
+- `pr-merge-verification`
+- `openclaw-recovery`
+- `pixel-agents-prs`
+- `paraphrase-embedding-search`
+- `paraphrase-auth-repair`
+- `mismatch-data-safety`
+- `cross-release-evidence`
+- `noanswer-cooking-recipe`
 
-Thresholds are defaults ratified at PR review; record any change with rationale
-in the decision record before the acceptance run.
+**Held-out (10):**
 
-## Over-context / lexical fallback
+- `hybrid-retrieval-status`
+- `codex-mcp`
+- `security-repair`
+- `backup-automation`
+- `residential-upgrade`
+- `paraphrase-plugin-publish`
+- `mismatch-release-trust`
+- `mismatch-agent-knowledge`
+- `cross-incident-hardening`
+- `noanswer-travel-visa`
 
-Articles exceeding the embedding context window fall back to lexical-only.
-The harness reports per-query fallback metadata (unknown when results are
-empty). The decision record must state the observed fallback rate and confirm
-the keyword-only fallback path for over-context articles returned sane
-rankings (spot-check the fallback queries' JSONL rows). A fallback rate above
-10% on the evaluation corpus triggers a TUNE review of chunking/embedding,
-not a silent accept.
+The split is stratified where the 20-query fixture permits it: exact 5/5,
+paraphrase 2/1, mismatch 1/2, cross 1/1, no-answer 1/1. The small category sizes
+are a declared limitation; do not choose a different split after seeing scores.
 
-## Decision record
+## Run and evidence procedure
 
-Filed as a private report plus a public summary on #319 containing: decision
-(ACCEPT/TUNE/REJECT), aggregate and per-category table for both subsets,
-fallback and latency observations, exact run conditions, and protocol
-revision used. #319 closes only when the acceptance run on the held-out
-subset meets the ACCEPT rule and the record is attached.
+1. Run freshness-only first. Every judgment must be `visible` and the outcome
+   `clear`; resolve any ambiguity/not-visible result through a committed fixture
+   revision before continuing.
+2. Run both paths with `--limit 10 --k 5`. Record harness commit, protocol ID and
+   blob, fixture blob, corpus snapshot time, scope, profile, Redis state, and
+   SHA-256 digests of private aggregate/JSONL reports. Keyword runs first and may
+   warm lexical fallback caches; therefore latency is not a cold-cache
+   comparison (see `HYBRID-SHADOW-EVALUATION.md`).
+3. Keep raw JSONL/JSON/Markdown private. Publish only sanitized aggregates,
+   category/subset rollups, and decision rationale.
+4. List the exact query IDs used in every subset table.
+
+### Required rollup from the aggregate JSON
+
+The harness emits overall metrics plus flat `perQuery` rankings. Produce the
+required tables from the same aggregate JSON and exact fixture as follows:
+
+- Map each query to the frozen partition above and to its recognized prefix;
+  unprefixed queries map to `exact`.
+- For each path × partition × answerable category, recompute the existing
+  harness formulas from recorded `results[].grade`: recall@5 uses positive hits
+  divided by all positive fixture judgments; nDCG@5 uses linear gain and IDCG
+  from all fixture judgments; average each only across queries with positive
+  judgments. MRR@10 averages reciprocal rank across all selected queries with
+  misses = 0.
+- Produce an overall row per path/partition with the same formulas. Exclude
+  `noanswer` from recall/nDCG and all decision/category gates; include it in MRR
+  only to preserve the harness's all-query denominator.
+- Report `evaluated` and `excluded` counts beside every aggregate. Assert that
+  each path has exactly one ranking for every listed query; otherwise the rollup
+  is invalid.
+- Category regression means `hybrid nDCG@5 - keyword nDCG@5` for that category
+  in the **held-out** partition. Publish the query IDs and values used, so the
+  calculation is reproducible.
+
+## Ordered decision procedure
+
+Use the held-out partition only. Apply the first matching outcome; these rules
+are exhaustive and mutually exclusive. “Overall” means the held-out aggregate
+across answerable queries using the formulas above.
+
+1. **REJECT** if hybrid overall nDCG@5 is below keyword overall nDCG@5, or any
+   answerable category's nDCG@5 regression is less than -0.20.
+2. **TUNE** (only if not REJECT) if hybrid overall recall@5 is more than 0.05
+   below keyword, any answerable category regression is less than -0.10, the
+   observed fallback rate exceeds 10%, or an observed-fallback answerable query
+   returns no grade-positive result in its top five.
+3. **ACCEPT** otherwise.
+
+Observed fallback rate is the fraction of answerable held-out hybrid rankings
+whose `hybridFallback` is `true`. `fallbackUnknown` is reported separately but
+is not a gate: empty results already count as misses in the primary metrics, and
+no-answer diagnostics are excluded from fallback gating. Latency is reported
+but not gated.
+
+There is no pre-existing accepted keyword baseline, so baseline comparison is
+N/A for revision 1. An ACCEPT record becomes the first baseline: pin its
+aggregate SHA-256, fixture blob, corpus snapshot, and keyword metrics. Future
+protocol revisions may add a baseline gate only when those inputs are compatible
+and named before their run.
+
+## Decision record and issue state
+
+The private record and sanitized #319 summary include: ACCEPT/TUNE/REJECT,
+protocol/fixture identities, exact run conditions, overall and per-category
+tables for both partitions, denominator counts, no-answer review, observed and
+unknown fallback counts, fallback spot-checks, latency, and report digests.
+
+ACCEPT on the held-out partition with complete evidence permits #319 to close.
+TUNE leaves #319 open and requires tuning plus a new full run under an applicable
+pre-registered revision. REJECT leaves #319 open and records that hybrid did not
+meet the gate. This PR establishes the contract only; it does not close #319.
