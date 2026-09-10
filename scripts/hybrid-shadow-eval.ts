@@ -16,7 +16,7 @@
  *
  * Usage (dual-path evaluation by default; --preflight-only performs only the
  * freshness lookup and writes no metric reports — see docs/HYBRID-SHADOW-EVALUATION.md):
- *   npm run hybrid:shadow-eval -- --limit 5 --k 5 --out <dir>
+ *   npm run hybrid:shadow-eval -- --limit 5 --k 5 --query-ids <id,id,...> --out <dir>
  *   npm run hybrid:shadow-eval -- --preflight-only --out <dir>
  *
  * Full dual-path run: must execute inside the compose network so the pinned
@@ -79,12 +79,12 @@ function requireEnv(name: string): string {
   return value;
 }
 
-export function parseArgs(argv: string[]): { limit: number; k: number; outDir: string; scopes: string[] | undefined; preflightOnly?: boolean; freshnessAdmin?: boolean } {
+export function parseArgs(argv: string[]): { limit: number; k: number; outDir: string; scopes: string[] | undefined; queryIds?: string[]; preflightOnly?: boolean; freshnessAdmin?: boolean } {
   const opts: ReturnType<typeof parseArgs> = { limit: 10, k: 5, outDir: "hybrid-shadow-reports", scopes: undefined as string[] | undefined };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--preflight-only") { opts.preflightOnly = true; continue; }
     if (argv[i] === "--freshness-admin") { opts.freshnessAdmin = true; continue; }
-    if (!["--limit", "--k", "--out", "--scopes"].includes(argv[i])) throw new Error(`unknown argument: ${argv[i]}`);
+    if (!["--limit", "--k", "--out", "--scopes", "--query-ids"].includes(argv[i])) throw new Error(`unknown argument: ${argv[i]}`);
     if (!argv[i + 1]?.trim() || argv[i + 1].startsWith("--")) throw new Error(`missing value for ${argv[i]}`);
     if (argv[i] === "--limit") opts.limit = Number(argv[++i]);
     else if (argv[i] === "--k") opts.k = Number(argv[++i]);
@@ -95,11 +95,29 @@ export function parseArgs(argv: string[]): { limit: number; k: number; outDir: s
       else if (value === "unscoped") opts.scopes = undefined;
       else throw new Error(`--scopes must be admin or unscoped (got: ${value})`);
     }
+    else if (argv[i] === "--query-ids") {
+      const ids = String(argv[++i]).split(",").map((id) => id.trim());
+      if (ids.some((id) => !/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(id)) || new Set(ids).size !== ids.length) {
+        throw new Error("--query-ids must be a comma-separated list of unique query IDs");
+      }
+      opts.queryIds = ids;
+    }
     else throw new Error(`unknown argument: ${argv[i]}`);
   }
   if (!Number.isSafeInteger(opts.limit) || opts.limit < 1 || opts.limit > HYBRID_MAX_WINDOW) throw new Error(`--limit must be 1..${HYBRID_MAX_WINDOW}`);
   if (!Number.isInteger(opts.k) || opts.k < 1 || opts.k > opts.limit) throw new Error("--k must be 1..limit");
   return opts;
+}
+
+export function selectQueries(querySet: QuerySet, queryIds: string[] | undefined): QuerySet {
+  if (!queryIds) return querySet;
+  const selected = new Set(queryIds);
+  const queries = querySet.queries.filter((query) => selected.has(query.id));
+  if (queries.length !== selected.size) {
+    const known = new Set(querySet.queries.map((query) => query.id));
+    throw new Error(`unknown query id: ${queryIds.find((id) => !known.has(id))}`);
+  }
+  return { ...querySet, queries };
 }
 
 export function loadQuerySet(file: string): QuerySet {
@@ -253,6 +271,7 @@ export function buildReport(
     generatedAt: new Date().toISOString(),
     querySetVersion: querySet.version,
     queryCount: querySet.queries.length,
+    queryIds: querySet.queries.map((query) => query.id),
     limit: opts.limit,
     k: opts.k,
     relevanceTiers: RELEVANCE_TIERS,
@@ -264,7 +283,7 @@ export function buildReport(
       order: "Keyword path ran first; it may warm the lexical cache used by hybrid fallback. Latencies are not a cold-cache comparison.",
       sideEffects: "Production searches may write lexical/hybrid caches, authorize query dispatch in the database, and call the embedding endpoint. No article edits or corpus-vector writes are requested; results are not served.",
       fallback: "Fallback is observed from returned-row metadata only. Empty hybrid results have unknown fallback (null), counted separately, not assumed successful.",
-      metrics: `Recall@${opts.k} treats grades > 0 as relevant; nDCG@${opts.k} uses linear gain (grade/log2(rank+1)) and IDCG from the full fixture. Judgments are per slug: only its first occurrence earns credit; duplicates retain their rank with grade 0. Recall/nDCG exclude queries with no positive judgments. MRR@${opts.limit} uses all queries with misses = 0 and the returned limit, not k.`,
+      metrics: `Recall@${opts.k} treats grades > 0 as relevant; nDCG@${opts.k} uses linear gain (grade/log2(rank+1)) and IDCG from the scored query's complete fixture judgments. Judgments are per slug: only its first occurrence earns credit; duplicates retain their rank with grade 0. Recall/nDCG exclude queries with no positive judgments. MRR@${opts.limit} uses all selected queries with misses = 0 and the returned limit, not k.`,
     },
     metrics,
     perQuery: [...keywordRankings, ...hybridRankings].map(toReportEntry),
@@ -317,7 +336,7 @@ export async function writeReport(report: ReturnType<typeof buildReport>, outDir
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2));
   const fixturePath = path.resolve(import.meta.dirname, "../src/__tests__/fixtures/hybrid-shadow-queries.json");
-  const querySet = loadQuerySet(await readFile(fixturePath, "utf8"));
+  const querySet = selectQueries(loadQuerySet(await readFile(fixturePath, "utf8")), opts.queryIds);
   const databaseUrl = requireEnv("DATABASE_URL");
   const baseEnv = opts.preflightOnly ? process.env : {
     ...process.env,

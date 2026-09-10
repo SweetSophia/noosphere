@@ -33,9 +33,11 @@ these prefixes:
 - `noanswer-*` — no known relevant article; `relevance` is `{}`.
 
 Grades: 3 = core, 2 = related, 1 = background, 0 = off-topic. Judgments are per
-slug; duplicate-slug ambiguity must be resolved before scores are read. A
-`clear` freshness result is a precondition. Difficult judgments must not be
-removed merely to improve a score.
+slug; duplicate-slug ambiguity must be resolved before scores are read. Any
+resolution changes judgment identity and therefore requires a new committed
+protocol/fixture revision and fresh preflight. A `clear` freshness result is a
+precondition. Difficult judgments must not be removed merely to improve a
+score.
 
 No-answer queries are diagnostics, not relevance metrics: empty and irrelevant
 result sets both produce recall/nDCG `null` and MRR 0. Before scoring, two
@@ -48,9 +50,12 @@ metrics. They are not described as detecting hallucination automatically.
 ## Frozen partitions
 
 Only the tuning partition may guide tuning. Its scores may be inspected during
-iterations. The held-out partition is scored once for the final decision; if a
-run accidentally exposes it early, start a new protocol revision with a new
-held-out set.
+iterations. Every tuning run must select only the tuning IDs with `--query-ids`.
+The held-out partition is searched and scored once, in its final decision run.
+Any earlier score-bearing search over a held-out ID is exposure, whether or not
+the resulting report is opened; start a new protocol revision with a new
+held-out set after such exposure. Freshness-only checks do not score queries and
+may cover the full fixture.
 
 **Tuning (10):**
 
@@ -87,11 +92,13 @@ are a declared limitation; do not choose a different split after seeing scores.
 1. Run freshness-only first. Every judgment must be `visible` and the outcome
    `clear`; resolve any ambiguity/not-visible result through a committed fixture
    revision before continuing.
-2. Run both paths with `--limit 10 --k 5`. Record harness commit, protocol ID and
-   blob, fixture blob, corpus snapshot time, scope, profile, Redis state, and
-   SHA-256 digests of private aggregate/JSONL reports. Keyword runs first and may
-   warm lexical fallback caches; therefore latency is not a cold-cache
-   comparison (see `HYBRID-SHADOW-EVALUATION.md`).
+2. During tuning, run both paths with `--limit 10 --k 5 --query-ids` followed by
+   the comma-separated tuning IDs above. For the final decision, use the same
+   options with exactly the held-out IDs above. Record harness commit, protocol
+   ID and blob, fixture blob, corpus snapshot time, scope, profile, Redis state,
+   selected query IDs, and SHA-256 digests of private aggregate/JSONL reports.
+   Keyword runs first and may warm lexical fallback caches; therefore latency is
+   not a cold-cache comparison (see `HYBRID-SHADOW-EVALUATION.md`).
 3. Keep raw JSONL/JSON/Markdown private. Publish only sanitized aggregates,
    category/subset rollups, and decision rationale.
 4. List the exact query IDs used in every subset table.
@@ -105,13 +112,14 @@ required tables from the same aggregate JSON and exact fixture as follows:
   unprefixed queries map to `exact`.
 - For each path × partition × answerable category, recompute the existing
   harness formulas from recorded `results[].grade`: recall@5 uses positive hits
-  divided by all positive fixture judgments; nDCG@5 uses linear gain and IDCG
-  from all fixture judgments; average each only across queries with positive
-  judgments. MRR@10 averages reciprocal rank across all selected queries with
-  misses = 0.
+  divided by all positive judgments for that scored query; nDCG@5 uses linear
+  gain and IDCG from that query's complete fixture relevance map; average each
+  only across queries with positive judgments. A category row's MRR@10 averages
+  reciprocal rank across that category's selected queries with misses = 0.
 - Produce an overall row per path/partition with the same formulas. Exclude
   `noanswer` from recall/nDCG and all decision/category gates; include it in MRR
-  only to preserve the harness's all-query denominator.
+  for the overall partition row only, preserving the harness's all-selected-query
+  denominator.
 - Report `evaluated` and `excluded` counts beside every aggregate. Assert that
   each path has exactly one ranking for every listed query; otherwise the rollup
   is invalid.

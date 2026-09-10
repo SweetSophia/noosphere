@@ -5,6 +5,11 @@ search without serving results. This is measurement tooling, not a serving
 acceptance gate. Reports remain private; admin runs can include restricted
 rankings. Search may write caches, authorize dispatch, and call embeddings.
 
+Use `--query-ids <id,id,...>` to run only a pre-registered partition. Unknown or
+duplicate IDs fail closed, and selected queries retain fixture order. A run
+without this option evaluates the full fixture; do not use that mode when a
+protocol reserves held-out queries from tuning.
+
 ## Freshness before evaluation
 
 Every dual-path run performs an exact article lookup **before searching** and

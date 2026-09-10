@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { buildReport, loadQuerySet, parseArgs, runPath, writeReport, type QuerySet } from "./hybrid-shadow-eval";
+import { buildReport, loadQuerySet, parseArgs, runPath, selectQueries, writeReport, type QuerySet } from "./hybrid-shadow-eval";
 import type { MemoryResult } from "@/lib/memory/types";
 
 const fixtureDir = path.resolve(import.meta.dirname, "../src/__tests__/fixtures");
@@ -55,7 +55,7 @@ test("duplicate judged slugs earn credit once without shifting returned ranks", 
   assert.deepEqual(hybrid[0].results.map((r) => r.grade), [3, 0, 1]);
 });
 
-test("linear-gain nDCG uses full fixture IDCG, including unretrieved judgments", async () => {
+test("linear-gain nDCG uses each query's complete IDCG, including unretrieved judgments", async () => {
   const set = querySet();
   const hybrid = await rankings(set, [[row("other")]]);
   const report = buildReport(set, hybrid, hybrid, parseArgs(["--k", "2"]), {});
@@ -143,7 +143,7 @@ test("explicit runtime validator stays in parity with the schema constraints", a
 });
 
 test("argument validation guards missing values and finite supported bounds", () => {
-  for (const flag of ["--limit", "--k", "--out", "--scopes"]) {
+  for (const flag of ["--limit", "--k", "--out", "--scopes", "--query-ids"]) {
     for (const args of [[flag], [flag, "--k", "1"], [flag, " "]]) assert.throws(() => parseArgs(args), /missing value/);
   }
   for (const value of ["0", "-1", "1.5", "NaN", "Infinity", "201", "9007199254740992"]) {
@@ -152,9 +152,22 @@ test("argument validation guards missing values and finite supported bounds", ()
   for (const value of ["0", "-1", "1.5", "NaN", "Infinity", "11"]) assert.throws(() => parseArgs(["--k", value]));
   assert.throws(() => parseArgs(["--unknown"]), /unknown argument/);
   assert.throws(() => parseArgs(["--scopes", "published"]), /admin or unscoped/);
+  for (const value of ["query-one,,query-two", "query-one,query-one", "Bad-ID"]) {
+    assert.throws(() => parseArgs(["--query-ids", value]), /unique query IDs/);
+  }
   assert.deepEqual(parseArgs(["--limit", "200", "--k", "200", "--out", "reports", "--scopes", "admin"]),
     { limit: 200, k: 200, outDir: "reports", scopes: ["*"] });
   assert.equal(parseArgs(["--scopes", "unscoped"]).scopes, undefined);
+  assert.deepEqual(parseArgs(["--query-ids", "query-two, query-one"]).queryIds, ["query-two", "query-one"]);
+});
+
+test("query selection rejects unknown IDs and preserves fixture order", () => {
+  const set = querySet([one, { ...one, id: "query-two" }, { ...one, id: "query-three" }]);
+  assert.deepEqual(selectQueries(set, undefined), set);
+  const selected = selectQueries(set, ["query-three", "query-one"]);
+  assert.deepEqual(selected.queries.map((query) => query.id), ["query-one", "query-three"]);
+  assert.deepEqual(buildReport(selected, [], [], parseArgs([]), {}).queryIds, ["query-one", "query-three"]);
+  assert.throws(() => selectQueries(set, ["query-one", "query-missing"]), /unknown query id: query-missing/);
 });
 
 test("rapid report writes preserve aggregate JSON, JSONL and honest secret-free metadata", async () => {
