@@ -20,7 +20,8 @@
  *   npm run hybrid:shadow-eval -- --limit 5 --k 5 --all-queries --out <dir>
  *   npm run hybrid:shadow-eval -- --preflight-only --out <dir>
  *
- * Full dual-path run: must execute inside the compose network so the pinned
+ * Tuning dual-path run (frozen tuning IDs; not the final held-out decision):
+ * must execute inside the compose network so the pinned
  * provider endpoint (host.docker.internal:8741) resolves, with the app-role
  * DATABASE_URL pointing at db:5432:
  *   docker run --rm --network noosphere-net \
