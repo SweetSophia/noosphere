@@ -152,7 +152,7 @@ no-answer diagnostics are excluded from fallback gating. Latency is reported
 but not gated.
 
 There is no pre-existing accepted keyword baseline, so baseline comparison is
-N/A for revision 1. An ACCEPT record becomes the first baseline: pin its
+N/A for revision 2. An ACCEPT record becomes the first baseline: pin its
 aggregate SHA-256, fixture blob, corpus snapshot, and keyword metrics. Future
 protocol revisions may add a baseline gate only when those inputs are compatible
 and named before their run.
