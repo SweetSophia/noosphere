@@ -1,6 +1,6 @@
 # Phase D evaluation protocol — issue #319
 
-**Protocol ID:** `noosphere-hybrid-shadow-v1` (revision 1)
+**Protocol ID:** `noosphere-hybrid-shadow-v1` (revision 2)
 
 This contract is pre-registered before a decision-grade run. Any change to its
 queries, judgments, metrics, thresholds, partitions, or decision rules requires
@@ -40,12 +40,14 @@ precondition. Difficult judgments must not be removed merely to improve a
 score.
 
 No-answer queries are diagnostics, not relevance metrics: empty and irrelevant
-result sets both produce recall/nDCG `null` and MRR 0. Before scoring, two
-reviewers independently inspect each path's top-five JSONL rows for both
-no-answer queries. Any genuinely relevant row invalidates that empty judgment
-and requires a committed protocol/fixture revision and fresh run. Otherwise the
-rows are recorded as diagnostic evidence and excluded from category/decision
-metrics. They are not described as detecting hallucination automatically.
+result sets both produce recall/nDCG `null` and MRR 0. After each partition's
+score-bearing run, and before its metrics are used, two reviewers independently
+inspect `results[0:5]` in each path's JSONL ranking record for that partition's
+single no-answer query. Do not score both no-answer IDs together. Any genuinely
+relevant row invalidates that empty judgment and requires a committed
+protocol/fixture revision and fresh run. Otherwise the rows are recorded as
+diagnostic evidence and excluded from category/decision metrics. They are not
+described as detecting hallucination automatically.
 
 ## Frozen partitions
 

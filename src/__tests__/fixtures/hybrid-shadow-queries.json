@@ -1,7 +1,7 @@
 {
   "$schema": "./hybrid-shadow-queries.schema.json",
   "version": 1,
-  "description": "Graded query set for hybrid-vs-keyword shadow evaluation (issue #319), protocol noosphere-hybrid-shadow-v1 revision 1. 20 queries: unprefixed ids are the original exact core; added ids use paraphrase/mismatch/cross/noanswer prefixes. Slugs were verified against the live corpus 2026-09-04 and are rechecked by freshness preflight. Relevance: 3 = core, 2 = related, 1 = background, 0 = off-topic.",
+  "description": "Graded query set for hybrid-vs-keyword shadow evaluation (issue #319), protocol noosphere-hybrid-shadow-v1 revision 2. 20 queries: unprefixed ids are the original exact core; added ids use paraphrase/mismatch/cross/noanswer prefixes. Slugs are backed by corpus evidence and are rechecked by freshness preflight. Relevance: 3 = core, 2 = related, 1 = background, 0 = off-topic.",
   "queries": [
     {
       "id": "release-1-13-2",
@@ -161,8 +161,8 @@
       "query": "what went wrong and what did we harden afterwards",
       "relevance": {
         "openclaw-incident-2026-08-04-cross-agent-sessions-send-semantic-loop-root-cause-": 3,
-        "openclaw-2026-08-08-shodan-reasoning-only-text-masqueraded-as-final-answer": 2,
-        "openclaw-repair-backups-moved-from-root-ssd-to-storage-disk-2026-08-03": 2
+        "openclaw-upstream-filings-2026-08-05-issues-119600-2-pr-119604-sessions-send-loo": 3,
+        "openclaw-2026-08-08-shodan-reasoning-only-text-masqueraded-as-final-answer": 2
       }
     },
     {

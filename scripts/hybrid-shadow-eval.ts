@@ -115,7 +115,7 @@ export function parseArgs(argv: string[]): { limit: number; k: number; outDir: s
 
 export function selectQueries(querySet: QuerySet, queryIds: string[] | undefined, allowAll = false): QuerySet {
   if (!queryIds) {
-    if (!allowAll) throw new Error("score-bearing run requires --query-ids or explicit --all-queries");
+    if (!allowAll) throw new Error("score-bearing run requires an explicit --query-ids selection");
     return querySet;
   }
   const selected = new Set(queryIds);
@@ -309,6 +309,7 @@ export async function writeReport(report: ReturnType<typeof buildReport>, outDir
     `# Hybrid shadow evaluation — ${report.generatedAt}`,
     ``,
     `Query set v${report.querySetVersion} (${report.queryCount} queries), limit ${report.limit}, k ${report.k}.`,
+    `Selected query IDs: ${report.queryIds.map((id) => `\`${id}\``).join(", ")}.`,
     ``,
     `Scope: ${report.observation.scope}. Redis: ${report.observation.redis}. ${report.observation.redisLimitation}`,
     ...[report.observation.order, report.observation.sideEffects, report.observation.fallback, report.observation.metrics].flatMap((text) => ["", text]),

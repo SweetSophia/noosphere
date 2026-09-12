@@ -165,7 +165,7 @@ test("argument validation guards missing values and finite supported bounds", ()
 
 test("query selection rejects unknown IDs and preserves fixture order", () => {
   const set = querySet([one, { ...one, id: "query-two" }, { ...one, id: "query-three" }]);
-  assert.throws(() => selectQueries(set, undefined), /requires --query-ids or explicit --all-queries/);
+  assert.throws(() => selectQueries(set, undefined), /requires an explicit --query-ids selection/);
   assert.deepEqual(selectQueries(set, undefined, true), set);
   const selected = selectQueries(set, ["query-three", "query-one"]);
   assert.deepEqual(selected.queries.map((query) => query.id), ["query-one", "query-three"]);
@@ -192,6 +192,7 @@ test("rapid report writes preserve aggregate JSON, JSONL and honest secret-free 
       assert.deepEqual(JSON.parse(await readFile(files.aggregatePath, "utf8")), report);
       assert.deepEqual((await readFile(files.jsonl, "utf8")).trim().split("\n").map((line) => JSON.parse(line)), report.perQuery);
       const md = await readFile(files.summaryPath, "utf8");
+      assert.match(md, /Selected query IDs: `query-one`\./);
       for (const text of Object.values(report.observation)) assert.ok(md.includes(text));
       assert.match(md, /unknown fallback/);
       assert.match(md, /MRR@10/);
@@ -257,6 +258,6 @@ test("pure import has no provider/Prisma initialization; CLI rejects arguments b
   assert.doesNotMatch(cli.stderr, /requires DATABASE_URL|Prisma/);
   const omittedSelection = spawnSync(process.execPath, ["--import", "tsx", script], { env, encoding: "utf8", timeout: 10000 });
   assert.equal(omittedSelection.status, 1);
-  assert.match(omittedSelection.stderr, /score-bearing run requires --query-ids or explicit --all-queries/);
+  assert.match(omittedSelection.stderr, /score-bearing run requires an explicit --query-ids selection/);
   assert.doesNotMatch(omittedSelection.stderr, /requires DATABASE_URL|Prisma/);
 });
