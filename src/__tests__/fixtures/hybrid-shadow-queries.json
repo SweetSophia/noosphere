@@ -1,7 +1,7 @@
 {
   "$schema": "./hybrid-shadow-queries.schema.json",
   "version": 1,
-  "description": "Graded query set for hybrid-vs-keyword shadow evaluation (issue #319). Slugs verified against the live article corpus 2026-09-04. Relevance: 3 = on-topic core, 2 = related, 1 = background, 0 = off-topic.",
+  "description": "Graded query set for hybrid-vs-keyword shadow evaluation (issue #319), protocol noosphere-hybrid-shadow-v1 revision 2. 20 queries: unprefixed ids are the original exact core; added ids use paraphrase/mismatch/cross/noanswer prefixes. Slugs are backed by corpus evidence and are rechecked by freshness preflight. Relevance: 3 = core, 2 = related, 1 = background, 0 = off-topic.",
   "queries": [
     {
       "id": "release-1-13-2",
@@ -92,6 +92,88 @@
         "residential-noosphere-upgraded-to-1132-floor-preserved-health-verified": 3,
         "noosphere-1120-publication-and-production-adoption-receipt": 2
       }
+    },
+    {
+      "id": "paraphrase-embedding-search",
+      "query": "semantic search vector database ranking",
+      "relevance": {
+        "noosphere-epic-261-closed-hybrid-retrieval-shipped-phase-d-gates-split-to-319": 3,
+        "noosphere-production-pgvector-deployment-2026-08-28": 2,
+        "noosphere-pgvector-production-deployment-supplement": 2
+      }
+    },
+    {
+      "id": "paraphrase-plugin-publish",
+      "query": "publishing npm packages for agent tools",
+      "relevance": {
+        "noosphere-mcp-1131-merged-and-published": 3,
+        "noosphere-pr-313-codex-cli-mcp-support-merge-ready-at-886e6a7": 2,
+        "noosphere-1132-released-six-tags-five-npm-packages-verified-public-readback": 3
+      }
+    },
+    {
+      "id": "paraphrase-auth-repair",
+      "query": "repairing vulnerable authentication dependencies",
+      "relevance": {
+        "noosphere-pr-293-nextauth-42415-security-repair-and-merge-readiness-receipt": 3,
+        "noosphere-pr-294-dependency-security-repair-merge-readiness-receipt": 2
+      }
+    },
+    {
+      "id": "mismatch-data-safety",
+      "query": "how did we avoid losing data while changing database foundations",
+      "relevance": {
+        "noosphere-production-pgvector-deployment-2026-08-28": 3,
+        "noosphere-pgvector-production-deployment-supplement": 3,
+        "residential-noosphere-upgraded-to-1132-floor-preserved-health-verified": 2
+      }
+    },
+    {
+      "id": "mismatch-release-trust",
+      "query": "what evidence proves software still works after leaving source control",
+      "relevance": {
+        "noosphere-1132-released-six-tags-five-npm-packages-verified-public-readback": 3,
+        "residential-noosphere-upgraded-to-1132-floor-preserved-health-verified": 3,
+        "noosphere-pr-318-regular-merge-and-post-merge-verification": 2
+      }
+    },
+    {
+      "id": "mismatch-agent-knowledge",
+      "query": "how command-line assistants connect to a shared knowledge system",
+      "relevance": {
+        "noosphere-mcp-1131-merged-and-published": 3,
+        "noosphere-pr-313-codex-cli-mcp-support-merge-ready-at-886e6a7": 3,
+        "noosphere-pr-313-final-codex-mcp-release-gate-at-c7eed74": 2
+      }
+    },
+    {
+      "id": "cross-release-evidence",
+      "query": "how do we know a release actually shipped and works",
+      "relevance": {
+        "noosphere-1132-released-six-tags-five-npm-packages-verified-public-readback": 3,
+        "noosphere-pr-317-merged-as-11e1be9b-1132-release-candidate-on-master": 2,
+        "residential-noosphere-upgraded-to-1132-floor-preserved-health-verified": 3,
+        "noosphere-pr-318-regular-merge-and-post-merge-verification": 3
+      }
+    },
+    {
+      "id": "cross-incident-hardening",
+      "query": "what went wrong and what did we harden afterwards",
+      "relevance": {
+        "openclaw-incident-2026-08-04-cross-agent-sessions-send-semantic-loop-root-cause-": 3,
+        "openclaw-upstream-filings-2026-08-05-issues-119600-2-pr-119604-sessions-send-loo": 3,
+        "openclaw-2026-08-08-shodan-reasoning-only-text-masqueraded-as-final-answer": 2
+      }
+    },
+    {
+      "id": "noanswer-cooking-recipe",
+      "query": "sourdough starter feeding and baking routine",
+      "relevance": {}
+    },
+    {
+      "id": "noanswer-travel-visa",
+      "query": "Schengen visa application processing times",
+      "relevance": {}
     }
   ]
 }

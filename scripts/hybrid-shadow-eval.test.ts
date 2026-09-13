@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { buildReport, loadQuerySet, parseArgs, runPath, writeReport, type QuerySet } from "./hybrid-shadow-eval";
+import { buildReport, loadQuerySet, parseArgs, runPath, selectQueries, writeReport, type QuerySet } from "./hybrid-shadow-eval";
 import type { MemoryResult } from "@/lib/memory/types";
 
 const fixtureDir = path.resolve(import.meta.dirname, "../src/__tests__/fixtures");
@@ -55,7 +55,7 @@ test("duplicate judged slugs earn credit once without shifting returned ranks", 
   assert.deepEqual(hybrid[0].results.map((r) => r.grade), [3, 0, 1]);
 });
 
-test("linear-gain nDCG uses full fixture IDCG, including unretrieved judgments", async () => {
+test("linear-gain nDCG uses each query's complete IDCG, including unretrieved judgments", async () => {
   const set = querySet();
   const hybrid = await rankings(set, [[row("other")]]);
   const report = buildReport(set, hybrid, hybrid, parseArgs(["--k", "2"]), {});
@@ -143,7 +143,7 @@ test("explicit runtime validator stays in parity with the schema constraints", a
 });
 
 test("argument validation guards missing values and finite supported bounds", () => {
-  for (const flag of ["--limit", "--k", "--out", "--scopes"]) {
+  for (const flag of ["--limit", "--k", "--out", "--scopes", "--query-ids"]) {
     for (const args of [[flag], [flag, "--k", "1"], [flag, " "]]) assert.throws(() => parseArgs(args), /missing value/);
   }
   for (const value of ["0", "-1", "1.5", "NaN", "Infinity", "201", "9007199254740992"]) {
@@ -152,9 +152,25 @@ test("argument validation guards missing values and finite supported bounds", ()
   for (const value of ["0", "-1", "1.5", "NaN", "Infinity", "11"]) assert.throws(() => parseArgs(["--k", value]));
   assert.throws(() => parseArgs(["--unknown"]), /unknown argument/);
   assert.throws(() => parseArgs(["--scopes", "published"]), /admin or unscoped/);
+  assert.throws(() => parseArgs(["--all-queries", "--query-ids", "query-one"]), /mutually exclusive/);
+  for (const value of ["query-one,,query-two", "query-one,query-one", "Bad-ID"]) {
+    assert.throws(() => parseArgs(["--query-ids", value]), /unique query IDs/);
+  }
   assert.deepEqual(parseArgs(["--limit", "200", "--k", "200", "--out", "reports", "--scopes", "admin"]),
     { limit: 200, k: 200, outDir: "reports", scopes: ["*"] });
   assert.equal(parseArgs(["--scopes", "unscoped"]).scopes, undefined);
+  assert.deepEqual(parseArgs(["--query-ids", "query-two, query-one"]).queryIds, ["query-two", "query-one"]);
+  assert.equal(parseArgs(["--all-queries"]).allQueries, true);
+});
+
+test("query selection rejects unknown IDs and preserves fixture order", () => {
+  const set = querySet([one, { ...one, id: "query-two" }, { ...one, id: "query-three" }]);
+  assert.throws(() => selectQueries(set, undefined), /requires an explicit --query-ids selection/);
+  assert.deepEqual(selectQueries(set, undefined, true), set);
+  const selected = selectQueries(set, ["query-three", "query-one"]);
+  assert.deepEqual(selected.queries.map((query) => query.id), ["query-one", "query-three"]);
+  assert.deepEqual(buildReport(selected, [], [], parseArgs([]), {}).queryIds, ["query-one", "query-three"]);
+  assert.throws(() => selectQueries(set, ["query-one", "query-missing"]), /unknown query id: query-missing/);
 });
 
 test("rapid report writes preserve aggregate JSON, JSONL and honest secret-free metadata", async () => {
@@ -176,6 +192,7 @@ test("rapid report writes preserve aggregate JSON, JSONL and honest secret-free 
       assert.deepEqual(JSON.parse(await readFile(files.aggregatePath, "utf8")), report);
       assert.deepEqual((await readFile(files.jsonl, "utf8")).trim().split("\n").map((line) => JSON.parse(line)), report.perQuery);
       const md = await readFile(files.summaryPath, "utf8");
+      assert.match(md, /Selected query IDs: `query-one`\./);
       for (const text of Object.values(report.observation)) assert.ok(md.includes(text));
       assert.match(md, /unknown fallback/);
       assert.match(md, /MRR@10/);
@@ -239,4 +256,8 @@ test("pure import has no provider/Prisma initialization; CLI rejects arguments b
   assert.equal(cli.status, 1);
   assert.match(cli.stderr, /missing value for --out/);
   assert.doesNotMatch(cli.stderr, /requires DATABASE_URL|Prisma/);
+  const omittedSelection = spawnSync(process.execPath, ["--import", "tsx", script], { env, encoding: "utf8", timeout: 10000 });
+  assert.equal(omittedSelection.status, 1);
+  assert.match(omittedSelection.stderr, /score-bearing run requires an explicit --query-ids selection/);
+  assert.doesNotMatch(omittedSelection.stderr, /requires DATABASE_URL|Prisma/);
 });
