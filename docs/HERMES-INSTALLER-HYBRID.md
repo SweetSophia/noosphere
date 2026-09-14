@@ -223,13 +223,13 @@ Never `docker compose` from a git clone. Never re-run `init`.
 ### 4.1 Scripts checkout (not the runtime)
 
 ```bash
-git clone --branch v1.13.3 --depth 1 https://github.com/SweetSophia/noosphere.git ~/src/noosphere-scripts
+git clone --branch v1.14.0 --depth 1 https://github.com/SweetSophia/noosphere.git ~/src/noosphere-scripts
 cd ~/src/noosphere-scripts
-test "$(git describe --tags --exact-match)" = v1.13.3
+test "$(git describe --tags --exact-match)" = v1.14.0
 npm ci
 ```
 
-That commit is tag `v1.13.3`. `npm ci` is for activators only. Do not run
+That commit is tag `v1.14.0`. `npm ci` is for activators only. Do not run
 Compose from this clone.
 
 ### 4.2 Snapshot

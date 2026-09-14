@@ -7,7 +7,7 @@ const DEFAULT_COMPOSE_FILE = "~/.noosphere/docker-compose.yml";
 const DEFAULT_LOG_TAIL = 80;
 const VERIFIED_INSTALLER_REF = "4468cbb160c1b5eb98d42662229287be013692d7";
 const VERIFIED_INSTALLER_SHA256 = "781c1f635082aefaf62910bc2d973e22809ca690ef30a1c3a7143e8c9441e283";
-const VERIFIED_NOOSPHERE_VERSION = "1.13.3";
+const VERIFIED_NOOSPHERE_VERSION = "1.14.0";
 const VERIFIED_INSTALLER_URL = `https://raw.githubusercontent.com/SweetSophia/noosphere/${VERIFIED_INSTALLER_REF}/install.sh`;
 export function getVerifiedInstallerCommands() {
     return [
