@@ -16,8 +16,8 @@ const releaseRoot = resolve(process.cwd());
 const immutableHelperRef = "9da4af0a7b2275aa91eecd102095e0e470bbb0e3";
 const guidedInstallerRef = "4468cbb160c1b5eb98d42662229287be013692d7";
 const guidedInstallerSha256 = "781c1f635082aefaf62910bc2d973e22809ca690ef30a1c3a7143e8c9441e283";
-const guidedBackendRef = "91ca29963ef980dd95e700a2e84d9b49837c4b77";
-const guidedBackendSha256 = "44a3005015a1530c3a0976265ecc48f32dc9397fec52078e4b9cfe60e02a2831";
+const guidedBackendRef = "ef36b7da94b64cd2c63e66c7731c2de4e5ca69cf";
+const guidedBackendSha256 = "224dd8211df0d985d3815472a41d411836c64c8061c92be9315208a353563976";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
