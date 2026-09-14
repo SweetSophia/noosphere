@@ -2363,8 +2363,8 @@ describe("OpenClaw Noosphere CLI helpers", () => {
     const combined = commands.join("\n");
 
     assert.equal(commands.length, 8);
-    assert.match(combined, /4468cbb160c1b5eb98d42662229287be013692d7/);
-    assert.match(combined, /781c1f635082aefaf62910bc2d973e22809ca690ef30a1c3a7143e8c9441e283/);
+    assert.match(combined, /182e0dceade3f0ac31e5d14f42f091d4075793a2/);
+    assert.match(combined, /5fd69c4125ba02fdcc36e1bb54b66628dc5d324f7c04cea13d5dae3729035601/);
     assert.equal(commands[0], "(");
     assert.equal(commands[1], "  set -e");
     assert.match(commands[2], /mktemp/);
@@ -2373,7 +2373,7 @@ describe("OpenClaw Noosphere CLI helpers", () => {
     assert.match(commands[5], /sha256sum -c -/);
     assert.equal(
       commands[6],
-      '  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.13.3}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.13.3}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.13.3}" bash "$installer" --non-interactive --with openclaw',
+      '  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.14.0}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.14.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.14.0}" bash "$installer" --non-interactive --with openclaw',
     );
     assert.equal(commands[7], ")");
     assert.doesNotMatch(combined, /\/master\/install-openclaw\.sh|install-openclaw\.sh \| bash/);

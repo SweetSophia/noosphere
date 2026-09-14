@@ -8,6 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-09-14
+
+Minor release adding explicit wiki publication controls and the revisioned hybrid
+retrieval evaluation harness. Hybrid serving defaults and deployment state are
+unchanged.
+
+### Added
+
+- **Wiki draft publication and article status controls
+  ([#324](https://github.com/SweetSophia/noosphere/pull/324))**: editors and
+  administrators can publish a non-published article from its page or select
+  `draft`, `reviewed`, or `published` while editing. The wiki now exposes one
+  **Admin menu** entry instead of separate keys/settings links.
+- **Hybrid shadow-evaluation tooling
+  ([#320](https://github.com/SweetSophia/noosphere/pull/320),
+  [#326](https://github.com/SweetSophia/noosphere/pull/326),
+  [#327](https://github.com/SweetSophia/noosphere/pull/327))**: adds a
+  production-path keyword/hybrid comparison harness, private freshness
+  evidence, explicit metric denominators, frozen tuning and held-out
+  partitions, and deterministic ACCEPT/TUNE/REJECT rules.
+
+### Validation
+
+- **Revision-2 reference evaluation
+  ([#319](https://github.com/SweetSophia/noosphere/issues/319))**: the held-out
+  partition returned **ACCEPT** with hybrid Recall@5 `0.426` versus keyword
+  `0.389`, nDCG@5 `0.474` versus `0.447`, and MRR@10 `0.525` versus
+  `0.500`. No fallback was observed and neither independent no-answer review
+  found a relevant result. Raw rankings remain owner-only; this evidence does
+  not change serving configuration or authorize deployment.
+
 ## [1.13.3] - 2026-09-05
 
 Patch release so first-time installer images no longer seed house project
@@ -439,7 +470,8 @@ changes.
   backfill pipeline, and the memory provider refactor. Refer to the commit
   history (`git log v1.8.0..v1.9.0`) for the full set of changes.
 
-[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.13.3...HEAD
+[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.14.0...HEAD
+[1.14.0]: https://github.com/SweetSophia/noosphere/compare/v1.13.3...v1.14.0
 [1.13.3]: https://github.com/SweetSophia/noosphere/compare/v1.13.2...v1.13.3
 [1.13.2]: https://github.com/SweetSophia/noosphere/compare/v1.13.1...v1.13.2
 [1.13.1]: https://github.com/SweetSophia/noosphere/compare/v1.13.0...v1.13.1
