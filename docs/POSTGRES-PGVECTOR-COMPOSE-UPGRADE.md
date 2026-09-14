@@ -44,14 +44,14 @@ Install and upgrade through the same command, but only after the coordinated
 exists with all six installer assets. Source merge alone does not publish them:
 
 ```bash
-# Installer commit: 4468cbb160c1b5eb98d42662229287be013692d7
-# Expected SHA-256: 781c1f635082aefaf62910bc2d973e22809ca690ef30a1c3a7143e8c9441e283
+# Installer commit: 182e0dceade3f0ac31e5d14f42f091d4075793a2
+# Expected SHA-256: 5fd69c4125ba02fdcc36e1bb54b66628dc5d324f7c04cea13d5dae3729035601
 (
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/4468cbb160c1b5eb98d42662229287be013692d7/install.sh -o "$installer"
-  printf '%s  %s\n' '781c1f635082aefaf62910bc2d973e22809ca690ef30a1c3a7143e8c9441e283' "$installer" | sha256sum -c -
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/182e0dceade3f0ac31e5d14f42f091d4075793a2/install.sh -o "$installer"
+  printf '%s  %s\n' '5fd69c4125ba02fdcc36e1bb54b66628dc5d324f7c04cea13d5dae3729035601' "$installer" | sha256sum -c -
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.14.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.14.0}" bash "$installer" --non-interactive --with openclaw
 )
 ```
