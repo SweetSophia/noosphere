@@ -29,6 +29,13 @@ unchanged.
   evidence, explicit metric denominators, frozen tuning and held-out
   partitions, and deterministic ACCEPT/TUNE/REJECT rules.
 
+### Security
+
+- **Dependency audit remediation ([#329](https://github.com/SweetSophia/noosphere/pull/329))**: override Prisma's pinned transitive
+  `deepmerge-ts` `7.1.5` → `8.0.2` and `mysql2` `3.15.3` → `3.24.4`, and
+  refresh stale development-tooling locks. Root production and full-tree
+  `npm audit` runs now report zero vulnerabilities.
+
 ### Validation
 
 - **Revision-2 reference evaluation

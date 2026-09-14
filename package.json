@@ -86,6 +86,8 @@
     "@hono/node-server": "1.19.13",
     "postcss": "8.5.26",
     "hono": "4.12.25",
-    "uuid": "11.1.1"
+    "uuid": "11.1.1",
+    "deepmerge-ts": "8.0.2",
+    "mysql2": "3.24.4"
   }
 }
