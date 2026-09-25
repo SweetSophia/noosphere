@@ -12,6 +12,7 @@ import {
   HYBRID_MINIMUM_COVERAGE,
   HYBRID_RRF_K,
 } from "@/lib/memory/hybrid-ranking";
+import { TSQUERY_CONFIG } from "@/lib/memory/article-search";
 
 function sqlText(query: { strings: readonly string[] }): string {
   return query.strings.join("?").replace(/\s+/g, " ");
@@ -149,7 +150,12 @@ test("miss query selects strict lexical matches before the bounded zero-result f
   assert.match(text, /strict_match_exists AS MATERIALIZED/);
   assert.match(text, /effective_query AS MATERIALIZED/);
   assert.match(text, /NOT strict_match_exists\.matched/);
-  assert.match(text, /to_tsquery\('simple'/);
+  // Both tsquery and tsvector builders must use TSQUERY_CONFIG (issue #256);
+  // the fallback tsquery fragment embeds the literal directly.
+  assert.match(
+    text,
+    new RegExp(`to_tsquery\\('${TSQUERY_CONFIG}'`),
+  );
 });
 
 test("miss query locks provenance before articles, normalizes before pagination, and emits a complete cache set", () => {
