@@ -64,10 +64,10 @@ describe("article search tsvector config (#256)", () => {
 
   it("buildSearchableCTE tokenizes every field with TSQUERY_CONFIG", () => {
     const cte = buildSearchableCTE([]);
-
-    const englishUses = [
-      cte.strings.join("?").match(new RegExp(`to_tsvector\\('${TSQUERY_CONFIG}'`, "g")) ?? [],
-    ][0];
+    const text = cte.strings.join("?");
+    const englishUses = text.match(
+      new RegExp(`to_tsvector\\('${TSQUERY_CONFIG}'`, "g"),
+    ) ?? [];
     assert.equal(
       englishUses.length,
       4,
@@ -75,7 +75,7 @@ describe("article search tsvector config (#256)", () => {
         englishUses.length,
     );
     assert.equal(
-      cte.strings.join("?").match(/to_tsvector\('simple'/g),
+      text.match(/to_tsvector\('simple'/g),
       null,
       "stale 'simple' literal survived in CTE — issue #256 regression",
     );

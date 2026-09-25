@@ -14,12 +14,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#256](https://github.com/SweetSophia/noosphere/issues/256))**: the shared
   full-text search builders (`to_tsvector`, `websearch_to_tsquery`,
   `to_tsquery`) now use the `'english'` text-search configuration instead of
-  `'simple'`, so stemmed forms match (`running` ↔ `run`/`ran`) and English
-  stop words are filtered by the query parser. The configuration is exposed
-  as `TSQUERY_CONFIG` in `src/lib/memory/article-search.ts` for a future
-  operator override. Both sides of the `@@` operator use the same config so
-  ranking semantics are preserved; the change is otherwise backward
-  compatible.
+  `'simple'`, so stemmed regular word forms match (`running`/`runs` ↔ `run`,
+  `photos` ↔ `photo`) and English stop words are filtered by the query
+  parser. The configuration is exposed as a module-level
+  `TSQUERY_CONFIG` constant in `src/lib/memory/article-search.ts` for
+  internal use; it is not read from the environment. Both sides of the
+  `@@` operator use the same config so ranking semantics are preserved;
+  the change is otherwise backward compatible.
+
+  **Deployment note for hybrid retrieval:** the search-result cache for
+  hybrid retrieval is keyed by `noosphere_hybrid.search_cache_epoch`, which
+  is bumped only by data-mutation triggers on `embedding_profile` and
+  `article_embedding`. Operators should call
+  `noosphere_hybrid.bump_search_cache_epoch()` once after deploying this
+  change so cached hybrid results computed under `'simple'` semantics are
+  invalidated. Without this manual bump, cached results expire gradually on
+  the next article write (the same TTL window applies to the legacy Redis
+  search cache).
 
 ## [1.14.0] - 2026-09-14
 

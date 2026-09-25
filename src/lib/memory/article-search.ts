@@ -17,16 +17,23 @@ import { resolveScopeAccess } from "@/lib/api/scope-filter";
  * PostgreSQL text-search configuration used by every `to_tsvector` and
  * `to_tsquery` call in this module.
  *
- * `'english'` adds stemming and stop-word filtering, so `running` matches
- * `run`/`ran`, and common function words (`the`, `of`, `is`, …) are ignored
- * during search. Both sides of the `@@` operator MUST agree on the config or
- * the operator returns `false` for every match.
+ * `'english'` adds stemming and English stop-word filtering. The Porter/
+ * Snowball stemmer maps regular word forms onto a common lexeme, so
+ * `running` and `runs` both stem to `run` and match `to_tsquery('english',
+ * 'run')`; the same is true for `photo` ↔ `photos`. Irregular verbs (`ran`)
+ * and lexically distinct nouns (`photograph`) keep their own lexemes and do
+ * NOT conflate. Common function words (`the`, `of`, `is`, …) are stripped
+ * by the query parser, so a query of only stop words yields an empty tsquery.
+ *
+ * Both sides of the `@@` operator MUST agree on the configuration or the
+ * operator returns `false` for every row.
  *
  * The English configuration is part of the standard PostgreSQL distribution
  * (`pg_catalog.english`), so no extension or migration is required — only the
- * `english` text-search dictionary must be available in the cluster. A
- * test-time guard in `src/__tests__/memory/article-search.test.ts` fails
- * loudly if a non-standard image ever drops it.
+ * `english` text-search dictionary must be present in the cluster. The unit
+ * tests in `src/__tests__/memory/article-search.test.ts` guard against a
+ * stale `'simple'` literal surviving in the generated SQL; they do not
+ * assert dictionary presence on the cluster itself.
  *
  * Issue #256 (M2): previously `'simple'`, which tokenized without stemming.
  */
@@ -274,9 +281,10 @@ export function buildSearchTsQuery(query: string): Prisma.Sql {
  * only after the strict query returns zero rows, and keeps the term set bounded
  * so broad searches do not swamp normal relevance ranking.
  *
- * The fallback uses the same `TSQUERY_CONFIG` as the strict path; terms are
- * OR-joined after stemming so a query for "photo" still matches an article
- * containing "photos" or "photograph".
+ * The fallback uses the same `TSQUERY_CONFIG` as the strict path; the
+ * expanded terms (root plus `FALLBACK_SEARCH_SYNONYMS` group members) are
+ * OR-joined, so a query for "photo" still matches an article containing
+ * "photos" (via stemming) or "image"/"portrait" (via the synonym group).
  */
 export function buildFallbackSearchTsQuery(query: string): Prisma.Sql | null {
   const terms = extractFallbackSearchTerms(query);
