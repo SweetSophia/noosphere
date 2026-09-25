@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **English stemming on article search
+  ([#256](https://github.com/SweetSophia/noosphere/issues/256))**: the shared
+  full-text search builders (`to_tsvector`, `websearch_to_tsquery`,
+  `to_tsquery`) now use the `'english'` text-search configuration instead of
+  `'simple'`, so stemmed forms match (`running` ↔ `run`/`ran`) and English
+  stop words are filtered by the query parser. The configuration is exposed
+  as `TSQUERY_CONFIG` in `src/lib/memory/article-search.ts` for a future
+  operator override. Both sides of the `@@` operator use the same config so
+  ranking semantics are preserved; the change is otherwise backward
+  compatible.
+
 ## [1.14.0] - 2026-09-14
 
 Minor release adding explicit wiki publication controls and the revisioned hybrid

@@ -13,6 +13,25 @@
 import { Prisma } from "@prisma/client";
 import { resolveScopeAccess } from "@/lib/api/scope-filter";
 
+/**
+ * PostgreSQL text-search configuration used by every `to_tsvector` and
+ * `to_tsquery` call in this module.
+ *
+ * `'english'` adds stemming and stop-word filtering, so `running` matches
+ * `run`/`ran`, and common function words (`the`, `of`, `is`, …) are ignored
+ * during search. Both sides of the `@@` operator MUST agree on the config or
+ * the operator returns `false` for every match.
+ *
+ * The English configuration is part of the standard PostgreSQL distribution
+ * (`pg_catalog.english`), so no extension or migration is required — only the
+ * `english` text-search dictionary must be available in the cluster. A
+ * test-time guard in `src/__tests__/memory/article-search.test.ts` fails
+ * loudly if a non-standard image ever drops it.
+ *
+ * Issue #256 (M2): previously `'simple'`, which tokenized without stemming.
+ */
+export const TSQUERY_CONFIG = "english" as const;
+
 const FALLBACK_SEARCH_MAX_SEED_TERMS = 8;
 const FALLBACK_SEARCH_MAX_TERMS = 16;
 
@@ -202,10 +221,10 @@ export function buildSearchableCTE(
       a.id,
       a."updatedAt",
       (
-        setweight(to_tsvector('simple', coalesce(a.title, '')), 'A') ||
-        setweight(to_tsvector('simple', coalesce(a.excerpt, '')), 'B') ||
-        setweight(to_tsvector('simple', coalesce(a.content, '')), 'C') ||
-        setweight(to_tsvector('simple', coalesce(string_agg(tg.name, ' '), '')), 'B')
+        setweight(to_tsvector(${Prisma.raw(`'${TSQUERY_CONFIG}'`)}, coalesce(a.title, '')), 'A') ||
+        setweight(to_tsvector(${Prisma.raw(`'${TSQUERY_CONFIG}'`)}, coalesce(a.excerpt, '')), 'B') ||
+        setweight(to_tsvector(${Prisma.raw(`'${TSQUERY_CONFIG}'`)}, coalesce(a.content, '')), 'C') ||
+        setweight(to_tsvector(${Prisma.raw(`'${TSQUERY_CONFIG}'`)}, coalesce(string_agg(tg.name, ' '), '')), 'B')
       ) AS document
     FROM "Article" a
     INNER JOIN "Topic" tpc ON tpc.id = a."topicId"
@@ -237,9 +256,13 @@ function buildWhereClause(filters: Prisma.Sql[]): Prisma.Sql {
 
 /**
  * Build a tsquery fragment from a user query string using `websearch_to_tsquery`.
+ *
+ * Uses `TSQUERY_CONFIG` so the resulting tsquery matches the tsvector document
+ * produced by `buildSearchableCTE` — both sides must agree on the text-search
+ * configuration or the `@@` operator returns `false` for every row.
  */
 export function buildSearchTsQuery(query: string): Prisma.Sql {
-  return Prisma.sql`websearch_to_tsquery('simple', ${query})`;
+  return Prisma.sql`websearch_to_tsquery(${Prisma.raw(`'${TSQUERY_CONFIG}'`)}, ${query})`;
 }
 
 /**
@@ -250,12 +273,16 @@ export function buildSearchTsQuery(query: string): Prisma.Sql {
  * "reattach") while still naming the concept ("photo"). This fallback is used
  * only after the strict query returns zero rows, and keeps the term set bounded
  * so broad searches do not swamp normal relevance ranking.
+ *
+ * The fallback uses the same `TSQUERY_CONFIG` as the strict path; terms are
+ * OR-joined after stemming so a query for "photo" still matches an article
+ * containing "photos" or "photograph".
  */
 export function buildFallbackSearchTsQuery(query: string): Prisma.Sql | null {
   const terms = extractFallbackSearchTerms(query);
   if (terms.length === 0) return null;
 
-  return Prisma.sql`to_tsquery('simple', ${terms.join(" | ")})`;
+  return Prisma.sql`to_tsquery(${Prisma.raw(`'${TSQUERY_CONFIG}'`)}, ${terms.join(" | ")})`;
 }
 
 export function extractFallbackSearchTerms(query: string): string[] {

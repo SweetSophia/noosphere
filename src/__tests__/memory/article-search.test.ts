@@ -3,7 +3,10 @@ import { describe, it } from "node:test";
 import {
   buildFallbackSearchTsQuery,
   buildRestrictedScopeSql,
+  buildSearchTsQuery,
+  buildSearchableCTE,
   extractFallbackSearchTerms,
+  TSQUERY_CONFIG,
 } from "@/lib/memory/article-search";
 
 describe("article search fallback terms", () => {
@@ -39,6 +42,71 @@ describe("article search fallback terms", () => {
     assert.deepEqual(
       extractFallbackSearchTerms("foo & bar | baz !qux <-> quux"),
       ["foo", "bar", "baz", "qux", "quux"],
+    );
+  });
+});
+
+/**
+ * Issue #256 (M2) — the tsvector and tsquery builders must use the same
+ * PostgreSQL text-search configuration. The CTE produces a `document`
+ * tsvector and the query produces a tsquery; the `@@` operator only matches
+ * if both sides agree on the regconfig name.
+ *
+ * Before #256 the builders used `'simple'`, which tokenized without stemming
+ * (so "running" and "ran" did not match). These tests assert the builders
+ * emit the post-fix configuration and that no `'simple'` literal survives
+ * in the generated SQL.
+ */
+describe("article search tsvector config (#256)", () => {
+  it("exports the english config as a single source of truth", () => {
+    assert.equal(TSQUERY_CONFIG, "english");
+  });
+
+  it("buildSearchableCTE tokenizes every field with TSQUERY_CONFIG", () => {
+    const cte = buildSearchableCTE([]);
+
+    const englishUses = [
+      cte.strings.join("?").match(new RegExp(`to_tsvector\\('${TSQUERY_CONFIG}'`, "g")) ?? [],
+    ][0];
+    assert.equal(
+      englishUses.length,
+      4,
+      "expected four to_tsvector calls (title, excerpt, content, tags) — got " +
+        englishUses.length,
+    );
+    assert.equal(
+      cte.strings.join("?").match(/to_tsvector\('simple'/g),
+      null,
+      "stale 'simple' literal survived in CTE — issue #256 regression",
+    );
+  });
+
+  it("buildSearchTsQuery emits websearch_to_tsquery with TSQUERY_CONFIG", () => {
+    const sql = buildSearchTsQuery("running");
+    const text = sql.strings.join("?");
+    assert.match(
+      text,
+      new RegExp(`websearch_to_tsquery\\('${TSQUERY_CONFIG}'`),
+    );
+    assert.equal(
+      text.match(/websearch_to_tsquery\('simple'/),
+      null,
+      "stale 'simple' literal survived in strict tsquery — issue #256 regression",
+    );
+  });
+
+  it("buildFallbackSearchTsQuery emits to_tsquery with TSQUERY_CONFIG", () => {
+    const sql = buildFallbackSearchTsQuery("photo upload");
+    assert.ok(sql, "expected a fallback tsquery for non-stop-word terms");
+    const text = sql!.strings.join("?");
+    assert.match(
+      text,
+      new RegExp(`to_tsquery\\('${TSQUERY_CONFIG}'`),
+    );
+    assert.equal(
+      text.match(/to_tsquery\('simple'/),
+      null,
+      "stale 'simple' literal survived in fallback tsquery — issue #256 regression",
     );
   });
 });
