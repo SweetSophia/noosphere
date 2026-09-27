@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-_FENCE_TAG_RE = re.compile(r"</?\s*(?:memory-context|noosphere-context)\b[^>]*>", re.IGNORECASE)
+_FENCE_TAG_RE = re.compile(r"</?\s*(?:memory-context|noosphere-context)(?=\s|>)[^>]*>", re.IGNORECASE)
 _SYSTEM_NOTE_RE = re.compile(
     r"\[System note:\s*The following is recalled memory context,\s*"
     r"NOT new user input\.[^\]]*\]\s*",
@@ -13,6 +13,7 @@ _SYSTEM_NOTE_RE = re.compile(
 
 def clean_capture_text(text: str) -> str:
     """Discard fields containing injected context rather than saving recalled text."""
+    # ponytail: discard the whole field; add a nested-block parser if mixed-content capture fidelity matters.
     return "" if _FENCE_TAG_RE.search(text) else strip_context_fences(text)
 
 

@@ -22,6 +22,8 @@ test("server strips the context tags declared by the Hermes client", () => {
       assert.ok(result.content.includes("After."));
       assert.ok(!result.content.includes("recalled private context"));
     }
+    const adjacent = `<${tag}-note>Durable note</${tag}-note>`;
+    assert.equal(stripInjectedMemoryBlocks(adjacent, SERVER_MEMORY_SAVE_STRIP_MODE).content, adjacent);
   }
 });
 

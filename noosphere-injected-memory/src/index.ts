@@ -78,7 +78,7 @@ function buildPatternSet(
       const hermesFence = tag === "memory-context" || tag === "noosphere-context";
       const tagPrefix = hermesFence ? "\\s*" : "";
       const openBoundary =
-        config.open === "tag-boundary" ? "(?=[\\s>/])" : "\\b";
+        hermesFence || config.open === "tag-boundary" ? "(?=[\\s>/])" : "\\b";
       const closeSuffix = hermesFence || config.closeAllowsWhitespace ? "\\s*" : "";
 
       return [

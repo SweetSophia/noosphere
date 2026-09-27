@@ -219,6 +219,15 @@ class NoosphereSavePhase4Test(unittest.TestCase):
         self.assertEqual(result.get("error"), "content is required")
         self.assertEqual(provider._client.saved, [])
 
+    def test_save_tool_preserves_distinct_hyphenated_tag(self):
+        provider = self.initialized_provider(topic_id="topic-1")
+        content = "<memory-context-note>Durable note</memory-context-note>"
+        result = json.loads(provider.handle_tool_call("noosphere_save", {
+            "title": "Deployment rule", "content": content,
+        }))
+        self.assertTrue(result["success"])
+        self.assertEqual(provider._client.saved[0]["content"], content)
+
     def test_save_async_does_not_block_behind_in_flight_write(self):
         provider = self.initialized_provider(topic_id="topic-1")
         client = _BlockingClient()
@@ -271,7 +280,7 @@ class NoosphereSavePhase4Test(unittest.TestCase):
 
     def test_sync_turn_does_not_capture_fenced_context(self):
         provider = self.initialized_provider(topic_id="topic-1", auto_capture=True)
-        provider.sync_turn("<memory-context>private recalled text</memory-context>", "ok")
+        provider.sync_turn("<memory-context>private recalled text</memory-context>", "I documented the durable deployment rule with a verification command.")
         provider.shutdown()
         self.assertEqual(provider._client.saved, [])
 

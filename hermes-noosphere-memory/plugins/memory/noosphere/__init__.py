@@ -400,6 +400,8 @@ class NoosphereMemoryProvider(MemoryProvider):
             return
         clean_user = _clean_capture_text(user_content)
         clean_assistant = _clean_capture_text(assistant_content)
+        if (user_content and not clean_user) or (assistant_content and not clean_assistant):
+            return  # Do not save a partial turn after an injected-context field was dropped.
         combined = f"{clean_user}\n{clean_assistant}".strip()
         if not _should_capture(combined):
             return
