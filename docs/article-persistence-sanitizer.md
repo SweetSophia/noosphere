@@ -4,7 +4,7 @@
 
 A Prisma client `$extends` query interceptor that strips registered injected-memory blocks (including Hermes context fences) from article and revision text fields (`content`, `excerpt`, `title`, `sourceUrl`, `authorName`) before PostgreSQL writes.
 
-The extension intercepts `create`, `update`, `upsert`, `createMany`, and `updateMany` on both models. This is a backstop for those fields, not a claim that every metadata field or related table is sanitized.
+The extension intercepts `create`, `update`, `upsert`, `createMany`, `updateMany`, `createManyAndReturn`, and `updateManyAndReturn` on both models. This is a backstop for those fields, not a claim that every metadata field or related table is sanitized.
 
 ## What It Does
 
@@ -12,7 +12,7 @@ The extension intercepts `create`, `update`, `upsert`, `createMany`, and `update
 2. **Rejects** writes where `content` or `title` becomes empty after stripping
 3. **Recurses** into nested Prisma write payloads (e.g. `revisions: { create: [...] }`) — handles all payload shapes including arrays, `connectOrCreate`, `{ where, data }` wrappers, and Prisma field operations (`content: { set: "..." }`)
 4. **Skips** `where` clauses — query conditions are never stripped or rejected
-5. **Rejects** `createMany`/`updateMany` calls that include `content` or `excerpt`; sanitizes metadata fields on bulk writes
+5. **Rejects** bulk writes (including `AndReturn` variants) that include `content` or `excerpt`; sanitizes metadata fields on permitted bulk writes
 6. **Protects** both `article` and `articleRevision` tables
 
 ## What Stays at Route Level
@@ -47,6 +47,8 @@ Examples from the persistence-layer regression suite (`npm run test:persistence-
 | 7 | `article.updateMany` allows metadata-only | Bulk metadata fields sanitized |
 | 8 | `article.updateMany` rejects content fields | Bulk content blocked |
 | 9 | `article.createMany` rejects content fields | Bulk create content blocked |
+| 9a | `createManyAndReturn` rejects content on both models | Bulk-return create cannot bypass the guard |
+| 9b | `updateManyAndReturn` sanitizes metadata and rejects content | Bulk-return update cannot bypass the guard |
 | 10 | Nested `revision.create` (single object) strips | Nested writes sanitized |
 | 11 | Nested `revision.create` (array form) strips | Array nested writes sanitized |
 | 12 | Excerpt-only stripping (clean content) | Excerpt independently sanitized |

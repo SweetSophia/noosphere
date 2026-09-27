@@ -1,10 +1,9 @@
 /**
  * Prisma client extension: Article persistence-layer sanitizer
  *
- * This extension intercepts all `article.create`, `article.update`,
- * `article.upsert`, `article.createMany`, `article.updateMany`,
- * `articleRevision.create`, `articleRevision.update`, and
- * `articleRevision.upsert` operations at the Prisma query layer.
+ * This extension intercepts `create`, `update`, `upsert`, `createMany`,
+ * `updateMany`, `createManyAndReturn`, and `updateManyAndReturn` on both
+ * `article` and `articleRevision` at the Prisma query layer.
  * It strips registered injected-memory blocks from `content`, `excerpt`,
  * `title`, `sourceUrl`, and `authorName` before the data reaches PostgreSQL.
  *
@@ -309,6 +308,17 @@ function buildModelInterceptors() {
       return query(args);
     },
 
+    async createManyAndReturn({
+      args,
+      query,
+    }: {
+      args: { data: Record<string, unknown> | Record<string, unknown>[] };
+      query: (args: unknown) => Promise<unknown>;
+    }) {
+      rejectBulkContentFields(args, "createManyAndReturn");
+      return query(args);
+    },
+
     async updateMany({
       args,
       query,
@@ -317,6 +327,17 @@ function buildModelInterceptors() {
       query: (args: unknown) => Promise<unknown>;
     }) {
       rejectBulkContentFields(args, "updateMany");
+      return query(args);
+    },
+
+    async updateManyAndReturn({
+      args,
+      query,
+    }: {
+      args: { data: Record<string, unknown> };
+      query: (args: unknown) => Promise<unknown>;
+    }) {
+      rejectBulkContentFields(args, "updateManyAndReturn");
       return query(args);
     },
   };
