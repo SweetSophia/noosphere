@@ -19,6 +19,7 @@ The extension intercepts `create`, `update`, `upsert`, `createMany`, and `update
 
 - **Secret detection** — needs caller context (HTTP request, auth session) for proper error responses
 - **Activity logging** — needs `route` and `kind` metadata
+- **Memory-save metadata gate** — the API rejects context-bearing `excerpt`, `source`, `authorName`, `tags`, and `restrictedTags` before they can reach Tag or ActivityLog. Direct writes to those other tables remain outside this extension.
 - **HTTP error responses** — the extension throws a plain `Error`; routes should catch via `isPersistenceLayerSanitizerError()` and convert to HTTP 400
 
 ## Files
@@ -33,7 +34,7 @@ The extension intercepts `create`, `update`, `upsert`, `createMany`, and `update
 
 ## Testing
 
-The persistence-layer regression suite (`npm run test:persistence-layer`) includes these cases:
+Examples from the persistence-layer regression suite (`npm run test:persistence-layer`):
 
 | # | Test | What it proves |
 |---|------|----------------|
@@ -43,13 +44,14 @@ The persistence-layer regression suite (`npm run test:persistence-layer`) includ
 | 4 | `article.update` rejects injected-only content | Update path rejects empty |
 | 5 | `article.upsert` strips (create branch) | Upsert create sanitized |
 | 6 | `article.upsert` strips (update branch) | Upsert update sanitized |
-| 7 | `article.updateMany` allows metadata-only | Bulk metadata not affected |
+| 7 | `article.updateMany` allows metadata-only | Bulk metadata fields sanitized |
 | 8 | `article.updateMany` rejects content fields | Bulk content blocked |
 | 9 | `article.createMany` rejects content fields | Bulk create content blocked |
 | 10 | Nested `revision.create` (single object) strips | Nested writes sanitized |
 | 11 | Nested `revision.create` (array form) strips | Array nested writes sanitized |
 | 12 | Excerpt-only stripping (clean content) | Excerpt independently sanitized |
 | 13 | `{ set }` field operation strips | Prisma field ops unwrapped |
+| 13a | Injected-only `{ set }` rejects | Article/revision content cannot be replaced with blank injected text |
 | 14 | `articleRevision.create` strips injected blocks | Revision model protected |
 | 15 | `articleRevision.create` rejects injected-only | Revision model rejects empty |
 | 16 | `where` clause content not stripped or rejected | Query conditions left alone |

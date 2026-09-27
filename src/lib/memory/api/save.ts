@@ -190,6 +190,18 @@ export function validateMemorySaveRequest(
   );
   if (!restrictedTags.ok) return restrictedTags;
 
+  // These metadata values can also reach Tag and ActivityLog, outside the
+  // Article/ArticleRevision persistence guard. Fail closed before any writer.
+  for (const [field, value] of [
+    ["excerpt", excerpt.value], ["source", source.value], ["authorName", authorName.value],
+    ...tags.value.map((tag) => ["tags", tag] as const),
+    ...restrictedTags.value.map((tag) => ["restrictedTags", tag] as const),
+  ] as const) {
+    if (value && stripInjectedMemoryBlocks(value).strippedBlocks.length) {
+      return { ok: false, status: 400, error: `${field} contains injected memory context` };
+    }
+  }
+
   const strippedTitle = stripInjectedMemoryBlocks(title.value);
   const sanitizedTitle = strippedTitle.content.trim();
   if (!sanitizedTitle) {

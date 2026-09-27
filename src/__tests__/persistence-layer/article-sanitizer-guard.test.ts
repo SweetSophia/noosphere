@@ -215,6 +215,40 @@ test("persistence layer rejects article.update with injected-only content", asyn
   }
 });
 
+test("persistence layer rejects injected-only { set } content for articles and revisions", async () => {
+  const topic = await ensureTestTopic();
+  const article = await prisma.article.create({ data: {
+    title: `${TEST_PREFIX}-set-reject`, slug: `${TEST_PREFIX}-set-reject`,
+    topicId: topic.id, content: "Original durable article content.",
+  } });
+  const revision = await prisma.articleRevision.create({ data: {
+    articleId: article.id, title: `${TEST_PREFIX}-set-reject-revision`,
+    content: "Original durable revision content.",
+  } });
+  try {
+    await assert.rejects(
+      () => prisma.article.update({
+        where: { id: article.id },
+        data: { content: { set: "<memory-context>injected only</memory-context>" } },
+      }),
+      isPersistenceLayerInjectedOnlyError,
+    );
+    await assert.rejects(
+      () => prisma.articleRevision.update({
+        where: { id: revision.id },
+        data: { content: { set: "<noosphere-context>injected only</noosphere-context>" } },
+      }),
+      isPersistenceLayerInjectedOnlyError,
+    );
+    assert.equal((await prisma.article.findUniqueOrThrow({ where: { id: article.id } })).content,
+      "Original durable article content.");
+    assert.equal((await prisma.articleRevision.findUniqueOrThrow({ where: { id: revision.id } })).content,
+      "Original durable revision content.");
+  } finally {
+    await cleanupTestFixtures();
+  }
+});
+
 // ── article.upsert ──
 
 test("persistence layer strips injected-memory blocks from article.upsert (create branch)", async () => {

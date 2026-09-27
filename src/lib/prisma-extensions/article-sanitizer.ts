@@ -177,7 +177,9 @@ function stripFromNestedData(
   // Reject if content was provided and is now empty
   if (rejectEmpty && "content" in record) {
     const content = record.content;
-    if (typeof content === "string" && !content.trim()) {
+    const contentValue = typeof content === "string" ? content
+      : content && typeof content === "object" && "set" in content ? content.set : undefined;
+    if (typeof contentValue === "string" && !contentValue.trim()) {
       throw new Error(PERSISTENCE_LAYER_INJECTED_ONLY_ERROR);
     }
   }
