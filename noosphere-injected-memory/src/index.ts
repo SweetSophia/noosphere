@@ -3,6 +3,8 @@ const INJECTED_MEMORY_BLOCKS = [
   "recall",
   "hindsight_memories",
   "noosphere_auto_recall",
+  "memory-context",
+  "noosphere-context",
 ] as const;
 
 export type InjectedMemoryBlock = (typeof INJECTED_MEMORY_BLOCKS)[number];
@@ -73,16 +75,18 @@ function buildPatternSet(
 ): Record<InjectedMemoryBlock, InjectedMemoryPatterns> {
   return fromEntries(
     INJECTED_MEMORY_BLOCKS.map((tag) => {
+      const hermesFence = tag === "memory-context" || tag === "noosphere-context";
+      const tagPrefix = hermesFence ? "\\s*" : "";
       const openBoundary =
         config.open === "tag-boundary" ? "(?=[\\s>/])" : "\\b";
-      const closeSuffix = config.closeAllowsWhitespace ? "\\s*" : "";
+      const closeSuffix = hermesFence || config.closeAllowsWhitespace ? "\\s*" : "";
 
       return [
         tag,
         {
-          open: new RegExp(`<${tag}${openBoundary}[^>]*>`, "i"),
-          openGlobal: new RegExp(`<${tag}${openBoundary}[^>]*>`, "gi"),
-          close: new RegExp(`</${tag}${closeSuffix}>`, "gi"),
+          open: new RegExp(`<${tagPrefix}${tag}${openBoundary}[^>]*>`, "i"),
+          openGlobal: new RegExp(`<${tagPrefix}${tag}${openBoundary}[^>]*>`, "gi"),
+          close: new RegExp(`</${tagPrefix}${tag}${closeSuffix}>`, "gi"),
         },
       ];
     }),

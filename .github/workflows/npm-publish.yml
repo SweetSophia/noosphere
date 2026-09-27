@@ -10,6 +10,7 @@ on:
       - "scripts/sync-version.mjs"
       - "package.json"
       - "package-lock.json"
+      - "src/**"
       - "install-openclaw.sh"
       - "docker-compose.noosphere.yml"
       - "README.md"

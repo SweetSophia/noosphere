@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 from agent.memory_provider import MemoryProvider
 
 from .client import NoosphereClient, NoosphereClientError, normalize_base_url
-from .formatting import strip_context_fences
+from .formatting import clean_capture_text, strip_context_fences
 from .schemas import TOOL_SCHEMAS
 
 logger = logging.getLogger(__name__)
@@ -608,7 +608,7 @@ def _read_restricted_tags(value: Any) -> List[str]:
 
 
 def _clean_capture_text(text: Any) -> str:
-    return strip_context_fences(str(text or "")).strip()
+    return clean_capture_text(str(text or "")).strip()
 
 
 def _should_capture(text: str) -> bool:

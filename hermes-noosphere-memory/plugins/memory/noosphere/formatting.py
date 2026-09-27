@@ -11,6 +11,10 @@ _SYSTEM_NOTE_RE = re.compile(
     re.IGNORECASE,
 )
 
+def clean_capture_text(text: str) -> str:
+    """Discard fields containing injected context rather than saving recalled text."""
+    return "" if _FENCE_TAG_RE.search(text) else strip_context_fences(text)
+
 
 def strip_context_fences(text: str) -> str:
     """Remove context wrapper markup while preserving recalled memory content."""

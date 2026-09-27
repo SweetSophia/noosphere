@@ -84,6 +84,28 @@ test("persistence layer strips injected-memory blocks from direct article.create
   }
 });
 
+test("persistence layer strips Hermes context from article content and excerpt", async () => {
+  const topic = await ensureTestTopic();
+  try {
+    const created = await prisma.article.create({
+      data: {
+        title: `${TEST_PREFIX}-hermes-strip`,
+        slug: `${TEST_PREFIX}-hermes-strip`,
+        topicId: topic.id,
+        content: "Durable text.\n<memory-context>private recall</memory-context>\nStill durable.",
+        excerpt: "Visible excerpt.\n< noosphere-context >private excerpt</ noosphere-context >",
+      },
+    });
+    assert.ok(created.content.includes("Durable text."));
+    assert.ok(created.content.includes("Still durable."));
+    assert.ok(!created.content.includes("private recall"));
+    assert.ok(created.excerpt?.includes("Visible excerpt."));
+    assert.ok(!created.excerpt?.includes("private excerpt"));
+  } finally {
+    await cleanupTestFixtures();
+  }
+});
+
 test("persistence layer rejects article.create with injected-only content", async () => {
   const topic = await ensureTestTopic();
 

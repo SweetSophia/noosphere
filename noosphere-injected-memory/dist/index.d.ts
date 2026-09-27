@@ -1,4 +1,4 @@
-declare const INJECTED_MEMORY_BLOCKS: readonly ["recall", "hindsight_memories", "noosphere_auto_recall"];
+declare const INJECTED_MEMORY_BLOCKS: readonly ["recall", "hindsight_memories", "noosphere_auto_recall", "memory-context", "noosphere-context"];
 export type InjectedMemoryBlock = (typeof INJECTED_MEMORY_BLOCKS)[number];
 export type InjectedMemoryStripMode = "openclaw-article-create" | "server-save";
 export declare const OPENCLAW_ARTICLE_CREATE_STRIP_MODE: "openclaw-article-create";
