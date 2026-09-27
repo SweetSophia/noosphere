@@ -219,6 +219,14 @@ class NoosphereSavePhase4Test(unittest.TestCase):
         self.assertEqual(result.get("error"), "content is required")
         self.assertEqual(provider._client.saved, [])
 
+    def test_save_tool_rejects_self_closing_context_fence(self):
+        provider = self.initialized_provider(topic_id="topic-1")
+        result = json.loads(provider.handle_tool_call("noosphere_save", {
+            "title": "Deployment rule", "content": "Durable prefix. <memory-context/>private fact",
+        }))
+        self.assertEqual(result.get("error"), "content is required")
+        self.assertEqual(provider._client.saved, [])
+
     def test_save_tool_preserves_distinct_hyphenated_tag(self):
         provider = self.initialized_provider(topic_id="topic-1")
         content = "<memory-context-note>Durable note</memory-context-note>"
@@ -258,6 +266,16 @@ class NoosphereSavePhase4Test(unittest.TestCase):
     def test_memory_write_mirror_does_not_capture_fenced_context(self):
         provider = self.initialized_provider(topic_id="topic-1")
         provider.on_memory_write("add", "memory", "Durable prefix < memory-context >private recall</ memory-context >")
+        provider.shutdown()
+        self.assertEqual(provider._client.saved, [])
+
+    def test_memory_write_mirror_rejects_fenced_target_and_source(self):
+        provider = self.initialized_provider(topic_id="topic-1")
+        content = "Remember this specific durable operating fact about the system configuration."
+        provider.on_memory_write("add", "<memory-context>private target</memory-context>", content)
+        provider.on_memory_write("add", "memory", content, {
+            "source": "<noosphere-context>private source</noosphere-context>",
+        })
         provider.shutdown()
         self.assertEqual(provider._client.saved, [])
 

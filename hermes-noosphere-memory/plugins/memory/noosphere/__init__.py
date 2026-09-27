@@ -435,15 +435,21 @@ class NoosphereMemoryProvider(MemoryProvider):
         clean = _clean_capture_text(content)
         if not _should_capture(clean) or not self._config.get("topic_id"):
             return
+        clean_target = _clean_capture_text(target)
+        clean_source = _clean_capture_text(
+            str((metadata or {}).get("source") or f"hermes:memory:{target}")
+        )
+        if not clean_target or not clean_source:
+            return
         self._save_async(
             {
-                "title": _truncate_title(f"Hermes memory: {target}", 120),
+                "title": _truncate_title(f"Hermes memory: {clean_target}", 120),
                 "content": clean,
                 "topicId": self._config["topic_id"],
-                "source": str((metadata or {}).get("source") or f"hermes:memory:{target}"),
+                "source": clean_source,
                 "authorName": _resolve_author_name(self._config, self._agent_identity),
                 "confidence": "medium",
-                "tags": ["hermes", "explicit-memory", target],
+                "tags": ["hermes", "explicit-memory", clean_target],
             }
         )
 

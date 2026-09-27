@@ -2,17 +2,17 @@
 
 ## Overview
 
-A Prisma client `$extends` query interceptor that acts as a **hard boundary** against registered injected-memory blocks (including Hermes context fences) reaching the `article` and `articleRevision` tables in PostgreSQL.
+A Prisma client `$extends` query interceptor that strips registered injected-memory blocks (including Hermes context fences) from article and revision text fields (`content`, `excerpt`, `title`, `sourceUrl`, `authorName`) before PostgreSQL writes.
 
-The extension intercepts all write operations — `create`, `update`, `upsert`, `createMany`, `updateMany` — on both models. Even if a future route forgets route-level sanitization, injected blocks cannot reach those tables.
+The extension intercepts `create`, `update`, `upsert`, `createMany`, and `updateMany` on both models. This is a backstop for those fields, not a claim that every metadata field or related table is sanitized.
 
 ## What It Does
 
-1. **Strips** injected-memory blocks from `content` and `excerpt` fields before write
-2. **Rejects** writes where `content` becomes empty after stripping (injected-only content)
+1. **Strips** injected-memory blocks from `content`, `excerpt`, `title`, `sourceUrl`, and `authorName` fields before write
+2. **Rejects** writes where `content` or `title` becomes empty after stripping
 3. **Recurses** into nested Prisma write payloads (e.g. `revisions: { create: [...] }`) — handles all payload shapes including arrays, `connectOrCreate`, `{ where, data }` wrappers, and Prisma field operations (`content: { set: "..." }`)
 4. **Skips** `where` clauses — query conditions are never stripped or rejected
-5. **Rejects** `createMany`/`updateMany` calls that include `content` or `excerpt` fields — bulk operations are metadata-only
+5. **Rejects** `createMany`/`updateMany` calls that include `content` or `excerpt`; sanitizes metadata fields on bulk writes
 6. **Protects** both `article` and `articleRevision` tables
 
 ## What Stays at Route Level
@@ -33,7 +33,7 @@ The extension intercepts all write operations — `create`, `update`, `upsert`, 
 
 ## Testing
 
-The persistence-layer regression suite (`npm run test:persistence-layer`) covers 16 cases:
+The persistence-layer regression suite (`npm run test:persistence-layer`) includes these cases:
 
 | # | Test | What it proves |
 |---|------|----------------|
@@ -63,7 +63,7 @@ The extension exports two type guards and one combined guard:
 ```typescript
 isPersistenceLayerInjectedOnlyError(err)   // content empty after stripping
 isPersistenceLayerBulkContentError(err)    // createMany/updateMany with content
-isPersistenceLayerSanitizerError(err)      // either of the above
+isPersistenceLayerSanitizerError(err)      // content/title empty or bulk content
 ```
 
 ## Issue

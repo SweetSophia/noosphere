@@ -24,6 +24,7 @@ import { prisma } from "@/lib/prisma";
 import {
   isPersistenceLayerInjectedOnlyError,
   isPersistenceLayerBulkContentError,
+  isPersistenceLayerSanitizerError,
 } from "@/lib/prisma-extensions/article-sanitizer";
 
 if (!process.env.DATABASE_URL) {
@@ -84,18 +85,29 @@ test("persistence layer strips injected-memory blocks from direct article.create
   }
 });
 
-test("persistence layer strips Hermes context from article content and excerpt", async () => {
+test("persistence layer strips Hermes context from article and nested revision text", async () => {
   const topic = await ensureTestTopic();
   try {
     const created = await prisma.article.create({
       data: {
-        title: `${TEST_PREFIX}-hermes-strip`,
+        title: `${TEST_PREFIX}-hermes-strip <memory-context>private title</memory-context>`,
         slug: `${TEST_PREFIX}-hermes-strip`,
         topicId: topic.id,
         content: "Durable text.\n<memory-context>private recall</memory-context>\nStill durable.",
         excerpt: "Visible excerpt.\n< noosphere-context >private excerpt</ noosphere-context >",
+        sourceUrl: "Source. <noosphere-context>private source</noosphere-context>",
+        authorName: "Author. <memory-context>private author</memory-context>",
+        revisions: { create: {
+          title: "Revision. <memory-context>private revision title</memory-context>",
+          content: "Revision content is durable.",
+        } },
       },
+      include: { revisions: true },
     });
+    assert.ok(!created.title.includes("private title"));
+    assert.ok(!created.sourceUrl?.includes("private source"));
+    assert.ok(!created.authorName?.includes("private author"));
+    assert.ok(!created.revisions[0]?.title.includes("private revision title"));
     assert.ok(created.content.includes("Durable text."));
     assert.ok(created.content.includes("Still durable."));
     assert.ok(!created.content.includes("private recall"));
@@ -104,6 +116,23 @@ test("persistence layer strips Hermes context from article content and excerpt",
     assert.ok(!created.excerpt?.includes("private excerpt"));
     assert.ok(!created.excerpt?.includes("< noosphere-context >"));
   } finally {
+    await cleanupTestFixtures();
+  }
+});
+
+test("persistence layer rejects a title consisting only of injected context", async () => {
+  const topic = await ensureTestTopic();
+  const slug = `${TEST_PREFIX}-injected-title`;
+  try {
+    await assert.rejects(
+      () => prisma.article.create({ data: {
+        title: "<memory-context>private title</memory-context>",
+        slug, topicId: topic.id, content: "Durable article content.",
+      } }),
+      isPersistenceLayerSanitizerError,
+    );
+  } finally {
+    await prisma.article.deleteMany({ where: { slug } });
     await cleanupTestFixtures();
   }
 });
@@ -256,9 +285,14 @@ test("persistence layer does not interfere with updateMany (metadata-only update
   try {
     const result = await prisma.article.updateMany({
       where: { id: article.id },
-      data: { status: "draft" },
+      data: {
+        status: "draft",
+        title: `${TEST_PREFIX}-updatemany <memory-context>private bulk title</memory-context>`,
+      },
     });
     assert.equal(result.count, 1);
+    const updated = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    assert.ok(!updated.title.includes("private bulk title"));
   } finally {
     await cleanupTestFixtures();
   }
@@ -429,10 +463,12 @@ test("persistence layer strips injected blocks from content passed via { set } f
         content: {
           set: "Set via field op.\n<recall>injected via set</recall>\nEnd.",
         },
+        title: { set: `${TEST_PREFIX}-set-op <memory-context>private title</memory-context>` },
       },
     });
 
     assert.ok(!updated.content.includes("<recall>"));
+    assert.ok(!updated.title.includes("private title"));
     assert.ok(updated.content.includes("Set via field op."));
   } finally {
     await cleanupTestFixtures();

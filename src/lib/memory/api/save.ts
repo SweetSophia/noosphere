@@ -190,6 +190,11 @@ export function validateMemorySaveRequest(
   );
   if (!restrictedTags.ok) return restrictedTags;
 
+  const strippedTitle = stripInjectedMemoryBlocks(title.value);
+  const sanitizedTitle = strippedTitle.content.trim();
+  if (!sanitizedTitle) {
+    return { ok: false, status: 400, error: "title is empty after injected-memory stripping" };
+  }
   const stripped = stripInjectedMemoryBlocks(content.value);
   const sanitizedContent = normalizeContent(stripped.content);
   const durableError = validateDurableContent(sanitizedContent);
@@ -197,7 +202,7 @@ export function validateMemorySaveRequest(
 
   const secretError = detectSecretInInputs([
     { field: "content", value: sanitizedContent },
-    { field: "title", value: title.value },
+    { field: "title", value: sanitizedTitle },
     { field: "excerpt", value: excerpt.value },
     { field: "source", value: source.value },
     { field: "authorName", value: authorName.value },
@@ -208,7 +213,7 @@ export function validateMemorySaveRequest(
   return {
     ok: true,
     input: {
-      title: title.value,
+      title: sanitizedTitle,
       content: sanitizedContent,
       topicId: topicId.value,
       excerpt: excerpt.value,
@@ -218,7 +223,7 @@ export function validateMemorySaveRequest(
       confidence: confidence.value,
       restrictedTags: restrictedTags.value,
       status: "draft",
-      strippedBlocks: stripped.strippedBlocks,
+      strippedBlocks: [...strippedTitle.strippedBlocks, ...stripped.strippedBlocks],
     },
   };
 }

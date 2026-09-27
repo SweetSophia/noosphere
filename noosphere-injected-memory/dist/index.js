@@ -41,7 +41,7 @@ function buildPatternSet(config) {
     return fromEntries(INJECTED_MEMORY_BLOCKS.map((tag) => {
         const hermesFence = tag === "memory-context" || tag === "noosphere-context";
         const tagPrefix = hermesFence ? "\\s*" : "";
-        const openBoundary = hermesFence || config.open === "tag-boundary" ? "(?=[\\s>/])" : "\\b";
+        const openBoundary = "(?=[\\s>/])";
         const closeSuffix = hermesFence || config.closeAllowsWhitespace ? "\\s*" : "";
         return [
             tag,

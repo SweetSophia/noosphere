@@ -14,7 +14,6 @@ export type InjectedMemoryStripMode =
   | "server-save";
 
 type InjectedMemoryStripModeConfig = {
-  open: "tag-boundary" | "word-boundary";
   closeAllowsWhitespace: boolean;
   unclosed: "throw" | "truncate-tail";
 };
@@ -27,12 +26,10 @@ type InjectedMemoryPatterns = {
 
 const STRIP_MODE_CONFIGS = {
   "openclaw-article-create": {
-    open: "tag-boundary",
     closeAllowsWhitespace: true,
     unclosed: "throw",
   },
   "server-save": {
-    open: "word-boundary",
     closeAllowsWhitespace: false,
     unclosed: "truncate-tail",
   },
@@ -77,8 +74,7 @@ function buildPatternSet(
     INJECTED_MEMORY_BLOCKS.map((tag) => {
       const hermesFence = tag === "memory-context" || tag === "noosphere-context";
       const tagPrefix = hermesFence ? "\\s*" : "";
-      const openBoundary =
-        hermesFence || config.open === "tag-boundary" ? "(?=[\\s>/])" : "\\b";
+      const openBoundary = "(?=[\\s>/])";
       const closeSuffix = hermesFence || config.closeAllowsWhitespace ? "\\s*" : "";
 
       return [

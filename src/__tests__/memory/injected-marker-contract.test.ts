@@ -33,3 +33,10 @@ test("server strips the block emitted by the OpenCode/Kilo shared formatter", ()
   assert.equal(result.content.trim(), "");
   assert.deepEqual(result.strippedBlocks, ["noosphere_auto_recall"]);
 });
+
+test("server preserves distinct hyphenated names for every registered block", () => {
+  for (const tag of ["recall", "hindsight_memories", "noosphere_auto_recall"]) {
+    const adjacent = `<${tag}-note>Durable note</${tag}-note>`;
+    assert.equal(stripInjectedMemoryBlocks(adjacent, SERVER_MEMORY_SAVE_STRIP_MODE).content, adjacent);
+  }
+});

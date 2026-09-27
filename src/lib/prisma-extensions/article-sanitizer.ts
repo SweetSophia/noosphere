@@ -5,9 +5,8 @@
  * `article.upsert`, `article.createMany`, `article.updateMany`,
  * `articleRevision.create`, `articleRevision.update`, and
  * `articleRevision.upsert` operations at the Prisma query layer.
- * It strips injected memory blocks (`<recall>`, `<hindsight_memories>`,
- * `<noosphere_auto_recall>`) from `content` and `excerpt` fields *before*
- * the data reaches PostgreSQL.
+ * It strips registered injected-memory blocks from `content`, `excerpt`,
+ * `title`, `sourceUrl`, and `authorName` before the data reaches PostgreSQL.
  *
  * ## Why this exists
  *
@@ -17,8 +16,8 @@
  * endpoint-level hardening alone is not a reliable long-term safety boundary.
  *
  * This extension is a **hard boundary** for the `article` and
- * `articleRevision` tables. Even if a future route forgets to call
- * `sanitizeArticleContent`, injected blocks cannot reach those tables.
+ * `articleRevision` text fields. Even if a future route forgets to call
+ * `sanitizeArticleContent`, injected blocks cannot reach these fields.
  *
  * ## What this extension does NOT do
  *
@@ -27,7 +26,7 @@
  * - **Activity logging**: stays at the route/action level where `route` and
  *   `kind` metadata is known. The extension is a silent backstop.
  * - **HTTP error responses**: the extension throws a plain `Error` if content
- *   becomes empty after stripping. Routes should catch this and convert to
+ *   or title becomes empty after stripping. Routes should catch this and convert to
  *   HTTP 400 if it surfaces.
  *
  * ## `updateMany`
@@ -54,6 +53,8 @@ import {
  */
 export const PERSISTENCE_LAYER_INJECTED_ONLY_ERROR =
   "Persistence layer rejected article write: content is empty after injected-memory stripping";
+export const PERSISTENCE_LAYER_INJECTED_TITLE_ERROR =
+  "Persistence layer rejected article write: title is empty after injected-memory stripping";
 
 /**
  * Type guard for the persistence-layer rejection error.
@@ -91,6 +92,7 @@ export function isPersistenceLayerSanitizerError(
 ): boolean {
   return (
     isPersistenceLayerInjectedOnlyError(err) ||
+    (err instanceof Error && err.message === PERSISTENCE_LAYER_INJECTED_TITLE_ERROR) ||
     isPersistenceLayerBulkContentError(err)
   );
 }
@@ -113,13 +115,13 @@ function stripString(value: string): string {
 }
 
 /**
- * Strip injected-memory blocks from a `content` or `excerpt` field if present
+ * Strip injected-memory blocks from an article/revision text field if present
  * in the payload. Handles raw strings and Prisma field-operation objects
  * (e.g., `{ set: "..." }`). Mutates `data` in place.
  */
 function stripField(
   data: Record<string, unknown>,
-  field: "content" | "excerpt",
+  field: "content" | "excerpt" | "title" | "sourceUrl" | "authorName",
 ): void {
   const value = data[field];
   if (typeof value === "string") {
@@ -137,7 +139,7 @@ function stripField(
 }
 
 /**
- * Recursively walk a Prisma write payload, stripping `content` and `excerpt`
+ * Recursively walk a Prisma write payload, stripping writable text
  * fields wherever they appear. This simplified full-recursion approach handles
  * all Prisma nested write shapes including:
  *
@@ -165,9 +167,12 @@ function stripFromNestedData(
 
   const record = data as Record<string, unknown>;
 
-  // Strip content/excerpt fields at this level
+  // Strip writable article and revision text fields at this level.
   stripField(record, "content");
   stripField(record, "excerpt");
+  stripField(record, "title");
+  stripField(record, "sourceUrl");
+  stripField(record, "authorName");
 
   // Reject if content was provided and is now empty
   if (rejectEmpty && "content" in record) {
@@ -175,6 +180,12 @@ function stripFromNestedData(
     if (typeof content === "string" && !content.trim()) {
       throw new Error(PERSISTENCE_LAYER_INJECTED_ONLY_ERROR);
     }
+  }
+  const title = record.title;
+  const titleValue = typeof title === "string" ? title
+    : title && typeof title === "object" && "set" in title ? title.set : undefined;
+  if (rejectEmpty && typeof titleValue === "string" && !titleValue.trim()) {
+    throw new Error(PERSISTENCE_LAYER_INJECTED_TITLE_ERROR);
   }
 
   // Recurse into nested properties to handle Prisma nested write structures
@@ -209,6 +220,7 @@ function rejectBulkContentFields(
           `${PERSISTENCE_LAYER_BULK_CONTENT_ERROR_PREFIX}${operation} with content/excerpt fields. Use create/update/upsert for content writes.`,
         );
       }
+      stripFromNestedData(record, true);
     }
   }
 }
