@@ -185,6 +185,7 @@ export const NoosphereOpencodePlugin = async (ctx, options) => {
                     topicId: tool.schema.string().max(128).describe("Noosphere topic ID/UUID. Use noosphere_topics if unknown."),
                     excerpt: tool.schema.string().max(500).optional().describe("Optional short summary."),
                     tags: tool.schema.array(tool.schema.string().max(64)).max(12).optional().describe("Optional tags."),
+                    restrictedTags: tool.schema.array(tool.schema.string().max(64)).max(16).optional().describe("Optional restricted scope tags. Scoped API keys may only use their allowed scopes."),
                     source: tool.schema.string().max(500).optional().describe("Optional source pointer."),
                     confidence: tool.schema.enum(["low", "medium", "high"]).optional().describe("Initial confidence."),
                 },
