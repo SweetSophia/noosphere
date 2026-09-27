@@ -22,8 +22,10 @@ import crypto from "node:crypto";
 import test from "node:test";
 import { prisma } from "@/lib/prisma";
 import {
+  articleSanitizerExtension,
   isPersistenceLayerInjectedOnlyError,
   isPersistenceLayerBulkContentError,
+  isPersistenceLayerSanitizerError,
 } from "@/lib/prisma-extensions/article-sanitizer";
 
 if (!process.env.DATABASE_URL) {
@@ -80,6 +82,58 @@ test("persistence layer strips injected-memory blocks from direct article.create
     assert.ok(!created.excerpt?.includes("<hindsight_memories>"));
     assert.ok(created.excerpt?.includes("Visible excerpt."));
   } finally {
+    await cleanupTestFixtures();
+  }
+});
+
+test("persistence layer strips Hermes context from article and nested revision text", async () => {
+  const topic = await ensureTestTopic();
+  try {
+    const created = await prisma.article.create({
+      data: {
+        title: `${TEST_PREFIX}-hermes-strip <memory-context>private title</memory-context>`,
+        slug: `${TEST_PREFIX}-hermes-strip`,
+        topicId: topic.id,
+        content: "Durable text.\n<memory-context>private recall</memory-context>\nStill durable.",
+        excerpt: "Visible excerpt.\n< noosphere-context >private excerpt</ noosphere-context >",
+        sourceUrl: "Source. <noosphere-context>private source</noosphere-context>",
+        authorName: "Author. <memory-context>private author</memory-context>",
+        revisions: { create: {
+          title: "Revision. <memory-context>private revision title</memory-context>",
+          content: "Revision content is durable.",
+        } },
+      },
+      include: { revisions: true },
+    });
+    assert.ok(!created.title.includes("private title"));
+    assert.ok(!created.sourceUrl?.includes("private source"));
+    assert.ok(!created.authorName?.includes("private author"));
+    assert.ok(!created.revisions[0]?.title.includes("private revision title"));
+    assert.ok(created.content.includes("Durable text."));
+    assert.ok(created.content.includes("Still durable."));
+    assert.ok(!created.content.includes("private recall"));
+    assert.ok(!created.content.includes("<memory-context>"));
+    assert.ok(created.excerpt?.includes("Visible excerpt."));
+    assert.ok(!created.excerpt?.includes("private excerpt"));
+    assert.ok(!created.excerpt?.includes("< noosphere-context >"));
+  } finally {
+    await cleanupTestFixtures();
+  }
+});
+
+test("persistence layer rejects a title consisting only of injected context", async () => {
+  const topic = await ensureTestTopic();
+  const slug = `${TEST_PREFIX}-injected-title`;
+  try {
+    await assert.rejects(
+      () => prisma.article.create({ data: {
+        title: "<memory-context>private title</memory-context>",
+        slug, topicId: topic.id, content: "Durable article content.",
+      } }),
+      isPersistenceLayerSanitizerError,
+    );
+  } finally {
+    await prisma.article.deleteMany({ where: { slug } });
     await cleanupTestFixtures();
   }
 });
@@ -162,6 +216,40 @@ test("persistence layer rejects article.update with injected-only content", asyn
   }
 });
 
+test("persistence layer rejects injected-only { set } content for articles and revisions", async () => {
+  const topic = await ensureTestTopic();
+  const article = await prisma.article.create({ data: {
+    title: `${TEST_PREFIX}-set-reject`, slug: `${TEST_PREFIX}-set-reject`,
+    topicId: topic.id, content: "Original durable article content.",
+  } });
+  const revision = await prisma.articleRevision.create({ data: {
+    articleId: article.id, title: `${TEST_PREFIX}-set-reject-revision`,
+    content: "Original durable revision content.",
+  } });
+  try {
+    await assert.rejects(
+      () => prisma.article.update({
+        where: { id: article.id },
+        data: { content: { set: "<memory-context>injected only</memory-context>" } },
+      }),
+      isPersistenceLayerInjectedOnlyError,
+    );
+    await assert.rejects(
+      () => prisma.articleRevision.update({
+        where: { id: revision.id },
+        data: { content: { set: "<noosphere-context>injected only</noosphere-context>" } },
+      }),
+      isPersistenceLayerInjectedOnlyError,
+    );
+    assert.equal((await prisma.article.findUniqueOrThrow({ where: { id: article.id } })).content,
+      "Original durable article content.");
+    assert.equal((await prisma.articleRevision.findUniqueOrThrow({ where: { id: revision.id } })).content,
+      "Original durable revision content.");
+  } finally {
+    await cleanupTestFixtures();
+  }
+});
+
 // ── article.upsert ──
 
 test("persistence layer strips injected-memory blocks from article.upsert (create branch)", async () => {
@@ -232,9 +320,14 @@ test("persistence layer does not interfere with updateMany (metadata-only update
   try {
     const result = await prisma.article.updateMany({
       where: { id: article.id },
-      data: { status: "draft" },
+      data: {
+        status: "draft",
+        title: `${TEST_PREFIX}-updatemany <memory-context>private bulk title</memory-context>`,
+      },
     });
     assert.equal(result.count, 1);
+    const updated = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    assert.ok(!updated.title.includes("private bulk title"));
   } finally {
     await cleanupTestFixtures();
   }
@@ -283,6 +376,68 @@ test("persistence layer rejects createMany with content fields", async () => {
         }),
       (err: unknown) => isPersistenceLayerBulkContentError(err),
     );
+  } finally {
+    await cleanupTestFixtures();
+  }
+});
+
+test("persistence layer rejects bulk-return content writes on both models", async () => {
+  const topic = await ensureTestTopic();
+  const article = await prisma.article.create({ data: {
+    title: `${TEST_PREFIX}-bulk-return-parent`, slug: `${TEST_PREFIX}-bulk-return-parent`,
+    topicId: topic.id, content: "Durable parent content.",
+  } });
+  try {
+    await assert.rejects(
+      () => prisma.article.createManyAndReturn({ data: [{
+        title: `${TEST_PREFIX}-bulk-return-new`, slug: `${TEST_PREFIX}-bulk-return-new`,
+        topicId: topic.id, content: "<memory-context>private</memory-context>",
+      }] }),
+      isPersistenceLayerBulkContentError,
+    );
+    await assert.rejects(
+      () => prisma.articleRevision.createManyAndReturn({ data: [{
+        title: `${TEST_PREFIX}-bulk-return-revision`, articleId: article.id,
+        content: "<noosphere-context>private</noosphere-context>",
+      }] }),
+      isPersistenceLayerBulkContentError,
+    );
+    await assert.rejects(
+      () => prisma.article.updateManyAndReturn({
+        where: { id: article.id }, data: { content: "<recall>private</recall>" },
+      }),
+      isPersistenceLayerBulkContentError,
+    );
+  } finally {
+    await cleanupTestFixtures();
+  }
+});
+
+test("persistence layer sanitizes permitted bulk-return metadata on both models", async () => {
+  const topic = await ensureTestTopic();
+  const article = await prisma.article.create({ data: {
+    title: `${TEST_PREFIX}-bulk-return-update`, slug: `${TEST_PREFIX}-bulk-return-update`,
+    topicId: topic.id, content: "Durable parent content.",
+  } });
+  const revision = await prisma.articleRevision.create({ data: {
+    title: `${TEST_PREFIX}-bulk-return-update-revision`, articleId: article.id,
+    content: "Durable revision content.",
+  } });
+  try {
+    const updated = await prisma.article.updateManyAndReturn({
+      where: { id: article.id },
+      data: { title: `${TEST_PREFIX}-bulk-return-update <memory-context>private title</memory-context>` },
+    });
+    assert.equal(updated.length, 1);
+    assert.ok(updated[0].title.startsWith(`${TEST_PREFIX}-bulk-return-update`));
+    assert.ok(!updated[0].title.includes("private title"));
+    const revisions = await prisma.articleRevision.updateManyAndReturn({
+      where: { id: revision.id },
+      data: { title: `${TEST_PREFIX}-bulk-return-update-revision <noosphere-context>private revision</noosphere-context>` },
+    });
+    assert.equal(revisions.length, 1);
+    assert.ok(revisions[0].title.startsWith(`${TEST_PREFIX}-bulk-return-update-revision`));
+    assert.ok(!revisions[0].title.includes("private revision"));
   } finally {
     await cleanupTestFixtures();
   }
@@ -405,10 +560,12 @@ test("persistence layer strips injected blocks from content passed via { set } f
         content: {
           set: "Set via field op.\n<recall>injected via set</recall>\nEnd.",
         },
+        title: { set: `${TEST_PREFIX}-set-op <memory-context>private title</memory-context>` },
       },
     });
 
     assert.ok(!updated.content.includes("<recall>"));
+    assert.ok(!updated.title.includes("private title"));
     assert.ok(updated.content.includes("Set via field op."));
   } finally {
     await cleanupTestFixtures();
@@ -475,44 +632,12 @@ test("persistence layer rejects articleRevision.create with injected-only conten
 
 // ── `where` clause safety ──
 
-test("persistence layer does not strip or reject content inside where clauses", async () => {
-  const topic = await ensureTestTopic();
-  const article = await prisma.article.create({
-    data: {
-      title: `${TEST_PREFIX}-where-safety`,
-      slug: `${TEST_PREFIX}-where-safety`,
-      topicId: topic.id,
-      content: "Clean content for where-safety test.",
-    },
-  });
-
-  try {
-    // Nested update with a `where` clause containing a `content` key.
-    // The sanitizer must NOT strip or reject this — it's a query condition, not write data.
-    // (Prisma doesn't support filtering on `content` today, but the test proves
-    // the sanitizer leaves `where` alone regardless.)
-    const result = await prisma.article.update({
-      where: { id: article.id },
-      data: {
-        title: `${TEST_PREFIX}-where-safety-renamed`,
-        revisions: {
-          update: {
-            where: { id: `nonexistent-${TEST_RUN_ID}` },
-            data: { title: `${TEST_PREFIX}-where-rev`, content: "Clean revision from where test." },
-          },
-        },
-      },
-    });
-
-    // If we get here without throwing, the `where` clause was not falsely rejected.
-    assert.ok(result);
-  } catch (err: unknown) {
-    // Prisma will throw P2025 (record not found) for the nonexistent revision,
-    // which is expected — the point is that we do NOT get PERSISTENCE_LAYER_INJECTED_ONLY_ERROR.
-    if (isPersistenceLayerInjectedOnlyError(err)) {
-      assert.fail("Sanitizer incorrectly rejected content inside a where clause");
-    }
-  } finally {
-    await cleanupTestFixtures();
-  }
+test("persistence layer leaves where.content unchanged while sanitizing write data", async () => {
+  // Intercept before Prisma validates filters; this exercises the query extension
+  // without relying on a database query that rejects content in `where`.
+  const where = { id: "example", content: "<memory-context>query predicate</memory-context>" };
+  const args = { where, data: { title: "Durable title <memory-context>private</memory-context>" } };
+  await articleSanitizerExtension.query.article.update({ args, query: async () => undefined });
+  assert.equal(args.where.content, "<memory-context>query predicate</memory-context>");
+  assert.ok(!args.data.title.includes("private"));
 });

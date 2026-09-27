@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 from agent.memory_provider import MemoryProvider
 
 from .client import NoosphereClient, NoosphereClientError, normalize_base_url
-from .formatting import strip_context_fences
+from .formatting import clean_capture_text, strip_context_fences
 from .schemas import TOOL_SCHEMAS
 
 logger = logging.getLogger(__name__)
@@ -400,6 +400,8 @@ class NoosphereMemoryProvider(MemoryProvider):
             return
         clean_user = _clean_capture_text(user_content)
         clean_assistant = _clean_capture_text(assistant_content)
+        if (user_content and not clean_user) or (assistant_content and not clean_assistant):
+            return  # Do not save a partial turn after an injected-context field was dropped.
         combined = f"{clean_user}\n{clean_assistant}".strip()
         if not _should_capture(combined):
             return
@@ -433,15 +435,21 @@ class NoosphereMemoryProvider(MemoryProvider):
         clean = _clean_capture_text(content)
         if not _should_capture(clean) or not self._config.get("topic_id"):
             return
+        clean_target = _clean_capture_text(target)
+        clean_source = _clean_capture_text(
+            str((metadata or {}).get("source") or f"hermes:memory:{target}")
+        )
+        if not clean_target or not clean_source:
+            return
         self._save_async(
             {
-                "title": _truncate_title(f"Hermes memory: {target}", 120),
+                "title": _truncate_title(f"Hermes memory: {clean_target}", 120),
                 "content": clean,
                 "topicId": self._config["topic_id"],
-                "source": str((metadata or {}).get("source") or f"hermes:memory:{target}"),
+                "source": clean_source,
                 "authorName": _resolve_author_name(self._config, self._agent_identity),
                 "confidence": "medium",
-                "tags": ["hermes", "explicit-memory", target],
+                "tags": ["hermes", "explicit-memory", clean_target],
             }
         )
 
@@ -608,7 +616,7 @@ def _read_restricted_tags(value: Any) -> List[str]:
 
 
 def _clean_capture_text(text: Any) -> str:
-    return strip_context_fences(str(text or "")).strip()
+    return clean_capture_text(str(text or "")).strip()
 
 
 def _should_capture(text: str) -> bool:
