@@ -30,7 +30,7 @@ export class NoosphereClient {
     }
     async requestJson(method, path, body) {
         if (!this.config.apiKey) {
-            throw new NoosphereClientError(this.config.missingApiKeyMessage ?? DEFAULT_MISSING_API_KEY_MESSAGE);
+            throw new NoosphereClientError(this.config.missingApiKeyMessage || DEFAULT_MISSING_API_KEY_MESSAGE);
         }
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);

@@ -65,13 +65,15 @@ test("throws the adapter-specific hint when apiKey is missing", async () => {
   });
 });
 
-test("falls back to the generic message when no adapter hint is configured", async () => {
-  const client = new NoosphereClient(baseConfig({ apiKey: undefined }));
-  await assert.rejects(() => client.recall({ query: "x" }), (err: unknown) => {
-    assert.ok(err instanceof NoosphereClientError);
-    assert.equal(err.message, DEFAULT_MISSING_API_KEY_MESSAGE);
-    return true;
-  });
+test("falls back to the generic message when the adapter hint is empty", async () => {
+  for (const missingApiKeyMessage of [undefined, ""]) {
+    const client = new NoosphereClient(baseConfig({ apiKey: undefined, missingApiKeyMessage }));
+    await assert.rejects(() => client.recall({ query: "x" }), (err: unknown) => {
+      assert.ok(err instanceof NoosphereClientError);
+      assert.equal(err.message, DEFAULT_MISSING_API_KEY_MESSAGE);
+      return true;
+    });
+  }
 });
 
 // ─── Request shape ───────────────────────────────────────────────────────────

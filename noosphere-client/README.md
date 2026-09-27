@@ -2,7 +2,7 @@
 
 Shared Noosphere REST client, response types, and recall formatting for agent adapters.
 
-This package exists because the OpenCode, Kilo Code, and MCP adapters all speak the
+This package exists because the OpenCode and Kilo Code adapters both speak the
 same REST contract with the same wire format. Before extraction, `client.ts`,
 `format.ts`, and `types.ts` were duplicated per adapter — the OpenCode and Kilo Code
 copies differed by three lines. They now share one implementation.

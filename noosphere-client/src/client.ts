@@ -71,7 +71,7 @@ export class NoosphereClient {
   ): Promise<T> {
     if (!this.config.apiKey) {
       throw new NoosphereClientError(
-        this.config.missingApiKeyMessage ?? DEFAULT_MISSING_API_KEY_MESSAGE,
+        this.config.missingApiKeyMessage || DEFAULT_MISSING_API_KEY_MESSAGE,
       );
     }
 
