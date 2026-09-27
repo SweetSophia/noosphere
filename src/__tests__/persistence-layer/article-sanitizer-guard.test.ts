@@ -429,12 +429,14 @@ test("persistence layer sanitizes permitted bulk-return metadata on both models"
       data: { title: `${TEST_PREFIX}-bulk-return-update <memory-context>private title</memory-context>` },
     });
     assert.equal(updated.length, 1);
+    assert.ok(updated[0].title.startsWith(`${TEST_PREFIX}-bulk-return-update`));
     assert.ok(!updated[0].title.includes("private title"));
     const revisions = await prisma.articleRevision.updateManyAndReturn({
       where: { id: revision.id },
       data: { title: `${TEST_PREFIX}-bulk-return-update-revision <noosphere-context>private revision</noosphere-context>` },
     });
     assert.equal(revisions.length, 1);
+    assert.ok(revisions[0].title.startsWith(`${TEST_PREFIX}-bulk-return-update-revision`));
     assert.ok(!revisions[0].title.includes("private revision"));
   } finally {
     await cleanupTestFixtures();
