@@ -8,12 +8,10 @@ const INJECTED_MEMORY_BLOCKS = [
 ];
 const STRIP_MODE_CONFIGS = {
     "openclaw-article-create": {
-        open: "tag-boundary",
         closeAllowsWhitespace: true,
         unclosed: "throw",
     },
     "server-save": {
-        open: "word-boundary",
         closeAllowsWhitespace: false,
         unclosed: "truncate-tail",
     },
