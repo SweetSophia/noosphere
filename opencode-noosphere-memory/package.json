@@ -25,8 +25,12 @@
   },
   "dependencies": {
     "@opencode-ai/plugin": "^1.14.18",
-    "@opencode-ai/sdk": "^1.14.18"
+    "@opencode-ai/sdk": "^1.14.18",
+    "@sweetsophia/noosphere-client": "file:../noosphere-client"
   },
+  "bundledDependencies": [
+    "@sweetsophia/noosphere-client"
+  ],
   "devDependencies": {
     "@types/node": "^20",
     "typescript": "^5"

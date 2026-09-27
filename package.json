@@ -45,6 +45,7 @@
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "@sweetsophia/noosphere-injected-memory": "file:./noosphere-injected-memory",
+    "@sweetsophia/noosphere-client": "file:./noosphere-client",
     "@types/pg": "^8.20.0",
     "bcryptjs": "^3.0.3",
     "ioredis": "^5.10.1",
