@@ -2,7 +2,7 @@
 
 ## Overview
 
-A Prisma client `$extends` query interceptor that acts as a **hard boundary** against injected-memory blocks (`<recall>`, `<hindsight_memories>`, `<noosphere_auto_recall>`) reaching the `article` and `articleRevision` tables in PostgreSQL.
+A Prisma client `$extends` query interceptor that acts as a **hard boundary** against registered injected-memory blocks (including Hermes context fences) reaching the `article` and `articleRevision` tables in PostgreSQL.
 
 The extension intercepts all write operations — `create`, `update`, `upsert`, `createMany`, `updateMany` — on both models. Even if a future route forgets route-level sanitization, injected blocks cannot reach those tables.
 

@@ -8,7 +8,7 @@ import {
 } from "@sweetsophia/noosphere-injected-memory";
 
 test("server strips the context tags declared by the Hermes client", () => {
-  const formatting = readFileSync("hermes-noosphere-memory/plugins/memory/noosphere/formatting.py", "utf8");
+  const formatting = readFileSync(new URL("../../../hermes-noosphere-memory/plugins/memory/noosphere/formatting.py", import.meta.url), "utf8");
   const tags = formatting.match(/_FENCE_TAG_RE = re\.compile\(r"[^"\n]*\(\?:([^)]*)\)/)?.[1].split("|");
   assert.deepEqual(tags, ["memory-context", "noosphere-context"]);
   for (const tag of tags) {

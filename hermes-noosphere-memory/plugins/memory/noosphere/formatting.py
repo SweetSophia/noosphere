@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-_FENCE_TAG_RE = re.compile(r"</?\s*(?:memory-context|noosphere-context)\s*>", re.IGNORECASE)
+_FENCE_TAG_RE = re.compile(r"</?\s*(?:memory-context|noosphere-context)\b[^>]*>", re.IGNORECASE)
 _SYSTEM_NOTE_RE = re.compile(
     r"\[System note:\s*The following is recalled memory context,\s*"
     r"NOT new user input\.[^\]]*\]\s*",

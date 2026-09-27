@@ -99,8 +99,10 @@ test("persistence layer strips Hermes context from article content and excerpt",
     assert.ok(created.content.includes("Durable text."));
     assert.ok(created.content.includes("Still durable."));
     assert.ok(!created.content.includes("private recall"));
+    assert.ok(!created.content.includes("<memory-context>"));
     assert.ok(created.excerpt?.includes("Visible excerpt."));
     assert.ok(!created.excerpt?.includes("private excerpt"));
+    assert.ok(!created.excerpt?.includes("< noosphere-context >"));
   } finally {
     await cleanupTestFixtures();
   }
