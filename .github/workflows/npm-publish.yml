@@ -16,6 +16,9 @@ on:
       - "docs/OPENCLAW*.md"
       - "hermes-noosphere-memory/plugins/memory/noosphere/plugin.yaml"
       - "noosphere-injected-memory/**"
+      # Shared library consumed as a bundled dep by opencode/kilocode: a change
+      # here must re-run their package-check (typecheck/build/committed dist).
+      - "noosphere-client/**"
       - "openclaw-noosphere-memory/**"
       - "opencode-noosphere-memory/**"
       - "kilocode-noosphere-memory/**"

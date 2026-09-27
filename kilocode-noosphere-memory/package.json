@@ -33,8 +33,12 @@
   },
   "dependencies": {
     "@kilocode/plugin": "^7.3.1",
-    "@kilocode/sdk": "^7.3.1"
+    "@kilocode/sdk": "^7.3.1",
+    "@sweetsophia/noosphere-client": "file:../noosphere-client"
   },
+  "bundledDependencies": [
+    "@sweetsophia/noosphere-client"
+  ],
   "devDependencies": {
     "@types/node": "^20",
     "typescript": "^5"

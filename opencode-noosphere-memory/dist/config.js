@@ -11,6 +11,7 @@ export function resolveConfig(options, env = process.env) {
         apiKey: readString(raw.apiKey) ||
             readString(env.OPENCODE_NOOSPHERE_API_KEY) ||
             readString(env.NOOSPHERE_API_KEY),
+        missingApiKeyMessage: "Set OPENCODE_NOOSPHERE_API_KEY for Opencode Noosphere memory requests, or NOOSPHERE_API_KEY as a compatibility fallback",
         timeoutMs: readInteger(raw.timeoutMs, firstEnv(env.OPENCODE_NOOSPHERE_TIMEOUT_MS, env.NOOSPHERE_TIMEOUT_MS), 5_000, 500, 30_000),
         autoRecall: readBoolean(raw.autoRecall, firstEnv(env.OPENCODE_NOOSPHERE_AUTO_RECALL, env.NOOSPHERE_AUTO_RECALL), true),
         autoRecallInjectOn: readInjectOn(raw.autoRecallInjectOn, firstEnv(env.OPENCODE_NOOSPHERE_AUTO_RECALL_INJECT_ON, env.NOOSPHERE_AUTO_RECALL_INJECT_ON)),
