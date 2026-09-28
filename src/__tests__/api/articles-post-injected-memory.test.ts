@@ -188,6 +188,32 @@ test("POST /api/articles rejects content made only of injected memory blocks", a
   }
 });
 
+test("POST /api/articles returns 400 for a title made only of injected context", async () => {
+  const { prisma } = await import("@/lib/prisma");
+  const { POST } = await import("@/app/api/articles/route");
+  const rawKey = `noo_${crypto.randomBytes(32).toString("base64url")}`;
+
+  await cleanupFixtures(prisma);
+  const topic = await setupTopic(prisma);
+  await createWriteKey(prisma, rawKey);
+  try {
+    const response = await POST(buildPostRequest(rawKey, {
+      title: "<memory-context>private recall</memory-context>",
+      slug: "issue-208-fence-only-title",
+      content: "Durable article content outside injected context.",
+      topicId: topic.id,
+    }));
+    const body = (await response.json()) as { error?: string };
+    assert.equal(response.status, 400, body.error);
+    assert.match(body.error ?? "", /title is empty after injected-memory stripping/);
+    assert.equal(await prisma.article.findFirst({
+      where: { topicId: topic.id, slug: "issue-208-fence-only-title" },
+    }), null);
+  } finally {
+    await cleanupFixtures(prisma);
+  }
+});
+
 test("POST /api/articles rejects caller excerpts made only of injected memory blocks", async () => {
   const { prisma } = await import("@/lib/prisma");
   const { POST } = await import("@/app/api/articles/route");
