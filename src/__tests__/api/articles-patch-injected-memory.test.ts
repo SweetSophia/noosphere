@@ -176,6 +176,7 @@ test("PATCH /api/articles/[id] rejects content made only of injected memory bloc
 test("PATCH /api/articles/[id] returns 400 for a title made only of injected context", async () => {
   const { prisma } = await import("@/lib/prisma");
   const { PATCH } = await import("@/app/api/articles/[id]/route");
+  const { PERSISTENCE_LAYER_INJECTED_TITLE_ERROR } = await import("@/lib/prisma-extensions/article-sanitizer");
   const rawKey = `noo_${crypto.randomBytes(32).toString("base64url")}`;
 
   await cleanupFixtures(prisma);
@@ -191,7 +192,7 @@ test("PATCH /api/articles/[id] returns 400 for a title made only of injected con
     );
     const body = (await response.json()) as { error?: string };
     assert.equal(response.status, 400, body.error);
-    assert.match(body.error ?? "", /title is empty after injected-memory stripping/);
+    assert.equal(body.error, PERSISTENCE_LAYER_INJECTED_TITLE_ERROR);
     const after = await prisma.article.findUniqueOrThrow({
       where: { id: article.id }, include: { revisions: true },
     });
