@@ -8,7 +8,8 @@ import { Breadcrumbs } from "@/components/wiki/Breadcrumbs";
 import { PageHeader } from "@/components/wiki/PageHeader";
 import { ImageUploadPanel } from "@/components/wiki/ImageUploadPanel";
 import { MarkdownPreviewTabs } from "@/components/wiki/MarkdownPreviewTabs";
-import { createArticle } from "./actions";
+import { ArticleWriteForm } from "@/components/wiki/ArticleWriteForm";
+import { createArticle, createArticleWithFeedback } from "./actions";
 import { RestrictedTagPicker } from "@/components/wiki/RestrictedTagPicker";
 
 interface Props {
@@ -57,7 +58,7 @@ export default async function NewArticlePage({ params }: Props) {
 
       <ImageUploadPanel targetTextareaId="content" />
 
-      <form action={createArticle.bind(null, topicSlug)}>
+      <ArticleWriteForm action={createArticle.bind(null, topicSlug)} feedbackAction={createArticleWithFeedback.bind(null, topicSlug)}>
         <div className="form-group">
           <label className="form-label" htmlFor="title">Title *</label>
           <input
@@ -115,7 +116,7 @@ export default async function NewArticlePage({ params }: Props) {
             Cancel
           </Link>
         </div>
-      </form>
+      </ArticleWriteForm>
     </div>
   );
 }

@@ -229,6 +229,31 @@ test("POST /api/answer rejects injected-only excerpts", async () => {
   }
 });
 
+test("POST /api/answer returns 400 for an injected-only title", async () => {
+  const { prisma } = await import("@/lib/prisma");
+  const { POST } = await import("@/app/api/answer/route");
+  const { PERSISTENCE_LAYER_INJECTED_TITLE_ERROR } = await import("@/lib/prisma-extensions/article-sanitizer");
+  const rawKey = `noo_${crypto.randomBytes(32).toString("base64url")}`;
+
+  await cleanupFixtures(prisma);
+  const topic = await setupTopic(prisma);
+  await createWriteKey(prisma, rawKey);
+  try {
+    const response = await POST(buildJsonRequest("/api/answer", rawKey, {
+      title: "<memory-context>private recall</memory-context>",
+      topicId: topic.id,
+      content: "Durable answer text.",
+    }));
+    const body = (await response.json()) as { error?: string };
+    assert.equal(response.status, 400, body.error);
+    assert.equal(body.error, PERSISTENCE_LAYER_INJECTED_TITLE_ERROR);
+    assert.equal(await prisma.article.count({ where: { topicId: topic.id } }), 0);
+    assert.equal(await prisma.articleRevision.count({ where: { article: { topicId: topic.id } } }), 0);
+  } finally {
+    await cleanupFixtures(prisma);
+  }
+});
+
 test("POST /api/ingest strips malformed injected tails before batch persistence", async () => {
   const { prisma } = await import("@/lib/prisma");
   const { POST } = await import("@/app/api/ingest/route");
@@ -321,6 +346,34 @@ test("POST /api/ingest rejects the whole batch when one article is injected-only
       where: { topicId: topic.id },
     });
     assert.equal(articles.length, 0, "rejected ingest batch must not persist earlier clean articles");
+  } finally {
+    await cleanupFixtures(prisma);
+  }
+});
+
+test("POST /api/ingest returns 400 and rolls back for an injected-only title", async () => {
+  const { prisma } = await import("@/lib/prisma");
+  const { POST } = await import("@/app/api/ingest/route");
+  const { PERSISTENCE_LAYER_INJECTED_TITLE_ERROR } = await import("@/lib/prisma-extensions/article-sanitizer");
+  const rawKey = `noo_${crypto.randomBytes(32).toString("base64url")}`;
+
+  await cleanupFixtures(prisma);
+  const topic = await setupTopic(prisma);
+  await createWriteKey(prisma, rawKey);
+  try {
+    const response = await POST(buildJsonRequest("/api/ingest", rawKey, {
+      source: { type: "text", title: `${TEST_TITLE_PREFIX} Source` },
+      articles: [
+        { title: `${TEST_TITLE_PREFIX} Durable`, slug: "issue-340-clean", topicId: topic.id, content: "Durable text." },
+        { title: "<recall>private title</recall>", slug: "issue-340-reject", topicId: topic.id, content: "Durable text." },
+      ],
+    }));
+    const body = (await response.json()) as { error?: string };
+    assert.equal(response.status, 400, body.error);
+    assert.equal(body.error, PERSISTENCE_LAYER_INJECTED_TITLE_ERROR);
+    assert.equal(await prisma.article.count({ where: { topicId: topic.id } }), 0);
+    assert.equal(await prisma.articleRevision.count({ where: { article: { topicId: topic.id } } }), 0);
+    assert.equal(await prisma.activityLog.count({ where: { title: { contains: `${TEST_TITLE_PREFIX} Source` } } }), 0);
   } finally {
     await cleanupFixtures(prisma);
   }
