@@ -1,64 +1,20 @@
 # Noosphere Memory for Kilo Code
 
-Kilo Code plugin for Noosphere memory integration.
+Connect Kilo Code to self-hosted Noosphere memory. Recall relevant knowledge,
+save draft memories with explicit tools, and optionally enable idle auto-save.
 
-It provides:
+## Quick start
 
-- prompt-time auto-recall through `POST /api/memory/recall`
-- optional idle auto-save through `POST /api/memory/save`
-- manual tools for status, recall, topic lookup, and draft memory saving
+You need a running Noosphere instance and a dedicated Kilo Code WRITE key. For a
+new local setup, select Kilo Code in the [guided installer](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#guided-installation)
+after confirming the [v1.14.0 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.14.0)
+has all six installer assets. The [auditable download](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#auditable-download)
+explains checksum verification.
 
-## Before you start
-
-You need two things before this plugin will do anything useful:
-
-1. **A reachable Noosphere instance.** The plugin defaults to
-   `http://127.0.0.1:6578`. For a guided local install that also configures
-   Kilo Code, run:
-
-   Before running this pinned `1.14.0` command, confirm that the coordinated
-   [`v1.14.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.14.0)
-   exists with all six installer assets. Source merge alone does not publish the
-   image, package, or release assets.
-
-   ```bash
-   # Installer commit: 182e0dceade3f0ac31e5d14f42f091d4075793a2
-   # Expected SHA-256: 5fd69c4125ba02fdcc36e1bb54b66628dc5d324f7c04cea13d5dae3729035601
-   (
-     set -e
-     installer="$(mktemp)"
-     trap 'rm -f "$installer"' EXIT
-     curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/182e0dceade3f0ac31e5d14f42f091d4075793a2/install.sh -o "$installer"
-     printf '%s  %s\n' '5fd69c4125ba02fdcc36e1bb54b66628dc5d324f7c04cea13d5dae3729035601' "$installer" | sha256sum -c -
-     bash "$installer" --non-interactive --with kilocode
-   )
-   ```
-
-   The immutable launcher checksum-verifies its backend, preserves existing
-   database state, and stores generated credentials without printing them. It
-   creates and persists a Kilo-specific WRITE key; the bootstrap ADMIN key is
-   not written to Kilo configuration. See
-   [Installing Noosphere](../docs/INSTALLATION.md) for the auditable download,
-   upgrade behavior, and manual Compose path.
-
-   To point at an existing Noosphere instead, set `baseUrl` in the plugin options
-   (see [Configuration](#configuration)).
-
-2. **A Noosphere API key for this tool.** The plugin will refuse to start
-   without one. Create a **tool-specific WRITE key** (named after the tool, e.g.
-   `kilocode`) in the Noosphere admin UI at:
-
-   ```text
-   https://<your-noosphere-host>/wiki/admin/keys
-   ```
-
-   Admin login is required. The local Docker Compose install creates an
-   `admin@noosphere.local` admin account whose password is in `.env` as
-   `NOOSPHERE_ADMIN_PASSWORD`. See [Secrets](#secrets) below for which
-   permissions the key needs and where to put it. “Tool-specific” means the
-   credential is isolated from ADMIN and other integrations; guided setup leaves
-   corpus scopes unrestricted so saves without `restrictedTags` continue to
-   work. Apply a restricted scope only together with matching integration tags.
+Already running Noosphere? Create a dedicated WRITE key at `/wiki/admin/keys`,
+then [install the plugin](#install) and [set its key](#secrets). Never use the
+bootstrap ADMIN key for an agent integration. See the [full Kilo Code guide on GitHub](https://github.com/SweetSophia/noosphere/tree/master/kilocode-noosphere-memory)
+for remote setup and configuration details.
 
 ## Install
 
@@ -194,6 +150,26 @@ Arguments:
 - `excerpt`, `tags`, `restrictedTags`, `source`, `confidence` optional
 
 Use this for stable project facts, decisions, runbooks, and recurring fixes. Do not save secrets, raw prompt dumps, or transient task chatter.
+
+## Verified guided install
+
+For a new local setup, first confirm the [v1.14.0 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.14.0)
+has all six installer assets. This pinned launcher verifies its SHA-256 before
+execution; see the [GitHub installation guide](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md)
+for upgrade behavior and other installation paths.
+
+```bash
+# Installer commit: 182e0dceade3f0ac31e5d14f42f091d4075793a2
+# Expected SHA-256: 5fd69c4125ba02fdcc36e1bb54b66628dc5d324f7c04cea13d5dae3729035601
+(
+  set -e
+  installer="$(mktemp)"
+  trap 'rm -f "$installer"' EXIT
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/182e0dceade3f0ac31e5d14f42f091d4075793a2/install.sh -o "$installer"
+  printf '%s  %s\n' '5fd69c4125ba02fdcc36e1bb54b66628dc5d324f7c04cea13d5dae3729035601' "$installer" | sha256sum -c -
+  bash "$installer" --non-interactive --with kilocode
+)
+```
 
 ## Development
 

@@ -1,43 +1,25 @@
 # Noosphere Memory for OpenClaw
 
-OpenClaw plugin for Noosphere memory over HTTP. It provides explicit memory
-tools, optional prompt-time auto-recall, and an optional shared memory corpus
-supplement.
+Connect OpenClaw to self-hosted Noosphere memory. Recall relevant knowledge,
+save draft memories, and optionally inject recalled context into prompts.
 
-## Install
+## Quick start
 
-Use OpenClaw's plugin installer:
+You need a running Noosphere instance and a dedicated OpenClaw WRITE key. For a
+new local setup, select OpenClaw in the [guided installer](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#guided-installation)
+after confirming the [v1.14.0 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.14.0)
+has all six installer assets. The [auditable download](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#auditable-download)
+explains checksum verification.
+
+If Noosphere is already running, install the plugin with OpenClaw:
 
 ```bash
 openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.14.0 --pin
 ```
 
-For the full local Noosphere + OpenClaw setup, first confirm that the
-coordinated [`v1.14.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.14.0)
-exists with all six installer assets. Source merge alone does not publish the
-image, package, or release assets. Then use the checksum-verifying download form
-below; it runs the guided `1.14.0` launcher non-interactively for OpenClaw.
-
-It verifies the reviewed launcher and backend before configuring OpenClaw through
-its protected file secret provider. For the full lifecycle and auditable download,
-see [Installing Noosphere](../docs/INSTALLATION.md). Guided setup creates a
-separate OpenClaw WRITE key, never the bootstrap ADMIN key. The key is
-unrestricted across corpus scopes by default so ordinary saves without
-`restrictedTags` work; apply restricted scopes only together with matching
-integration tags.
-
-```bash
-# Installer commit: 182e0dceade3f0ac31e5d14f42f091d4075793a2
-# Expected SHA-256: 5fd69c4125ba02fdcc36e1bb54b66628dc5d324f7c04cea13d5dae3729035601
-(
-  set -e
-  installer="$(mktemp)"
-  trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/182e0dceade3f0ac31e5d14f42f091d4075793a2/install.sh -o "$installer"
-  printf '%s  %s\n' '5fd69c4125ba02fdcc36e1bb54b66628dc5d324f7c04cea13d5dae3729035601' "$installer" | sha256sum -c -
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.14.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.14.0}" bash "$installer" --non-interactive --with openclaw
-)
-```
+Then [configure the plugin](#configuration) with its own WRITE key, not the
+bootstrap ADMIN key. See the [full OpenClaw guide on GitHub](https://github.com/SweetSophia/noosphere/tree/master/openclaw-noosphere-memory)
+for remote setup and configuration details.
 
 ## Configuration
 
@@ -148,7 +130,7 @@ advisory; it does not perform an automatic save.
 
 This is the implemented Phase 0 behavior. The opt-in automatic-capture and
 recall-enrichment phases are tracked in the
-[Automatic Memory Capture and Recall Enrichment ADR](../docs/AUTOMATIC-MEMORY-CAPTURE-AND-ENRICHMENT-ADR.md).
+[Automatic Memory Capture and Recall Enrichment ADR](https://github.com/SweetSophia/noosphere/blob/master/docs/AUTOMATIC-MEMORY-CAPTURE-AND-ENRICHMENT-ADR.md).
 
 ## Corpus Supplement
 
@@ -167,6 +149,26 @@ default API key for shared corpus access, set:
 Use a narrow default key if you enable this. The default corpus key should be
 READ-only when the shared corpus is used for search only, and its scopes should
 exclude private agent/project memory that other agents must not see.
+
+## Verified guided install
+
+For a new local setup, first confirm the [v1.14.0 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.14.0)
+has all six installer assets. This pinned launcher verifies its SHA-256 before
+execution; see the [GitHub installation guide](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md)
+for upgrade behavior and other installation paths.
+
+```bash
+# Installer commit: 182e0dceade3f0ac31e5d14f42f091d4075793a2
+# Expected SHA-256: 5fd69c4125ba02fdcc36e1bb54b66628dc5d324f7c04cea13d5dae3729035601
+(
+  set -e
+  installer="$(mktemp)"
+  trap 'rm -f "$installer"' EXIT
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/182e0dceade3f0ac31e5d14f42f091d4075793a2/install.sh -o "$installer"
+  printf '%s  %s\n' '5fd69c4125ba02fdcc36e1bb54b66628dc5d324f7c04cea13d5dae3729035601' "$installer" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.14.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.14.0}" bash "$installer" --non-interactive --with openclaw
+)
+```
 
 ## Release Tags
 
