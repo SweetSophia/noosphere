@@ -11,14 +11,15 @@ after confirming the [v1.14.0 release](https://github.com/SweetSophia/noosphere/
 has all six installer assets. The [auditable download](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#auditable-download)
 explains checksum verification.
 
-If Noosphere is already running, install the plugin with OpenClaw:
+If Noosphere is already running, create an OpenClaw-specific WRITE key at
+`/wiki/admin/keys` (not the bootstrap ADMIN key), then install the plugin:
 
 ```bash
 openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.14.0 --pin
 ```
 
-Then [configure the plugin](#configuration) with its own WRITE key, not the
-bootstrap ADMIN key. See the [full OpenClaw guide on GitHub](https://github.com/SweetSophia/noosphere/tree/master/openclaw-noosphere-memory)
+Then [configure the plugin](#configuration) with that key. See the
+[full OpenClaw guide on GitHub](https://github.com/SweetSophia/noosphere/tree/master/openclaw-noosphere-memory)
 for remote setup and configuration details.
 
 ## Configuration
