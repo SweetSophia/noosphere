@@ -24,8 +24,9 @@ import { prisma } from "@/lib/prisma";
 import {
   articleSanitizerExtension,
   isPersistenceLayerInjectedOnlyError,
+  isPersistenceLayerInjectedTitleError,
   isPersistenceLayerBulkContentError,
-  isPersistenceLayerSanitizerError,
+  PERSISTENCE_LAYER_BULK_CONTENT_ERROR_PREFIX,
 } from "@/lib/prisma-extensions/article-sanitizer";
 
 if (!process.env.DATABASE_URL) {
@@ -130,7 +131,12 @@ test("persistence layer rejects a title consisting only of injected context", as
         title: "<memory-context>private title</memory-context>",
         slug, topicId: topic.id, content: "Durable article content.",
       } }),
-      isPersistenceLayerSanitizerError,
+      isPersistenceLayerInjectedTitleError,
+    );
+    assert.equal(
+      isPersistenceLayerInjectedTitleError(new Error(PERSISTENCE_LAYER_BULK_CONTENT_ERROR_PREFIX)),
+      false,
+      "bulk-operation programmer errors must not be mistaken for title input errors",
     );
   } finally {
     await prisma.article.deleteMany({ where: { slug } });

@@ -65,6 +65,10 @@ export function isPersistenceLayerInjectedOnlyError(
   return err instanceof Error && err.message === PERSISTENCE_LAYER_INJECTED_ONLY_ERROR;
 }
 
+export function isPersistenceLayerInjectedTitleError(err: unknown): boolean {
+  return err instanceof Error && err.message === PERSISTENCE_LAYER_INJECTED_TITLE_ERROR;
+}
+
 /**
  * Error prefix for bulk operations that include content/excerpt fields.
  */
@@ -84,14 +88,14 @@ export function isPersistenceLayerBulkContentError(
 }
 
 /**
- * Type guard for any persistence-layer sanitizer error (injected-only or bulk).
+ * Type guard for any persistence-layer sanitizer error (injected-only, title, or bulk).
  */
 export function isPersistenceLayerSanitizerError(
   err: unknown,
 ): boolean {
   return (
     isPersistenceLayerInjectedOnlyError(err) ||
-    (err instanceof Error && err.message === PERSISTENCE_LAYER_INJECTED_TITLE_ERROR) ||
+    isPersistenceLayerInjectedTitleError(err) ||
     isPersistenceLayerBulkContentError(err)
   );
 }

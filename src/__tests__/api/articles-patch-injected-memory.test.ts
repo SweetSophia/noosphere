@@ -173,6 +173,36 @@ test("PATCH /api/articles/[id] rejects content made only of injected memory bloc
   }
 });
 
+test("PATCH /api/articles/[id] returns 400 for a title made only of injected context", async () => {
+  const { prisma } = await import("@/lib/prisma");
+  const { PATCH } = await import("@/app/api/articles/[id]/route");
+  const { PERSISTENCE_LAYER_INJECTED_TITLE_ERROR } = await import("@/lib/prisma-extensions/article-sanitizer");
+  const rawKey = `noo_${crypto.randomBytes(32).toString("base64url")}`;
+
+  await cleanupFixtures(prisma);
+  const topic = await setupTopic(prisma);
+  await createWriteKey(prisma, rawKey);
+  const article = await createArticle(prisma, topic.id, "patch-fence-only-title");
+  try {
+    const response = await PATCH(
+      buildPatchRequest(article.id, {
+        title: "< noosphere-context >private recall</ noosphere-context >",
+      }, rawKey),
+      { params: Promise.resolve({ id: article.id }) },
+    );
+    const body = (await response.json()) as { error?: string };
+    assert.equal(response.status, 400, body.error);
+    assert.equal(body.error, PERSISTENCE_LAYER_INJECTED_TITLE_ERROR);
+    const after = await prisma.article.findUniqueOrThrow({
+      where: { id: article.id }, include: { revisions: true },
+    });
+    assert.equal(after.title, article.title);
+    assert.equal(after.revisions.length, 0, "rejected title must not create a revision");
+  } finally {
+    await cleanupFixtures(prisma);
+  }
+});
+
 test("PATCH /api/articles/[id] rejects visible secrets after stripping", async () => {
   const { prisma } = await import("@/lib/prisma");
   const { PATCH } = await import("@/app/api/articles/[id]/route");
