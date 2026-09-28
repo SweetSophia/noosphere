@@ -192,8 +192,11 @@ test("PATCH /api/articles/[id] returns 400 for a title made only of injected con
     const body = (await response.json()) as { error?: string };
     assert.equal(response.status, 400, body.error);
     assert.match(body.error ?? "", /title is empty after injected-memory stripping/);
-    const after = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    const after = await prisma.article.findUniqueOrThrow({
+      where: { id: article.id }, include: { revisions: true },
+    });
     assert.equal(after.title, article.title);
+    assert.equal(after.revisions.length, 0, "rejected title must not create a revision");
   } finally {
     await cleanupFixtures(prisma);
   }
