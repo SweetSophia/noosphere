@@ -10,7 +10,8 @@ import { PageHeader } from "@/components/wiki/PageHeader";
 import { DeleteArticleForm } from "@/components/wiki/DeleteArticleForm";
 import { ImageUploadPanel } from "@/components/wiki/ImageUploadPanel";
 import { MarkdownPreviewTabs } from "@/components/wiki/MarkdownPreviewTabs";
-import { deleteArticle, saveArticle } from "./actions";
+import { ArticleWriteForm } from "@/components/wiki/ArticleWriteForm";
+import { deleteArticle, saveArticle, saveArticleWithFeedback } from "./actions";
 import { RestrictedTagPicker } from "@/components/wiki/RestrictedTagPicker";
 
 interface Props {
@@ -88,7 +89,7 @@ export default async function EditArticlePage({ params }: Props) {
 
       <ImageUploadPanel targetTextareaId="content" />
 
-      <form action={saveArticle.bind(null, topicSlug, articleSlug)}>
+      <ArticleWriteForm action={saveArticle.bind(null, topicSlug, articleSlug)} feedbackAction={saveArticleWithFeedback.bind(null, topicSlug, articleSlug)}>
         <div className="form-group">
           <label className="form-label" htmlFor="title">Title</label>
           <input
@@ -167,7 +168,7 @@ export default async function EditArticlePage({ params }: Props) {
             Cancel
           </Link>
         </div>
-      </form>
+      </ArticleWriteForm>
     </div>
   );
 }

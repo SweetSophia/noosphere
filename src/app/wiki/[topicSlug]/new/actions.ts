@@ -13,6 +13,7 @@ import {
   sanitizeArticleExcerpt,
 } from "@/lib/api/article-content";
 import { detectSecretInInputs } from "@/lib/memory/api/save";
+import { isPersistenceLayerInjectedTitleError } from "@/lib/prisma-extensions/article-sanitizer";
 
 async function requireEditorSession() {
   const session = await getServerSession(authOptions);
@@ -160,4 +161,13 @@ export async function createArticle(
   revalidatePath("/wiki");
   revalidatePath("/wiki/search");
   redirect(`/wiki/${topicSlug}/${article.slug}`);
+}
+
+export async function createArticleWithFeedback(topicSlug: string, formData: FormData): Promise<string | void> {
+  try {
+    await createArticle(topicSlug, formData);
+  } catch (error) {
+    if (!isPersistenceLayerInjectedTitleError(error)) throw error;
+    return "Article title cannot consist only of injected context.";
+  }
 }
