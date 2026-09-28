@@ -1,17 +1,17 @@
 # Noosphere MCP
 
-`@sweetsophia/noosphere-mcp` exposes Noosphere's memory and wiki API as a stdio Model Context Protocol server. It includes a guided Codex CLI installer and skill.
+Connect Codex CLI or another MCP client to a self-hosted Noosphere memory and
+wiki. This stdio server includes a guided Codex CLI installer and skill.
 
-## Codex CLI quick install
+## Quick start (Codex CLI)
 
-Prerequisites:
+You need Node.js 22 or newer, a trusted Codex CLI with MCP support on your
+`PATH`, a running Noosphere instance, and a permission-scoped API key. New to
+Noosphere? Start with the [guided installation on GitHub](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#guided-installation).
+Check that the coordinated [v1.14.0 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.14.0)
+exists before using this version-pinned command.
 
-- Node.js 22 or newer
-- Codex CLI with MCP support, installed from a trusted source and available as
-  `codex` on a trusted `PATH`
-- A running Noosphere deployment and a permission-scoped API key
-
-Install the MCP launcher and user-level Codex skill:
+Install the MCP launcher and user-level Codex skill from a trusted shell:
 
 ```bash
 npx -y @sweetsophia/noosphere-mcp@1.14.0 install-codex
@@ -37,6 +37,9 @@ The default endpoint is `http://127.0.0.1:6578`. Verify the launcher without exp
 ```bash
 codex mcp get noosphere --json
 ```
+
+For full setup, other MCP clients, remote endpoints, and troubleshooting, see
+the [Noosphere MCP guide on GitHub](https://github.com/SweetSophia/noosphere/tree/master/noosphere-mcp).
 
 ## Remote Noosphere deployments
 

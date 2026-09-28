@@ -2,7 +2,7 @@
   "name": "@sweetsophia/noosphere-mcp",
   "version": "1.14.0",
   "private": false,
-  "description": "Model Context Protocol server for Noosphere, with a guided Codex CLI integration.",
+  "description": "Connect Codex CLI and other MCP clients to self-hosted Noosphere memory and wiki tools.",
   "type": "module",
   "license": "Apache-2.0",
   "main": "./dist/index.js",
@@ -56,5 +56,5 @@
   "bugs": {
     "url": "https://github.com/SweetSophia/noosphere/issues"
   },
-  "homepage": "https://github.com/SweetSophia/noosphere#readme"
+  "homepage": "https://github.com/SweetSophia/noosphere/tree/master/noosphere-mcp"
 }

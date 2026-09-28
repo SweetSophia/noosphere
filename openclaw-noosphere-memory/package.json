@@ -2,7 +2,7 @@
   "name": "@sweetsophia/openclaw-noosphere-memory",
   "version": "1.14.0",
   "private": false,
-  "description": "OpenClaw plugin for Noosphere: agent memory tools, Noosphere recall, draft memory saving, and automatic prompt-time memory injection.",
+  "description": "Connect OpenClaw to self-hosted Noosphere memory for recall, draft saves, and optional prompt-time context.",
   "type": "module",
   "license": "Apache-2.0",
   "main": "./dist/index.js",
@@ -63,5 +63,5 @@
   "bugs": {
     "url": "https://github.com/SweetSophia/noosphere/issues"
   },
-  "homepage": "https://github.com/SweetSophia/noosphere#readme"
+  "homepage": "https://github.com/SweetSophia/noosphere/tree/master/openclaw-noosphere-memory"
 }

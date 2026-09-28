@@ -1,12 +1,9 @@
 # Noosphere Injected Memory
 
-Internal helper package for removing transient injected-memory blocks before
-Noosphere persists agent-authored content.
+Internal helper for removing transient injected-memory blocks before Noosphere
+persists agent-authored content. The server uses it directly; the OpenClaw
+plugin bundles it. **Most users should install an integration, not this helper.**
 
-The package is intentionally adapter-neutral. The Noosphere server and OpenClaw
-plugin depend on this package instead of depending on each other.
-
-The package is published as a coordinated npm artifact from the
-`v-openclaw-*` release boundary before the OpenClaw package. The server still
-consumes it through a local workspace dependency, and OpenClaw bundles it so
-installed plugin users do not need to install the helper separately.
+For the server, integration guides, and release instructions, visit
+[Noosphere on GitHub](https://github.com/SweetSophia/noosphere). Adapter authors
+can inspect this package's [source and API](https://github.com/SweetSophia/noosphere/tree/master/noosphere-injected-memory).
