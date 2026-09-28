@@ -36,7 +36,6 @@ async function cleanup(prisma: PrismaClient) {
 test("wiki create reports an injected-only title without writing an article", async () => {
   const { prisma } = await import("@/lib/prisma");
   const { createArticleWithFeedback } = await import("@/app/wiki/[topicSlug]/new/actions");
-  const { PERSISTENCE_LAYER_INJECTED_TITLE_ERROR } = await import("@/lib/prisma-extensions/article-sanitizer");
   await cleanup(prisma);
   const topic = await setup(prisma);
   try {
@@ -44,7 +43,7 @@ test("wiki create reports an injected-only title without writing an article", as
     const form = new FormData();
     form.set("title", "< noosphere-context >private recall</ noosphere-context >");
     form.set("content", "Durable wiki content.");
-    assert.equal(await createArticleWithFeedback(topic.slug, form), PERSISTENCE_LAYER_INJECTED_TITLE_ERROR);
+    assert.equal(await createArticleWithFeedback(topic.slug, form), "Article title cannot consist only of injected context.");
     assert.equal(await prisma.article.count({ where: { topicId: topic.id } }), 0);
     assert.equal(await prisma.articleRevision.count({ where: { article: { topicId: topic.id } } }), 0);
   } finally {
@@ -55,7 +54,6 @@ test("wiki create reports an injected-only title without writing an article", as
 test("wiki edit reports an injected-only title and keeps the article unchanged", async () => {
   const { prisma } = await import("@/lib/prisma");
   const { saveArticleWithFeedback } = await import("@/app/wiki/[topicSlug]/[articleSlug]/edit/actions");
-  const { PERSISTENCE_LAYER_INJECTED_TITLE_ERROR } = await import("@/lib/prisma-extensions/article-sanitizer");
   await cleanup(prisma);
   const topic = await setup(prisma);
   const article = await prisma.article.create({
@@ -66,7 +64,7 @@ test("wiki edit reports an injected-only title and keeps the article unchanged",
     form.set("title", "<recall>private recall</recall>");
     form.set("content", "Updated durable content.");
     form.set("status", "published");
-    assert.equal(await saveArticleWithFeedback(topic.slug, article.slug, form), PERSISTENCE_LAYER_INJECTED_TITLE_ERROR);
+    assert.equal(await saveArticleWithFeedback(topic.slug, article.slug, form), "Article title cannot consist only of injected context.");
     const after = await prisma.article.findUniqueOrThrow({ where: { id: article.id }, include: { revisions: true } });
     assert.equal(after.title, article.title);
     assert.equal(after.content, article.content);

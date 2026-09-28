@@ -13,7 +13,7 @@ import {
   sanitizeArticleExcerpt,
 } from "@/lib/api/article-content";
 import { detectSecretInInputs } from "@/lib/memory/api/save";
-import { isPersistenceLayerInjectedTitleError, PERSISTENCE_LAYER_INJECTED_TITLE_ERROR } from "@/lib/prisma-extensions/article-sanitizer";
+import { isPersistenceLayerInjectedTitleError } from "@/lib/prisma-extensions/article-sanitizer";
 
 async function requireEditorSession() {
   const session = await getServerSession(authOptions);
@@ -168,6 +168,6 @@ export async function createArticleWithFeedback(topicSlug: string, formData: For
     await createArticle(topicSlug, formData);
   } catch (error) {
     if (!isPersistenceLayerInjectedTitleError(error)) throw error;
-    return PERSISTENCE_LAYER_INJECTED_TITLE_ERROR;
+    return "Article title cannot consist only of injected context.";
   }
 }
