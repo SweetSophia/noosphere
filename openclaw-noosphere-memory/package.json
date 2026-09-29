@@ -1,6 +1,6 @@
 {
   "name": "@sweetsophia/openclaw-noosphere-memory",
-  "version": "1.14.0",
+  "version": "1.14.1",
   "private": false,
   "description": "Connect OpenClaw to self-hosted Noosphere memory for recall, draft saves, and optional prompt-time context.",
   "type": "module",

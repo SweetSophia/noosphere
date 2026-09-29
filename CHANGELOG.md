@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-09-29
+
+Patch release to complete the coordinated 1.14 release after npm publication
+was stopped by newly reported dependency advisories. The 1.14.0 application
+image was published, but its integration packages and GitHub Release were not;
+use 1.14.1 for the complete release once all publication gates pass.
+
+### Security
+
+- Refresh the root and Codex MCP dependency locks to resolve `fast-uri`
+  GHSA-qw65-cvwx-89v3 / GHSA-58mr-gqgx-xq4g and `undici`
+  GHSA-3wwx-pv8p-q78v. No application or integration behavior changes.
+
 ## [1.14.0] - 2026-09-14
 
 Minor release adding explicit wiki publication controls and the revisioned hybrid
@@ -477,7 +490,8 @@ changes.
   backfill pipeline, and the memory provider refactor. Refer to the commit
   history (`git log v1.8.0..v1.9.0`) for the full set of changes.
 
-[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.14.0...HEAD
+[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.14.1...HEAD
+[1.14.1]: https://github.com/SweetSophia/noosphere/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/SweetSophia/noosphere/compare/v1.13.3...v1.14.0
 [1.13.3]: https://github.com/SweetSophia/noosphere/compare/v1.13.2...v1.13.3
 [1.13.2]: https://github.com/SweetSophia/noosphere/compare/v1.13.1...v1.13.2
