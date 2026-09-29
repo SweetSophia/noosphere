@@ -1,6 +1,6 @@
 {
   "name": "@sweetsophia/noosphere-mcp",
-  "version": "1.14.0",
+  "version": "1.14.1",
   "private": false,
   "description": "Connect Codex CLI and other MCP clients to self-hosted Noosphere memory and wiki tools.",
   "type": "module",

@@ -1,6 +1,6 @@
 {
   "name": "@sweetsophia/opencode-noosphere-memory",
-  "version": "1.14.0",
+  "version": "1.14.1",
   "private": false,
   "description": "Connect OpenCode to self-hosted Noosphere memory for recall, draft saves, and optional idle auto-save.",
   "type": "module",

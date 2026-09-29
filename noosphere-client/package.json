@@ -1,6 +1,6 @@
 {
   "name": "@sweetsophia/noosphere-client",
-  "version": "1.14.0",
+  "version": "1.14.1",
   "description": "Shared Noosphere REST client, response types, and recall formatting for agent adapters.",
   "type": "module",
   "license": "Apache-2.0",
