@@ -1,6 +1,6 @@
 {
   "name": "@sweetsophia/noosphere-injected-memory",
-  "version": "1.14.1",
+  "version": "1.15.0",
   "description": "Internal Noosphere helper for removing transient injected-memory blocks before persistence.",
   "type": "module",
   "license": "Apache-2.0",

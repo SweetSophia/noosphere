@@ -7,7 +7,7 @@ save draft memories, and optionally inject recalled context into prompts.
 
 You need a running Noosphere instance and a dedicated OpenClaw WRITE key. For a
 new local setup, select OpenClaw in the [guided installer](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#guided-installation)
-after confirming the [v1.14.1 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.14.1)
+after confirming the [v1.15.0 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.0)
 has all six installer assets. The [auditable download](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#auditable-download)
 explains checksum verification.
 
@@ -15,7 +15,7 @@ If Noosphere is already running, create an OpenClaw-specific WRITE key at
 `/wiki/admin/keys` (not the bootstrap ADMIN key), then install the plugin:
 
 ```bash
-openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.14.1 --pin
+openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.15.0 --pin
 ```
 
 Then [configure the plugin](#configuration) with that key. See the
@@ -153,21 +153,21 @@ exclude private agent/project memory that other agents must not see.
 
 ## Verified guided install
 
-For a new local setup, first confirm the [v1.14.1 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.14.1)
+For a new local setup, first confirm the [v1.15.0 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.0)
 has all six installer assets. This pinned launcher verifies its SHA-256 before
 execution; see the [GitHub installation guide](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md)
 for upgrade behavior and other installation paths.
 
 ```bash
-# Installer commit: bba25572900d74fbe204afdbe6cfde2caf592458
-# Expected SHA-256: 588d7b47af02f4025ba4bd60b763300c88fc0ed862deb16cb73c91d6b8508c35
+# Installer commit: 7ebffe1f21578cd6e2ad17a7f6fa5baddc88769e
+# Expected SHA-256: f573463525c139e4cee69f5b002d2f8e0a15ad976063564fbb19cba5d3458586
 (
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/bba25572900d74fbe204afdbe6cfde2caf592458/install.sh -o "$installer"
-  printf '%s  %s\n' '588d7b47af02f4025ba4bd60b763300c88fc0ed862deb16cb73c91d6b8508c35' "$installer" | sha256sum -c -
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.14.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.14.1}" bash "$installer" --non-interactive --with openclaw
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/7ebffe1f21578cd6e2ad17a7f6fa5baddc88769e/install.sh -o "$installer"
+  printf '%s  %s\n' 'f573463525c139e4cee69f5b002d2f8e0a15ad976063564fbb19cba5d3458586' "$installer" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.0}" bash "$installer" --non-interactive --with openclaw
 )
 ```
 
@@ -176,14 +176,14 @@ for upgrade behavior and other installation paths.
 Package releases use package-specific tag prefixes so independent packages do
 not trigger each other's publish jobs:
 
-- `v-openclaw-1.14.1` publishes `@sweetsophia/noosphere-injected-memory@1.14.1`
-  first, then `@sweetsophia/openclaw-noosphere-memory@1.14.1` after exact
+- `v-openclaw-1.15.0` publishes `@sweetsophia/noosphere-injected-memory@1.15.0`
+  first, then `@sweetsophia/openclaw-noosphere-memory@1.15.0` after exact
   integrity readback
-- `v-opencode-1.14.1` publishes `@sweetsophia/opencode-noosphere-memory@1.14.1`
-- `v-kilocode-1.14.1` publishes `@sweetsophia/kilocode-noosphere-memory@1.14.1`
-- `v-mcp-1.14.1` publishes `@sweetsophia/noosphere-mcp@1.14.1`
-- `v-hermes-1.14.1` produces the deterministic Hermes workflow artifact; the
-  trusted release publisher attaches that archive and checksum to `v1.14.1`
+- `v-opencode-1.15.0` publishes `@sweetsophia/opencode-noosphere-memory@1.15.0`
+- `v-kilocode-1.15.0` publishes `@sweetsophia/kilocode-noosphere-memory@1.15.0`
+- `v-mcp-1.15.0` publishes `@sweetsophia/noosphere-mcp@1.15.0`
+- `v-hermes-1.15.0` produces the deterministic Hermes workflow artifact; the
+  trusted release publisher attaches that archive and checksum to `v1.15.0`
   after independent readback
 
 New plugin packages should add their own `v-{package}-*` tag prefix in CI before
