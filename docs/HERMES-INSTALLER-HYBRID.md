@@ -75,8 +75,8 @@ CLI it finds (`[Y/n]`, empty enter = Yes):
   set -e
   installer="$(mktemp)"
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/bba25572900d74fbe204afdbe6cfde2caf592458/install.sh -o "$installer"
-  printf '%s  %s\n' '588d7b47af02f4025ba4bd60b763300c88fc0ed862deb16cb73c91d6b8508c35' "$installer" | sha256sum -c -
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/7ebffe1f21578cd6e2ad17a7f6fa5baddc88769e/install.sh -o "$installer"
+  printf '%s  %s\n' 'f573463525c139e4cee69f5b002d2f8e0a15ad976063564fbb19cba5d3458586' "$installer" | sha256sum -c -
   bash "$installer"
 )
 ```
