@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start",
-    "test": "npm run test:hybrid-provider && npm run test:hybrid-shadow && npm run test:hybrid-stack && npm run test:memory && npm run test:wiki && npm run test:cache && npm run test:rate-limit && npm run test:api && npm run test:security && npm run test:persistence-layer",
+    "test": "npm run test:hybrid-provider && npm run test:hybrid-shadow && npm run test:hybrid-stack && npm run test:memory && npm run test:wiki && npm run test:cache && npm run test:rate-limit && npm run test:api && npm run test:security && npm run test:persistence-layer && npm run test:obsidian-sync",
     "test:hybrid-provider": "node --test scripts/hybrid-provider.test.mjs",
     "test:hybrid-stack": "bash scripts/activate-hybrid-retrieval-stack.test.sh",
     "hybrid:shadow-eval": "tsx scripts/hybrid-shadow-eval.ts",
@@ -39,7 +39,8 @@
     "test:hybrid-storage": "bash scripts/test-hybrid-storage.sh",
     "version:sync": "node scripts/sync-version.mjs",
     "version:check": "node scripts/sync-version.mjs --check",
-    "test:persistence-layer": "node --env-file=.env.test --import tsx --test 'src/__tests__/persistence-layer/**/*.test.ts'"
+    "test:persistence-layer": "node --env-file=.env.test --import tsx --test 'src/__tests__/persistence-layer/**/*.test.ts'",
+    "test:obsidian-sync": "node --import tsx --test 'src/__tests__/obsidian-sync/**/*.test.ts'"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",

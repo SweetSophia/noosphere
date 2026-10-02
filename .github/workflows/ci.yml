@@ -217,6 +217,9 @@ jobs:
         env:
           SHADOW_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
 
+      - name: Run hybrid operator stack regression checks (docker-free)
+        run: npm run test:hybrid-stack
+
       - name: Run memory tests
         run: npm run test:memory
 
@@ -229,6 +232,9 @@ jobs:
       - name: Run wiki and keyword-search tests
         run: npm run test:wiki
 
+      - name: Run cache tests
+        run: npm run test:cache
+
       - name: Run rate-limit tests
         run: npm run test:rate-limit
         env:
@@ -236,6 +242,9 @@ jobs:
 
       - name: Run security tests
         run: npm run test:security
+
+      - name: Run Obsidian sync tests
+        run: npm run test:obsidian-sync
 
       - name: Verify keyword-only runtime made no feature DDL
         run: node scripts/verify-keyword-only-database.mjs
