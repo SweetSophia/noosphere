@@ -77,6 +77,21 @@ describe("Noosphere plugin environment isolation", () => {
     });
   });
 
+  it("declares the OpenClaw API key secret input in top-level configContracts", async () => {
+    const manifest = JSON.parse(
+      await readFile(
+        new URL("../../../openclaw-noosphere-memory/openclaw.plugin.json", import.meta.url),
+        "utf8",
+      ),
+    );
+
+    // OpenClaw ignores contracts.config when collecting secrets before startup.
+    assert.deepEqual(manifest.configContracts?.secretInputs?.paths, [
+      { path: "apiKey", expected: "string" },
+    ]);
+    assert.equal(manifest.contracts?.config, undefined);
+  });
+
   it("keeps trusted-origin variables out of OpenClaw provider auth metadata", async () => {
     const manifest = JSON.parse(
       await readFile(
