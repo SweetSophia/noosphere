@@ -1,6 +1,6 @@
 {
   "name": "@sweetsophia/noosphere-mcp",
-  "version": "1.14.1",
+  "version": "1.15.0",
   "private": false,
   "description": "Connect Codex CLI and other MCP clients to self-hosted Noosphere memory and wiki tools.",
   "type": "module",
@@ -46,7 +46,7 @@
   },
   "overrides": {
     "@hono/node-server": "2.1.1",
-    "hono": "4.13.5"
+    "hono": "4.13.7"
   },
   "repository": {
     "type": "git",

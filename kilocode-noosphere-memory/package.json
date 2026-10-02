@@ -1,6 +1,6 @@
 {
   "name": "@sweetsophia/kilocode-noosphere-memory",
-  "version": "1.14.1",
+  "version": "1.15.0",
   "private": false,
   "description": "Connect Kilo Code to self-hosted Noosphere memory for recall, draft saves, and optional idle auto-save.",
   "type": "module",

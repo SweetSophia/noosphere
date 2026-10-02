@@ -1,6 +1,6 @@
 {
   "name": "noosphere",
-  "version": "1.14.1",
+  "version": "1.15.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -54,7 +54,7 @@
     "jszip": "^3.10.1",
     "katex": "^0.17.0",
     "mermaid": "^11.16.0",
-    "next": "16.3.4",
+    "next": "16.3.8",
     "next-auth": "^4.24.15",
     "pg": "^8.20.0",
     "prisma": "^7.9.1",
@@ -78,7 +78,7 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "dotenv": "^17.4.2",
     "eslint": "^9",
-    "eslint-config-next": "16.3.4",
+    "eslint-config-next": "16.3.8",
     "happy-dom": "^20.10.6",
     "tsx": "^4.22.4",
     "typescript": "^5"

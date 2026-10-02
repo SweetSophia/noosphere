@@ -7,7 +7,7 @@ save draft memories with explicit tools, and optionally enable idle auto-save.
 
 You need a running Noosphere instance and a dedicated Kilo Code WRITE key. For a
 new local setup, select Kilo Code in the [guided installer](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#guided-installation)
-after confirming the [v1.14.1 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.14.1)
+after confirming the [v1.15.0 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.0)
 has all six installer assets. The [auditable download](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#auditable-download)
 explains checksum verification.
 
@@ -19,7 +19,7 @@ for remote setup and configuration details.
 ## Install
 
 ```bash
-npm install -g @sweetsophia/kilocode-noosphere-memory@1.14.1
+npm install -g @sweetsophia/kilocode-noosphere-memory@1.15.0
 ```
 
 Add it to `~/.config/kilo/kilo.json`:
@@ -27,7 +27,7 @@ Add it to `~/.config/kilo/kilo.json`:
 ```json
 {
   "plugin": [
-    "@sweetsophia/kilocode-noosphere-memory@1.14.1"
+    "@sweetsophia/kilocode-noosphere-memory@1.15.0"
   ]
 }
 ```
@@ -35,7 +35,7 @@ Add it to `~/.config/kilo/kilo.json`:
 You can also install it with Kilo's plugin command:
 
 ```bash
-kilo plugin @sweetsophia/kilocode-noosphere-memory@1.14.1 --global
+kilo plugin @sweetsophia/kilocode-noosphere-memory@1.15.0 --global
 ```
 
 Or configure it with explicit options:
@@ -44,7 +44,7 @@ Or configure it with explicit options:
 {
   "plugin": [
     [
-      "@sweetsophia/kilocode-noosphere-memory@1.14.1",
+      "@sweetsophia/kilocode-noosphere-memory@1.15.0",
       {
         "baseUrl": "http://127.0.0.1:6578",
         "autoRecall": true,
@@ -153,7 +153,7 @@ Use this for stable project facts, decisions, runbooks, and recurring fixes. Do 
 
 ## Verified guided install
 
-For a new local setup, first confirm the [v1.14.1 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.14.1)
+For a new local setup, first confirm the [v1.15.0 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.0)
 has all six installer assets. This pinned launcher verifies its SHA-256 before
 execution; see the [GitHub installation guide](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md)
 for upgrade behavior and other installation paths.

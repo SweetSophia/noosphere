@@ -8,13 +8,13 @@ wiki. This stdio server includes a guided Codex CLI installer and skill.
 You need Node.js 22 or newer, a trusted Codex CLI with MCP support on your
 `PATH`, a running Noosphere instance, and a permission-scoped API key. New to
 Noosphere? Start with the [guided installation on GitHub](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#guided-installation).
-Check that the coordinated [v1.14.1 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.14.1)
+Check that the coordinated [v1.15.0 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.0)
 exists before using this version-pinned command.
 
 Install the MCP launcher and user-level Codex skill from a trusted shell:
 
 ```bash
-npx -y @sweetsophia/noosphere-mcp@1.14.1 install-codex
+npx -y @sweetsophia/noosphere-mcp@1.15.0 install-codex
 ```
 
 The installer:
@@ -75,7 +75,7 @@ Run the server directly through an MCP client that supports stdio:
 
 ```text
 command: npx
-args: -y @sweetsophia/noosphere-mcp@1.14.1
+args: -y @sweetsophia/noosphere-mcp@1.15.0
 ```
 
 Pass credentials through the MCP process environment; do not embed them in repository configuration.

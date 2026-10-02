@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-10-02
+
+Coordinated maintenance release for the application and all integrations.
+No database migration or change to hybrid-serving defaults is required.
+
+### Fixed
+
+- **OpenClaw SecretRef initialization ([#345](https://github.com/SweetSophia/noosphere/pull/345))**:
+  declare the API-key secret input in top-level `configContracts`, allowing
+  OpenClaw to resolve credential references before Noosphere registers its
+  tools and auto-recall hook. Runtime credential guards remain unchanged.
+
+### Security
+
+- Update Next.js and its ESLint configuration to 16.3.8, including the
+  `next/og` ImageResponse remote-code-execution fix and subsequent security fixes.
+- Refresh DOMPurify and brace-expansion locks to patched versions.
+- Update the MCP package's Hono override to 4.13.7 and ip-address lock to 10.7.3.
+
 ## [1.14.1] - 2026-09-29
 
 Patch release to complete the coordinated 1.14 release after npm publication
@@ -490,7 +509,8 @@ changes.
   backfill pipeline, and the memory provider refactor. Refer to the commit
   history (`git log v1.8.0..v1.9.0`) for the full set of changes.
 
-[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.14.1...HEAD
+[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.15.0...HEAD
+[1.15.0]: https://github.com/SweetSophia/noosphere/compare/v1.14.1...v1.15.0
 [1.14.1]: https://github.com/SweetSophia/noosphere/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/SweetSophia/noosphere/compare/v1.13.3...v1.14.0
 [1.13.3]: https://github.com/SweetSophia/noosphere/compare/v1.13.2...v1.13.3
