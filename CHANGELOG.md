@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Authorize tag creation/renaming and topic updates through the shared permission
+  ladder for API keys and human sessions. Tag/topic deletion remains admin-only
+  ([#332](https://github.com/SweetSophia/noosphere/issues/332)).
+
 ## [1.15.0] - 2026-10-02
 
 Coordinated maintenance release for the application and all integrations.
