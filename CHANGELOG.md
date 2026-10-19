@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Raise the MCP SDK minimum to 1.31.0, refresh the MCP package's
+  `proxy-addr` lock to 2.0.8, and enforce its patched floor for package-root
+  installs, addressing the SDK OAuth client-credentials and proxy-address trust
+  advisories. The bundled CLI continues to use stdio; no HTTP transport or
+  authentication behavior is changed.
+
 ## [1.15.0] - 2026-10-02
 
 Coordinated maintenance release for the application and all integrations.
