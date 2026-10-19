@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Refresh the root application's sharp lock to 0.35.5, including its patched
+  prebuilt libvips/librsvg dependencies (GHSA-wq5f-xc86-pv6w), and source-map-js
+  to 1.2.2 (GHSA-68fv-2mgg-jv7q). Both updates stay within existing dependency
+  ranges; unrelated dependency advisories remain tracked separately.
+
 ## [1.15.0] - 2026-10-02
 
 Coordinated maintenance release for the application and all integrations.
