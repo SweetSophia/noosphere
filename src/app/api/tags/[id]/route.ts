@@ -20,7 +20,9 @@ export async function PATCH(request: NextRequest, { params }: Props) {
   if (!auth.authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!hasPermission(auth, [Permissions.WRITE])) {
+  // Shared taxonomy changes affect every referencing article, not only the
+  // caller's scopes. Permission (including ADMIN) never implies global scope.
+  if (!hasPermission(auth, [Permissions.WRITE]) || !auth.allowedScopes?.includes("*")) {
     return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
   }
 
@@ -84,7 +86,8 @@ export async function DELETE(request: NextRequest, { params }: Props) {
   if (!auth.authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!hasPermission(auth, [Permissions.ADMIN])) {
+  // Even ADMIN keys need explicit full scope to mutate shared taxonomy.
+  if (!hasPermission(auth, [Permissions.ADMIN]) || !auth.allowedScopes?.includes("*")) {
     return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
   }
 

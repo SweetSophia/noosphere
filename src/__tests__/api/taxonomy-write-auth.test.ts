@@ -15,7 +15,7 @@ const mutation = async (): Promise<unknown> => null;
 const persistence = {
   apiKey: { findUnique: lookup, updateMany: async () => ({ count: 0 }) },
   tag: { findFirst: mutation, findUnique: lookup, create: mutation, update: mutation, delete: mutation },
-  topic: { findUnique: lookup, count: async () => 0, update: mutation, delete: mutation },
+  topic: { findUnique: lookup, findMany: async () => [], count: async () => 0, update: mutation, delete: mutation },
   article: { count: async () => 0 },
   articleTag: { count: async () => 0 },
 };
@@ -35,9 +35,17 @@ const sessionMock = mock.method(
 after(() => sessionMock.mock.restore());
 
 const credentials = [
-  { name: "READ key", permission: "READ", level: 1 },
-  { name: "WRITE key", permission: "WRITE", level: 2 },
-  { name: "ADMIN key", permission: "ADMIN", level: 3 },
+  { name: "READ key", permission: "READ", level: 1, scopes: ["*"] },
+  { name: "WRITE key", permission: "WRITE", level: 2, scopes: ["*"] },
+  { name: "ADMIN key", permission: "ADMIN", level: 3, scopes: ["*"] },
+  { name: "unrestricted-only WRITE key", permission: "WRITE", level: 2, scopes: [] },
+  { name: "scoped WRITE key", permission: "WRITE", level: 2, scopes: ["team-a"] },
+  { name: "scoped ADMIN key", permission: "ADMIN", level: 3, scopes: ["team-a"] },
+  { name: "unrestricted-only ADMIN key", permission: "ADMIN", level: 3, scopes: [] },
+  { name: "WRITE key without scopes", permission: "WRITE", level: 2, scopes: undefined },
+  { name: "ADMIN key without scopes", permission: "ADMIN", level: 3, scopes: undefined },
+  { name: "mixed wildcard WRITE key", permission: "WRITE", level: 2, scopes: ["team-a", "*"] },
+  { name: "key without permission", permission: undefined, level: 0, scopes: ["*"] },
   { name: "VIEWER session", role: "VIEWER", level: 1 },
   { name: "EDITOR session", role: "EDITOR", level: 2 },
   { name: "ADMIN session", role: "ADMIN", level: 3 },
@@ -52,10 +60,12 @@ const routes = [
   { name: "PATCH /api/tags/[id]", method: "PATCH", path: "/api/tags/tag-1", level: 2, status: 200, entity: "tag" },
   { name: "DELETE /api/tags/[id]", method: "DELETE", path: "/api/tags/tag-1", level: 3, status: 204, entity: "tag" },
   { name: "PATCH /api/topics/[id]", method: "PATCH", path: "/api/topics/topic-1", level: 2, status: 200, entity: "topic" },
+  { name: "PATCH /api/topics/[id] move", method: "PATCH", path: "/api/topics/topic-1", level: 2, status: 200, entity: "topic", body: { parentId: "parent-1" } },
+  { name: "PATCH /api/topics/[id] description", method: "PATCH", path: "/api/topics/topic-1", level: 2, status: 200, entity: "topic", body: { description: "Updated description" } },
   { name: "DELETE /api/topics/[id]", method: "DELETE", path: "/api/topics/topic-1", level: 3, status: 204, entity: "topic" },
 ] as const;
 
-for (const route of routes) {
+for (const [routeIndex, route] of routes.entries()) {
   test(`${route.name} preserves API-key and session permission boundaries`, async (t) => {
     const { checkRouteAuth } = await import("@/lib/api/auth");
     const tagRoutes = await import("@/app/api/tags/route");
@@ -65,7 +75,7 @@ for (const route of routes) {
       ? topicIdRoutes[route.method as "PATCH" | "DELETE"]
       : route.method === "POST" ? tagRoutes.POST : tagIdRoutes[route.method];
 
-    for (const credential of credentials) {
+    for (const [credentialIndex, credential] of credentials.entries()) {
       await t.test(credential.name, async (c) => {
         session = "role" in credential || "missingRole" in credential
           ? { user: { id: "user-1", name: "Test user", role: "role" in credential ? credential.role : undefined } }
@@ -79,7 +89,7 @@ for (const route of routes) {
           if (!("permission" in credential)) return null;
           return {
             id: "key-1", name: "Test key", permissions: credential.permission as Permissions,
-            allowedScopes: [], agentPrincipalId: null,
+            allowedScopes: "scopes" in credential ? credential.scopes : [], agentPrincipalId: null,
             revokedAt: "revoked" in credential ? new Date(0) : null,
           };
         });
@@ -90,6 +100,7 @@ for (const route of routes) {
           c.mock.method(persistence.tag, "findFirst", async () => null),
           c.mock.method(persistence.tag, "findUnique", async (args: { where: { id?: string; slug?: string } }) => args.where.id ? tag : null),
           c.mock.method(persistence.topic, "findUnique", async (args: { where: { id?: string; slug?: string } }) => args.where.id ? topic : null),
+          c.mock.method(persistence.topic, "findMany", async () => []),
           c.mock.method(persistence.topic, "count", async () => 0),
           c.mock.method(persistence.article, "count", async () => 0),
           c.mock.method(persistence.articleTag, "count", async () => 0),
@@ -105,10 +116,10 @@ for (const route of routes) {
           method: route.method,
           headers: {
             "Content-Type": "application/json",
-            "x-real-ip": "192.0.2.33",
+            "x-real-ip": `192.0.2.${routeIndex * 20 + credentialIndex + 1}`,
             ...(rawKey ? { Authorization: `Bearer ${rawKey}` } : {}),
           },
-          ...(route.method !== "DELETE" ? { body: JSON.stringify({ name: "Updated" }) } : {}),
+          ...(route.method !== "DELETE" ? { body: JSON.stringify("body" in route ? route.body : { name: "Updated" }) } : {}),
         });
         if ("permission" in credential && !("revoked" in credential)) {
           const auth = await checkRouteAuth(request);
@@ -119,8 +130,13 @@ for (const route of routes) {
         const response = await handler(request, {
           params: Promise.resolve({ id: route.entity === "tag" ? "tag-1" : "topic-1" }),
         });
+        // Existing shared taxonomy can affect articles outside this key's
+        // scopes. Deny before any lookup, including keys with ADMIN permission.
+        // New tag creation deliberately retains its existing WRITE policy.
+        const lacksGlobalScope = route.method !== "POST" && "permission" in credential
+          && !("scopes" in credential && credential.scopes?.some((scope) => scope === "*"));
         const expected = credential.level < 0 ? 401
-          : credential.level < route.level ? 403 : route.status;
+          : credential.level < route.level || lacksGlobalScope ? 403 : route.status;
         assert.equal(response.status, expected);
         const mutationCount = mutations.reduce((sum, spy) => sum + spy.mock.callCount(), 0);
         assert.equal(mutationCount, expected < 400 ? 1 : 0);

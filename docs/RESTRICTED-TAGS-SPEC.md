@@ -110,6 +110,32 @@ article.restrictedTags = ["health"]  →  accessible only to keys where
 
 ## 3. API Changes
 
+### Shared taxonomy mutations
+
+Tags and topics are shared metadata: renaming a tag or changing a topic can
+change the presentation or organization of articles outside a caller's scopes.
+Existing taxonomy therefore requires **both** the operation permission and
+explicit full scope (`allowedScopes` containing `"*"`):
+
+- `PATCH /api/tags/[id]` and `PATCH /api/topics/[id]`: WRITE or ADMIN plus full
+  scope. This includes topic renames, moves, slug changes and descriptions.
+- `DELETE /api/tags/[id]` and `DELETE /api/topics/[id]`: ADMIN plus full scope.
+  Existing in-use deletion restrictions still apply.
+- ADMIN permission alone does not imply full scope. Empty, missing or specific
+  non-wildcard scopes are denied even when the current taxonomy entry has no
+  restricted references; the policy is global authority, not a snapshot of
+  currently affected articles.
+- Valid authenticated callers lacking either requirement receive 403 before
+  any taxonomy lookup or mutation. Unauthenticated callers still receive 401.
+- Human sessions already receive full scope, so EDITOR/ADMIN update access and
+  ADMIN-only deletion are preserved. VIEWER sessions remain read-only.
+- New tag/topic creation retains its existing WRITE permission rule and does
+  not gain this full-scope requirement.
+
+This taxonomy policy does not grant article-body access or alter an article's
+`restrictedTags`. Scope assignment and article visibility remain independent
+from permission level.
+
 ### 3.1 New Endpoints
 
 #### `GET /api/scopes` — List all available restricted scopes

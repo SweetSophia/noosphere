@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Require explicit full scope (`allowedScopes` containing `"*"`) as well as
+  operation permission for existing shared tag/topic updates and deletions.
+  Scoped ADMIN keys cannot bypass this boundary; deletions remain ADMIN-only.
+  Human sessions and taxonomy creation keep their existing permission rules
+  ([#351](https://github.com/SweetSophia/noosphere/issues/351)).
+
 ### Fixed
 
 - Authorize tag creation/renaming and topic updates through the shared permission

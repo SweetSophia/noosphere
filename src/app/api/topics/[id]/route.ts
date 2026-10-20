@@ -35,7 +35,9 @@ export async function PATCH(request: NextRequest, { params }: Props) {
   if (!auth.authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!hasPermission(auth, [Permissions.WRITE])) {
+  // Renames and moves affect shared taxonomy across article scopes.
+  // Full scope and the operation permission are independent requirements.
+  if (!hasPermission(auth, [Permissions.WRITE]) || !auth.allowedScopes?.includes("*")) {
     return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
   }
 
@@ -129,7 +131,8 @@ export async function DELETE(request: NextRequest, { params }: Props) {
   if (!auth.authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!hasPermission(auth, [Permissions.ADMIN])) {
+  // ADMIN permission alone must not bypass the shared-taxonomy scope gate.
+  if (!hasPermission(auth, [Permissions.ADMIN]) || !auth.allowedScopes?.includes("*")) {
     return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
   }
 
