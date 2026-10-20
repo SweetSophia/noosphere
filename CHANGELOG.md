@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- Article tag attachment now preserves existing shared tag names on slug conflicts;
+  authorized global renames remain available through the protected tag endpoint.
+- API-key scope forms offer explicit opt-in full access (`*`), preserve existing
+  wildcard selections, and correctly label empty scopes as public-article-only.
+  No existing key is automatically granted broader access.
+
+
+### Security
 
 - Require explicit full scope (`allowedScopes` containing `"*"`) as well as
   operation permission for existing shared tag/topic updates and deletions.

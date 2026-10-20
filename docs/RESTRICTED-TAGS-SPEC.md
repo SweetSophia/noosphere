@@ -508,3 +508,27 @@ OpenCode uses its own API key (e.g., `noo_live_opencode_xxx`). OpenCode connects
 
 4. **Auto-sync behavior with restricted tags:**
    The Obsidian sync (`POST /api/sync/obsidian`) mirrors articles to the local vault. Should restricted articles be excluded from sync, included with a `[RESTRICTED]` prefix in the filename, or included normally (with vault access being the user's concern)?
+
+
+## API-key scope provisioning and tag attachment
+
+Permissions and content scopes are independent. `allowedScopes: []` permits public
+articles only; concrete scope tags add access to matching restricted articles.
+`allowedScopes` containing `"*"` grants access to all restricted content. ADMIN
+permission alone does not imply full content scope.
+
+The API-key admin console exposes full access as an explicit, unchecked-by-default
+checkbox and preserves an existing wildcard on edit. It never upgrades existing
+keys automatically. Concrete private scopes remain selectable alongside `"*"`:
+automatic-memory principal bindings still require their explicit private scope.
+
+For API provisioning, an ADMIN-authenticated `POST /api/keys` can explicitly set
+`"allowedScopes": ["*"]`; `PATCH /api/keys/{id}` accepts the same field. The caller
+must deliberately choose this broader access. The permission threshold of each
+operation still applies: shared taxonomy updates require WRITE and full content
+scope, while deletion requires ADMIN and full content scope.
+
+Attaching tags to an accessible article may create a new tag or link an existing
+normalized slug, but never renames an existing shared tag. Name changes must use
+the protected tag-update endpoint; changing submitted casing or punctuation during
+article attachment is not an alternate global rename path.

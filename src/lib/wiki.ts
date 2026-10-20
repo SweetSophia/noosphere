@@ -18,13 +18,15 @@ export async function buildTagConnections(tagNames: string[]) {
   const tags = normalizeTagInputs(tagNames);
   if (!tags.length) return [];
 
-  // Preserve the previous upsert behavior while avoiding per-tag round-trips.
+  // Linking an article must not rename globally shared taxonomy. In particular,
+  // scoped writers may reference existing tags without authority to mutate them.
+  // Global renames belong to the permission-and-full-scope protected tag route.
   await prisma.$executeRaw(Prisma.sql`
     INSERT INTO "Tag" ("id", "name", "slug")
     VALUES ${Prisma.join(
       tags.map((tag) => Prisma.sql`(${randomUUID()}, ${tag.name}, ${tag.slug})`)
     )}
-    ON CONFLICT ("slug") DO UPDATE SET "name" = EXCLUDED."name"
+    ON CONFLICT ("slug") DO NOTHING
   `);
 
   const slugs = tags.map((tag) => tag.slug);
