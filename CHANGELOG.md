@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Article tag attachment now preserves existing shared tag names on slug conflicts;
+  authorized global renames remain available through the protected tag endpoint.
+- API-key scope forms offer explicit opt-in full access (`*`), preserve existing
+  wildcard selections, and correctly label empty scopes as public-article-only.
+  No existing key is automatically granted broader access.
+
+
+### Security
+
+- Require explicit full scope (`allowedScopes` containing `"*"`) as well as
+  operation permission for existing shared tag/topic updates and deletions.
+  Scoped ADMIN keys cannot bypass this boundary; deletions remain ADMIN-only.
+  Human sessions and taxonomy creation keep their existing permission rules
+  ([#351](https://github.com/SweetSophia/noosphere/issues/351)).
+
+### Fixed
+
+- Authorize tag creation/renaming and topic updates through the shared permission
+  ladder for API keys and human sessions. Tag/topic deletion remains admin-only
+  ([#332](https://github.com/SweetSophia/noosphere/issues/332)).
+
 ## [1.15.0] - 2026-10-02
 
 Coordinated maintenance release for the application and all integrations.

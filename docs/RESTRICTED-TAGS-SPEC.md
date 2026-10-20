@@ -110,6 +110,32 @@ article.restrictedTags = ["health"]  →  accessible only to keys where
 
 ## 3. API Changes
 
+### Shared taxonomy mutations
+
+Tags and topics are shared metadata: renaming a tag or changing a topic can
+change the presentation or organization of articles outside a caller's scopes.
+Existing taxonomy therefore requires **both** the operation permission and
+explicit full scope (`allowedScopes` containing `"*"`):
+
+- `PATCH /api/tags/[id]` and `PATCH /api/topics/[id]`: WRITE or ADMIN plus full
+  scope. This includes topic renames, moves, slug changes and descriptions.
+- `DELETE /api/tags/[id]` and `DELETE /api/topics/[id]`: ADMIN plus full scope.
+  Existing in-use deletion restrictions still apply.
+- ADMIN permission alone does not imply full scope. Empty, missing or specific
+  non-wildcard scopes are denied even when the current taxonomy entry has no
+  restricted references; the policy is global authority, not a snapshot of
+  currently affected articles.
+- Valid authenticated callers lacking either requirement receive 403 before
+  any taxonomy lookup or mutation. Unauthenticated callers still receive 401.
+- Human sessions already receive full scope, so EDITOR/ADMIN update access and
+  ADMIN-only deletion are preserved. VIEWER sessions remain read-only.
+- New tag/topic creation retains its existing WRITE permission rule and does
+  not gain this full-scope requirement.
+
+This taxonomy policy does not grant article-body access or alter an article's
+`restrictedTags`. Scope assignment and article visibility remain independent
+from permission level.
+
 ### 3.1 New Endpoints
 
 #### `GET /api/scopes` — List all available restricted scopes
@@ -482,3 +508,27 @@ OpenCode uses its own API key (e.g., `noo_live_opencode_xxx`). OpenCode connects
 
 4. **Auto-sync behavior with restricted tags:**
    The Obsidian sync (`POST /api/sync/obsidian`) mirrors articles to the local vault. Should restricted articles be excluded from sync, included with a `[RESTRICTED]` prefix in the filename, or included normally (with vault access being the user's concern)?
+
+
+## API-key scope provisioning and tag attachment
+
+Permissions and content scopes are independent. `allowedScopes: []` permits public
+articles only; concrete scope tags add access to matching restricted articles.
+`allowedScopes` containing `"*"` grants access to all restricted content. ADMIN
+permission alone does not imply full content scope.
+
+The API-key admin console exposes full access as an explicit, unchecked-by-default
+checkbox and preserves an existing wildcard on edit. It never upgrades existing
+keys automatically. Concrete private scopes remain selectable alongside `"*"`:
+automatic-memory principal bindings still require their explicit private scope.
+
+For API provisioning, an ADMIN-authenticated `POST /api/keys` can explicitly set
+`"allowedScopes": ["*"]`; `PATCH /api/keys/{id}` accepts the same field. The caller
+must deliberately choose this broader access. The permission threshold of each
+operation still applies: shared taxonomy updates require WRITE and full content
+scope, while deletion requires ADMIN and full content scope.
+
+Attaching tags to an accessible article may create a new tag or link an existing
+normalized slug, but never renames an existing shared tag. Name changes must use
+the protected tag-update endpoint; changing submitted casing or punctuation during
+article attachment is not an alternate global rename path.
