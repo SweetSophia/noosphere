@@ -20,11 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Registry audit does not independently assess the renamed package; the
   standalone regression probe remains explicitly skipped. See
   [candidate provenance and limitations](vendor/README.md).
-- Raise the MCP SDK minimum to 1.31.0, refresh the MCP package's
-  `proxy-addr` lock to 2.0.8, and enforce its patched floor for package-root
-  installs, addressing the SDK OAuth client-credentials and proxy-address trust
-  advisories. The bundled CLI continues to use stdio; no HTTP transport or
-  authentication behavior is changed.
+- Raise the MCP SDK minimum to 1.32.1 and refresh its Hono overrides to
+  `hono` 4.13.13 and `@hono/node-server` 2.1.5 to clear the SDK session,
+  redirect, validation-memory, bearer-audience and Hono static-path advisories.
+  Keep the patched `proxy-addr` 2.0.8 lock and package-root install floor.
+  The bundled CLI continues to use stdio; no HTTP transport or authentication
+  behavior is changed.
 - Article tag attachment now preserves existing shared tag names on slug conflicts;
   authorized global renames remain available through the protected tag endpoint.
 - API-key scope forms offer explicit opt-in full access (`*`), preserve existing
