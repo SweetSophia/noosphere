@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Update Next.js and its ESLint configuration to 16.4.2 for the App Router
+  Server Actions denial-of-service advisory GHSA-p3m5-59mp-jv5r and to satisfy
+  the patched Next.js floor for GHSA-2464-fhr4-w9xw. The existing sharp 0.35.5
+  lock already implements the latter advisory's documented image workaround;
+  this update does not claim a reproduced exploit or change audit thresholds.
 - Refresh the root application's sharp lock to 0.35.5, including its patched
   prebuilt libvips/librsvg dependencies (GHSA-wq5f-xc86-pv6w), and source-map-js
   to 1.2.2 (GHSA-68fv-2mgg-jv7q). Both updates stay within existing dependency
