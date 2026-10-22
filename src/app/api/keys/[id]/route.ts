@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requirePermission } from "@/lib/api/auth";
+import { requireGlobalKeyManagement } from "@/lib/api/key-management-auth";
 import { getJsonBodyError, readBoundedJsonObject } from "@/lib/api/body";
 import { withApiErrorBoundary } from "@/lib/api/errors";
 import { rateLimit } from "@/lib/rate-limit";
@@ -12,7 +12,7 @@ import {
 import { MemoryCaptureError } from "@/lib/memory/capture/repository";
 
 // GET /api/keys/[id] — Get a single key's metadata
-// Auth: ADMIN only
+// Auth: ADMIN and explicit full content scope
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -21,7 +21,7 @@ export async function GET(
   if (!rl.allowed) return rl.response;
 
   const { id } = await params;
-  const auth = await requirePermission(_request, [Permissions.ADMIN]);
+  const auth = await requireGlobalKeyManagement(_request);
   if (!auth.success) {
     return auth.response;
   }
@@ -50,8 +50,8 @@ export async function GET(
   return NextResponse.json({ key });
 }
 
-// PATCH /api/keys/[id] — Update allowedScopes on a key
-// Auth: ADMIN only
+// PATCH /api/keys/[id] — Update scopes, permission or name (including self-updates)
+// Auth: ADMIN and explicit full content scope
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -65,7 +65,7 @@ export async function PATCH(
     if (!rl.allowed) return rl.response;
 
     const { id } = await params;
-    const auth = await requirePermission(request, [Permissions.ADMIN]);
+    const auth = await requireGlobalKeyManagement(request);
     if (!auth.success) {
       return auth.response;
     }
@@ -195,7 +195,7 @@ export async function PATCH(
 }
 
 // DELETE /api/keys/[id] — Revoke an API key
-// Auth: ADMIN only
+// Auth: ADMIN and explicit full content scope
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -205,7 +205,7 @@ export async function DELETE(
     if (!rl.allowed) return rl.response;
 
     const { id } = await params;
-    const auth = await requirePermission(_request, [Permissions.ADMIN]);
+    const auth = await requireGlobalKeyManagement(_request);
     if (!auth.success) {
       return auth.response;
     }

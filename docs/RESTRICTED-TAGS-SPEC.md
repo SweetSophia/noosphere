@@ -525,11 +525,27 @@ checkbox and preserves an existing wildcard on edit. It never upgrades existing
 keys automatically. Concrete private scopes remain selectable alongside `"*"`:
 automatic-memory principal bindings still require their explicit private scope.
 
-For API provisioning, an ADMIN-authenticated `POST /api/keys` can explicitly set
-`"allowedScopes": ["*"]`; `PATCH /api/keys/{id}` accepts the same field. The caller
-must deliberately choose this broader access. The permission threshold of each
-operation still applies: shared taxonomy updates require WRITE and full content
-scope, while deletion requires ADMIN and full content scope.
+Global API-key management requires both ADMIN permission and explicit full content
+scope (`allowedScopes` containing `"*"`). This applies to `GET`/`POST /api/keys`
+and `GET`/`PATCH`/`DELETE /api/keys/{id}`, including metadata, self-updates,
+permission-only updates and revocation. Scoped ADMIN keys receive 403 before any
+target-key lookup or mutation; they cannot mint wildcard credentials or upgrade
+themselves or another key to escape their content scopes. Anonymous, invalid and
+revoked credentials still receive 401 when no authorized session is available.
+
+Compatibility change: an existing ADMIN API key without `"*"` can no longer use
+these global key-management endpoints, even to issue a narrower key. Use a human
+ADMIN session or an already full-scope ADMIN credential to provision or explicitly
+change scopes. Human ADMIN sessions retain full access; READ/WRITE credentials
+remain unable to manage keys even with `"*"`. No existing key is automatically
+expanded. The human-admin console remains session-gated, and principal bindings
+still require their explicit private scope alongside any wildcard.
+
+An authorized `POST /api/keys` can deliberately set `"allowedScopes": ["*"]`;
+`PATCH /api/keys/{id}` accepts the same field. Omitted scopes on creation still
+default to public articles only. The permission threshold of each taxonomy
+operation is unchanged: updates require WRITE and full content scope, while
+deletion requires ADMIN and full content scope.
 
 Attaching tags to an accessible article may create a new tag or link an existing
 normalized slug, but never renames an existing shared tag. Name changes must use

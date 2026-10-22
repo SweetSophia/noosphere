@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- Require ADMIN permission plus explicit full content scope (`*`) for global
+  API-key list, metadata, creation, updates (including self-updates) and revocation.
+  Scoped ADMIN credentials can no longer mint or upgrade wildcard credentials to
+  bypass content-scope boundaries. This intentionally removes key-management
+  access from existing ADMIN API keys without `*`; human ADMIN sessions and
+  explicitly full-scope ADMIN keys retain access. No keys are auto-expanded.
 
 - Update Next.js and its ESLint configuration to 16.4.2 for the App Router
   Server Actions denial-of-service advisory GHSA-p3m5-59mp-jv5r and to satisfy
