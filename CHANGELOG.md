@@ -9,15 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+
+- Refresh the root application's sharp lock to 0.35.5, including its patched
+  prebuilt libvips/librsvg dependencies (GHSA-wq5f-xc86-pv6w), and source-map-js
+  to 1.2.2 (GHSA-68fv-2mgg-jv7q). Both updates stay within existing dependency
+  ranges; unrelated dependency advisories remain tracked separately.
+- Add a local private `braces@3.0.3` derivative candidate with fixed parser and
+  AST traversal budgets, pinned through an exact vendored archive and override.
+  This is not an upstream security release or complete advisory-coverage proof.
+  Registry audit does not independently assess the renamed package; the
+  standalone regression probe remains explicitly skipped. See
+  [candidate provenance and limitations](vendor/README.md).
+- Raise the MCP SDK minimum to 1.31.0, refresh the MCP package's
+  `proxy-addr` lock to 2.0.8, and enforce its patched floor for package-root
+  installs, addressing the SDK OAuth client-credentials and proxy-address trust
+  advisories. The bundled CLI continues to use stdio; no HTTP transport or
+  authentication behavior is changed.
 - Article tag attachment now preserves existing shared tag names on slug conflicts;
   authorized global renames remain available through the protected tag endpoint.
 - API-key scope forms offer explicit opt-in full access (`*`), preserve existing
   wildcard selections, and correctly label empty scopes as public-article-only.
   No existing key is automatically granted broader access.
-
-
-### Security
-
 - Require explicit full scope (`allowedScopes` containing `"*"`) as well as
   operation permission for existing shared tag/topic updates and deletions.
   Scoped ADMIN keys cannot bypass this boundary; deletions remain ADMIN-only.
