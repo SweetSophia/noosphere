@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+// Intentionally exercise the exact locked transitive packages used by Next and
+// PostCSS, rather than a separate test-only dependency resolution. This suite
+// requires a full root npm ci, including optional dependencies. A missing package
+// must fail the check; omitting optional dependencies is not this test contract.
 import sharp from "sharp";
 import { SourceMapConsumer } from "source-map-js";
 

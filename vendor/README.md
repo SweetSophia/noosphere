@@ -71,7 +71,7 @@ this candidate. Low-severity findings also remain outstanding.
 
 The standalone regression probe was explicitly skipped by the owner. It is not
 included, rerun, replaced, or counted as passing. No substitute boundary/stress
-probe or new security test was run. Historical parser-only `.1` results are not
+probe or new security test covering the braces derivative was run. Historical parser-only `.1` results are not
 fresh behavioral coverage for `.2`. At that freeze, no complete upstream suite, dedicated `.2` security-regression,
 Node 22/Alpine, hosted CI matrix, Docker-build, production or deployment
 verification was claimed. The root-only ordinary and packaging evidence below
@@ -108,7 +108,8 @@ an explicit owner request. Publication remains on hold and #356 stays open.
 The exact archive and license remain unchanged. Five low root audit findings
 remain disclosed. The registry audit blind spot, skipped probe and absence of
 fresh `.2` behavioral/security-regression evidence still apply. No replacement
-probe, boundary/stress check or new security test was introduced. No ARM64,
+probe, boundary/stress check or new security test for the braces derivative was introduced.
+The retained sharp/source-map regression tests cover separate dependencies. No ARM64,
 application-runtime, production, deployment or complete-advisory-coverage claim
 is made; a Node 22 Alpine **build** is not runtime certification.
 
@@ -140,7 +141,8 @@ Fresh combined-source **root** validation is not a fresh MCP package install or
 test run. No fresh combined Docker build, hosted combined CI, ARM64 verification,
 application-runtime verification or complete advisory-coverage proof was added.
 The skipped standalone probe remains skipped, with no substitute, boundary/stress
-probe or new security test. Registry audit inventory still does not independently
+probe or new security test covering the braces derivative. The retained
+sharp/source-map tests do not establish braces coverage. Registry audit inventory still does not independently
 assess this renamed private derivative, and five low findings remain outstanding.
 No publication or deployment occurred. Publication remains on hold and #356 stays
 open pending the subsequent publication/CI gate disposition.

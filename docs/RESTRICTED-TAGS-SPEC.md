@@ -129,8 +129,11 @@ explicit full scope (`allowedScopes` containing `"*"`):
   any taxonomy lookup or mutation. Unauthenticated callers still receive 401.
 - Human sessions already receive full scope, so EDITOR/ADMIN update access and
   ADMIN-only deletion are preserved. VIEWER sessions remain read-only.
-- New tag/topic creation retains its existing WRITE permission rule and does
-  not gain this full-scope requirement.
+- Tag creation now accepts WRITE/ADMIN API keys through the shared permission
+  ladder; the former session-role check incorrectly rejected all API keys.
+  Like topic creation, it requires WRITE but does not require full scope.
+  Creation can add a new entry, but cannot rename an existing shared entry;
+  article attachment likewise preserves existing tag metadata on a slug conflict.
 
 This taxonomy policy does not grant article-body access or alter an article's
 `restrictedTags`. Scope assignment and article visibility remain independent
