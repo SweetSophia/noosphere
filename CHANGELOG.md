@@ -20,8 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [GHSA-mrv2-3pqr-j5jr](https://github.com/cure53/DOMPurify/security/advisories/GHSA-mrv2-3pqr-j5jr)
   (IN_PLACE hook handling) and
   [GHSA-cg2g-xh64-v4q7](https://github.com/cure53/DOMPurify/security/advisories/GHSA-cg2g-xh64-v4q7)
-  (SAFE_FOR_TEMPLATES shadow-root handling). This also constrains future lock
-  refreshes; no exploit in Noosphere's upload configuration has been demonstrated.
+  (SAFE_FOR_TEMPLATES shadow-root handling). The upload sanitizer uses the default
+  HTML parser and excludes SMIL animation elements; it enables neither IN_PLACE
+  hooks nor SAFE_FOR_TEMPLATES. These are defense-in-depth/audit updates for that
+  upload path. Review the exact override when updating its requirers: overrides
+  can force a version below a future transitive minimum.
 - Refresh the MCP `ip-address` lock to 10.7.4 for the IPv6 zone-identifier
   regular-expression denial of service,
   [GHSA-rxp7-6hxx-x8q5](https://github.com/beaugunderson/ip-address/security/advisories/GHSA-rxp7-6hxx-x8q5).
