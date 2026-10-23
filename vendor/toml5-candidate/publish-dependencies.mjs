@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { setTimeout } from "node:timers/promises";
 
 const [directory, mode] = process.argv.slice(2);
 assert.ok(directory && path.isAbsolute(directory), "An absolute artifact directory is required");
@@ -67,14 +68,30 @@ for (const artifact of artifacts) {
   if (published) await verify(artifact, published);
   existing.set(artifact, published);
 }
-const receipts = [];
-for (const artifact of artifacts) {
-  if (mode === "--publish" && !existing.get(artifact)) {
-    // The approved archives retain upstream repository URLs; npm provenance
-    // requires those URLs to match the publishing repository. Keep approved bytes.
-    execFileSync(process.execPath, [npm, "publish", local.get(artifact).archive, "--access=public", "--ignore-scripts", "--tag=noosphere-toml5-candidate", `--registry=${registry}`, "--provenance=false", "--loglevel=error"], { stdio: "inherit", timeout: 180_000 });
+if (mode === "--publish") {
+  const submitted = [];
+  for (const artifact of artifacts) {
+    if (!existing.get(artifact)) {
+      // The approved archives retain upstream repository URLs; npm provenance
+      // requires those URLs to match the publishing repository. Keep approved bytes.
+      execFileSync(process.execPath, [npm, "publish", local.get(artifact).archive, "--access=public", "--ignore-scripts", "--tag=noosphere-toml5-candidate", `--registry=${registry}`, "--provenance=false", "--loglevel=error"], { stdio: "inherit", timeout: 180_000 });
+    }
+    submitted.push({ ...artifact, alreadyVerified: Boolean(existing.get(artifact)) });
+    await writeFile(path.join(directory, "submitted.json"), `${JSON.stringify({ commit: process.env.GITHUB_SHA || null, artifacts: submitted }, null, 2)}\n`);
   }
-  await verify(artifact, await metadata(artifact));
-  receipts.push({ ...artifact, registry });
 }
+// npm scans new versions before making them installable. A successful publish
+// response can precede public visibility by 5-15 minutes or longer. Submit in
+// dependency order, then wait for all four without republishing a pending version.
+const receipts = await Promise.all(artifacts.map(async (artifact) => {
+  const deadline = Date.now() + 20 * 60_000;
+  let published = await metadata(artifact);
+  while (!published && mode === "--publish" && Date.now() < deadline) {
+    console.log(`WAIT public availability ${artifact.name}@${artifact.version}`);
+    await setTimeout(10_000);
+    published = await metadata(artifact);
+  }
+  await verify(artifact, published);
+  return { ...artifact, registry };
+}));
 await writeFile(path.join(directory, "publication.json"), `${JSON.stringify({ commit: process.env.GITHUB_SHA || null, artifacts: receipts }, null, 2)}\n`);

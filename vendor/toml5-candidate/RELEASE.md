@@ -44,6 +44,10 @@ Only the publication step receives `NPM_TOKEN`; it checks the npm identity,
 verifies `release-artifacts.json`, publishes with the candidate tag, and verifies
 the public registry archives. Existing versions are accepted only if their bytes
 match approval. Partial publication can be retried without replacing packages.
+The job submits in dependency order and then allows up to 20 minutes for npm's
+publish-time scanning before requiring public availability and byte verification.
+`submitted.json` records accepted submissions separately from `publication.json`;
+an accepted submission alone is not verification or proof of installability.
 
 These exact approved archives retain upstream `repository` URLs. npm requires a
 matching publishing repository for provenance, so this workflow explicitly uses

@@ -66,7 +66,7 @@ jobs:
       github.sha == inputs.expected_sha
     needs: [installed-consumers, application-typecheck]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     permissions:
       contents: read
     concurrency:
@@ -96,4 +96,5 @@ jobs:
           path: |
             ${{ runner.temp }}/toml-publication/qualification.json
             ${{ runner.temp }}/toml-publication/publication.json
+            ${{ runner.temp }}/toml-publication/submitted.json
             ${{ runner.temp }}/toml-publication/*.log
