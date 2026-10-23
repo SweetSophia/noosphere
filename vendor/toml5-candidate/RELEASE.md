@@ -1,7 +1,8 @@
 # TOML candidate publication and activation plan
 
-Status: **not published, not activated**. This is a reviewable plan, not permission
-to publish. The qualification workflow never executes these release steps.
+Status: **publication approved on 2026-10-23; not published, not activated**.
+Approval covers only the four exact dependency archives below. Adapter releases
+require separate authorization. Pull-request qualification never publishes.
 
 ## Decision and exact artifacts
 
@@ -33,6 +34,30 @@ incomplete. Retire the aliases when supported upstream SDKs declare a fixed TOML
 path (or remove it), after repeating consumer and host checks.
 
 ## Publication, after approval and npm authentication
+
+The repository's `toml-candidate.yml` workflow has a manual publication mode,
+separate from the five-participant integration release workflow. Dispatch it from
+the reviewed branch with `publish_dependencies=true` and `expected_sha` equal to
+that branch's full commit SHA. Publication requires successful Node 22/24 consumer
+qualification and application lint/typecheck, then reconstructs with npm 12.1.0.
+Only the publication step receives `NPM_TOKEN`; it checks the npm identity,
+verifies `release-artifacts.json`, publishes with the candidate tag, and verifies
+the public registry archives. Existing versions are accepted only if their bytes
+match approval. Partial publication can be retried without replacing packages.
+
+These exact approved archives retain upstream `repository` URLs. npm requires a
+matching publishing repository for provenance, so this workflow explicitly uses
+`--provenance=false` and does not request an OIDC token. GitHub run/commit and
+archive-hash evidence remain available; this is not an npm provenance attestation.
+Correcting the manifests would create different archives requiring new review.
+
+For inspection without publishing:
+
+```sh
+node vendor/toml5-candidate/publish-dependencies.mjs /absolute/qualification-output --check
+```
+
+The equivalent ordered publication procedure is:
 
 1. Run the qualification harness on the final reviewed commit and preserve its
    exact output. Confirm `npm whoami --registry=https://registry.npmjs.org` is the
