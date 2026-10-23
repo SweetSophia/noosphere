@@ -1,0 +1,35 @@
+{
+  "status": "accepted-submission-only-not-publication-verification",
+  "run": "https://github.com/SweetSophia/noosphere/actions/runs/39965115177",
+  "commit": "eaff14c1f22cca641f1a83008c9250775e3d1e28",
+  "artifacts": [
+    {
+      "name": "@sweetsophia/noosphere-effect",
+      "version": "4.0.0-beta.65-noosphere.3",
+      "archive": "sweetsophia-noosphere-effect-4.0.0-beta.65-noosphere.3.tgz",
+      "sha256": "5174e0710593a000a244e656df482c941e11fff8d4a9046d1080515a3a295084",
+      "integrity": "sha512-nbPJ6beqt5XDG2rEDSWTvOxUAl5KSC+GM0auI4nMjXmw3vo82n8zQQxRfh3r7dn547gZh5v6ikaOrzBSF8972w=="
+    },
+    {
+      "name": "@sweetsophia/noosphere-effect",
+      "version": "4.0.0-beta.57-noosphere.4",
+      "archive": "sweetsophia-noosphere-effect-4.0.0-beta.57-noosphere.4.tgz",
+      "sha256": "b29bb00619d18a52a333d692af8e1943375ce8c67e947e9b3b0db13ea378bba7",
+      "integrity": "sha512-MEa3tAQYqm2inNpKPEKn7y3XVPyaYAUirEjupM4Wgvb7utQ3YuqUogY0mTHauqdYv6Xp6b9Azz3IHjXdYExN/g=="
+    },
+    {
+      "name": "@sweetsophia/noosphere-opencode-plugin",
+      "version": "1.15.5-noosphere.3",
+      "archive": "sweetsophia-noosphere-opencode-plugin-1.15.5-noosphere.3.tgz",
+      "sha256": "b3be7a902c22bf2e0fb0c19ac519fcbb6d1af1c4c446db0d30da7039695bce07",
+      "integrity": "sha512-XNZUygmM+sN23WI9FHVkoMQQmnsnyjUMRttcAt+fvIs4K2nq9mBELc8bfNMLieLFbQEKQWeFzaM2hOYNN5cHpw=="
+    },
+    {
+      "name": "@sweetsophia/noosphere-kilocode-plugin",
+      "version": "7.3.1-noosphere.4",
+      "archive": "sweetsophia-noosphere-kilocode-plugin-7.3.1-noosphere.4.tgz",
+      "sha256": "030dca359fc9698cb71e6a11c1f8d644d4486a7c1c05c8e930e77980ea8ce239",
+      "integrity": "sha512-Qcwu0jnFWcuvwgkko4s1cBH9axmi+sM8RWfzO+mZJ2RuRXuXA1SVmNgSC/JqQ88veuaq+Ubsc2omz55uMEN50g=="
+    }
+  ]
+}

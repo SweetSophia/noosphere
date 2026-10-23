@@ -1,0 +1,66 @@
+{
+  "name": "@sweetsophia/opencode-noosphere-memory",
+  "version": "1.15.0-noosphere.toml.1",
+  "private": false,
+  "description": "Connect OpenCode to self-hosted Noosphere memory for recall, draft saves, and optional idle auto-save.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "src/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.mjs",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "npm:@sweetsophia/noosphere-opencode-plugin@1.15.5-noosphere.3",
+    "@opencode-ai/sdk": "^1.14.18",
+    "@sweetsophia/noosphere-client": "1.15.0"
+  },
+  "bundledDependencies": [
+    "@sweetsophia/noosphere-client"
+  ],
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5"
+  },
+  "opencode": {
+    "type": "plugin",
+    "hooks": [
+      "chat.message",
+      "event"
+    ]
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SweetSophia/noosphere.git",
+    "directory": "opencode-noosphere-memory"
+  },
+  "bugs": {
+    "url": "https://github.com/SweetSophia/noosphere/issues"
+  },
+  "homepage": "https://github.com/SweetSophia/noosphere/tree/master/opencode-noosphere-memory",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "oh-my-opencode-slim",
+    "noosphere",
+    "memory",
+    "recall"
+  ]
+}

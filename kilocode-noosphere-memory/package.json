@@ -29,10 +29,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.mjs",
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@kilocode/plugin": "^7.3.1",
+    "@kilocode/plugin": "npm:@sweetsophia/noosphere-kilocode-plugin@7.3.1-noosphere.4",
     "@kilocode/sdk": "^7.3.1",
     "@sweetsophia/noosphere-client": "file:../noosphere-client"
   },

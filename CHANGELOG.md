@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- Switch OpenCode/Kilo to maintained SDK/Effect aliases that explicitly require
+  TOML 5.0.1 for GHSA-4qx8-w7c3-pj3p, GHSA-9j65-hcg3-gc64 and GHSA-9qmh-m7c6-f92p,
+  with public-registry locks and checks of the exact packed adapters.
+  The shared client remains bundled and unpublished. TOML tables now have null
+  prototypes and unsafe integers fail; see [qualification and release limits](vendor/toml5-candidate/README.md).
 - Pin root DOMPurify to 3.4.17 through an override for
   [GHSA-c6gr-qvv4-5v3f](https://github.com/cure53/DOMPurify/security/advisories/GHSA-c6gr-qvv4-5v3f)
   (XHTML/SMIL attribute guard),

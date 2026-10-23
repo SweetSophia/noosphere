@@ -1,0 +1,135 @@
+name: Qualify TOML dependency repair
+
+on:
+  pull_request:
+    paths:
+      - "vendor/toml5-candidate/**"
+      - ".github/workflows/toml-candidate.yml"
+      - "opencode-noosphere-memory/**"
+      - "kilocode-noosphere-memory/**"
+      - "noosphere-client/**"
+      - "tsconfig.json"
+  workflow_dispatch:
+    inputs:
+      publish_dependencies:
+        description: "Publish the four hash-approved TOML dependency archives with the candidate tag"
+        type: boolean
+        required: true
+        default: false
+      expected_sha:
+        description: "Exact reviewed commit SHA required for publication"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  installed-consumers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Reconstruct and qualify installed candidate consumers
+        run: node vendor/toml5-candidate/qualify.mjs "$RUNNER_TEMP/toml-candidate"
+
+  application-typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts
+      - run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://localhost:5432/unused
+      - run: npm run lint
+      - run: npm run typecheck -- --incremental false
+
+  public-consumers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Build and pack the active adapters
+        run: |
+          for adapter in opencode-noosphere-memory kilocode-noosphere-memory; do
+            npm --prefix "$adapter" ci --ignore-scripts
+            npm --prefix "$adapter" run typecheck
+            npm --prefix "$adapter" run build
+            npm --prefix "$adapter" test
+            npm --prefix "$adapter" audit --audit-level=low
+            node vendor/toml5-candidate/pack-adapter.mjs "$GITHUB_WORKSPACE/$adapter" "$RUNNER_TEMP/public-adapters"
+          done
+      - name: Qualify public-registry consumer installs and strict types
+        run: node vendor/toml5-candidate/public-consumers.mjs "$RUNNER_TEMP/public-adapters" "$RUNNER_TEMP/public-consumers"
+      - name: Preserve public consumer qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: public-consumers-node-${{ matrix.node }}
+          path: |
+            ${{ runner.temp }}/public-consumers/public-consumers.json
+            ${{ runner.temp }}/public-consumers/*.log
+
+  publish-dependencies:
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.publish_dependencies &&
+      github.repository == 'SweetSophia/noosphere' && github.actor == 'SweetSophia' &&
+      github.sha == inputs.expected_sha
+    needs: [installed-consumers, application-typecheck]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    concurrency:
+      group: noosphere-toml-dependency-publication
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Use the reviewed archive packer version
+        run: npm install --global npm@12.1.0 --ignore-scripts
+      - name: Reconstruct and qualify exact approved archives
+        run: node vendor/toml5-candidate/qualify.mjs "$RUNNER_TEMP/toml-publication"
+      - name: Verify approval hashes, publish dependencies and verify public registry bytes
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node vendor/toml5-candidate/publish-dependencies.mjs "$RUNNER_TEMP/toml-publication" --publish
+      - name: Preserve publication evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: toml-dependency-publication
+          path: |
+            ${{ runner.temp }}/toml-publication/qualification.json
+            ${{ runner.temp }}/toml-publication/publication.json
+            ${{ runner.temp }}/toml-publication/submitted.json
+            ${{ runner.temp }}/toml-publication/*.log
