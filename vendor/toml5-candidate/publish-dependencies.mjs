@@ -13,6 +13,14 @@ assert.ok(["--check", "--publish", "--verify"].includes(mode), "Select --check, 
 const registry = "https://registry.npmjs.org";
 const artifacts = JSON.parse(await readFile(new URL("release-artifacts.json", import.meta.url), "utf8"));
 assert.equal(artifacts.length, 4);
+// Preserve the first run's successful submission even while npm returns 404.
+// Re-submitting that immutable version cannot make its scan finish sooner.
+const prior = JSON.parse(await readFile(new URL("submitted-artifacts.json", import.meta.url), "utf8"));
+const previouslySubmitted = new Set();
+for (const artifact of prior.artifacts) {
+  assert.deepEqual(artifact, artifacts.find((entry) => entry.name === artifact.name && entry.version === artifact.version));
+  previouslySubmitted.add(`${artifact.name}@${artifact.version}`);
+}
 const digest = (bytes, algorithm, encoding) => createHash(algorithm).update(bytes).digest(encoding);
 const local = new Map();
 for (const artifact of artifacts) {
@@ -71,12 +79,13 @@ for (const artifact of artifacts) {
 if (mode === "--publish") {
   const submitted = [];
   for (const artifact of artifacts) {
-    if (!existing.get(artifact)) {
+    const wasSubmitted = previouslySubmitted.has(`${artifact.name}@${artifact.version}`);
+    if (!existing.get(artifact) && !wasSubmitted) {
       // The approved archives retain upstream repository URLs; npm provenance
       // requires those URLs to match the publishing repository. Keep approved bytes.
       execFileSync(process.execPath, [npm, "publish", local.get(artifact).archive, "--access=public", "--ignore-scripts", "--tag=noosphere-toml5-candidate", `--registry=${registry}`, "--provenance=false", "--loglevel=error"], { stdio: "inherit", timeout: 180_000 });
     }
-    submitted.push({ ...artifact, alreadyVerified: Boolean(existing.get(artifact)) });
+    submitted.push({ ...artifact, alreadyVerified: Boolean(existing.get(artifact)), previouslySubmitted: wasSubmitted });
     await writeFile(path.join(directory, "submitted.json"), `${JSON.stringify({ commit: process.env.GITHUB_SHA || null, artifacts: submitted }, null, 2)}\n`);
   }
 }

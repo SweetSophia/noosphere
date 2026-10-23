@@ -1,0 +1,14 @@
+{
+  "status": "accepted-submission-only-not-publication-verification",
+  "run": "https://github.com/SweetSophia/noosphere/actions/runs/39963136594",
+  "commit": "4b1d3c61fe9255694c5c9e7ea1c0a026f908afdd",
+  "artifacts": [
+    {
+      "name": "@sweetsophia/noosphere-effect",
+      "version": "4.0.0-beta.65-noosphere.3",
+      "archive": "sweetsophia-noosphere-effect-4.0.0-beta.65-noosphere.3.tgz",
+      "sha256": "5174e0710593a000a244e656df482c941e11fff8d4a9046d1080515a3a295084",
+      "integrity": "sha512-nbPJ6beqt5XDG2rEDSWTvOxUAl5KSC+GM0auI4nMjXmw3vo82n8zQQxRfh3r7dn547gZh5v6ikaOrzBSF8972w=="
+    }
+  ]
+}

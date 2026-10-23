@@ -48,6 +48,10 @@ The job submits in dependency order and then allows up to 20 minutes for npm's
 publish-time scanning before requiring public availability and byte verification.
 `submitted.json` records accepted submissions separately from `publication.json`;
 an accepted submission alone is not verification or proof of installability.
+The initial run accepted the first Effect archive before its immediate availability
+check failed. `submitted-artifacts.json` preserves that accepted submission and
+its run/commit reference so retries wait for it instead of uploading it again.
+The recorded archive must still match approval and pass public byte verification.
 
 These exact approved archives retain upstream `repository` URLs. npm requires a
 matching publishing repository for provenance, so this workflow explicitly uses
