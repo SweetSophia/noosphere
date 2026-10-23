@@ -1,4 +1,4 @@
-name: Qualify inactive TOML candidate
+name: Qualify TOML dependency repair
 
 on:
   pull_request:
@@ -58,6 +58,41 @@ jobs:
           DATABASE_URL: postgresql://localhost:5432/unused
       - run: npm run lint
       - run: npm run typecheck -- --incremental false
+
+  public-consumers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Build and pack the active adapters
+        run: |
+          for adapter in opencode-noosphere-memory kilocode-noosphere-memory; do
+            npm --prefix "$adapter" ci --ignore-scripts
+            npm --prefix "$adapter" run typecheck
+            npm --prefix "$adapter" run build
+            npm --prefix "$adapter" test
+            npm --prefix "$adapter" audit --audit-level=low
+            node vendor/toml5-candidate/pack-adapter.mjs "$GITHUB_WORKSPACE/$adapter" "$RUNNER_TEMP/public-adapters"
+          done
+      - name: Qualify public-registry consumer installs and strict types
+        run: node vendor/toml5-candidate/public-consumers.mjs "$RUNNER_TEMP/public-adapters" "$RUNNER_TEMP/public-consumers"
+      - name: Preserve public consumer qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: public-consumers-node-${{ matrix.node }}
+          path: |
+            ${{ runner.temp }}/public-consumers/public-consumers.json
+            ${{ runner.temp }}/public-consumers/*.log
 
   publish-dependencies:
     if: >-

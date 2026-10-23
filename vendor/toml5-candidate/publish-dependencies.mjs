@@ -13,8 +13,8 @@ assert.ok(["--check", "--publish", "--verify"].includes(mode), "Select --check, 
 const registry = "https://registry.npmjs.org";
 const artifacts = JSON.parse(await readFile(new URL("release-artifacts.json", import.meta.url), "utf8"));
 assert.equal(artifacts.length, 4);
-// Preserve the first run's successful submission even while npm returns 404.
-// Re-submitting that immutable version cannot make its scan finish sooner.
+// Preserve accepted submissions even while npm returns 404.
+// Re-submitting immutable versions cannot make their scans finish sooner.
 const prior = JSON.parse(await readFile(new URL("submitted-artifacts.json", import.meta.url), "utf8"));
 const previouslySubmitted = new Set();
 for (const artifact of prior.artifacts) {
@@ -45,7 +45,7 @@ async function metadata(artifact) {
   return response.json();
 }
 async function verify(artifact, published) {
-  assert.ok(published, `${artifact.name}@${artifact.version} is not published`);
+  if (!published) return false;
   assert.equal(published.name, artifact.name);
   assert.equal(published.version, artifact.version);
   assert.equal(published.dist.integrity, artifact.integrity);
@@ -53,11 +53,13 @@ async function verify(artifact, published) {
   const url = new URL(published.dist.tarball);
   assert.equal(url.origin, registry, "Unexpected registry tarball origin");
   const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+  if (response.status === 404) return false; // Metadata can precede tarball availability.
   assert.equal(response.status, 200);
   const bytes = Buffer.from(await response.arrayBuffer());
   assert.equal(digest(bytes, "sha256", "hex"), artifact.sha256, "Published archive differs from approval");
   assert.equal(`sha512-${digest(bytes, "sha512", "base64")}`, artifact.integrity);
   console.log(`VERIFIED public registry ${artifact.name}@${artifact.version}`);
+  return true;
 }
 
 let npm;
@@ -71,9 +73,10 @@ if (mode === "--publish") {
 }
 // Preflight every already-published version before making any registry mutation.
 const existing = new Map();
+const verifiedExisting = new Set();
 for (const artifact of artifacts) {
   const published = await metadata(artifact);
-  if (published) await verify(artifact, published);
+  if (await verify(artifact, published)) verifiedExisting.add(artifact);
   existing.set(artifact, published);
 }
 if (mode === "--publish") {
@@ -85,7 +88,7 @@ if (mode === "--publish") {
       // requires those URLs to match the publishing repository. Keep approved bytes.
       execFileSync(process.execPath, [npm, "publish", local.get(artifact).archive, "--access=public", "--ignore-scripts", "--tag=noosphere-toml5-candidate", `--registry=${registry}`, "--provenance=false", "--loglevel=error"], { stdio: "inherit", timeout: 180_000 });
     }
-    submitted.push({ ...artifact, alreadyVerified: Boolean(existing.get(artifact)), previouslySubmitted: wasSubmitted });
+    submitted.push({ ...artifact, alreadyVerified: verifiedExisting.has(artifact), previouslySubmitted: wasSubmitted });
     await writeFile(path.join(directory, "submitted.json"), `${JSON.stringify({ commit: process.env.GITHUB_SHA || null, artifacts: submitted }, null, 2)}\n`);
   }
 }
@@ -95,12 +98,14 @@ if (mode === "--publish") {
 const receipts = await Promise.all(artifacts.map(async (artifact) => {
   const deadline = Date.now() + 20 * 60_000;
   let published = await metadata(artifact);
-  while (!published && mode === "--publish" && Date.now() < deadline) {
+  let verified = await verify(artifact, published);
+  while (!verified && Date.now() < deadline) {
     console.log(`WAIT public availability ${artifact.name}@${artifact.version}`);
     await setTimeout(10_000);
     published = await metadata(artifact);
+    verified = await verify(artifact, published);
   }
-  await verify(artifact, published);
+  assert.ok(verified, `Public archive unavailable after the bounded wait: ${artifact.name}@${artifact.version}`);
   return { ...artifact, registry };
 }));
 await writeFile(path.join(directory, "publication.json"), `${JSON.stringify({ commit: process.env.GITHUB_SHA || null, artifacts: receipts }, null, 2)}\n`);

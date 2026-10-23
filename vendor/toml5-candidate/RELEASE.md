@@ -1,8 +1,14 @@
 # TOML candidate publication and activation plan
 
-Status: **publication approved on 2026-10-23; not published, not activated**.
-Approval covers only the four exact dependency archives below. Adapter releases
-require separate authorization. Pull-request qualification never publishes.
+Status: **all four dependencies published and public bytes verified on 2026-10-23**.
+The active adapter aliases/locks are qualified against the public registry on
+Node 22. Approval covered only the four exact dependency archives below; adapter
+releases require separate authorization. Pull-request qualification never publishes.
+
+The adapters retain the coordinated checkout version `1.15.0`. These source changes
+do not replace the already-published adapter versions. A coordinated version bump
+and separately authorized adapter release are still needed to deliver the repair
+to installed users.
 
 ## Decision and exact artifacts
 
@@ -48,10 +54,12 @@ The job submits in dependency order and then allows up to 20 minutes for npm's
 publish-time scanning before requiring public availability and byte verification.
 `submitted.json` records accepted submissions separately from `publication.json`;
 an accepted submission alone is not verification or proof of installability.
-The initial run accepted the first Effect archive before its immediate availability
-check failed. `submitted-artifacts.json` preserves that accepted submission and
-its run/commit reference so retries wait for it instead of uploading it again.
-The recorded archive must still match approval and pass public byte verification.
+The resumed run accepted all four archives before tarball availability completed.
+`submitted-artifacts.json` preserves these accepted submissions and their run/commit
+reference so retries wait for them instead of uploading them again. Registry
+metadata and tarballs can become available at different times; verification waits
+for both. Every recorded archive must still match approval and pass public byte
+verification. `--verify` performs the same bounded wait without publishing.
 
 These exact approved archives retain upstream `repository` URLs. npm requires a
 matching publishing repository for provenance, so this workflow explicitly uses

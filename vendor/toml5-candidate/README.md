@@ -1,17 +1,19 @@
-# TOML 5 candidate — reproducible qualification, not an activated dependency update
+# TOML 5 dependency repair and reproducible qualification
 
 This directory preserves the dependency-path repair qualified against the source
 at commit `412e132aa2ee380d16b74344c18c462974bb1337` (PR #362).
-**It is an inactive proposal, not a released or production-ready fix.** Root and
-adapter production manifests/locks are deliberately unchanged. Do not merge this
-as evidence that the existing adapters' TOML advisory is resolved.
+The four maintained dependency archives are now public and match their approved
+hashes. Active OpenCode/Kilo manifests use the maintained aliases and their locks
+were regenerated against the public npm registry. The adapters themselves have
+not been released with this repair; existing installed versions require a new
+coordinated adapter release. See [RELEASE.md](RELEASE.md).
 
-## Proposed dependency path
+## Active dependency path
 
-- OpenCode adapter `1.15.0-noosphere.toml.1`: `@opencode-ai/plugin` aliases
+- OpenCode adapter: `@opencode-ai/plugin` aliases
   `@sweetsophia/noosphere-opencode-plugin@1.15.5-noosphere.3`, whose `effect`
   dependency aliases `@sweetsophia/noosphere-effect@4.0.0-beta.65-noosphere.3`.
-- Kilo adapter `1.15.0-noosphere.toml.2`: `@kilocode/plugin` aliases
+- Kilo adapter: `@kilocode/plugin` aliases
   `@sweetsophia/noosphere-kilocode-plugin@7.3.1-noosphere.4`, whose `effect`
   dependency aliases `@sweetsophia/noosphere-effect@4.0.0-beta.57-noosphere.4`.
 - Both maintained Effect artifacts explicitly depend on `toml: 5.0.1`.
@@ -20,8 +22,10 @@ as evidence that the existing adapters' TOML advisory is resolved.
   only an isolated staging manifest. The private client stays unpublished and no
   consumer override is required.
 
-These scoped names/versions are unpublished fixture placeholders, not reserved
-registry names. Publishing dependency-local npm overrides alone was rejected:
+These scoped names/versions were originally qualified as unpublished fixtures.
+The approved dependency archive identities and current publication procedure are
+in [RELEASE.md](RELEASE.md); a registry placeholder is not proof that the approved
+version is installable. Publishing dependency-local npm overrides alone was rejected:
 npm ignores them for consumers. A bundled-subtree prototype also failed a clean
 install and was rejected rather than bypassing that gate.
 
@@ -44,6 +48,13 @@ install and was rejected rather than bypassing that gate.
   package contents, and changes only the staged client edge to its exact version.
 - `host-probe.mjs`: probes tool registration and JSON-schema conversion through
   an actual host server. Run only inside the isolated container described below.
+- `public-consumers.mjs`: installs the active adapters' exact tarballs into fresh
+  consumers using only public npm dependencies, then requires clean reinstalls,
+  complete dependency trees, low-threshold audits, runtime and strict type checks.
+- `publish-dependencies.mjs` and `release-artifacts.json`: the manually triggered
+  GitHub publication path for the four approved dependency archives, with exact
+  hash checks and public-registry verification. `submitted-artifacts.json` records
+  earlier accepted uploads so a retry does not re-upload pending versions.
 - `provenance.json`: original and inspected fixture artifact SHA-256 hashes,
   exact changed members and patched-file hashes. The original artifact hashes
   identify the inspected historical archives; arbitrary repacking is not claimed
@@ -86,11 +97,31 @@ unsafe integers fail explicitly through Effect, prototype-shaped keys remain own
 data, and nested null-prototype tables decode through Effect schemas. They do not
 establish arbitrary TOML compatibility or add a `bigint` opt-in.
 
-The `Qualify inactive TOML candidate` workflow now independently runs the harness
+The `Qualify TOML dependency repair` workflow independently runs the harness
 on Node 22 and 24. It also checks application lint/types, with the consumer fixture
 directory excluded from the application's root TypeScript compilation. Consumer
 types are checked separately with `strict` and `skipLibCheck=false` after actual
 installation. A successful workflow qualifies the local graph, not publication.
+
+### Active public-registry consumers (2026-10-23)
+
+The four published dependency archives were downloaded from npm and verified
+against both approved digests and their declared dependency edges. Node 22.23.4
+clean source installs, typechecks, builds and 11 adapter tests pass. The regenerated
+locks also refresh compatible Effect transitives within their declared ranges.
+Committed adapter runtime output remains unchanged.
+
+The active `1.15.0` adapter tarballs produced by `pack-adapter.mjs` pass fresh public
+consumer install/reinstall, full dependency-tree validation, `audit --audit-level=low`,
+24 runtime cases and two strict TypeScript consumers. Every installed TOML in these
+consumer trees is 5.0.1. The private client is bundled; no loopback registry,
+consumer override, builder sibling directory or preseeded `node_modules` is used.
+
+`public-consumers.mjs /absolute/archive-directory /absolute/new/output` repeats
+these installed-consumer checks. The TOML workflow runs them on Node 22 and 24.
+The normal integration workflow now runs them for packed OpenCode/Kilo artifacts,
+including the exact archive used by each publishing job. No publishing token is
+available to these qualification steps.
 
 ### Actual host loading (2026-10-23)
 
@@ -126,9 +157,34 @@ Both hosts attempt a separate global-config SDK install; offline npm settings ma
 that unavailable bootstrap fail promptly, with an expected warning, while the
 preinstalled candidate loads. Kilo also has a baseline semantic-search warning.
 The hosts embed their own runtime: these checks complement the separate Node 22
-execution tests. File-URI loading does not qualify host-managed npm installation,
+execution tests. File-URI loading alone does not qualify host-managed npm installation,
 its engine gate, or public-registry delivery. Never run a host's `--help` outside
 isolation as a harmless probe: Kilo can execute startup database migrations first.
+
+### Actual host-managed tarball installation (2026-10-23)
+
+Both pinned hosts also pass their real npm installation path with the active
+adapter archives. The configuration uses a named file specification such as
+`@sweetsophia/opencode-noosphere-memory@file:/artifacts/adapter.tgz`, rather than
+a direct file-URI import. This reaches the hosts' npm compatibility check and
+Arborist installation into empty host state. Each host-installed adapter resolves
+its maintained SDK and Effect fork to TOML 5.0.1, registers exactly the four
+Noosphere tools, and exposes the expected `restrictedTags` schema.
+
+Repeat in the same network-none, read-only disposable container, mounting only
+the binary, probe, adapter tarball and public-consumer npm cache. Copy that cache
+from a read-only `/seed-cache` mount to writable tmpfs `/tmp/npm-cache`, then run:
+
+```sh
+node /probe.mjs opencode /artifacts/adapter.tgz npm-tarball /tmp/npm-cache
+```
+
+Use `kilo` for Kilo's binary and adapter archive. No preinstalled `node_modules`,
+host home/configuration, credentials or model calls are used. The host's unrelated
+global SDK bootstrap still warns because its original SDK is not in this offline
+cache; Kilo's baseline semantic-search warning remains. This qualifies the
+Noosphere adapter graph and host-managed installation of its tarball. Looking up
+a newly released adapter version by registry name remains a release smoke check.
 
 ### Historical Node 24 snapshot
 
@@ -160,29 +216,27 @@ The historical private execution receipts/reports are not copied into Git: they
 contain machine-local paths. The harness above makes new qualification repeatable;
 it does not retroactively turn the historical local runs into hosted CI evidence.
 
-## Blocking release gates
+## Remaining release work
 
 The concrete artifact identities and ordered activation steps are in
-[RELEASE.md](RELEASE.md). Publication still requires explicit approval and an
-authenticated account with access to the package scope.
+[RELEASE.md](RELEASE.md). Publication of the four dependency archives was approved
+on 2026-10-23; adapter publication requires separate authorization. The manual
+GitHub job uses the repository's npm token; pull-request jobs never publish.
 
-1. Authorize and coordinate maintained-fork package publication, verify scope/name
-   access, licenses and actual published bytes. GitHub push authority alone is
-   **not** npm publication authority.
-2. Regenerate production locks against real published dependencies; do not copy
-   loopback-registry fixture locks into active packages. Keep the source client's
-   local `file:` edge and use `pack-adapter.mjs` for release artifacts; do not copy
-   the packed-manifest proposals verbatim into source or publish the private client.
-3. Verify the actual published consumer dependency trees and artifact continuity.
-4. Verify host-managed installation from the actual published graph. Node 22 and
-   real-host file loading are qualified above; registry loading is still pending.
-5. Accept the explicit TOML numeric compatibility boundary before release:
-   TOML 5 uses null-prototype tables and rejects unsafe-range integers by default;
-   unchanged Effect calls `Toml.parse(content)` without `bigint: true`.
-6. Reconcile the other open security/PR gates independently. No Braces probe,
+1. Coordinate a new adapter release version and obtain its separate publication
+   authorization. Keep the source client's local `file:` edge and publish only
+   the qualified `pack-adapter.mjs` archive; the private client remains unpublished.
+2. Repeat clean installed-consumer checks for that release archive, verify its
+   registry bytes, and smoke-test host lookup of the released adapter version.
+   Current public dependency and actual host-managed tarball checks are recorded
+   above; an adapter release has not yet been delivered to installed users.
+3. Reconcile the other open security/PR gates independently. No Braces probe,
    substitute probe, KaTeX remediation, broad security stress, merge or deployment
    is part of this proposal.
 
-Full TOML conformance, unsafe-large-integer compatibility, real-registry delivery
-and overall PR readiness remain unqualified/NO_GO. The new workflow performs
-qualification only; no release workflow is added or triggered by this draft.
+Full TOML conformance and unsafe-large-integer compatibility are not claimed:
+TOML 5 uses null-prototype tables and unchanged Effect parsing rejects unsafe
+integers without opting into bigint. Overall PR/release readiness requires the
+remaining gates above.
+Only explicit manual dispatch enables the dependency publication job; its accepted
+submission receipts and verified-publication receipts are distinct evidence.

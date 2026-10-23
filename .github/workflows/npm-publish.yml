@@ -2,12 +2,14 @@ name: Publish Noosphere plugins to npm
 
 on:
   pull_request:
-    branches: [main, master]
     paths:
       - ".github/workflows/npm-publish.yml"
       - "VERSION"
       - "scripts/check-package-policies.mjs"
       - "scripts/sync-version.mjs"
+      - "vendor/toml5-candidate/pack-adapter.mjs"
+      - "vendor/toml5-candidate/public-consumers.mjs"
+      - "vendor/toml5-candidate/consumer-fixtures/**"
       - "package.json"
       - "package-lock.json"
       - "src/**"
@@ -134,6 +136,14 @@ jobs:
 
       - name: Pack dry run
         run: npm pack --dry-run
+
+      - name: Pack adapters with the bundled private client
+        if: matrix.package.dir == 'opencode-noosphere-memory' || matrix.package.dir == 'kilocode-noosphere-memory'
+        run: node ../vendor/toml5-candidate/pack-adapter.mjs "$PWD" "$RUNNER_TEMP/adapter-package"
+
+      - name: Qualify the installed adapter tarball
+        if: matrix.package.dir == 'opencode-noosphere-memory' || matrix.package.dir == 'kilocode-noosphere-memory'
+        run: node ../vendor/toml5-candidate/public-consumers.mjs "$RUNNER_TEMP/adapter-package" "$RUNNER_TEMP/adapter-consumers" "${{ matrix.package.dir }}"
 
   publish_helper:
     needs: package-check
@@ -364,10 +374,18 @@ jobs:
           git diff --exit-code -- dist
           test -z "$(git ls-files --others --exclude-standard -- dist)"
 
+      - name: Pack adapter with the bundled private client
+        run: node ../vendor/toml5-candidate/pack-adapter.mjs "$PWD" "$RUNNER_TEMP/opencode-package" > "$RUNNER_TEMP/opencode-pack.json"
+
+      - name: Qualify the exact tarball to publish
+        run: node ../vendor/toml5-candidate/public-consumers.mjs "$RUNNER_TEMP/opencode-package" "$RUNNER_TEMP/opencode-consumers" opencode-noosphere-memory
+
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance
+        run: |
+          TARBALL=$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).archive' "$RUNNER_TEMP/opencode-pack.json")
+          npm publish "$TARBALL" --access public --provenance
 
   publish_kilocode:
     needs: package-check
@@ -438,10 +456,18 @@ jobs:
           git diff --exit-code -- dist
           test -z "$(git ls-files --others --exclude-standard -- dist)"
 
+      - name: Pack adapter with the bundled private client
+        run: node ../vendor/toml5-candidate/pack-adapter.mjs "$PWD" "$RUNNER_TEMP/kilocode-package" > "$RUNNER_TEMP/kilocode-pack.json"
+
+      - name: Qualify the exact tarball to publish
+        run: node ../vendor/toml5-candidate/public-consumers.mjs "$RUNNER_TEMP/kilocode-package" "$RUNNER_TEMP/kilocode-consumers" kilocode-noosphere-memory
+
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance
+        run: |
+          TARBALL=$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).archive' "$RUNNER_TEMP/kilocode-pack.json")
+          npm publish "$TARBALL" --access public --provenance
 
   publish_mcp:
     needs: package-check
