@@ -4,13 +4,13 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { run, guard, digest, atomicJSON } from "./publish.mjs";
+import { run, guard, digest, atomicJSON, validateTargets } from "./publish.mjs";
 import { requiredChecks } from "./ci-receipt.mjs";
 
 const source = JSON.parse(await readFile(new URL("artifacts.json", import.meta.url), "utf8"));
 const sha = "a".repeat(40);
 const env = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "SweetSophia/noosphere", GITHUB_ACTOR: "SweetSophia",
-  GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_SHA: sha, EXPECTED_REVIEWED_SHA: sha, GITHUB_RUN_ATTEMPT: "1" };
+  GITHUB_TRIGGERING_ACTOR: "SweetSophia", GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_SHA: sha, EXPECTED_REVIEWED_SHA: sha, GITHUB_RUN_ATTEMPT: "1" };
 async function fixture(t, transform = () => {}) {
   const directory = await mkdtemp(path.join(tmpdir(), "sdk-publication-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -52,10 +52,16 @@ async function fixture(t, transform = () => {}) {
     if (mode === "dependency-mismatch") meta.dependencies = { ...meta.dependencies, zod: "4.3.0" };
     if (mode === "identity-mismatch") meta.name = "other";
     if (mode === "unsafe-url") meta.dist.tarball = "https://example.invalid/secret";
+    if (mode === "credential-url") {
+      const url = new URL(meta.dist.tarball); url.username = "fixture"; url.password = "fixture";
+      meta.dist.tarball = url.href;
+    }
+    if (mode === "fragment-url") meta.dist.tarball += "#fixture";
     return Response.json(meta);
   };
   const npm = async (args) => {
     calls.push({ npm: args });
+    if (args[0] === "--version") return "12.1.0";
     if (args[0] === "whoami") return "sweetsophia";
     const i = artifacts.findIndex((a) => args[1] === path.join(directory, a.archive));
     assert.ok(i >= 0, "Only approved tarball paths may be published");
@@ -72,6 +78,9 @@ async function fixture(t, transform = () => {}) {
   };
 }
 
+test("unchanged committed approval records satisfy the target contract", () => {
+  validateTargets(source);
+});
 test("check approves synthetic bytes with zero npm/network calls", async (t) => {
   const f = await fixture(t);
   assert.equal((await run(f.directory, "--check", f.options)).completed, true);
@@ -117,17 +126,27 @@ test("guards exact workflow identity and reviewed SHA", () => {
   guard(env);
   for (const key of Object.keys(env)) assert.throws(() => guard({ ...env, [key]: "wrong" }), key);
   assert.throws(() => guard({ ...env, GITHUB_SHA: "short", EXPECTED_REVIEWED_SHA: "short" }));
+  const missingTrigger = { ...env }; delete missingTrigger.GITHUB_TRIGGERING_ACTOR;
+  assert.throws(() => guard(missingTrigger));
+});
+test("reject wrong publishing npm version before identity or registry access", async (t) => {
+  const f = await fixture(t), normal = f.options.npm;
+  f.options.npm = async (args) => args[0] === "--version" ? "11.0.0" : normal(args);
+  await assert.rejects(run(f.directory, "--publish", f.options), /npm version/);
+  assert.deepEqual(f.calls, []);
 });
 test("reject wrong npm identity without registry reads or publish", async (t) => {
   const f = await fixture(t);
-  f.options.npm = async () => "not-approved";
+  f.options.npm = async (args) => args[0] === "--version" ? "12.1.0" : "not-approved";
   await assert.rejects(run(f.directory, "--publish", f.options), /npm identity/);
   assert.deepEqual(f.calls, []);
 });
-for (const mode of ["integrity-mismatch", "bytes-mismatch", "dependency-mismatch", "identity-mismatch", "unsafe-url"]) {
+for (const mode of ["integrity-mismatch", "bytes-mismatch", "dependency-mismatch", "identity-mismatch", "unsafe-url", "credential-url", "fragment-url"]) {
   test(`preflight second target ${mode} blocks ALL submissions`, async (t) => {
     const f = await fixture(t); f.publicModes[1] = mode;
-    await assert.rejects(run(f.directory, "--publish", f.options));
+    const reason = mode === "unsafe-url" ? /Unexpected tarball origin/
+      : ["credential-url", "fragment-url"].includes(mode) ? /Invalid tarball URL/ : undefined;
+    await assert.rejects(run(f.directory, "--publish", f.options), reason);
     assert.equal(f.publishes().length, 0);
     await assert.rejects(readFile(path.join(f.directory, "submitted.json")), { code: "ENOENT" });
   });
@@ -163,13 +182,50 @@ test("unknown submission is durable and is verify-only on subsequent invocation"
   await assert.rejects(run(f.directory, "--publish", f.options), /visibility deadline/);
   assert.equal(f.publishes().length, 1);
 });
-test("rerun without recovered journal fails closed unless both versions verified", async (t) => {
+test("recovery rerun cannot replay an older journal after an unknown submission", async (t) => {
+  const f = await fixture(t);
+  const older = [{ target: 0, state: "accepted" }];
+  await f.journal(older);
+  const normal = f.options.npm;
+  f.options.npm = async (args) => {
+    if (args[0] === "publish") {
+      f.calls.push({ npm: args });
+      throw new Error("simulated unknown upload outcome");
+    }
+    return normal(args);
+  };
+  await assert.rejects(run(f.directory, "--publish", f.options), /visibility deadline/);
+  const latest = JSON.parse(await readFile(path.join(f.directory, "submitted.json"), "utf8"));
+  assert.equal(latest.submissions.find((s) => s.target === 1)?.state, "unknown");
+  assert.equal(f.publishes().length, 1);
+
+  // A failed-job rerun restores the original inputs, not the latest recovery journal.
+  await f.journal(older);
+  f.options.env.GITHUB_RUN_ATTEMPT = "2";
+  const before = f.calls.length;
+  let failure;
+  try { await run(f.directory, "--publish", f.options); }
+  catch (error) { failure = error; }
+  assert.equal(f.publishes().length, 1, "rerunning recovery must not submit an unknown target again");
+  assert.match(failure?.message || "", /Publication reruns are forbidden/);
+  assert.deepEqual(f.calls.slice(before), [], "rerun rejection precedes npm and registry access");
+});
+test("publication reruns fail before npm or registry access; read-only verification stays available", async (t) => {
   const f = await fixture(t); f.options.env.GITHUB_RUN_ATTEMPT = "2";
-  await assert.rejects(run(f.directory, "--publish", f.options), /Cross-run artifact recovery required/);
-  assert.equal(f.publishes().length, 0);
+  await assert.rejects(run(f.directory, "--publish", f.options), /Publication reruns are forbidden/);
+  assert.deepEqual(f.calls, []);
   f.publicModes.fill("visible");
+  await assert.rejects(run(f.directory, "--publish", f.options), /Publication reruns are forbidden/);
+  assert.deepEqual(f.calls, []);
+  assert.equal((await run(f.directory, "--verify", f.options)).completed, true);
+  assert.equal(f.calls.filter((c) => c.npm).length, 0);
+});
+test("a new recovery dispatch can submit only the remaining unattempted target", async (t) => {
+  const f = await fixture(t); f.publicModes[0] = "visible";
+  await f.journal([{ target: 0, state: "accepted" }]);
   assert.equal((await run(f.directory, "--publish", f.options)).completed, true);
-  assert.equal(f.publishes().length, 0);
+  assert.equal(f.publishes().length, 1);
+  assert.equal(f.publishes()[0].npm[1], path.join(f.directory, f.artifacts[1].archive));
 });
 test("verify has no npm calls, records partial verification and distinguishes tarball 404", async (t) => {
   const f = await fixture(t); f.publicModes[0] = "visible"; f.publicModes[1] = "tar404";

@@ -42,10 +42,11 @@ export function guard(env) {
   assert.equal(env.GITHUB_ACTIONS, "true", "Publication requires GitHub Actions");
   assert.equal(env.GITHUB_REPOSITORY, "SweetSophia/noosphere");
   assert.equal(env.GITHUB_ACTOR, "SweetSophia");
+  assert.equal(env.GITHUB_TRIGGERING_ACTOR, "SweetSophia", "Unexpected triggering actor");
   assert.equal(env.GITHUB_EVENT_NAME, "workflow_dispatch");
   assert.match(env.GITHUB_SHA || "", /^[a-fA-F0-9]{40}$/, "Invalid reviewed SHA");
   assert.equal(env.GITHUB_SHA, env.EXPECTED_REVIEWED_SHA, "Reviewed SHA mismatch");
-  assert.match(env.GITHUB_RUN_ATTEMPT || "", /^[1-9][0-9]*$/, "Missing run attempt");
+  assert.equal(env.GITHUB_RUN_ATTEMPT, "1", "Publication reruns are forbidden; use read-only verification or a new dispatch referencing the latest submission journal");
 }
 export async function atomicJSON(file, value) {
   const temp = `${file}.${randomUUID()}.tmp`;
@@ -96,10 +97,11 @@ export async function publicState(artifact, manifest, request = fetch, deadline 
   approved(Buffer.from(await tarball.arrayBuffer()), artifact);
   return "verified";
 }
-async function npmCommand(args) {
-  // npm config/environment supply credentials normally; never serialize output or env.
+async function createNpmCommand() {
+  // Resolve once: version, identity and submissions must use the same CLI.
+  // npm config/environment supply credentials; never serialize output or env.
   const npm = await realpath(process.env.npm_execpath || execFileSync("which", ["npm"], { encoding: "utf8" }).trim());
-  return execFileSync(process.execPath, [npm, ...args], {
+  return async (args) => execFileSync(process.execPath, [npm, ...args], {
     encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 180_000,
   }).trim();
 }
@@ -107,16 +109,19 @@ export async function run(directory, mode, dependencies = {}) {
   assert.ok(path.isAbsolute(directory || ""), "Absolute artifact directory required");
   assert.ok(["--check", "--publish", "--verify"].includes(mode), "Invalid mode");
   directory = await realpath(directory);
-  const { env = process.env, npm = npmCommand, request = fetch, sleep = setTimeout, now = Date.now,
+  const { env = process.env, npm: suppliedNpm, request = fetch, sleep = setTimeout, now = Date.now,
     artifacts = await json(new URL("artifacts.json", import.meta.url)) } = dependencies;
   validateTargets(artifacts);
   const local = await localArtifacts(directory, artifacts);
   const qualification = await json(path.join(directory, "qualification.json"));
   validateQualification(qualification, artifacts);
   if (mode === "--check") return { completed: true, artifacts };
+  let npm;
   if (mode === "--publish") {
     guard(env);
     validateCiReceipt(qualification, artifacts, env.GITHUB_SHA, 22);
+    npm = suppliedNpm || await createNpmCommand();
+    assert.equal(await npm(["--version"]), "12.1.0", "Unexpected publishing npm version");
     assert.equal(await npm(["whoami", `--registry=${registry}`]), "sweetsophia", "Unexpected npm identity");
   }
   // Preflight ALL public versions, dependencies and available tar bytes before npm writes.
@@ -137,8 +142,6 @@ export async function run(directory, mode, dependencies = {}) {
       assert.ok(["attempted", "accepted", "unknown"].includes(entry.state), "Invalid submission state");
     }
   }
-  if (mode === "--publish" && !journal && Number(env.GITHUB_RUN_ATTEMPT) > 1)
-    assert.ok(states.every((s) => s === "verified"), "Cross-run artifact recovery required: restore submitted.json; missing journal forbids rerun submissions");
   let locked = false;
   const lock = path.join(directory, ".publish-lock");
   try {
@@ -193,7 +196,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.log(JSON.stringify({ completed: result.completed, artifacts: result.artifacts.map((a) => `${a.name}@${a.version}`) }));
   } catch {
     // Do not print arbitrary exception text from fetch/npm/config or credential-bearing inputs.
-    console.error("SDK publication guard failed; inspect credential-free qualification/submission/publication receipts. Recover submitted.json before reruns; never blindly resubmit.");
+    console.error("SDK publication guard failed; inspect credential-free qualification/submission/publication receipts. Publication reruns are forbidden: verify read-only or start a new dispatch with the latest submitted.json; never blindly resubmit.");
     process.exitCode = 1;
   }
 }

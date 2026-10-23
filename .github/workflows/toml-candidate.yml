@@ -37,11 +37,11 @@ on:
         required: true
         default: false
       zod_receipt_run_id:
-        description: "Prior run whose SDK submission journal must be recovered"
+        description: "Latest submission/recovery run whose journal must be recovered by a NEW dispatch"
         type: string
         required: false
       zod_receipt_attempt:
-        description: "Attempt number of that prior journal artifact"
+        description: "Latest attempt of that journal artifact; never restore an older ancestor"
         type: string
         required: false
         default: "1"
@@ -192,6 +192,12 @@ jobs:
           if [[ "$PUBLISH_MODE" == true && "$VERIFY_MODE" == true ]]; then
             echo 'Choose SDK publication OR read-only verification.' >&2; exit 1
           fi
+          if [[ "$PUBLISH_MODE" == true ]]; then
+            if [[ "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
+              echo 'Publication reruns are forbidden: start a new dispatch with the latest journal, or verify read-only.' >&2; exit 1
+            fi
+            [[ "$GITHUB_ACTOR" == SweetSophia && "$GITHUB_TRIGGERING_ACTOR" == SweetSophia ]]
+          fi
           if [[ -n "$RECEIPT_RUN" ]]; then
             [[ "$RECEIPT_RUN" =~ ^[1-9][0-9]*$ && "$RECEIPT_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
             [[ "$FIRST_ATTEMPT" != true ]]
@@ -220,6 +226,8 @@ jobs:
       (inputs.publish_zod_sdks || inputs.verify_zod_sdks) &&
       !inputs.publish_dependencies && !(inputs.publish_zod_sdks && inputs.verify_zod_sdks) &&
       github.repository == 'SweetSophia/noosphere' && github.actor == 'SweetSophia' &&
+      github.triggering_actor == 'SweetSophia' &&
+      (!inputs.publish_zod_sdks || github.run_attempt == 1) &&
       github.sha == inputs.expected_sha
     needs: [zod-sdk-qualification]
     name: Publish or verify exactly two Zod SDK archives

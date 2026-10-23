@@ -26,8 +26,9 @@ records, and checks with passed=true. Publisher must reject missing/incomplete o
 mismatched qualification before any npm write.
 
 Publication is GitHub Actions workflow_dispatch only, gated by the exact reviewed
-SHA, repository and actor SweetSophia, successful scoped qualification, and npm
-identity sweetsophia. It publishes only the two tarballs, with ignore-scripts and
+SHA, repository, original and triggering actors SweetSophia, successful scoped
+qualification, and npm identity sweetsophia. The publisher resolves its npm CLI
+once, requires version 12.1.0, and reuses that exact CLI for identity and uploads. It publishes only the two tarballs, with ignore-scripts and
 the explicit noosphere-zod-candidate tag, never latest. Retained upstream repository
 URLs mean provenance=false is explicit; these are not npm provenance attestations.
 Old Effect/SDK artifacts and their accepted-submission history remain immutable.
@@ -35,7 +36,8 @@ Old Effect/SDK artifacts and their accepted-submission history remain immutable.
 Preflight all existing registry metadata and tarball bytes before any submission.
 Persist attempted/accepted/unknown submission state; never blindly resubmit a
 pending or uncertain immutable version. Preserve receipts as Actions artifacts
-on failure. A rerun must recover its prior submission journal or verify only;
+on failure. Publication is allowed only on attempt 1 of a workflow dispatch;
+rerunning a publication job is forbidden even when a journal was recovered.
 404 alone is not proof that a previous upload was never accepted. Public byte
 readback, identity/dependency checks and SHA256/SHA512 agreement are required.
 A successful npm publish response is not delivery. Hold adapter activation and
@@ -52,14 +54,22 @@ active-adapter audits remain visible; their old SDK pins cannot be cleared until
 these prerequisite SDK bytes exist publicly. This scoped dependency gate is not
 an assertion that the whole application/adapter PR is green or mergeable.
 
-Never reuse first-attempt mode after an accepted/unknown submission. Start a new
-run with `zod_first_attempt=false`, `zod_receipt_run_id=PRIOR_RUN` and
-`zod_receipt_attempt=PRIOR_ATTEMPT` to recover the exact journal artifact before
-retrying the guarded command. Missing recovery state fails closed on reruns.
+Never reuse first-attempt mode after an accepted/unknown submission. Do not use
+GitHub's rerun controls for publication, including recovery dispatches: those
+controls retain older recovery inputs and can discard a newer unknown upload.
+Start a NEW workflow dispatch with `zod_first_attempt=false`,
+`zod_receipt_run_id=LATEST_SUBMISSION_OR_RECOVERY_RUN` and
+`zod_receipt_attempt=LATEST_ATTEMPT` to recover the newest journal, including any
+journal produced by an intervening recovery run. Never restore an older ancestor.
+Missing recovery artifacts fail closed. Every publication dispatch must itself
+be on run attempt 1; publication-mode reruns fail before npm or registry access.
 A newly-created run cannot independently detect a lost historical journal: the
 operator must retain the accepted run ID and never falsely declare a new first
 attempt. Set `verify_zod_sdks=true` with publication false for read-only public
-verification; this mode receives no npm token. The journal must still bind the
+verification; this mode receives no npm token and may be rerun. It polls for up to
+20 minutes and fails with a partial receipt while metadata or tarball bytes remain
+unavailable (`metadata-404` versus `tarball-404`). Refresh that observation with
+read-only verification, never by blindly republishing. The journal must still bind the
 reviewed commit for publication. Changed-code recovery is verify-only until
 explicitly reviewed. Do not remove stale publication locks automatically.
 
@@ -72,6 +82,10 @@ artifacts, and verifies their exact source commit, runtime, npm packer, approved
 archive records, all 32 mandatory gate results, and two complete consumer records.
 It does not execute SDK/runtime tests before the privileged npm step. No prior-run
 qualification may replace a current-run proof. Only the submission journal is
-recoverable across attempts. The publisher independently enforces the full
-Node 22 CI receipt/source-SHA contract before npm identity or registry access.
+recoverable across dispatches, using the newest journal. In `--publish` mode the
+publisher independently enforces the full Node 22 CI receipt/source-SHA contract
+before npm identity or registry access. Standalone `--check` is an offline local
+archive/basic-qualification check; standalone `--verify` is read-only public-byte
+verification, not independent CI approval or proof this invocation submitted bytes.
+The registered workflow validates both current-run CI receipts for either mode.
 This remains explicit local-file qualification, not public adapter delivery.
