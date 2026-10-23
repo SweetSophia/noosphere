@@ -17,7 +17,7 @@
     "test:cache": "node --env-file=.env.test --import tsx --test 'src/__tests__/cache/**/*.test.ts'",
     "test:rate-limit": "node --env-file=.env.test --import tsx --test src/__tests__/rate-limit.test.ts src/__tests__/rate-limit-fallback.test.ts src/__tests__/rate-limit-redis-integration.test.ts",
     "test:api": "node --import tsx --test 'src/__tests__/api/**/*.test.ts'",
-    "test:security": "node --env-file=.env.test --import tsx --test src/__tests__/security/uploads.test.ts src/__tests__/security/proxy.test.ts src/__tests__/security/articles-update.test.ts src/__tests__/security/markdown-sanitize.test.ts src/__tests__/security/yaml-resource-limits.test.ts src/__tests__/security/openclaw-secret-ref-boundary.test.ts",
+    "test:security": "node --env-file=.env.test --import tsx --test src/__tests__/security/uploads.test.ts src/__tests__/security/proxy.test.ts src/__tests__/security/articles-update.test.ts src/__tests__/security/markdown-sanitize.test.ts src/__tests__/security/yaml-resource-limits.test.ts src/__tests__/security/openclaw-secret-ref-boundary.test.ts src/__tests__/security/dependency-security.test.ts",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "db:migrate": "prisma migrate dev",
@@ -54,7 +54,7 @@
     "jszip": "^3.10.1",
     "katex": "^0.17.0",
     "mermaid": "^11.16.0",
-    "next": "16.3.8",
+    "next": "16.4.2",
     "next-auth": "^4.24.15",
     "pg": "^8.20.0",
     "prisma": "^7.9.1",
@@ -78,17 +78,20 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "dotenv": "^17.4.2",
     "eslint": "^9",
-    "eslint-config-next": "16.3.8",
+    "eslint-config-next": "16.4.2",
     "happy-dom": "^20.10.6",
     "tsx": "^4.22.4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "braces": "file:./vendor/sweetsophia-noosphere-braces-3.0.3-noosphere.2.tgz"
   },
   "overrides": {
+    "dompurify": "3.4.17",
     "@hono/node-server": "1.19.13",
     "postcss": "8.5.26",
     "hono": "4.12.25",
     "uuid": "11.1.1",
     "deepmerge-ts": "8.0.2",
-    "mysql2": "3.24.4"
+    "mysql2": "3.24.4",
+    "braces": "$braces"
   }
 }

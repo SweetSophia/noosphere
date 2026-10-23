@@ -97,6 +97,7 @@ export function canInspectMemoryCapture(
   // Human administrators retain full inspection access. API permission and
   // restricted-scope authorization remain separate capabilities.
   if (!auth.keyId) {
+    // eslint-disable-next-line no-restricted-syntax -- Human-only branch; API-key permission AND private scope are checked separately below.
     return auth.role === "ADMIN" && auth.allowedScopes?.includes("*") === true;
   }
 

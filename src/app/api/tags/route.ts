@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/wiki";
-import { checkRouteAuth } from "@/lib/api/auth";
+import { checkRouteAuth, hasPermission } from "@/lib/api/auth";
+import { Permissions } from "@prisma/client";
 import { getJsonBodyError, readBoundedJsonObject } from "@/lib/api/body";
 import { rateLimit } from "@/lib/rate-limit";
 
@@ -42,8 +43,8 @@ export async function POST(request: NextRequest) {
   if (!auth.authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (auth.role !== "EDITOR" && auth.role !== "ADMIN") {
-    return NextResponse.json({ error: "Editor or admin role required" }, { status: 403 });
+  if (!hasPermission(auth, [Permissions.WRITE])) {
+    return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
   }
 
   try {

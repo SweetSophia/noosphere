@@ -8,6 +8,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Pin root DOMPurify to 3.4.17 through an override for
+  [GHSA-c6gr-qvv4-5v3f](https://github.com/cure53/DOMPurify/security/advisories/GHSA-c6gr-qvv4-5v3f)
+  (XHTML/SMIL attribute guard),
+  [GHSA-mrv2-3pqr-j5jr](https://github.com/cure53/DOMPurify/security/advisories/GHSA-mrv2-3pqr-j5jr)
+  (IN_PLACE hook handling) and
+  [GHSA-cg2g-xh64-v4q7](https://github.com/cure53/DOMPurify/security/advisories/GHSA-cg2g-xh64-v4q7)
+  (SAFE_FOR_TEMPLATES shadow-root handling). The upload sanitizer uses the default
+  HTML parser and excludes SMIL animation elements; it enables neither IN_PLACE
+  hooks nor SAFE_FOR_TEMPLATES. These are defense-in-depth/audit updates for that
+  upload path. Review the exact override when updating its requirers: overrides
+  can force a version below a future transitive minimum.
+- Refresh the MCP `ip-address` lock to 10.7.4 for the IPv6 zone-identifier
+  regular-expression denial of service,
+  [GHSA-rxp7-6hxx-x8q5](https://github.com/beaugunderson/ip-address/security/advisories/GHSA-rxp7-6hxx-x8q5).
+  It arrives through `@modelcontextprotocol/sdk` → `express-rate-limit` for HTTP
+  transport support. Noosphere's CLI uses stdio and does not construct that HTTP
+  transport; this is an audit-driven dependency repair, not a demonstrated
+  reachable exploit. Audit thresholds are unchanged. Existing MCP consumer
+  lockfiles may need a dependency refresh to pick up the patched transitive.
+- Require ADMIN permission plus explicit full content scope (`*`) for global
+  API-key list, metadata, creation, updates (including self-updates) and revocation.
+  Scoped ADMIN credentials can no longer mint or upgrade wildcard credentials to
+  bypass content-scope boundaries. This intentionally removes key-management
+  access from existing ADMIN API keys without `*`; human ADMIN sessions and
+  explicitly full-scope ADMIN keys retain access. No keys are auto-expanded.
+
+- Update Next.js and its ESLint configuration to 16.4.2 for the App Router
+  Server Actions denial-of-service advisory GHSA-p3m5-59mp-jv5r and to satisfy
+  the patched Next.js floor for GHSA-2464-fhr4-w9xw. The existing sharp 0.35.5
+  lock already implements the latter advisory's documented image workaround;
+  this update does not claim a reproduced exploit or change audit thresholds.
+- Refresh the root application's sharp lock to 0.35.5, including its patched
+  prebuilt libvips/librsvg dependencies (GHSA-wq5f-xc86-pv6w), and source-map-js
+  to 1.2.2 (GHSA-68fv-2mgg-jv7q). Both updates stay within existing dependency
+  ranges; unrelated dependency advisories remain tracked separately.
+- Add a local private `braces@3.0.3` derivative candidate with fixed parser and
+  AST traversal budgets, pinned through an exact vendored archive and override.
+  This is not an upstream security release or complete advisory-coverage proof.
+  Registry audit does not independently assess the renamed package; the
+  standalone regression probe remains explicitly skipped. See
+  [candidate provenance and limitations](vendor/README.md).
+- Raise the MCP SDK minimum to 1.32.1 and refresh its Hono overrides to
+  `hono` 4.13.13 and `@hono/node-server` 2.1.5 to clear the SDK session,
+  redirect, validation-memory, bearer-audience and Hono static-path advisories.
+  Keep the patched `proxy-addr` 2.0.8 lock and package-root install floor.
+  The bundled CLI continues to use stdio; no HTTP transport or authentication
+  behavior is changed.
+- Article tag attachment now preserves existing shared tag names on slug conflicts;
+  authorized global renames remain available through the protected tag endpoint.
+- API-key scope forms offer explicit opt-in full access (`*`), preserve existing
+  wildcard selections, and correctly label empty scopes as public-article-only.
+  No existing key is automatically granted broader access.
+- Require explicit full scope (`allowedScopes` containing `"*"`) as well as
+  operation permission for existing shared tag/topic updates and deletions.
+  Scoped ADMIN keys cannot bypass this boundary; deletions remain ADMIN-only.
+  Human-session thresholds are unchanged. Tag creation now accepts WRITE/ADMIN
+  API keys; new tag/topic creation does not require full scope
+  ([#351](https://github.com/SweetSophia/noosphere/issues/351)).
+
+### Fixed
+
+- Authorize tag creation/renaming and topic updates through the shared permission
+  ladder for API keys and human sessions. Tag/topic deletion remains admin-only
+  ([#332](https://github.com/SweetSophia/noosphere/issues/332)).
+
 ## [1.15.0] - 2026-10-02
 
 Coordinated maintenance release for the application and all integrations.

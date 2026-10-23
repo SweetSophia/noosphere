@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/wiki";
-import { checkRouteAuth } from "@/lib/api/auth";
+import { checkRouteAuth, hasPermission } from "@/lib/api/auth";
+import { Permissions } from "@prisma/client";
 import { getJsonBodyError, readBoundedJsonObject } from "@/lib/api/body";
 import { rateLimit } from "@/lib/rate-limit";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
@@ -34,8 +35,10 @@ export async function PATCH(request: NextRequest, { params }: Props) {
   if (!auth.authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (auth.role !== "EDITOR" && auth.role !== "ADMIN") {
-    return NextResponse.json({ error: "Editor or admin role required" }, { status: 403 });
+  // Renames and moves affect shared taxonomy across article scopes.
+  // Full scope and the operation permission are independent requirements.
+  if (!hasPermission(auth, [Permissions.WRITE]) || !auth.allowedScopes?.includes("*")) {
+    return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
   }
 
   const { id } = await params;
@@ -128,8 +131,9 @@ export async function DELETE(request: NextRequest, { params }: Props) {
   if (!auth.authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (auth.role !== "ADMIN") {
-    return NextResponse.json({ error: "Admin role required" }, { status: 403 });
+  // ADMIN permission alone must not bypass the shared-taxonomy scope gate.
+  if (!hasPermission(auth, [Permissions.ADMIN]) || !auth.allowedScopes?.includes("*")) {
+    return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
   }
 
   const { id } = await params;

@@ -54,6 +54,8 @@ next-env.d.ts
 node_modules/
 *.tgz
 *.tar.gz
+# Exact maintained dependency candidate; provenance and limitations live alongside it.
+!/vendor/sweetsophia-noosphere-braces-3.0.3-noosphere.2.tgz
 
 # local runtime data
 uploads/
