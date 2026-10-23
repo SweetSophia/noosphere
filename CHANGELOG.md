@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- Refresh the root DOMPurify lock to 3.4.17 and the MCP `ip-address` lock to
+  10.7.4 for their current security advisories. Existing dependency ranges
+  admit these patches; audit thresholds are unchanged. Existing MCP consumer
+  lockfiles may need a dependency refresh to pick up the patched transitive.
 - Require ADMIN permission plus explicit full content scope (`*`) for global
   API-key list, metadata, creation, updates (including self-updates) and revocation.
   Scoped ADMIN credentials can no longer mint or upgrade wildcard credentials to
