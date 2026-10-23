@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "vendor/toml5-candidate/**"
+      - "vendor/zod-sdk-candidate/**"
       - ".github/workflows/toml-candidate.yml"
       - "opencode-noosphere-memory/**"
       - "kilocode-noosphere-memory/**"
@@ -20,6 +21,30 @@ on:
         description: "Exact reviewed commit SHA required for publication"
         type: string
         required: false
+      publish_zod_sdks:
+        description: "Publish only the two approved Zod-patched SDK archives"
+        type: boolean
+        required: true
+        default: false
+      verify_zod_sdks:
+        description: "Verify the two SDK archives without npm writes"
+        type: boolean
+        required: true
+        default: false
+      zod_first_attempt:
+        description: "Explicit first SDK submission only; never use for retries"
+        type: boolean
+        required: true
+        default: false
+      zod_receipt_run_id:
+        description: "Latest submission/recovery run whose journal must be recovered by a NEW dispatch"
+        type: string
+        required: false
+      zod_receipt_attempt:
+        description: "Latest attempt of that journal artifact; never restore an older ancestor"
+        type: string
+        required: false
+        default: "1"
 
 permissions:
   contents: read
@@ -97,6 +122,7 @@ jobs:
   publish-dependencies:
     if: >-
       github.event_name == 'workflow_dispatch' && inputs.publish_dependencies &&
+      !inputs.publish_zod_sdks && !inputs.verify_zod_sdks &&
       github.repository == 'SweetSophia/noosphere' && github.actor == 'SweetSophia' &&
       github.sha == inputs.expected_sha
     needs: [installed-consumers, application-typecheck]
@@ -133,3 +159,146 @@ jobs:
             ${{ runner.temp }}/toml-publication/publication.json
             ${{ runner.temp }}/toml-publication/submitted.json
             ${{ runner.temp }}/toml-publication/*.log
+
+  zod-sdk-qualification:
+    if: github.event_name == 'pull_request' || inputs.publish_zod_sdks || inputs.verify_zod_sdks
+    name: Qualify Zod SDK archives (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Validate SDK-only publication and recovery mode
+        env:
+          OLD_MODE: ${{ inputs.publish_dependencies }}
+          PUBLISH_MODE: ${{ inputs.publish_zod_sdks }}
+          VERIFY_MODE: ${{ inputs.verify_zod_sdks }}
+          FIRST_ATTEMPT: ${{ inputs.zod_first_attempt }}
+          RECEIPT_RUN: ${{ inputs.zod_receipt_run_id }}
+          RECEIPT_ATTEMPT: ${{ inputs.zod_receipt_attempt }}
+        run: |
+          set -euo pipefail
+          if [[ "$OLD_MODE" == true && ( "$PUBLISH_MODE" == true || "$VERIFY_MODE" == true ) ]]; then
+            echo 'Old artifact publication and SDK-only mode are mutually exclusive.' >&2; exit 1
+          fi
+          if [[ "$PUBLISH_MODE" == true && "$VERIFY_MODE" == true ]]; then
+            echo 'Choose SDK publication OR read-only verification.' >&2; exit 1
+          fi
+          if [[ "$PUBLISH_MODE" == true ]]; then
+            if [[ "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
+              echo 'Publication reruns are forbidden: start a new dispatch with the latest journal, or verify read-only.' >&2; exit 1
+            fi
+            [[ "$GITHUB_ACTOR" == SweetSophia && "$GITHUB_TRIGGERING_ACTOR" == SweetSophia ]]
+          fi
+          if [[ -n "$RECEIPT_RUN" ]]; then
+            [[ "$RECEIPT_RUN" =~ ^[1-9][0-9]*$ && "$RECEIPT_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+            [[ "$FIRST_ATTEMPT" != true ]]
+          elif [[ "$PUBLISH_MODE" == true ]]; then
+            [[ "$FIRST_ATTEMPT" == true && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+          fi
+      - name: Use the exact reviewed archive packer
+        run: npm install --global npm@12.1.0 --ignore-scripts
+      - name: Test SDK publication guards without network or registry writes
+        run: node --test vendor/zod-sdk-candidate/publish.test.mjs vendor/zod-sdk-candidate/ci-receipt.test.mjs
+      - name: Reconstruct and qualify both local SDK prototypes
+        run: node vendor/zod-sdk-candidate/qualify.mjs "$RUNNER_TEMP/zod-sdk-qualified"
+      - name: Preserve scoped SDK qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zod-sdk-qualified-node-${{ matrix.node }}
+          path: |
+            ${{ runner.temp }}/zod-sdk-qualified/reconstruction.json
+            ${{ runner.temp }}/zod-sdk-qualified/qualification.json
+            ${{ runner.temp }}/zod-sdk-qualified/*.log
+
+  publish-zod-sdks:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.publish_zod_sdks || inputs.verify_zod_sdks) &&
+      !inputs.publish_dependencies && !(inputs.publish_zod_sdks && inputs.verify_zod_sdks) &&
+      github.repository == 'SweetSophia/noosphere' && github.actor == 'SweetSophia' &&
+      github.triggering_actor == 'SweetSophia' &&
+      (!inputs.publish_zod_sdks || github.run_attempt == 1) &&
+      github.sha == inputs.expected_sha
+    needs: [zod-sdk-qualification]
+    name: Publish or verify exactly two Zod SDK archives
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: read
+    concurrency:
+      group: noosphere-zod-sdk-publication
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Use the exact reviewed archive packer
+        run: npm install --global npm@12.1.0 --ignore-scripts
+      # This job never executes SDK/runtime qualification code. It reconstructs
+      # only hash-approved archives with lifecycle scripts disabled.
+      - name: Reconstruct the exact SDK artifacts without executing SDK code
+        run: node vendor/zod-sdk-candidate/reconstruct.mjs "$RUNNER_TEMP/zod-sdk-publication"
+      - name: Download current-run Node 22 qualification evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: zod-sdk-qualified-node-22
+          path: ${{ runner.temp }}/zod-sdk-proof-22
+      - name: Download current-run Node 24 qualification evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: zod-sdk-qualified-node-24
+          path: ${{ runner.temp }}/zod-sdk-proof-24
+      - name: Bind both isolated qualifications to this reviewed commit
+        run: |
+          node vendor/zod-sdk-candidate/ci-receipt.mjs "$RUNNER_TEMP/zod-sdk-proof-22/qualification.json" "$GITHUB_SHA" 22
+          node vendor/zod-sdk-candidate/ci-receipt.mjs "$RUNNER_TEMP/zod-sdk-proof-24/qualification.json" "$GITHUB_SHA" 24
+          cp "$RUNNER_TEMP/zod-sdk-proof-22/qualification.json" "$RUNNER_TEMP/zod-sdk-publication/qualification.json"
+      - name: Recover the prior SDK journal when explicitly supplied
+        if: inputs.zod_receipt_run_id != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.zod_receipt_run_id }}
+          name: zod-sdk-publication-${{ inputs.zod_receipt_run_id }}-${{ inputs.zod_receipt_attempt }}
+          path: ${{ runner.temp }}/zod-sdk-recovered
+      - name: Restore the exact recovered submission journal
+        if: inputs.zod_receipt_run_id != ''
+        run: |
+          test -f "$RUNNER_TEMP/zod-sdk-recovered/submitted.json"
+          cp "$RUNNER_TEMP/zod-sdk-recovered/submitted.json" "$RUNNER_TEMP/zod-sdk-publication/submitted.json"
+      - name: Publish only the two reviewed SDK archives
+        if: inputs.publish_zod_sdks
+        env:
+          EXPECTED_REVIEWED_SHA: ${{ inputs.expected_sha }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node vendor/zod-sdk-candidate/publish.mjs "$RUNNER_TEMP/zod-sdk-publication" --publish
+      - name: Read back public SDK bytes without npm writes
+        if: inputs.verify_zod_sdks
+        run: node vendor/zod-sdk-candidate/publish.mjs "$RUNNER_TEMP/zod-sdk-publication" --verify
+      - name: Preserve SDK submission and public-byte evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zod-sdk-publication-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/zod-sdk-publication/reconstruction.json
+            ${{ runner.temp }}/zod-sdk-publication/qualification.json
+            ${{ runner.temp }}/zod-sdk-publication/submitted.json
+            ${{ runner.temp }}/zod-sdk-publication/publication.json
+            ${{ runner.temp }}/zod-sdk-publication/sweetsophia-noosphere-*-plugin-*.tgz
+            ${{ runner.temp }}/zod-sdk-publication/*.log

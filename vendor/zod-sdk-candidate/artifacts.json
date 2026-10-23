@@ -1,0 +1,32 @@
+[
+  {
+    "name": "@sweetsophia/noosphere-opencode-plugin",
+    "version": "1.15.5-noosphere.4",
+    "sha256": "a7087e63560d06df0735fa8474fcf2364b50b377fb30016eb8467066cc56a8d4",
+    "integrity": "sha512-sf4voi3QyESYxVGyTFDPGeaBUB1xXshiNOYFykx7yxCSnb7JbwGiP9MLQ+7dR+XttegWu+mVSxRqVVxETmw8Ng==",
+    "archive": "sweetsophia-noosphere-opencode-plugin-1.15.5-noosphere.4.tgz",
+    "source": {
+      "version": "1.15.5-noosphere.3",
+      "sha256": "b3be7a902c22bf2e0fb0c19ac519fcbb6d1af1c4c446db0d30da7039695bce07",
+      "integrity": "sha512-XNZUygmM+sN23WI9FHVkoMQQmnsnyjUMRttcAt+fvIs4K2nq9mBELc8bfNMLieLFbQEKQWeFzaM2hOYNN5cHpw=="
+    },
+    "effectAlias": "npm:@sweetsophia/noosphere-effect@4.0.0-beta.65-noosphere.3",
+    "zod": "4.6.7",
+    "manifestSha256": "c5e8447942aff8bace5d7f49dad9895b48f080888a04e758629347fc203f3f61"
+  },
+  {
+    "name": "@sweetsophia/noosphere-kilocode-plugin",
+    "version": "7.3.1-noosphere.5",
+    "sha256": "3900af1ca93dffb9ca0593d8040878bd8bea60b40127edef94c5ffc064dcbbbb",
+    "integrity": "sha512-fmdIIbMS3DN+hGXi7j47xFCruwA8EpnFcm8Zwib2n2o7/2r9CuxEmW7/4yqVjuwTIGDp726OboQ1vatO2ZMaOg==",
+    "archive": "sweetsophia-noosphere-kilocode-plugin-7.3.1-noosphere.5.tgz",
+    "source": {
+      "version": "7.3.1-noosphere.4",
+      "sha256": "030dca359fc9698cb71e6a11c1f8d644d4486a7c1c05c8e930e77980ea8ce239",
+      "integrity": "sha512-Qcwu0jnFWcuvwgkko4s1cBH9axmi+sM8RWfzO+mZJ2RuRXuXA1SVmNgSC/JqQ88veuaq+Ubsc2omz55uMEN50g=="
+    },
+    "effectAlias": "npm:@sweetsophia/noosphere-effect@4.0.0-beta.57-noosphere.4",
+    "zod": "4.6.7",
+    "manifestSha256": "bce0953074c12ffb4e260f07c0591ee612261aa9eaf2f75024f36b2bc8b5ec83"
+  }
+]
