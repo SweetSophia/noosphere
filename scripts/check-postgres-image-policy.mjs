@@ -14,10 +14,10 @@ const verifyReleaseArtifacts = process.argv.includes("--verify-release-assets");
 const verifyReleaseFiles = process.argv.includes("--verify-release-files");
 const releaseRoot = resolve(process.cwd());
 const immutableHelperRef = "9da4af0a7b2275aa91eecd102095e0e470bbb0e3";
-const guidedInstallerRef = "7ebffe1f21578cd6e2ad17a7f6fa5baddc88769e";
-const guidedInstallerSha256 = "f573463525c139e4cee69f5b002d2f8e0a15ad976063564fbb19cba5d3458586";
-const guidedBackendRef = "d0cef60aad8a0f5dea8ed4d2dc2e6f93629dab29";
-const guidedBackendSha256 = "04a3cd17d75542dca48b0f4bdd7cc7cffa926629b192c0e79bea91d2e44b2952";
+const guidedInstallerRef = "243892c40fb4659066bc9b13b555e1b5e0eb4039";
+const guidedInstallerSha256 = "9e190014a8738d54a3904050c4dce6a330f6682d43af7d8d2b61684d7694c815";
+const guidedBackendRef = "243892c40fb4659066bc9b13b555e1b5e0eb4039";
+const guidedBackendSha256 = "c82a6e0cca5fa90b05a8d6246205a8490ae653652fb8f82c8a86ccc9128684a3";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
