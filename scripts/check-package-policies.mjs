@@ -691,12 +691,21 @@ expect(
   "The release Compose file must use a configurable Obsidian host path and must not contain personal home paths or non-loopback URL defaults.",
 );
 for (const { relativePath, text } of guidedCommandDocs) {
+  const imageBinding = `NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${releaseVersion}}"`;
+  const openClawInvocation = 'bash "$installer" --non-interactive --with openclaw';
+  const versionBoundCommand =
+    `NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-${releaseVersion}}" ${imageBinding} ` +
+    `NOOSPHERE_PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${releaseVersion}}" ${openClawInvocation}`;
   expect(
     text.includes(`releases/tag/v${releaseVersion}`) &&
       text.includes("all six installer assets") &&
       text.includes("sha256sum -c -") &&
-      !text.includes(`NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${releaseVersion}}"`),
-    `${relativePath} must gate pinned commands on the coordinated release and preserve persisted custom images.`,
+      (text.includes(openClawInvocation)
+        ? text.includes(versionBoundCommand) &&
+          text.includes("export `NOOSPHERE_IMAGE` explicitly") &&
+          text.includes("does not reuse a persisted image automatically")
+        : !text.includes(imageBinding)),
+    `${relativePath} must gate pinned commands on the coordinated release, bind OpenClaw's image, and explain explicit custom-image preservation.`,
   );
 }
 expect(

@@ -104,14 +104,9 @@ Hermes archive. Before running it, confirm that the
 [`v1.15.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.0)
 exists with all six installer assets; a merged commit alone is not a release.
 
-Run the guided installer:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/243892c40fb4659066bc9b13b555e1b5e0eb4039/install.sh | bash
-```
-
-The URL is pinned to an immutable Git commit—never `master` or `main`. The
-launcher then checksum-verifies its exact backend before execution.
+Use the [verified two-file download](docs/INSTALLATION.md#auditable-download)
+to run the guided installer. It downloads the launcher and its reviewed backend
+from an immutable commit, verifies both checksums, then runs them together.
 
 The installer:
 
@@ -139,10 +134,8 @@ warnings, manual Compose deployment, and bootstrap-secret path rules, read
 Do not replace the guided upgrade with an unrestricted `docker compose pull &&
 docker compose up`. First inspect the plan without changing the machine:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/243892c40fb4659066bc9b13b555e1b5e0eb4039/install.sh \
-  | bash -s -- --dry-run --core-only
-```
+Use the [verified two-file download](docs/INSTALLATION.md#auditable-download)
+and add `--dry-run --core-only` to its final invocation.
 
 Preserve your configuration, database backup, and local repair records before
 upgrading. The installer keeps the `noosphere_postgres_data` volume and admits

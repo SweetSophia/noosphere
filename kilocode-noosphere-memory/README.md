@@ -167,10 +167,15 @@ for upgrade behavior and other installation paths.
 # Expected SHA-256: 9e190014a8738d54a3904050c4dce6a330f6682d43af7d8d2b61684d7694c815
 (
   set -e
-  installer="$(mktemp)"
-  trap 'rm -f "$installer"' EXIT
+  installer_dir="$(mktemp -d)"
+  trap 'rm -rf "$installer_dir"' EXIT
+  installer="$installer_dir/install.sh"
+  backend="$installer_dir/install-openclaw.sh"
+  unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/243892c40fb4659066bc9b13b555e1b5e0eb4039/install.sh -o "$installer"
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/243892c40fb4659066bc9b13b555e1b5e0eb4039/install-openclaw.sh -o "$backend"
   printf '%s  %s\n' '9e190014a8738d54a3904050c4dce6a330f6682d43af7d8d2b61684d7694c815' "$installer" | sha256sum -c -
+  printf '%s  %s\n' 'c82a6e0cca5fa90b05a8d6246205a8490ae653652fb8f82c8a86ccc9128684a3' "$backend" | sha256sum -c -
   bash "$installer" --non-interactive --with kilocode
 )
 ```

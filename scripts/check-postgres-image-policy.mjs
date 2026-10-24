@@ -18,6 +18,8 @@ const guidedInstallerRef = "243892c40fb4659066bc9b13b555e1b5e0eb4039";
 const guidedInstallerSha256 = "9e190014a8738d54a3904050c4dce6a330f6682d43af7d8d2b61684d7694c815";
 const guidedBackendRef = "243892c40fb4659066bc9b13b555e1b5e0eb4039";
 const guidedBackendSha256 = "c82a6e0cca5fa90b05a8d6246205a8490ae653652fb8f82c8a86ccc9128684a3";
+const publishedFallbackRef = "d0cef60aad8a0f5dea8ed4d2dc2e6f93629dab29";
+const publishedFallbackSha256 = "04a3cd17d75542dca48b0f4bdd7cc7cffa926629b192c0e79bea91d2e44b2952";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 
 function read(relativePath) {
@@ -58,6 +60,7 @@ function expect(condition, message) {
 const releaseVersion = read("VERSION").trim();
 const versionBoundInstallerCommand =
   `NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-${releaseVersion}}" ` +
+  `NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${releaseVersion}}" ` +
   `NOOSPHERE_PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${releaseVersion}}" ` +
   'bash "$installer" --non-interactive --with openclaw';
 
@@ -875,11 +878,16 @@ for (const relativePath of [
   expect(
     text.includes(guidedInstallerRef) &&
       text.includes(guidedInstallerSha256) &&
+      text.includes(guidedBackendSha256) &&
       text.includes("VERIFIED_NOOSPHERE_VERSION") &&
       text.includes(releaseVersion) &&
       text.includes("NOOSPHERE_VERSION") &&
       text.includes('"  set -e"') &&
-      text.includes(`trap \\'rm -f "$installer"\\' EXIT`) &&
+      text.includes('installer_dir="$(mktemp -d)"') &&
+      text.includes(`trap \\'rm -rf "$installer_dir"\\' EXIT`) &&
+      text.includes('backend="$installer_dir/install-openclaw.sh"') &&
+      text.includes("unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256") &&
+      countLiteral(text, "sha256sum -c -") === 2 &&
       text.includes("sha256sum -c -") &&
       text.indexOf("curl -fsSL") < text.indexOf("sha256sum -c -") &&
       text.indexOf("sha256sum -c -") < text.indexOf('bash "$installer"') &&
@@ -895,6 +903,31 @@ for (const relativePath of [
   );
 }
 
+const verifiedDownloadPrelude = [
+  "(",
+  "set -e",
+  'installer_dir="$(mktemp -d)"',
+  'trap \'rm -rf "$installer_dir"\' EXIT',
+  'installer="$installer_dir/install.sh"',
+  'backend="$installer_dir/install-openclaw.sh"',
+  "unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256",
+  `curl -fsSL ${rawRepositoryUrl}/${guidedInstallerRef}/install.sh -o "$installer"`,
+  `curl -fsSL ${rawRepositoryUrl}/${guidedBackendRef}/install-openclaw.sh -o "$backend"`,
+  `printf '%s  %s\\n' '${guidedInstallerSha256}' "$installer" | sha256sum -c -`,
+  `printf '%s  %s\\n' '${guidedBackendSha256}' "$backend" | sha256sum -c -`,
+];
+
+function verifiedInstallerBlocks(text, invocation) {
+  const lines = text.split("\n").map((line) => line.trim());
+  return lines.filter((line, start) => {
+    if (line !== "(" || !verifiedDownloadPrelude.every((expected, index) => lines[start + index] === expected)) return false;
+    const end = lines.indexOf(")", start + verifiedDownloadPrelude.length);
+    const body = lines.slice(start + verifiedDownloadPrelude.length, end);
+    return end >= 0 && (invocation ? body[0] === invocation : body[0]?.includes('bash "$installer"')) &&
+      body.slice(1).every((command) => /^openclaw noosphere (doctor|status)$/.test(command));
+  }).length;
+}
+
 for (const relativePath of [
   "README-legacy.md",
   "openclaw-noosphere-memory/README.md",
@@ -905,17 +938,13 @@ for (const relativePath of [
 ]) {
   const text = read(relativePath);
   const checksumCount = countLiteral(text, "sha256sum -c -");
-  const safeInstallerBlocks = Array.from(
-    text.matchAll(
-      /^(\s*)\(\n\1  set -e\n\1  installer="\$\(mktemp\)"\n\1  trap 'rm -f "\$installer"' EXIT\n\1  curl -fsSL [^\n]+ -o "\$installer"\n\1  printf '[^\n]+' '[a-f0-9]{64}' "\$installer" \| sha256sum -c -\n\1  NOOSPHERE_VERSION="\$\{NOOSPHERE_VERSION:-[0-9]+\.[0-9]+\.[0-9]+\}" NOOSPHERE_PLUGIN_SPEC="\$\{NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia\/openclaw-noosphere-memory@[0-9]+\.[0-9]+\.[0-9]+\}" bash "\$installer" --non-interactive --with openclaw\n(?:\1  openclaw noosphere (?:doctor|status)\n)*\1\)$/gm,
-    ),
-  ).length;
+  const safeInstallerBlocks = verifiedInstallerBlocks(text, versionBoundInstallerCommand);
   expect(
     text.includes(guidedInstallerRef) &&
       text.includes(guidedInstallerSha256) &&
       text.includes(versionBoundInstallerCommand) &&
       checksumCount > 0 &&
-      safeInstallerBlocks === checksumCount,
+      safeInstallerBlocks * 2 === checksumCount,
     `${relativePath} must gate every immutable installer execution on checksum success and trap cleanup`,
   );
   expect(
@@ -938,11 +967,15 @@ const guidedLauncherDocs = [
   "openclaw-noosphere-memory/README.md",
   "opencode-noosphere-memory/README.md",
   "kilocode-noosphere-memory/README.md",
+  "docs/HERMES-INSTALLER-HYBRID.md",
 ];
 for (const relativePath of guidedLauncherDocs) {
   const text = read(relativePath);
   expect(
-    text.includes(`${rawRepositoryUrl}/${guidedInstallerRef}/install.sh`) &&
+    (relativePath === "README.md"
+      ? text.includes("docs/INSTALLATION.md#auditable-download")
+      : verifiedInstallerBlocks(text) > 0 &&
+        countLiteral(text, `${rawRepositoryUrl}/${guidedInstallerRef}/install.sh`) === verifiedInstallerBlocks(text)) &&
       !text.includes("/master/install.sh") &&
       !text.includes("/main/install.sh"),
     `${relativePath} must pin the reviewed guided launcher without a moving-branch fallback`,
@@ -954,10 +987,8 @@ expect(
     hermesBundleReadme.includes("avoids a circular bundle-to-launcher pin"),
   "The bundled Hermes README must delegate guided launcher ownership without embedding a circular launcher pin",
 );
-const guidedOneLiner =
-  `curl -fsSL ${rawRepositoryUrl}/${guidedInstallerRef}/install.sh | bash`;
 expect(
-  readme.includes(guidedInstallerRef) &&
+  readme.includes("docs/INSTALLATION.md#auditable-download") &&
     !readme.includes("/master/install.sh") &&
     !readme.includes("/main/install.sh"),
   "README.md must pin the guided launcher commit without a moving-branch fallback",
@@ -970,7 +1001,7 @@ expect(
   "docs/INSTALLATION.md must pin the guided launcher commit and checksum without a moving-branch fallback",
 );
 expect(
-  readme.includes(guidedOneLiner) &&
+  readme.includes("verified two-file download") &&
     readme.includes("~/.noosphere/credentials.json") &&
     readme.includes("--dry-run --core-only") &&
     readme.includes("noosphere_postgres_data") &&
@@ -1584,6 +1615,17 @@ expect(
   sha256("install.sh") === guidedInstallerSha256,
   "the checked-in guided launcher bytes must match the checksum advertised by public immutable-install guidance",
 );
+const guidedLauncher = read("install.sh");
+expect(
+  extractShellConstant(guidedLauncher, "SOURCE_BACKEND_SHA256") === guidedBackendSha256,
+  "the paired download must match the launcher's source sibling checksum",
+);
+expect(
+  extractShellStringConstant(guidedLauncher, "BACKEND_URL") ===
+    `${rawRepositoryUrl}/${publishedFallbackRef}/install-openclaw.sh` &&
+  extractShellConstant(guidedLauncher, "BACKEND_SHA256") === publishedFallbackSha256,
+  "the template's published standalone fallback must retain its separately verified immutable pair",
+);
 
 if (verifyRemoteArtifacts) {
   await verifyRemoteArtifact(
@@ -1595,6 +1637,11 @@ if (verifyRemoteArtifacts) {
     "guided installer backend",
     `${rawRepositoryUrl}/${guidedBackendRef}/install-openclaw.sh`,
     guidedBackendSha256,
+  );
+  await verifyRemoteArtifact(
+    "published standalone fallback backend",
+    extractShellStringConstant(guidedLauncher, "BACKEND_URL"),
+    publishedFallbackSha256,
   );
   for (const { label, shaConstant, urlConstant } of helperArtifacts) {
     await verifyRemoteArtifact(

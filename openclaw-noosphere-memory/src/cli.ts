@@ -15,6 +15,7 @@ const DEFAULT_COMPOSE_FILE = "~/.noosphere/docker-compose.yml";
 const DEFAULT_LOG_TAIL = 80;
 const VERIFIED_INSTALLER_REF = "243892c40fb4659066bc9b13b555e1b5e0eb4039";
 const VERIFIED_INSTALLER_SHA256 = "9e190014a8738d54a3904050c4dce6a330f6682d43af7d8d2b61684d7694c815";
+const VERIFIED_BACKEND_SHA256 = "c82a6e0cca5fa90b05a8d6246205a8490ae653652fb8f82c8a86ccc9128684a3";
 const VERIFIED_NOOSPHERE_VERSION = "1.15.1";
 const VERIFIED_INSTALLER_URL =
   `https://raw.githubusercontent.com/SweetSophia/noosphere/${VERIFIED_INSTALLER_REF}/install.sh`;
@@ -76,10 +77,15 @@ export function getVerifiedInstallerCommands(): string[] {
   return [
     "(",
     "  set -e",
-    '  installer="$(mktemp)"',
-    '  trap \'rm -f "$installer"\' EXIT',
+    '  installer_dir="$(mktemp -d)"',
+    '  trap \'rm -rf "$installer_dir"\' EXIT',
+    '  installer="$installer_dir/install.sh"',
+    '  backend="$installer_dir/install-openclaw.sh"',
+    '  unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256',
     `  curl -fsSL ${VERIFIED_INSTALLER_URL} -o "$installer"`,
+    `  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/${VERIFIED_INSTALLER_REF}/install-openclaw.sh -o "$backend"`,
     `  printf '%s  %s\\n' '${VERIFIED_INSTALLER_SHA256}' "$installer" | sha256sum -c -`,
+    `  printf '%s  %s\\n' '${VERIFIED_BACKEND_SHA256}' "$backend" | sha256sum -c -`,
     `  NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-${VERIFIED_NOOSPHERE_VERSION}}" NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${VERIFIED_NOOSPHERE_VERSION}}" NOOSPHERE_PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${VERIFIED_NOOSPHERE_VERSION}}" bash "$installer" --non-interactive --with openclaw`,
     ")",
   ];

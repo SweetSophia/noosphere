@@ -19,8 +19,9 @@ will be promoted only after exact-head verification and explicit release approva
 ### Security
 - Raise the MCP direct Zod minimum to `^4.6.7` and refresh its lock for
   GHSA-mrhx-c7xc-m3w5 (oversized constrained-collection memory exhaustion).
-  OpenCode/Kilo SDK revisions for this advisory are prepared separately but
-  remain unpublished; those adapter paths are not yet remediated in this candidate.
+  OpenCode/Kilo now select the published maintained SDK revisions
+  `1.15.5-noosphere.4` / `7.3.1-noosphere.5`, which declare Zod `4.6.7`.
+  The coordinated application and adapter release remains unpublished.
 - Add explicit full-scope provisioning for new dedicated bootstrap ADMIN
   credentials used by guided installers. Direct Compose remains opt-in via
   `NOOSPHERE_BOOTSTRAP_FULL_ACCESS`; existing key scopes, permissions, revocation
@@ -117,6 +118,11 @@ will be promoted only after exact-head verification and explicit release approva
 
 ### Fixed
 
+- Deliver and verify both immutable installer files in CLI-generated commands and
+  installation guides, so the launcher selects the reviewed sibling backend
+  rather than its older standalone fallback. Bind OpenClaw's image, application
+  and plugin defaults to the same candidate version, and check the actual
+  delivery chain in policy and tamper-rejection regression tests.
 - Authorize tag creation/renaming and topic updates through the shared permission
   ladder for API keys and human sessions. Tag/topic deletion remains admin-only
   ([#332](https://github.com/SweetSophia/noosphere/issues/332)).

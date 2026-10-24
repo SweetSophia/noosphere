@@ -25,20 +25,15 @@ Hermes archive. Before running it, confirm that the
 exists with all six installer assets. Merging the installer source does not by
 itself publish those artifacts.
 
-This URL is pinned to an immutable Git commit. It does not execute a moving
-`master` or `main` branch:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/243892c40fb4659066bc9b13b555e1b5e0eb4039/install.sh | bash
-```
-
-The script can prompt through `/dev/tty`, even when it is piped to Bash. It:
+Use the [verified two-file download](#auditable-download) below. Both files
+come from an immutable commit, never a moving `master` or `main` branch.
+The script can prompt through `/dev/tty`. It:
 
 1. shows the resolved plan;
 2. offers integrations it detects on the machine;
 3. determines whether this is a fresh install, interrupted run, or upgrade;
-4. downloads the exact backend pinned inside the launcher and verifies its
-   SHA-256 before execution;
+4. verifies the downloaded sibling backend against the launcher's source
+   checksum before execution;
 5. generates distinct runtime credentials without printing them;
 6. starts and verifies PostgreSQL, Redis, migrations, bootstrap, and Noosphere;
 7. configures the integrations you selected.
@@ -113,39 +108,38 @@ It is never enabled by default.
 --help
 ```
 
-Examples:
-
-```bash
-# Show the plan without changing the machine.
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/243892c40fb4659066bc9b13b555e1b5e0eb4039/install.sh \
-  | bash -s -- --dry-run --core-only
-
-# Automation: local Noosphere plus Hermes, without prompts.
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/243892c40fb4659066bc9b13b555e1b5e0eb4039/install.sh \
-  | bash -s -- --non-interactive --with hermes
-```
+In the [verified two-file download](#auditable-download), append
+`--dry-run --core-only` to the final invocation to inspect the plan, or
+`--non-interactive --with hermes` to select Hermes without prompts.
 
 `--non-interactive` requires either `--with` or `--core-only`; it never guesses
 which agent configuration to mutate.
 
 ### Auditable download
 
-If you want to verify the launcher before running it, download first and check
-the advertised SHA-256:
+Download the launcher and its reviewed backend into one private directory and
+check both SHA-256 values before execution. Keeping the sibling filename is
+essential: this source launcher retains an older published fallback for
+standalone downloads, while these instructions select its reviewed sibling.
 
 ```bash
 (
   set -e
-  installer="$(mktemp)"
-  trap 'rm -f "$installer"' EXIT
+  installer_dir="$(mktemp -d)"
+  trap 'rm -rf "$installer_dir"' EXIT
+  installer="$installer_dir/install.sh"
+  backend="$installer_dir/install-openclaw.sh"
+  unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/243892c40fb4659066bc9b13b555e1b5e0eb4039/install.sh -o "$installer"
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/243892c40fb4659066bc9b13b555e1b5e0eb4039/install-openclaw.sh -o "$backend"
   printf '%s  %s\n' '9e190014a8738d54a3904050c4dce6a330f6682d43af7d8d2b61684d7694c815' "$installer" | sha256sum -c -
+  printf '%s  %s\n' 'c82a6e0cca5fa90b05a8d6246205a8490ae653652fb8f82c8a86ccc9128684a3' "$backend" | sha256sum -c -
   bash "$installer"
 )
 ```
 
-The launcher independently verifies the backend controller and optional Hermes
-bundle before using them.
+The launcher independently verifies the sibling backend and optional Hermes
+bundle before using them. The temporary directory is removed on exit.
 
 ## Fresh install versus upgrade
 
