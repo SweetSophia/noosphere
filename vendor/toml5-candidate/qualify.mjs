@@ -158,7 +158,15 @@ const server = createServer(async (request, response) => {
     // Fail closed for an unregistered maintained package rather than silently
     // falling back to a different candidate from the public registry.
     if (name.startsWith("@sweetsophia/")) { response.writeHead(404).end(); return; }
-    const upstream = await fetch(`${registry}${request.url}`, { signal: AbortSignal.timeout(30_000) });
+    // Forward only to the fixed public registry origin: an absolute-form or
+    // protocol-relative request target must never steer this loopback proxy
+    // elsewhere (request forgery). The origin guard fails closed.
+    const upstreamUrl = new URL(`${registry}${request.url}`);
+    if (upstreamUrl.origin !== registry) {
+      response.writeHead(400).end();
+      return;
+    }
+    const upstream = await fetch(upstreamUrl, { signal: AbortSignal.timeout(30_000) });
     response.writeHead(upstream.status, { "content-type": upstream.headers.get("content-type") || "application/json" });
     response.end(Buffer.from(await upstream.arrayBuffer()));
   } catch (error) {
