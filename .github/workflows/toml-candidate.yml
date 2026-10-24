@@ -39,8 +39,26 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: ${{ matrix.node }}
-      - name: Reconstruct and qualify installed candidate consumers
-        run: node vendor/toml5-candidate/qualify.mjs "$RUNNER_TEMP/toml-candidate"
+      - name: Use the reviewed archive packer version
+        run: npm install --global npm@12.1.0 --ignore-scripts
+      - name: Verify CI qualification contracts
+        run: node --test vendor/toml5-candidate/test/ci-qualification.test.mjs vendor/toml5-candidate/test/resource-budget.test.mjs vendor/toml5-candidate/test/process-ownership.test.mjs
+      - name: Verify the unchanged historical archive approvals
+        run: node vendor/toml5-candidate/qualify.mjs "$RUNNER_TEMP/toml-history" --reconstruct-only
+      - name: Qualify current installed candidate consumers
+        run: node vendor/toml5-candidate/qualify-active.mjs "$RUNNER_TEMP/toml-candidate"
+      - name: Preserve historical and active qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: installed-consumers-node-${{ matrix.node }}
+          path: |
+            ${{ runner.temp }}/toml-history/reconstruction.json
+            ${{ runner.temp }}/toml-history/*.log
+            ${{ runner.temp }}/toml-candidate/qualification.json
+            ${{ runner.temp }}/toml-candidate/*.log
+            ${{ runner.temp }}/toml-candidate/consumers/public-consumers.json
+            ${{ runner.temp }}/toml-candidate/consumers/*.log
 
   application-typecheck:
     runs-on: ubuntu-latest

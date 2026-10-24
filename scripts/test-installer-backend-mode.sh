@@ -24,6 +24,23 @@ for (const needle of required) {
 if (source.includes("API KEY (save this - it will not be shown again)")) {
   throw new Error("backend prints the bootstrap key by default");
 }
+const path = require("node:path");
+const root = path.dirname(process.env.BACKEND_UNDER_TEST);
+function assertInitOnlySetting(text, setting, label) {
+  const init = text.match(/^  init:\n([\s\S]*?)(?=^  [a-zA-Z0-9_-]+:|(?![\s\S]))/m)?.[1];
+  const settings = text.match(/^      NOOSPHERE_BOOTSTRAP_FULL_ACCESS:.*$/gm) ?? [];
+  if (!init?.includes(setting) || settings.length !== 1) {
+    throw new Error(`${label} must declare bootstrap full access only in init: ${setting}`);
+  }
+}
+assertInitOnlySetting(source, 'NOOSPHERE_BOOTSTRAP_FULL_ACCESS: "true"', "guided backend");
+for (const template of ["docker-compose.yml", "docker-compose.noosphere.yml"]) {
+  assertInitOnlySetting(
+    fs.readFileSync(path.join(root, template), "utf8"),
+    'NOOSPHERE_BOOTSTRAP_FULL_ACCESS: ${NOOSPHERE_BOOTSTRAP_FULL_ACCESS:-false}',
+    template,
+  );
+}
 NODE
 
 source "$backend"

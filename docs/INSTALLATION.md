@@ -43,6 +43,11 @@ The script can prompt through `/dev/tty`, even when it is piped to Bash. It:
 6. starts and verifies PostgreSQL, Redis, migrations, bootstrap, and Noosphere;
 7. configures the integrations you selected.
 
+In a source checkout, the launcher instead verifies its adjacent backend against
+`SOURCE_BACKEND_SHA256`. The remote URL and `BACKEND_SHA256` remain a separate
+published pair until coordinated publication. Packaging binds both checksums to
+the packaged backend. Source changes do not update a published backend or image.
+
 On success, open:
 
 ```text
@@ -73,9 +78,24 @@ less ~/.noosphere/credentials.json
 
 Runtime database and application secrets remain in `~/.noosphere/.env`, also
 with mode `0600`. The protected credential file separates the bootstrap ADMIN
-key from the default WRITE key and the persisted per-tool WRITE keys. OpenClaw,
-Hermes, OpenCode, and Kilo Code receive only their scoped key; the bootstrap key
-is never written to tool configuration. OpenClaw's secret-provider file also
+key from the default WRITE key and the persisted per-tool WRITE keys. Guided
+installation explicitly provisions its **new dedicated bootstrap key** with
+`allowedScopes: ["*"]`, because global key management requires both ADMIN
+permission and literal full scope. That trusted opt-in is confined to the init
+service; integration keys remain WRITE with `allowedScopes: []` (public articles
+only). It is not a migration or blanket wildcard backfill.
+
+Reusing an existing key preserves its permissions, scopes, revocation and
+principal binding. A revoked key is not reactivated. If a reused credential is
+not an unbound full-scope ADMIN key, guided bootstrap fails safely with a recovery
+message instead of broadening it. Replace `NOOSPHERE_BOOTSTRAP_API_KEY` in the
+protected runtime `.env` with a **new dedicated** credential before retrying, or
+deliberately review access in the human ADMIN console. Preserve the old scoped
+key; do not silently repurpose an integration key. A temporary process override
+alone does not replace the existing persisted bootstrap assignment.
+
+OpenClaw, Hermes, OpenCode, and Kilo Code receive only their scoped key; the
+bootstrap key is never written to tool configuration. OpenClaw's secret-provider file also
 excludes the bootstrap key. Use `/wiki/admin/keys` later if you want to narrow a
 tool further with restricted scopes.
 
@@ -200,6 +220,25 @@ docker compose -f docker-compose.noosphere.yml --env-file .env up -d app
 That sequence is valid only for an absent PostgreSQL volume. If
 `noosphere_postgres_data` already exists, follow the existing-volume transition
 guide before starting the candidate database image.
+
+### Explicit bootstrap full access
+
+Direct Compose/bootstrap defaults to `NOOSPHERE_BOOTSTRAP_FULL_ACCESS=false`.
+A newly inserted key then receives `allowedScopes: []`, which cannot manage
+keys even with ADMIN permission. To deliberately provision a **new dedicated**
+global-management credential, set `NOOSPHERE_BOOTSTRAP_FULL_ACCESS=true` in the
+protected `.env` before running init (ADMIN permission is required). The bootstrap
+process accepts only exact `true` and `false` strings. The Compose templates use
+`${NOOSPHERE_BOOTSTRAP_FULL_ACCESS:-false}`, so an unset or empty Compose input
+resolves to `false` before bootstrap; an empty value passed directly to the
+bootstrap process is rejected.
+
+The option never changes a row with a matching key hash. A conflicting scoped,
+less-privileged, revoked or principal-bound credential is not upgraded or
+reactivated; full-access provisioning aborts and rolls back its transaction.
+An already unbound, active ADMIN key containing literal `"*"` can be reused
+without changing its scopes or other metadata. Direct callers that do not opt
+in can also reuse active scoped credentials unchanged.
 
 ### Bootstrap credential file rules
 

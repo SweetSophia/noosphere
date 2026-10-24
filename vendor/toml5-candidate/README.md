@@ -10,6 +10,26 @@ coordinated adapter release. See [RELEASE.md](RELEASE.md).
 
 ## Active dependency path
 
+### Current candidate pins (2026-10-24)
+
+The active adapter manifests in this candidate select the Zod-patched SDK
+revisions published on 2026-10-24:
+
+- OpenCode adapter: `@opencode-ai/plugin` aliases
+  `@sweetsophia/noosphere-opencode-plugin@1.15.5-noosphere.4`, whose `effect`
+  dependency aliases `@sweetsophia/noosphere-effect@4.0.0-beta.65-noosphere.3`.
+- Kilo adapter: `@kilocode/plugin` aliases
+  `@sweetsophia/noosphere-kilocode-plugin@7.3.1-noosphere.5`, whose `effect`
+  dependency aliases `@sweetsophia/noosphere-effect@4.0.0-beta.57-noosphere.4`.
+- Both current SDK revisions declare `zod: 4.6.7`, and the packed adapter
+  bundles the shared client at exact version `1.15.1`.
+
+### Published 2026-10-23 repair (historical)
+
+The pins below are the four-archive repair published on 2026-10-23. They remain
+the approved archive identities recorded in [RELEASE.md](RELEASE.md) and are not
+rewritten here.
+
 - OpenCode adapter: `@opencode-ai/plugin` aliases
   `@sweetsophia/noosphere-opencode-plugin@1.15.5-noosphere.3`, whose `effect`
   dependency aliases `@sweetsophia/noosphere-effect@4.0.0-beta.65-noosphere.3`.
@@ -43,6 +63,10 @@ install and was rejected rather than bypassing that gate.
 - `qualify.mjs`: reconstructs all four forks from hash-verified public upstream
   archives, verifies every patched/repacked member, and runs fresh downstream
   install/reinstall, dependency-tree, audit, runtime and strict type checks.
+- `qualify-active.mjs`: snapshots the current client/adapters with their locks,
+  builds/tests/audits them, checks unchanged emitted bytes, then packs and qualifies
+  fresh public-registry consumers. It never replaces active manifests with the
+  historical proposals.
 - `pack-adapter.mjs`: packs an already-built source adapter through isolated
   staging. It preserves source manifests, takes the private client's actual npm
   package contents, and changes only the staged client edge to its exact version.
@@ -97,8 +121,53 @@ unsafe integers fail explicitly through Effect, prototype-shaped keys remain own
 data, and nested null-prototype tables decode through Effect schemas. They do not
 establish arbitrary TOML compatibility or add a `bigint` opt-in.
 
-The `Qualify TOML dependency repair` workflow independently runs the harness
-on Node 22 and 24. It also checks application lint/types, with the consumer fixture
+The original command above is a historical replay, not a qualification of the
+current release. Its proposed manifests pin the old client/SDKs, and its old Zod
+graph is not audit-clean. Run that full replay from its matching historical source
+checkout; do not rewrite approval records or weaken current fixtures to make it
+pass in a newer checkout.
+
+The `Qualify TOML dependency repair` workflow now separates two mandatory proofs
+on Node 22 and 24:
+
+```sh
+# Exact historical archive/member/provenance proof with the reviewed npm 12.1.0:
+node vendor/toml5-candidate/qualify.mjs /absolute/new/history-output --reconstruct-only
+# Current manifests/locks, bundled current client, and full active consumer gates:
+node vendor/toml5-candidate/qualify-active.mjs /absolute/new/active-output
+```
+
+The first command compares all four reconstructed archive hashes and integrities
+with the unchanged `release-artifacts.json`; its `reconstruction.json` explicitly
+does not claim historical consumer qualification. The second keeps install,
+reinstall, full-tree, low-threshold audit, runtime and strict TypeScript checks on
+the actual shipping dependency graph. Audit failures still fail the job; no
+finding is ignored or allowlisted. The original default qualifier and manual
+publication command remain unchanged and do not gain a reconstruction-only bypass.
+
+Local resource limits are part of qualification, not optional operator cleanup:
+start only with 10 GiB free reserve plus a conservative 2 GiB stage budget on the
+output filesystem. Linux process-group ownership (`/proc` is required) monitors
+that reserve and stops the complete disposable writer group on breach, timeout,
+ordinary command completion or interruption. SIGINT/SIGTERM stop and quiesce
+writers before cleanup and lock release; no interrupted run gets a success
+receipt. Uncatchable owner death (SIGKILL or a machine crash) cannot execute JS
+cleanup: inspect and terminate any surviving writer before removing its stale
+lock; use an external supervisor if parent-death containment is required.
+A shared per-user install lock
+rejects simultaneous active qualifiers; run Node 22 and 24 serially. If an abrupt
+termination leaves a lock, inspect its owner before removing it—never delete a
+live qualifier's lock. On success or failure the active runner removes generated
+installs, download caches and packer staging while retaining source, manifests,
+locks, logs, archive hashes and qualification receipts. Historical reconstruction
+releases each pair of unpacked source/repacked directories once its hashes pass.
+That is not an automatic-cleanup guarantee for the full historical replay: its
+failed source proof and legacy builder/consumer trees require stage-end cleanup;
+never count that legacy path as the current self-cleaning qualification.
+Do not retain installed dependency trees indefinitely as review evidence; recreate
+one installation on demand and remove it at the end of that stage.
+
+The workflow also checks application lint/types, with the consumer fixture
 directory excluded from the application's root TypeScript compilation. Consumer
 types are checked separately with `strict` and `skipLibCheck=false` after actual
 installation. A successful workflow qualifies the local graph, not publication.

@@ -1,5 +1,9 @@
 # PostgreSQL pgvector Compose upgrade
 
+> **1.15.1 release candidate — not published.** Version-bound commands below
+> are for the candidate and must not run until the coordinated public release
+> and all six installer assets exist. Merge/publication/production remain on hold.
+
 This runbook covers Noosphere Phase A2b: switching an existing PostgreSQL 16.14 Alpine volume to Noosphere's rehearsed PostgreSQL + pgvector image. It changes only the database image. It does **not** run `CREATE EXTENSION vector`, change the application schema, or enable hybrid retrieval.
 
 ## Supported transition
@@ -40,7 +44,7 @@ Docker administrator access is an explicit trust boundary. The lock serializes t
 ## OpenClaw installer deployments
 
 Install and upgrade through the same command, but only after the coordinated
-[`v1.15.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.0)
+[`v1.15.1` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.1)
 exists with all six installer assets. Source merge alone does not publish them:
 
 ```bash
@@ -52,7 +56,7 @@ exists with all six installer assets. Source merge alone does not publish them:
   trap 'rm -f "$installer"' EXIT
   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/7ebffe1f21578cd6e2ad17a7f6fa5baddc88769e/install.sh -o "$installer"
   printf '%s  %s\n' 'f573463525c139e4cee69f5b002d2f8e0a15ad976063564fbb19cba5d3458586' "$installer" | sha256sum -c -
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.0}" bash "$installer" --non-interactive --with openclaw
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.1}" bash "$installer" --non-interactive --with openclaw
 )
 ```
 

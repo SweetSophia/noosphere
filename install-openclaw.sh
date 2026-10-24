@@ -51,7 +51,7 @@ NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH="${NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH:-}"
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH="${NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH:-}"
 NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS="${NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS:-}"
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS="${NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS:-}"
-PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.0}"
+PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.1}"
 SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$HOME/.openclaw/secrets}"
 SECRETS_FILE="${NOOSPHERE_SECRETS_FILE:-$SECRETS_DIR/noosphere-memory.json}"
 SECRET_PROVIDER_ID="${NOOSPHERE_SECRET_PROVIDER_ID:-noosphere-memory}"
@@ -282,6 +282,7 @@ create_scoped_integration_key() {
     --data-binary "@$body" --output "$response" "$base_url/api/keys"; then
     rm -f "$config" "$body" "$response"
     echo "Failed to create a scoped ${label} API key." >&2
+    echo 'Provisioning requires an ADMIN bootstrap key with explicit full scope (*). Existing scoped keys are not automatically expanded; use a new dedicated bootstrap credential or the human administrator key console.' >&2
     return 1
   fi
   raw=$(json_get "$response" key)
@@ -546,7 +547,7 @@ resolve_runtime_config() {
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-$(env_get "$runtime_env" NOOSPHERE_PORT)}"
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-$(env_get "$runtime_env" NOOSPHERE_VERSION)}"
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.0}"
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.1}"
   if ((NOOSPHERE_VERSION_WAS_EXPLICIT == 1 && NOOSPHERE_IMAGE_WAS_EXPLICIT == 0)); then
     # A version-bound public upgrade must not inherit an installer-persisted
     # image from the previous release. Operators retaining a custom registry or
@@ -1789,6 +1790,9 @@ services:
       NOOSPHERE_ADMIN_PASSWORD_RESET: \${NOOSPHERE_ADMIN_PASSWORD_RESET:-false}
       NOOSPHERE_FORCE_ADMIN: \${NOOSPHERE_FORCE_ADMIN:-false}
       NOOSPHERE_BOOTSTRAP_API_KEY: \${NOOSPHERE_BOOTSTRAP_API_KEY}
+      # Guided provisioning needs global key management. This opt-in applies
+      # only to NEW bootstrap keys; existing scoped/revoked keys are not widened.
+      NOOSPHERE_BOOTSTRAP_FULL_ACCESS: "true"
       # Keep the default in a dedicated directory because bootstrap tightens the
       # parent directory to 0700 before writing the 0600 credentials file.
       NOOSPHERE_BOOTSTRAP_SECRETS_FILE: \${NOOSPHERE_BOOTSTRAP_SECRETS_FILE:-/tmp/noosphere-bootstrap-secrets/secrets.json}

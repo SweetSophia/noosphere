@@ -1,6 +1,6 @@
 {
   "name": "@sweetsophia/kilocode-noosphere-memory",
-  "version": "1.15.0",
+  "version": "1.15.1",
   "private": false,
   "description": "Connect Kilo Code to self-hosted Noosphere memory for recall, draft saves, and optional idle auto-save.",
   "type": "module",
@@ -33,7 +33,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@kilocode/plugin": "npm:@sweetsophia/noosphere-kilocode-plugin@7.3.1-noosphere.4",
+    "@kilocode/plugin": "npm:@sweetsophia/noosphere-kilocode-plugin@7.3.1-noosphere.5",
     "@kilocode/sdk": "^7.3.1",
     "@sweetsophia/noosphere-client": "file:../noosphere-client"
   },

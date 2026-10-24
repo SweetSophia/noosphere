@@ -1,21 +1,22 @@
 // Reconstruct and qualify the inactive candidate. Never publishes packages.
-// Usage: node vendor/toml5-candidate/qualify.mjs /absolute/new/output-directory
+// Usage: node vendor/toml5-candidate/qualify.mjs /absolute/new/output-directory [--reconstruct-only]
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { execFile as execFileCallback, execFileSync } from "node:child_process";
-import { promisify } from "node:util";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 
-const execFile = promisify(execFileCallback);
+import { checkDiskBudget, runWithBudget } from "./resource-budget.mjs";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, "../..");
-const output = process.argv[2];
+const [output, mode, ...extra] = process.argv.slice(2);
+assert.ok(extra.length === 0 && (mode === undefined || mode === "--reconstruct-only"), "Unknown qualification mode");
 assert.ok(output && path.isAbsolute(output), "Provide a new absolute output directory");
 assert.ok(Number(process.versions.node.split(".")[0]) >= 22, "Node 22 or newer required");
+checkDiskBudget(path.dirname(output));
 await fs.mkdir(output); // Refuse reuse: stale installations must not qualify a candidate.
 const npm = realpathSync(process.env.npm_execpath || execFileSync("which", ["npm"], { encoding: "utf8" }).trim());
 const provenance = JSON.parse(await fs.readFile(path.join(here, "provenance.json"), "utf8"));
@@ -28,7 +29,7 @@ const sha = (bytes, algorithm = "sha256") => createHash(algorithm).update(bytes)
 async function run(command, args, cwd, label) {
   const log = path.join(output, `${String(++sequence).padStart(3, "0")}-${label}.log`);
   try {
-    const result = await execFile(command, args, { cwd, maxBuffer: 16 * 1024 * 1024, timeout: 180_000 });
+    const result = await runWithBudget(command, args, { cwd, maxBuffer: 16 * 1024 * 1024, timeout: 180_000 });
     await fs.writeFile(log, result.stdout + result.stderr);
     console.log(`PASS ${label}`);
     return result.stdout;
@@ -39,6 +40,9 @@ async function run(command, args, cwd, label) {
   }
 }
 const npmRun = (args, cwd, label) => run(process.execPath, [npm, ...args], cwd, label);
+if (mode === "--reconstruct-only") {
+  assert.equal((await npmRun(["--version"], output, "npm-version")).trim(), "12.1.0", "Historical archive reproduction requires the reviewed npm 12.1.0 packer");
+}
 async function hashes(directory) {
   const result = {};
   async function visit(current, prefix = "") {
@@ -112,6 +116,19 @@ for (let i = 0; i < sources.length; i++) {
   const repacked = path.join(output, `repacked-${i}`);
   await unpack(artifact.archive, repacked, `fork-${i}-repacked`);
   assert.deepEqual(await hashes(repacked), after, "Repacking changed package members");
+  // All proof is recorded; neither unpacked copy is needed by the consumers.
+  await fs.rm(directory, { recursive: true });
+  await fs.rm(repacked, { recursive: true });
+}
+
+// Historical provenance proof is separate from qualification of a shipping graph.
+// Never rewrite the approved identities or claim that these old consumers passed.
+if (mode === "--reconstruct-only") {
+  const approved = JSON.parse(await fs.readFile(path.join(here, "release-artifacts.json"), "utf8"));
+  const ordered = (entries) => [...entries].sort((a, b) => `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`));
+  assert.deepEqual(ordered(receipts), ordered(approved), "Reconstructed archives differ from the historical approvals");
+  await fs.writeFile(path.join(output, "reconstruction.json"), `${JSON.stringify({ node: process.version, artifacts: receipts, distribution: "historical-archives-only-not-consumer-qualification" }, null, 2)}\n`);
+  process.exit(0); // All archive checks/writes awaited; no loopback server was started.
 }
 
 // The registry serves only the exact reconstructed candidate artifacts; upstream

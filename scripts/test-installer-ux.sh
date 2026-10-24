@@ -3,10 +3,34 @@ set -euo pipefail
 trap 'printf "installer UX test failed near line %s: %s\\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-launcher=${1:-$root/install.sh}
+launcher=${1:-}
 version=$(tr -d '\r\n' < "$root/VERSION")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+
+# The checked-in template retains the previous published fallback. Qualify the
+# candidate launcher emitted by packaging, not that historical version pin.
+if [[ -z "$launcher" ]]; then
+  "$root/scripts/package-installer.sh" "$tmp/release" >/dev/null
+  launcher="$tmp/release/install.sh"
+fi
+LAUNCHER_UNDER_TEST="$launcher" EXPECTED_INSTALLER_VERSION="$version" node <<'NODE'
+const fs = require("node:fs");
+const source = fs.readFileSync(process.env.LAUNCHER_UNDER_TEST, "utf8");
+const versions = [...source.matchAll(/^RELEASE_VERSION='([^']+)'$/gm)];
+if (versions.length !== 1 || versions[0][1] !== process.env.EXPECTED_INSTALLER_VERSION) {
+  throw new Error("UX launcher must match the coordinated candidate VERSION");
+}
+NODE
+
+# Most UX cases isolate external services using a source-layout fixture. Keep
+# its launcher bytes exact; the single-file case below separately fetches and
+# checksum-verifies the candidate Hermes archive through the curl fixture.
+mkdir -p "$tmp/launcher"
+cp "$launcher" "$tmp/launcher/install.sh"
+cp "$root/VERSION" "$root/install-openclaw.sh" "$tmp/launcher/"
+cp -a "$root/hermes-noosphere-memory" "$tmp/launcher/"
+launcher="$tmp/launcher/install.sh"
 mkdir -p "$tmp/fake-bin" "$tmp/home/.config/opencode" "$tmp/home/.config/kilo"
 fixture_api_key="noo_fixture_$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
 fixture_bootstrap_key="noo_fixture_$(node -e 'process.stdout.write(require("node:crypto").randomBytes(12).toString("hex"))')"
@@ -235,7 +259,7 @@ env "${common_env[@]}" \
   INSTALLER_TEST_APP_URL_CAPTURE="$tmp/custom-port-app-url.txt" \
   INSTALLER_TEST_PORT_CAPTURE="$tmp/custom-port.txt" \
   INSTALLER_TEST_IMAGE_CAPTURE="$tmp/custom-image.txt" \
-  bash "$root/install.sh" --non-interactive --with hermes > "$tmp/custom-port.out"
+  bash "$launcher" --non-interactive --with hermes > "$tmp/custom-port.out"
 test "$(<"$tmp/custom-port-app-url.txt")" = 'http://127.0.0.1:7777'
 test "$(<"$tmp/custom-port.txt")" = 7777
 test "$(<"$tmp/custom-image.txt")" = 'registry.example/noosphere-custom:validated'
@@ -243,7 +267,7 @@ grep -q 'Hermes Agent configured' "$tmp/custom-port.out"
 
 : > "$tmp/curl.calls"
 if env "${common_env[@]}" NOOSPHERE_TEST_HERMES_KEY="$fixture_transport_key" \
-  bash "$root/install.sh" --non-interactive --with hermes \
+  bash "$launcher" --non-interactive --with hermes \
   >"$tmp/transport.out" 2>"$tmp/transport.err"; then
   echo 'launcher transport failure unexpectedly rotated or reused a scoped key' >&2
   exit 1
@@ -263,7 +287,7 @@ if env "${common_env[@]}" \
   HOME="$integration_home" \
   NOOSPHERE_HOME="$integration_home/.noosphere" \
   OPENCODE_CONFIG_FILE="$integration_home/.config/opencode-link/opencode.json" \
-  bash "$root/install.sh" --non-interactive --with opencode \
+  bash "$launcher" --non-interactive --with opencode \
   >"$tmp/integration-parent-symlink.out" 2>&1; then
   echo 'symlinked integration config parent unexpectedly passed' >&2
   exit 1
@@ -278,7 +302,7 @@ printf '%s\n' 'SENTINEL=yes' > "$tmp/hermes-env-target"
 chmod 644 "$tmp/hermes-env-target"
 ln -s "$tmp/hermes-env-target" "$tmp/home/.hermes-symlink/.env"
 if env "${common_env[@]}" HERMES_HOME="$tmp/home/.hermes-symlink" \
-  bash "$root/install.sh" --non-interactive --with hermes > "$tmp/hermes-symlink.out" 2>&1; then
+  bash "$launcher" --non-interactive --with hermes > "$tmp/hermes-symlink.out" 2>&1; then
   echo 'symlinked Hermes environment unexpectedly passed' >&2
   exit 1
 fi
@@ -295,7 +319,7 @@ printf '%s\n' 'HOME_SENTINEL=yes' > "$tmp/hermes-home-target/sentinel"
 chmod 755 "$tmp/hermes-home-target"
 ln -s "$tmp/hermes-home-target" "$tmp/home/.hermes-home-link"
 if env "${common_env[@]}" HERMES_HOME="$tmp/home/.hermes-home-link" \
-  bash "$root/install.sh" --non-interactive --with hermes > "$tmp/hermes-home-symlink.out" 2>&1; then
+  bash "$launcher" --non-interactive --with hermes > "$tmp/hermes-home-symlink.out" 2>&1; then
   echo 'symlinked Hermes home unexpectedly passed' >&2
   exit 1
 fi
@@ -311,7 +335,7 @@ mkdir -p "$parent_home" "$parent_target"
 printf '%s\n' 'PARENT_SENTINEL=yes' > "$parent_target/sentinel"
 ln -s "$parent_target" "$parent_home/plugins"
 if env "${common_env[@]}" HERMES_HOME="$parent_home" \
-  bash "$root/install.sh" --non-interactive --with hermes > "$tmp/hermes-parent-symlink.out" 2>&1; then
+  bash "$launcher" --non-interactive --with hermes > "$tmp/hermes-parent-symlink.out" 2>&1; then
   echo 'symlinked Hermes parent directory unexpectedly passed' >&2
   exit 1
 fi
@@ -323,7 +347,7 @@ grep -q 'Refusing symlinked Hermes path component' "$tmp/hermes-parent-symlink.o
 if env "${common_env[@]}" \
   APP_URL='https://attacker.invalid:6578' \
   HERMES_HOME="$tmp/home/.hermes-redirected" \
-  bash "$root/install.sh" --non-interactive --with hermes > "$tmp/redirected.out" 2>&1; then
+  bash "$launcher" --non-interactive --with hermes > "$tmp/redirected.out" 2>&1; then
   echo 'non-local bootstrap-key destination unexpectedly passed' >&2
   exit 1
 fi
@@ -333,7 +357,7 @@ if env "${common_env[@]}" \
   APP_URL='http://127.0.0.1:7777' \
   NOOSPHERE_PORT=6578 \
   HERMES_HOME="$tmp/home/.hermes-wrong-port" \
-  bash "$root/install.sh" --non-interactive --with hermes > "$tmp/wrong-port.out" 2>&1; then
+  bash "$launcher" --non-interactive --with hermes > "$tmp/wrong-port.out" 2>&1; then
   echo 'wrong-port bootstrap-key destination unexpectedly passed' >&2
   exit 1
 fi
@@ -344,7 +368,7 @@ mkdir -p "$tmp/hermes-release" "$tmp/remote-launcher"
 "$root/scripts/package-hermes-plugin.sh" "$tmp/hermes-release" >/dev/null
 hermes_archive="$tmp/hermes-release/hermes-noosphere-memory-${version}.tar.gz"
 hermes_sha=$(sha256sum "$hermes_archive" | awk '{print $1}')
-cp "$root/install.sh" "$tmp/remote-launcher/install.sh"
+cp "$launcher" "$tmp/remote-launcher/install.sh"
 REMOTE_LAUNCHER="$tmp/remote-launcher/install.sh" HERMES_FIXTURE_SHA="$hermes_sha" node <<'NODE'
 const fs = require("node:fs");
 const path = process.env.REMOTE_LAUNCHER;
@@ -415,38 +439,38 @@ if grep -q 'Hermes Agent configured' "$tmp/hermes-without-cli.out"; then
   exit 1
 fi
 
-env "${common_env[@]}" bash "$root/install.sh" \
+env "${common_env[@]}" bash "$launcher" \
   --non-interactive --with openclaw > "$tmp/openclaw.out"
 test "$(<"$tmp/backend-mode.txt")" = true
 
-test "$(grep -c 'Configure Noosphere for detected Kilo Code' "$root/install.sh")" = 1
-if bash "$root/install.sh" --dry-run >/dev/null 2>&1; then
+test "$(grep -c 'Configure Noosphere for detected Kilo Code' "$launcher")" = 1
+if bash "$launcher" --dry-run >/dev/null 2>&1; then
   echo 'no-tty implicit selection unexpectedly passed' >&2
   exit 1
 fi
-if env "${common_env[@]}" bash "$root/install.sh" --non-interactive >/dev/null 2>&1; then
+if env "${common_env[@]}" bash "$launcher" --non-interactive >/dev/null 2>&1; then
   echo 'non-interactive selection guard unexpectedly passed' >&2
   exit 1
 fi
-if bash "$root/install.sh" --dry-run --with unknown >/dev/null 2>&1; then
+if bash "$launcher" --dry-run --with unknown >/dev/null 2>&1; then
   echo 'unknown integration guard unexpectedly passed' >&2
   exit 1
 fi
 for empty_selection in ',,' none; do
-  if bash "$root/install.sh" --dry-run --non-interactive --with="$empty_selection" >/dev/null 2>&1; then
+  if bash "$launcher" --dry-run --non-interactive --with="$empty_selection" >/dev/null 2>&1; then
     echo "empty integration guard unexpectedly passed: $empty_selection" >&2
     exit 1
   fi
 done
 ln -s "$tmp/fake-backend.sh" "$tmp/backend-link.sh"
 if env "${common_env[@]}" NOOSPHERE_BACKEND_PATH="$tmp/backend-link.sh" \
-  bash "$root/install.sh" --core-only >/dev/null 2>&1; then
+  bash "$launcher" --core-only >/dev/null 2>&1; then
   echo 'symlink backend guard unexpectedly passed' >&2
   exit 1
 fi
 
 env "${common_env[@]}" NOOSPHERE_BACKEND_PATH=/does/not/exist \
-  bash "$root/install.sh" --dry-run --core-only >/dev/null
+  bash "$launcher" --dry-run --core-only >/dev/null
 
 mkdir -p "$tmp/mode-bin" "$tmp/modes/fresh" "$tmp/modes/existing" \
   "$tmp/modes/partial" "$tmp/modes/unclassified/backups/postgres-pgvector" \
@@ -459,31 +483,31 @@ chmod 700 "$tmp/mode-bin/docker"
 node_bin_dir=$(dirname "$(command -v node)")
 mode_path="$tmp/mode-bin:$node_bin_dir:/usr/bin:/bin"
 env HOME="$tmp/modes/fresh" NOOSPHERE_HOME="$tmp/modes/fresh/.noosphere" PATH="$mode_path" \
-  bash "$root/install.sh" --dry-run --core-only > "$tmp/mode-fresh.out"
+  bash "$launcher" --dry-run --core-only > "$tmp/mode-fresh.out"
 grep -q 'Mode:      fresh installation' "$tmp/mode-fresh.out"
 mkdir -p "$tmp/modes/existing/.noosphere" "$tmp/modes/partial/.noosphere"
 touch "$tmp/modes/existing/.noosphere/.env" "$tmp/modes/existing/.noosphere/docker-compose.yml"
 env HOME="$tmp/modes/existing" NOOSPHERE_HOME="$tmp/modes/existing/.noosphere" PATH="$mode_path" \
-  bash "$root/install.sh" --dry-run --core-only > "$tmp/mode-existing.out"
+  bash "$launcher" --dry-run --core-only > "$tmp/mode-existing.out"
 grep -q 'Mode:      upgrade or verify complete installation' "$tmp/mode-existing.out"
 touch "$tmp/modes/partial/.noosphere/.env"
 env HOME="$tmp/modes/partial" NOOSPHERE_HOME="$tmp/modes/partial/.noosphere" PATH="$mode_path" \
-  bash "$root/install.sh" --dry-run --core-only > "$tmp/mode-partial.out"
+  bash "$launcher" --dry-run --core-only > "$tmp/mode-partial.out"
 grep -q 'Mode:      verify partial existing state before mutation' "$tmp/mode-partial.out"
 printf '%s\n' '{not-json' > \
   "$tmp/modes/unclassified/backups/postgres-pgvector/noosphere_postgres_data.phase-a2b.json"
 env HOME="$tmp/modes/unclassified" NOOSPHERE_HOME="$tmp/modes/unclassified" PATH="$mode_path" \
-  bash "$root/install.sh" --dry-run --core-only > "$tmp/mode-unclassified.out"
+  bash "$launcher" --dry-run --core-only > "$tmp/mode-unclassified.out"
 grep -q 'Mode:      verify unclassified existing state before mutation' "$tmp/mode-unclassified.out"
 printf '%s\n' '{"phase":"provisioning"}' > \
   "$tmp/modes/resume/backups/postgres-pgvector/noosphere_postgres_data.phase-a2b.json"
 env HOME="$tmp/modes/resume" NOOSPHERE_HOME="$tmp/modes/resume" PATH="$mode_path" \
-  bash "$root/install.sh" --dry-run --core-only > "$tmp/mode-resume.out"
+  bash "$launcher" --dry-run --core-only > "$tmp/mode-resume.out"
 grep -q 'Mode:      resume or verify interrupted installation' "$tmp/mode-resume.out"
 
 sabotage_package="$tmp/proxy-sabotage-package"
 mkdir -p "$sabotage_package"
-cp "$root/VERSION" "$root/install-openclaw.sh" "$root/install.sh" "$sabotage_package/"
+cp "$root/VERSION" "$root/install-openclaw.sh" "$launcher" "$sabotage_package/"
 ln -s "$root/hermes-noosphere-memory" "$sabotage_package/hermes-noosphere-memory"
 SABOTAGED_LAUNCHER="$sabotage_package/install.sh" node <<'NODE'
 const fs = require("node:fs");

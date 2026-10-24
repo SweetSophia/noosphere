@@ -73,7 +73,11 @@ test("installed aliases use declared fork edges without overrides or builder ref
  const effect=effectRequire("effect/package.json");
  const consumer=JSON.parse(fsNode.readFileSync(new URL("./package.json",import.meta.url)));
  assert.equal(consumer.overrides,undefined);
- assert.ok(parent.version.endsWith("-noosphere.3"));
+ assert.equal(parent.name, "@sweetsophia/noosphere-opencode-plugin");
+ assert.equal(parent.version, "1.15.5-noosphere.4");
+ assert.equal(parent.dependencies.zod, "4.6.7");
+ assert.equal(pluginRequire("zod/package.json").version, "4.6.7");
+ assert.equal(parent.dependencies.effect, "npm:@sweetsophia/noosphere-effect@4.0.0-beta.65-noosphere.3");
  assert.match(parent.dependencies.effect,/^npm:@sweetsophia\/noosphere-effect@/);
  assert.ok(effect.version.endsWith("-noosphere.3"));
  assert.equal(effect.dependencies.toml,"5.0.1");

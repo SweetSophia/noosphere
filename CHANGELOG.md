@@ -8,7 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+No further changes beyond the pending 1.15.1 coordinated release candidate
+recorded in the section below.
+
+## [1.15.1] - Unreleased
+
+Coordinated release candidate; not published. Application and integration artifacts
+will be promoted only after exact-head verification and explicit release approval.
+
 ### Security
+- Raise the MCP direct Zod minimum to `^4.6.7` and refresh its lock for
+  GHSA-mrhx-c7xc-m3w5 (oversized constrained-collection memory exhaustion).
+  OpenCode/Kilo SDK revisions for this advisory are prepared separately but
+  remain unpublished; those adapter paths are not yet remediated in this candidate.
+- Add explicit full-scope provisioning for new dedicated bootstrap ADMIN
+  credentials used by guided installers. Direct Compose remains opt-in via
+  `NOOSPHERE_BOOTSTRAP_FULL_ACCESS`; existing key scopes, permissions, revocation
+  and principal binding are preserved rather than broadened or reset. Conflicting
+  credentials fail safely. Per-tool WRITE credentials remain public-only, and
+  global key management continues to require ADMIN plus literal `*` scope.
 - Switch OpenCode/Kilo to maintained SDK/Effect aliases that explicitly require
   TOML 5.0.1 for GHSA-4qx8-w7c3-pj3p, GHSA-9j65-hcg3-gc64 and GHSA-9qmh-m7c6-f92p,
   with public-registry locks and checks of the exact packed adapters.
@@ -72,6 +90,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Human-session thresholds are unchanged. Tag creation now accepts WRITE/ADMIN
   API keys; new tag/topic creation does not require full scope
   ([#351](https://github.com/SweetSophia/noosphere/issues/351)).
+- Remediate the root application's own dependency advisories. Raise the
+  development `happy-dom` dependency to `21.0.4` (semver-major 20.x -> 21.x)
+  for [GHSA-834v-8h66-3h79](https://github.com/advisories/GHSA-834v-8h66-3h79),
+  pin `katex` to `0.18.2` for
+  [GHSA-238p-pmpm-9mq7](https://github.com/advisories/GHSA-238p-pmpm-9mq7),
+  and refresh the `fast-uri` and `undici` locks inside their existing ranges
+  (3.1.8 -> 3.1.9 and 7.30.0 -> 7.30.1). `mermaid`, `rehype-katex` and
+  `micromark-extension-math` inherited the KaTeX advisory through their own
+  KaTeX dependency edge, and `remark-math` inherited it through
+  `micromark-extension-math`; three narrow `katex` overrides resolve them
+  without a major upgrade of any of those packages. Each of those three
+  parents declares `katex` as `^0.16.47` (mermaid) or `^0.16.0`
+  (rehype-katex, micromark-extension-math), so the override deliberately
+  installs 0.18.2 outside that declared range and needs re-qualification
+  whenever a parent changes its range or a new `katex` release appears; drop
+  the override once a parent accepts 0.18.2 on its own. Both `katex` and
+  `happy-dom` are now exact pins and must be bumped manually to receive
+  future security fixes, and `@types/katex` stays on the 0.16.x declarations
+  its parents require while the runtime is 0.18.2. For this remediation only
+  `package.json` and `package-lock.json` change; no application source
+  changes. The installed root tree audits 0 vulnerabilities at
+  `--audit-level=low`, down from 8 (2 high, 1 moderate, 5 low); that count
+  does not cover the vendored `braces` derivative, which registry audit
+  cannot assess (see the `braces` entry above and `vendor/README.md`).
 
 ### Fixed
 
@@ -581,6 +623,7 @@ changes.
   history (`git log v1.8.0..v1.9.0`) for the full set of changes.
 
 [Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.15.0...HEAD
+[1.15.1]: https://github.com/SweetSophia/noosphere/compare/v1.15.0...HEAD
 [1.15.0]: https://github.com/SweetSophia/noosphere/compare/v1.14.1...v1.15.0
 [1.14.1]: https://github.com/SweetSophia/noosphere/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/SweetSophia/noosphere/compare/v1.13.3...v1.14.0

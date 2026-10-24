@@ -23,6 +23,72 @@ It sits between a chat transcript and a full documentation site:
 
 The old long-form README is preserved at [README-legacy.md](README-legacy.md).
 
+## Release candidate
+
+**Qualification hold:** the current Zod advisory blocks the existing OpenCode/Kilo
+SDK pins. A local MCP floor repair is verified; two revised SDK artifacts still
+need compatibility qualification and separately approved publication before the
+adapter aliases can be activated. No adapter release is available yet.
+
+This branch prepares coordinated **1.15.1** by combining the reviewed dependency
+repair and explicit bootstrap-scope provisioning. It is **not published**; 1.15.0
+remains the public release below. Merge, publication and production deployment
+remain on hold pending review and approval. The source launcher's immutable remote
+fallback still identifies the previous release; the packaging helper binds the
+candidate launcher/backend/Hermes set together. Do not use a source checkout as
+proof that a 1.15.1 image or registry adapter exists.
+
+### Root application dependency remediation
+
+The root application's own audit findings are remediated in this candidate. The
+installed tree audits **0** vulnerabilities at `--audit-level=low`, down from 8
+(2 high, 1 moderate, 5 low). That count does not cover the vendored `braces`
+derivative, which registry audit cannot assess (see the changelog's `braces`
+entry and `vendor/README.md`).
+
+- `happy-dom` moves from `^20.10.6` to `21.0.4` (a semver-major 20.x -> 21.x
+  bump of the DOM implementation)
+  ([GHSA-834v-8h66-3h79](https://github.com/advisories/GHSA-834v-8h66-3h79)).
+  It is a development-only dependency used by the DOM test suite. Like
+  `katex`, it is now an exact pin and must be bumped manually to receive
+  future security fixes.
+- `katex` is pinned to `0.18.2`
+  ([GHSA-238p-pmpm-9mq7](https://github.com/advisories/GHSA-238p-pmpm-9mq7)).
+  `mermaid`, `rehype-katex` and `micromark-extension-math` each inherited that
+  advisory through their own KaTeX dependency edge, and `remark-math` inherited
+  it through `micromark-extension-math`. Three parent-scoped overrides
+  (`mermaid`, `rehype-katex`, `micromark-extension-math` -> `$katex`) resolve
+  them without a major upgrade or downgrade of any of those packages, and
+  without touching the locked `sharp` 0.35.5 (an optional dependency of
+  Next.js) or its parents. Each of those three
+  parents declares `katex` as `^0.16.47` (mermaid) or `^0.16.0`
+  (rehype-katex, micromark-extension-math), so the override deliberately installs
+  0.18.2 outside that declared range: it needs re-qualification whenever a
+  parent changes its range or a new `katex` release appears, and it should be
+  dropped once a parent accepts 0.18.2 on its own. npm's v3 lockfile does not
+  persist `overrides`, so `package.json` is the only durable record of that
+  forcing. The `@types/katex` 0.16.8 package remains installed only because
+  `micromark-extension-math` and `rehype-katex` declare `^0.16.0`; KaTeX 0.18.2
+  ships its own bundled declarations, which TypeScript resolves in preference
+  to `@types/katex`, so the typecheck surface tracks the 0.18.2 runtime.
+- `fast-uri` (3.1.8 -> 3.1.9) and `undici` (7.30.0 -> 7.30.1) are refreshed
+  inside their existing declared ranges.
+
+For this remediation only `package.json` and `package-lock.json` change; no
+application source changes.
+
+**Qualification performed so far** (local, unpublished): a full root install with
+optional dependencies but with install scripts disabled (`npm ci
+--ignore-scripts --include=optional`), the complete dependency tree, an
+installed-tree audit, Prisma client generation, the focused
+DOM/markdown/dependency test files (30 tests), a non-incremental typecheck,
+lint, a production build, and a hydrated browser check of the real wiki
+Markdown and Mermaid components on Node 22 - that browser check runs an
+esbuild fixture bundle of those components, not the production build output.
+The affected subset was repeated on Node 24. Hosted CI has not yet run on this
+head, so nothing here implies a passing hosted pipeline or an approved
+release.
+
 ## Quick Start
 
 ### Prerequisites

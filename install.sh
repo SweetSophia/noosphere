@@ -5,6 +5,9 @@ trap 'printf "Installer failed near line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2
 RELEASE_VERSION='1.15.0'
 BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/d0cef60aad8a0f5dea8ed4d2dc2e6f93629dab29/install-openclaw.sh'
 BACKEND_SHA256='04a3cd17d75542dca48b0f4bdd7cc7cffa926629b192c0e79bea91d2e44b2952'
+# Source checkouts bind their sibling separately from the published remote pair.
+# Packaging synchronizes both pins to the coordinated release backend.
+SOURCE_BACKEND_SHA256='c82a6e0cca5fa90b05a8d6246205a8490ae653652fb8f82c8a86ccc9128684a3'
 HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.15.0/hermes-noosphere-memory-1.15.0.tar.gz'
 HERMES_BUNDLE_SHA256='3bee19d869243250eb5aec6a4b9211b1c68bd39685c87e7106546aa6b24cedd7'
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
@@ -312,6 +315,7 @@ if [[ -n "${NOOSPHERE_BACKEND_PATH:-}" ]]; then
   }
 elif [[ -f "$SCRIPT_DIR/install-openclaw.sh" ]]; then
   backend="$SCRIPT_DIR/install-openclaw.sh"
+  expected_backend_sha=$SOURCE_BACKEND_SHA256
 else
   backend="$work_dir/install-openclaw.sh"
   curl -fsSL "$BACKEND_URL" -o "$backend"
@@ -480,6 +484,7 @@ create_tool_api_key() {
     --data-binary "@$body" --output "$response" "$base_url/api/keys"; then
     rm -f "$config" "$body" "$response"
     echo "Failed to create a scoped ${integration} API key." >&2
+    echo 'Provisioning requires an ADMIN bootstrap key with explicit full scope (*). Existing scoped keys are not automatically expanded; use a new dedicated bootstrap credential or the human administrator key console.' >&2
     return 1
   fi
   raw=$(CREDENTIALS_FILE="$response" node -e 'try { const d=JSON.parse(require("node:fs").readFileSync(process.env.CREDENTIALS_FILE,"utf8")); if (typeof d.key === "string") process.stdout.write(d.key); } catch { process.exit(0); }')
