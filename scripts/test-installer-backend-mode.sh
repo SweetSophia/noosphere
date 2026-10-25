@@ -33,7 +33,7 @@ function assertInitOnlySetting(text, setting, label) {
     throw new Error(`${label} must declare bootstrap full access only in init: ${setting}`);
   }
 }
-assertInitOnlySetting(source, 'NOOSPHERE_BOOTSTRAP_FULL_ACCESS: "true"', "guided backend");
+assertInitOnlySetting(source, 'NOOSPHERE_BOOTSTRAP_FULL_ACCESS: "${BOOTSTRAP_FULL_ACCESS}"', "guided backend");
 for (const template of ["docker-compose.yml", "docker-compose.noosphere.yml"]) {
   assertInitOnlySetting(
     fs.readFileSync(path.join(root, template), "utf8"),
@@ -44,6 +44,48 @@ for (const template of ["docker-compose.yml", "docker-compose.noosphere.yml"]) {
 NODE
 
 source "$backend"
+
+# The guided full-scope grant must be requested for a credential the installer
+# creates. An upgrade reuses the key persisted in .env: demanding "*" from that
+# key aborts the bootstrap transaction and breaks every pre-1.15.1 upgrade.
+assert_bootstrap_full_access_behavior() (
+  local failures=0
+  # A fresh guided install creates the credential and keeps the guided grant.
+  [[ "$(resolve_bootstrap_full_access false "")" == true ]] || failures=$((failures + 1))
+  # An upgrade reuses the persisted key and must not demand "*" from it.
+  [[ "$(resolve_bootstrap_full_access true "")" == false ]] || failures=$((failures + 1))
+  # An explicit operator choice always wins, in both directions.
+  [[ "$(resolve_bootstrap_full_access true true)" == true ]] || failures=$((failures + 1))
+  [[ "$(resolve_bootstrap_full_access false false)" == false ]] || failures=$((failures + 1))
+  # A malformed explicit value is rejected instead of being coerced.
+  if resolve_bootstrap_full_access false maybe >/dev/null 2>&1; then
+    failures=$((failures + 1))
+  fi
+  # Only the key already persisted in .env counts as an existing credential.
+  bootstrap_key_is_persisted "noo_fixture_same" "noo_fixture_same" || failures=$((failures + 1))
+  if bootstrap_key_is_persisted "noo_fixture_new" "noo_fixture_old"; then
+    failures=$((failures + 1))
+  fi
+  if bootstrap_key_is_persisted "noo_fixture_new" ""; then
+    failures=$((failures + 1))
+  fi
+  if bootstrap_key_is_persisted "" ""; then
+    failures=$((failures + 1))
+  fi
+  [[ "$failures" == 0 ]]
+)
+
+if ! assert_bootstrap_full_access_behavior; then
+  echo 'bootstrap full-access behavior assertions failed' >&2
+  exit 1
+fi
+if (
+  resolve_bootstrap_full_access() { printf 'true'; }
+  assert_bootstrap_full_access_behavior
+); then
+  echo 'constant bootstrap full-access sabotage unexpectedly passed' >&2
+  exit 1
+fi
 
 assert_article_verification_floor_behavior() (
   local floor

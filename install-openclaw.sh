@@ -380,6 +380,36 @@ reject_multiline_env_value() {
   fi
 }
 
+# Resolve the bootstrap full-scope request. The guided installer may request the
+# grant for a credential it creates; it must never demand "*" from a persisted
+# key, because widening that key is forbidden and the bootstrap transaction
+# aborts on it. An explicit operator choice always wins.
+resolve_bootstrap_full_access() {
+  local reused_persisted_key=${1:-false} requested=${2:-}
+  if [[ -n "$requested" ]]; then
+    case "$requested" in
+      true|false) printf '%s' "$requested" ;;
+      *)
+        echo 'NOOSPHERE_BOOTSTRAP_FULL_ACCESS must be true or false.' >&2
+        return 1
+        ;;
+    esac
+    return 0
+  fi
+  if [[ "$reused_persisted_key" == true ]]; then
+    printf 'false'
+  else
+    printf 'true'
+  fi
+}
+
+# True when the key the installer will use is the one already persisted in
+# .env. Only such a key is an existing credential that must not be widened.
+bootstrap_key_is_persisted() {
+  local api_key=${1:-} persisted=${2:-}
+  [[ -n "$api_key" && "$api_key" == "$persisted" ]]
+}
+
 normalize_hybrid_provider_config() {
   if [[ -n "$NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON" && -n "$NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64" ]]; then
     echo 'Set only one of NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON or NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64.' >&2
@@ -1782,6 +1812,18 @@ if [[ "$existing_switch_required" == true ]]; then
   compose_target="$POSTGRES_CONTROLLER_CANDIDATE"
 fi
 
+# An upgrade reuses the bootstrap key persisted in .env, while a fresh guided
+# install creates one here. The guided full-scope grant is requested only for a
+# new credential: the persisted key must never be widened, and demanding "*"
+# from it aborts every pre-1.15.1 upgrade. An operator-supplied key that
+# differs from the persisted one is a new credential and keeps the grant.
+persisted_bootstrap_key="$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_API_KEY)"
+bootstrap_reuses_persisted_key=false
+if bootstrap_key_is_persisted "${API_KEY:-}" "$persisted_bootstrap_key"; then
+  bootstrap_reuses_persisted_key=true
+fi
+BOOTSTRAP_FULL_ACCESS="$(resolve_bootstrap_full_access "$bootstrap_reuses_persisted_key" "${NOOSPHERE_BOOTSTRAP_FULL_ACCESS:-}")"
+
 cat > "$compose_target" <<YAML
 name: noosphere
 
@@ -1802,7 +1844,9 @@ services:
       NOOSPHERE_BOOTSTRAP_API_KEY: \${NOOSPHERE_BOOTSTRAP_API_KEY}
       # Guided provisioning needs global key management. This opt-in applies
       # only to NEW bootstrap keys; existing scoped/revoked keys are not widened.
-      NOOSPHERE_BOOTSTRAP_FULL_ACCESS: "true"
+      # A fresh guided install requests the grant; an upgrade that reuses the
+      # persisted key does not, because that key must not be widened.
+      NOOSPHERE_BOOTSTRAP_FULL_ACCESS: "${BOOTSTRAP_FULL_ACCESS}"
       # Keep the default in a dedicated directory because bootstrap tightens the
       # parent directory to 0700 before writing the 0600 credentials file.
       NOOSPHERE_BOOTSTRAP_SECRETS_FILE: \${NOOSPHERE_BOOTSTRAP_SECRETS_FILE:-/tmp/noosphere-bootstrap-secrets/secrets.json}

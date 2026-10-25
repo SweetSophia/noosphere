@@ -7,7 +7,7 @@ BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/d0cef60aad8
 BACKEND_SHA256='04a3cd17d75542dca48b0f4bdd7cc7cffa926629b192c0e79bea91d2e44b2952'
 # Source checkouts bind their sibling separately from the published remote pair.
 # Packaging synchronizes both pins to the coordinated release backend.
-SOURCE_BACKEND_SHA256='3765d12904a583cd1a513f0622924ee0e71d675ce7225e0ebd90389837e86bee'
+SOURCE_BACKEND_SHA256='681db7ce3e08f9692bd9631160bc0d9b9f0e468a0338179ab2dd826d25400c9f'
 HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.15.0/hermes-noosphere-memory-1.15.0.tar.gz'
 HERMES_BUNDLE_SHA256='3bee19d869243250eb5aec6a4b9211b1c68bd39685c87e7106546aa6b24cedd7'
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
