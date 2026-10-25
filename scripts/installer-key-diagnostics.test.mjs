@@ -9,6 +9,8 @@ import test from "node:test";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cases = [
   { name: "success", status: "201", code: 0, expected: /noo_fixture_created/ },
+  { name: "missing write-out rejected", status: "201", code: 0, omitWriteOut: true, expected: /HTTP 000/ },
+  { name: "missing status rejected", status: "", code: 0, expected: /HTTP 000/ },
   { name: "forbidden", status: "403", code: 22, expected: /ADMIN bootstrap key with explicit full scope/ },
   { name: "unauthorized", status: "401", code: 22, expected: /authentication.*401/i },
   { name: "server error", status: "500", code: 22, expected: /HTTP 500/ },
@@ -40,15 +42,23 @@ validated_local_app_url() { printf '%s' "$APP_URL"; }
 installer_validated_local_base_url() { printf '%s' "$APP_URL"; }
 json_get() { node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"))[process.argv[2]])' "$1" "$2"; }
 local_no_proxy_curl() {
-  local output=''
+  local output='' write_out='' method='' url=''
   while (($#)); do
-    if [[ "$1" == --output ]]; then output=$2; shift 2; else shift; fi
+    case "$1" in
+      --output) output=$2; shift 2 ;;
+      --write-out) write_out=$2; shift 2 ;;
+      --request) method=$2; shift 2 ;;
+      http://*|https://*) url=$1; shift ;;
+      *) shift ;;
+    esac
   done
+  [[ "$method" == POST && "$url" == "$APP_URL/api/keys" ]] || { echo 'fixture curl method/URL mismatch' >&2; return 96; }
+  [[ -z "$write_out" || "$write_out" == '%{http_code}' ]] || { echo 'fixture curl output-format mismatch' >&2; return 95; }
   printf '{"key":"noo_fixture_created"}' > "$output"
-  printf '%s' "$FIXTURE_HTTP_STATUS"
+  if [[ "$write_out" == '%{http_code}' ]]; then printf '%s' "$FIXTURE_HTTP_STATUS"; fi
   return "$FIXTURE_CURL_CODE"
 }
-${body}
+${sample.omitWriteOut ? body.replace(" --write-out '%{http_code}'", "") : body}
 ${fn} fixture
 `;
         const result = spawnSync("bash", ["-c", fixture], {

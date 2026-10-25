@@ -225,8 +225,8 @@ jobs:
           fi
       - name: Use the exact reviewed archive packer
         run: npm install --global npm@12.1.0 --ignore-scripts
-      - name: Test SDK publication guards without network or registry writes
-        run: node --test vendor/zod-sdk-candidate/publish.test.mjs vendor/zod-sdk-candidate/ci-receipt.test.mjs vendor/zod-sdk-candidate/consumer-fixture.test.mjs
+      - name: Test SDK guards and loopback fixtures without external network or registry writes
+        run: node --test vendor/zod-sdk-candidate/publish.test.mjs vendor/zod-sdk-candidate/ci-receipt.test.mjs vendor/zod-sdk-candidate/consumer-fixture.test.mjs vendor/zod-sdk-candidate/reconstruct.test.mjs
       - name: Reconstruct and qualify both local SDK prototypes
         run: node vendor/zod-sdk-candidate/qualify.mjs "$RUNNER_TEMP/zod-sdk-qualified"
       - name: Preserve scoped SDK qualification evidence
@@ -234,6 +234,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: zod-sdk-qualified-node-${{ matrix.node }}
+          overwrite: true # Qualification-only reruns replace their own current-run evidence.
           path: |
             ${{ runner.temp }}/zod-sdk-qualified/reconstruction.json
             ${{ runner.temp }}/zod-sdk-qualified/qualification.json

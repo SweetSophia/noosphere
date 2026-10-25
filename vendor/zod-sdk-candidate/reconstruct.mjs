@@ -45,10 +45,14 @@ async function unpack(archive, directory, cwd) {
   await fs.mkdir(directory);
   await command("tar", ["-xzf", archive, "--strip-components=1", "--no-same-owner", "--no-same-permissions", "-C", directory], cwd);
 }
-async function fetchBytes(url) {
+export async function fetchBytes(url, request = fetch) {
   const parsed = new URL(url);
   assert.equal(parsed.origin, registry, "Only the public npm registry is permitted");
-  const response = await fetch(parsed, { signal: AbortSignal.timeout(30_000) });
+  assert.ok(!parsed.username && !parsed.password, "Registry URLs must not contain credentials");
+  const target = new URL(registry);
+  target.pathname = parsed.pathname;
+  target.search = parsed.search;
+  const response = await request(target, { redirect: "error", signal: AbortSignal.timeout(30_000) });
   assert.equal(response.status, 200, `Registry read failed: ${parsed.pathname}`);
   const bytes = Buffer.from(await response.arrayBuffer());
   assert.ok(bytes.length < 2 * 1024 * 1024, "Unexpected SDK archive/metadata size");

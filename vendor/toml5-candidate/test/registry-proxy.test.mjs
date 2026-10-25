@@ -11,7 +11,10 @@ const end = source.indexOf(ending, start);
 assert.ok(start >= 0 && end > start, "cannot locate the production proxy core");
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const proxy = new AsyncFunction("request", "response", "fetch", "registry", source.slice(start, end + ending.length));
-const registry = "https://registry.npmjs.org";
+const registryDeclaration = source.match(/^const registry = ("[^"\n]+");$/m);
+assert.ok(registryDeclaration, "missing production registry declaration");
+const registry = JSON.parse(registryDeclaration[1]);
+assert.equal(registry, "https://registry.npmjs.org", "production must retain the fixed public origin");
 const response = () => ({ status: undefined, body: undefined, writeHead(status) { this.status = status; return this; }, end(body) { this.body = body; return this; } });
 
 async function serve(t, listener) {
