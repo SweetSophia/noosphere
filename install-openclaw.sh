@@ -262,7 +262,7 @@ integration_key_is_safe() {
 }
 
 create_scoped_integration_key() {
-  local label=$1 config body response name raw base_url
+  local label=$1 config body response name raw base_url http_status curl_status
   [[ "$API_KEY" =~ ^noo_[A-Za-z0-9_-]+$ ]] || {
     echo 'Bootstrap API key has an unexpected format.' >&2
     return 1
@@ -278,11 +278,21 @@ create_scoped_integration_key() {
   chmod 600 "$config" "$body" "$response"
   printf 'silent\nshow-error\nfail-with-body\nheader = "Authorization: Bearer %s"\n' "$API_KEY" > "$config"
   printf '{"name":"%s","permissions":"WRITE","allowedScopes":[]}\n' "$name" > "$body"
-  if ! local_no_proxy_curl --config "$config" --request POST --header 'Content-Type: application/json' \
-    --data-binary "@$body" --output "$response" "$base_url/api/keys"; then
+  curl_status=0
+  http_status=$(local_no_proxy_curl --config "$config" --request POST --header 'Content-Type: application/json' \
+    --data-binary "@$body" --output "$response" --write-out '%{http_code}' "$base_url/api/keys") || curl_status=$?
+  if (( curl_status != 0 )) || [[ ! "$http_status" =~ ^2[0-9][0-9]$ ]]; then
     rm -f "$config" "$body" "$response"
     echo "Failed to create a scoped ${label} API key." >&2
-    echo 'Provisioning requires an ADMIN bootstrap key with explicit full scope (*). Existing scoped keys are not automatically expanded; use a new dedicated bootstrap credential or the human administrator key console.' >&2
+    if (( curl_status != 0 && curl_status != 22 )); then
+      echo "Transport/connectivity failure (curl exit ${curl_status}); check the local service and network. Do not rotate a credential based on this failure." >&2
+    elif [[ "$http_status" == 403 ]]; then
+      echo 'Provisioning requires an ADMIN bootstrap key with explicit full scope (*). Existing scoped keys are not automatically expanded; use a new dedicated bootstrap credential or the human administrator key console.' >&2
+    elif [[ "$http_status" == 401 ]]; then
+      echo 'Bootstrap authentication was rejected (HTTP 401); verify the protected credential rather than changing its content scope.' >&2
+    else
+      echo "Noosphere returned HTTP ${http_status:-000}; check service availability, rate limits and server logs before changing credentials." >&2
+    fi
     return 1
   fi
   raw=$(json_get "$response" key)

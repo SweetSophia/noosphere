@@ -7,7 +7,7 @@ BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/d0cef60aad8
 BACKEND_SHA256='04a3cd17d75542dca48b0f4bdd7cc7cffa926629b192c0e79bea91d2e44b2952'
 # Source checkouts bind their sibling separately from the published remote pair.
 # Packaging synchronizes both pins to the coordinated release backend.
-SOURCE_BACKEND_SHA256='c82a6e0cca5fa90b05a8d6246205a8490ae653652fb8f82c8a86ccc9128684a3'
+SOURCE_BACKEND_SHA256='3765d12904a583cd1a513f0622924ee0e71d675ce7225e0ebd90389837e86bee'
 HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.15.0/hermes-noosphere-memory-1.15.0.tar.gz'
 HERMES_BUNDLE_SHA256='3bee19d869243250eb5aec6a4b9211b1c68bd39685c87e7106546aa6b24cedd7'
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
@@ -463,7 +463,7 @@ installer_key_is_scoped() {
 }
 
 create_tool_api_key() {
-  local integration=$1 bootstrap config body response name raw base_url
+  local integration=$1 bootstrap config body response name raw base_url http_status curl_status
   bootstrap=$(credential_field bootstrapApiKey)
   base_url=$(installer_validated_local_base_url) || {
     echo 'Refusing to send the bootstrap API key to a non-local Noosphere URL.' >&2
@@ -480,11 +480,21 @@ create_tool_api_key() {
   chmod 600 "$config" "$body" "$response"
   printf 'silent\nshow-error\nfail-with-body\nheader = "Authorization: Bearer %s"\n' "$bootstrap" > "$config"
   printf '{"name":"%s","permissions":"WRITE","allowedScopes":[]}\n' "$name" > "$body"
-  if ! local_no_proxy_curl --config "$config" --request POST --header 'Content-Type: application/json' \
-    --data-binary "@$body" --output "$response" "$base_url/api/keys"; then
+  curl_status=0
+  http_status=$(local_no_proxy_curl --config "$config" --request POST --header 'Content-Type: application/json' \
+    --data-binary "@$body" --output "$response" --write-out '%{http_code}' "$base_url/api/keys") || curl_status=$?
+  if (( curl_status != 0 )) || [[ ! "$http_status" =~ ^2[0-9][0-9]$ ]]; then
     rm -f "$config" "$body" "$response"
     echo "Failed to create a scoped ${integration} API key." >&2
-    echo 'Provisioning requires an ADMIN bootstrap key with explicit full scope (*). Existing scoped keys are not automatically expanded; use a new dedicated bootstrap credential or the human administrator key console.' >&2
+    if (( curl_status != 0 && curl_status != 22 )); then
+      echo "Transport/connectivity failure (curl exit ${curl_status}); check the local service and network. Do not rotate a credential based on this failure." >&2
+    elif [[ "$http_status" == 403 ]]; then
+      echo 'Provisioning requires an ADMIN bootstrap key with explicit full scope (*). Existing scoped keys are not automatically expanded; use a new dedicated bootstrap credential or the human administrator key console.' >&2
+    elif [[ "$http_status" == 401 ]]; then
+      echo 'Bootstrap authentication was rejected (HTTP 401); verify the protected credential rather than changing its content scope.' >&2
+    else
+      echo "Noosphere returned HTTP ${http_status:-000}; check service availability, rate limits and server logs before changing credentials." >&2
+    fi
     return 1
   fi
   raw=$(CREDENTIALS_FILE="$response" node -e 'try { const d=JSON.parse(require("node:fs").readFileSync(process.env.CREDENTIALS_FILE,"utf8")); if (typeof d.key === "string") process.stdout.write(d.key); } catch { process.exit(0); }')
