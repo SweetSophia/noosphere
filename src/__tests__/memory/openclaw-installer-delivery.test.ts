@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { getVerifiedInstallerCommands } from "../../../openclaw-noosphere-memory/src/cli";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
-const ref = "f86e04d4dfc1a31de26b51c43cee3318386d1855";
+const ref = "2114560065aa4ea07b1f07175824eb645f4325a7";
 const backendHash = "681db7ce3e08f9692bd9631160bc0d9b9f0e468a0338179ab2dd826d25400c9f";
 
 for (const tamper of [undefined, "install.sh", "install-openclaw.sh"] as const) {
