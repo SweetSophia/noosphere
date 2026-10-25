@@ -92,12 +92,12 @@ test("installed aliases use declared fork edges without overrides or builder ref
  assert.equal(consumer.overrides,undefined);
  assert.equal(parent.name, "@sweetsophia/noosphere-kilocode-plugin");
  assert.equal(parent.version, declaredVersion);
- // The maintained forks pin zod exactly. Verify that exact edge instead of
- // hand-rolling range semantics: a range spec fails closed here rather than
- // blessing a version this fixture cannot prove.
- const declaredZod=String(parent.dependencies.zod);
- assert.match(declaredZod,/^\d+\.\d+\.\d+$/, "the fork must pin zod exactly for this fixture to verify the declared edge");
- assert.equal(pluginRequire("zod/package.json").version, declaredZod);
+ // The installed zod must be exactly the version the fork declares. No range
+ // semantics are approximated here: a ranged or absent declaration fails closed
+ // with its own diagnostic instead of blessing a version this fixture cannot prove.
+ const declaredZod=parent.dependencies.zod;
+ assert.equal(typeof declaredZod, "string", "the fork must declare zod");
+ assert.equal(pluginRequire("zod/package.json").version, declaredZod, "the installed zod must be exactly the version the fork declares");
  assert.match(parent.dependencies.effect,/^npm:@sweetsophia\/noosphere-effect@/);
  assert.equal(effect.version, parent.dependencies.effect.slice(parent.dependencies.effect.lastIndexOf("@")+1));
  assert.equal(effect.dependencies.toml,"5.0.1");
