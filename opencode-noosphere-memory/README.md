@@ -1,5 +1,9 @@
 # Noosphere Memory for OpenCode
 
+> **1.15.1 release candidate — not published.** Version-bound commands below
+> are for the candidate and must not run until the coordinated public release
+> and all six installer assets exist. Merge/publication/production remain on hold.
+
 Connect OpenCode to self-hosted Noosphere memory. Recall relevant knowledge,
 save draft memories with explicit tools, and optionally enable idle auto-save.
 
@@ -7,7 +11,7 @@ save draft memories with explicit tools, and optionally enable idle auto-save.
 
 You need a running Noosphere instance and a dedicated OpenCode WRITE key. For a
 new local setup, select OpenCode in the [guided installer](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#guided-installation)
-after confirming the [v1.15.0 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.0)
+after confirming the [v1.15.1 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.1)
 has all six installer assets. The [auditable download](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#auditable-download)
 explains checksum verification.
 
@@ -24,7 +28,7 @@ npm plugins from this config:
 ```json
 {
   "plugin": [
-    "@sweetsophia/opencode-noosphere-memory@1.15.0"
+    "@sweetsophia/opencode-noosphere-memory@1.15.1"
   ]
 }
 ```
@@ -32,7 +36,7 @@ npm plugins from this config:
 Or install the package globally first if you prefer explicit local installs:
 
 ```bash
-npm install -g @sweetsophia/opencode-noosphere-memory@1.15.0
+npm install -g @sweetsophia/opencode-noosphere-memory@1.15.1
 ```
 
 ### oh-my-opencode-slim
@@ -44,7 +48,7 @@ need a separate fork. Install both plugins and keep both entries in
 ```bash
 npx oh-my-opencode-slim@latest install
 # Optional: Opencode can also auto-install npm plugins from opencode.json.
-npm install -g @sweetsophia/opencode-noosphere-memory@1.15.0
+npm install -g @sweetsophia/opencode-noosphere-memory@1.15.1
 export OPENCODE_NOOSPHERE_API_KEY="noo_..."
 ```
 
@@ -52,7 +56,7 @@ export OPENCODE_NOOSPHERE_API_KEY="noo_..."
 {
   "plugin": [
     "oh-my-opencode-slim",
-    "@sweetsophia/opencode-noosphere-memory@1.15.0"
+    "@sweetsophia/opencode-noosphere-memory@1.15.1"
   ]
 }
 ```
@@ -69,7 +73,7 @@ Or configure it with explicit options:
 {
   "plugin": [
     [
-      "@sweetsophia/opencode-noosphere-memory@1.15.0",
+      "@sweetsophia/opencode-noosphere-memory@1.15.1",
       {
         "baseUrl": "http://127.0.0.1:6578",
         "autoRecall": true,
@@ -178,20 +182,25 @@ Use this for stable project facts, decisions, runbooks, and recurring fixes. Do 
 
 ## Verified guided install
 
-For a new local setup, first confirm the [v1.15.0 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.0)
+For a new local setup, first confirm the [v1.15.1 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.1)
 has all six installer assets. This pinned launcher verifies its SHA-256 before
 execution; see the [GitHub installation guide](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md)
 for upgrade behavior and other installation paths.
 
 ```bash
-# Installer commit: 7ebffe1f21578cd6e2ad17a7f6fa5baddc88769e
-# Expected SHA-256: f573463525c139e4cee69f5b002d2f8e0a15ad976063564fbb19cba5d3458586
+# Installer commit: 2114560065aa4ea07b1f07175824eb645f4325a7
+# Expected SHA-256: 90432d088c8d4aa4d0220685c1f1801c1ce2d609d820e4cf309eb13a46f67701
 (
   set -e
-  installer="$(mktemp)"
-  trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/7ebffe1f21578cd6e2ad17a7f6fa5baddc88769e/install.sh -o "$installer"
-  printf '%s  %s\n' 'f573463525c139e4cee69f5b002d2f8e0a15ad976063564fbb19cba5d3458586' "$installer" | sha256sum -c -
+  installer_dir="$(mktemp -d)"
+  trap 'rm -rf "$installer_dir"' EXIT
+  installer="$installer_dir/install.sh"
+  backend="$installer_dir/install-openclaw.sh"
+  unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/2114560065aa4ea07b1f07175824eb645f4325a7/install.sh -o "$installer"
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/2114560065aa4ea07b1f07175824eb645f4325a7/install-openclaw.sh -o "$backend"
+  printf '%s  %s\n' '90432d088c8d4aa4d0220685c1f1801c1ce2d609d820e4cf309eb13a46f67701' "$installer" | sha256sum -c -
+  printf '%s  %s\n' '681db7ce3e08f9692bd9631160bc0d9b9f0e468a0338179ab2dd826d25400c9f' "$backend" | sha256sum -c -
   bash "$installer" --non-interactive --with opencode
 )
 ```

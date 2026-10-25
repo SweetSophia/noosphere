@@ -25,23 +25,23 @@ Hermes archive. Before running it, confirm that the
 exists with all six installer assets. Merging the installer source does not by
 itself publish those artifacts.
 
-This URL is pinned to an immutable Git commit. It does not execute a moving
-`master` or `main` branch:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/7ebffe1f21578cd6e2ad17a7f6fa5baddc88769e/install.sh | bash
-```
-
-The script can prompt through `/dev/tty`, even when it is piped to Bash. It:
+Use the [verified two-file download](#auditable-download) below. Both files
+come from an immutable commit, never a moving `master` or `main` branch.
+The script can prompt through `/dev/tty`. It:
 
 1. shows the resolved plan;
 2. offers integrations it detects on the machine;
 3. determines whether this is a fresh install, interrupted run, or upgrade;
-4. downloads the exact backend pinned inside the launcher and verifies its
-   SHA-256 before execution;
+4. verifies the downloaded sibling backend against the launcher's source
+   checksum before execution;
 5. generates distinct runtime credentials without printing them;
 6. starts and verifies PostgreSQL, Redis, migrations, bootstrap, and Noosphere;
 7. configures the integrations you selected.
+
+In a source checkout, the launcher instead verifies its adjacent backend against
+`SOURCE_BACKEND_SHA256`. The remote URL and `BACKEND_SHA256` remain a separate
+published pair until coordinated publication. Packaging binds both checksums to
+the packaged backend. Source changes do not update a published backend or image.
 
 On success, open:
 
@@ -73,9 +73,24 @@ less ~/.noosphere/credentials.json
 
 Runtime database and application secrets remain in `~/.noosphere/.env`, also
 with mode `0600`. The protected credential file separates the bootstrap ADMIN
-key from the default WRITE key and the persisted per-tool WRITE keys. OpenClaw,
-Hermes, OpenCode, and Kilo Code receive only their scoped key; the bootstrap key
-is never written to tool configuration. OpenClaw's secret-provider file also
+key from the default WRITE key and the persisted per-tool WRITE keys. Guided
+installation explicitly provisions its **new dedicated bootstrap key** with
+`allowedScopes: ["*"]`, because global key management requires both ADMIN
+permission and literal full scope. That trusted opt-in is confined to the init
+service; integration keys remain WRITE with `allowedScopes: []` (public articles
+only). It is not a migration or blanket wildcard backfill.
+
+Reusing an existing key preserves its permissions, scopes, revocation and
+principal binding. A revoked key is not reactivated. If a reused credential is
+not an unbound full-scope ADMIN key, guided bootstrap fails safely with a recovery
+message instead of broadening it. Replace `NOOSPHERE_BOOTSTRAP_API_KEY` in the
+protected runtime `.env` with a **new dedicated** credential before retrying, or
+deliberately review access in the human ADMIN console. Preserve the old scoped
+key; do not silently repurpose an integration key. A temporary process override
+alone does not replace the existing persisted bootstrap assignment.
+
+OpenClaw, Hermes, OpenCode, and Kilo Code receive only their scoped key; the
+bootstrap key is never written to tool configuration. OpenClaw's secret-provider file also
 excludes the bootstrap key. Use `/wiki/admin/keys` later if you want to narrow a
 tool further with restricted scopes.
 
@@ -93,39 +108,38 @@ It is never enabled by default.
 --help
 ```
 
-Examples:
-
-```bash
-# Show the plan without changing the machine.
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/7ebffe1f21578cd6e2ad17a7f6fa5baddc88769e/install.sh \
-  | bash -s -- --dry-run --core-only
-
-# Automation: local Noosphere plus Hermes, without prompts.
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/7ebffe1f21578cd6e2ad17a7f6fa5baddc88769e/install.sh \
-  | bash -s -- --non-interactive --with hermes
-```
+In the [verified two-file download](#auditable-download), append
+`--dry-run --core-only` to the final invocation to inspect the plan, or
+`--non-interactive --with hermes` to select Hermes without prompts.
 
 `--non-interactive` requires either `--with` or `--core-only`; it never guesses
 which agent configuration to mutate.
 
 ### Auditable download
 
-If you want to verify the launcher before running it, download first and check
-the advertised SHA-256:
+Download the launcher and its reviewed backend into one private directory and
+check both SHA-256 values before execution. Keeping the sibling filename is
+essential: this source launcher retains an older published fallback for
+standalone downloads, while these instructions select its reviewed sibling.
 
 ```bash
 (
   set -e
-  installer="$(mktemp)"
-  trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/7ebffe1f21578cd6e2ad17a7f6fa5baddc88769e/install.sh -o "$installer"
-  printf '%s  %s\n' 'f573463525c139e4cee69f5b002d2f8e0a15ad976063564fbb19cba5d3458586' "$installer" | sha256sum -c -
+  installer_dir="$(mktemp -d)"
+  trap 'rm -rf "$installer_dir"' EXIT
+  installer="$installer_dir/install.sh"
+  backend="$installer_dir/install-openclaw.sh"
+  unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/2114560065aa4ea07b1f07175824eb645f4325a7/install.sh -o "$installer"
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/2114560065aa4ea07b1f07175824eb645f4325a7/install-openclaw.sh -o "$backend"
+  printf '%s  %s\n' '90432d088c8d4aa4d0220685c1f1801c1ce2d609d820e4cf309eb13a46f67701' "$installer" | sha256sum -c -
+  printf '%s  %s\n' '681db7ce3e08f9692bd9631160bc0d9b9f0e468a0338179ab2dd826d25400c9f' "$backend" | sha256sum -c -
   bash "$installer"
 )
 ```
 
-The launcher independently verifies the backend controller and optional Hermes
-bundle before using them.
+The launcher independently verifies the sibling backend and optional Hermes
+bundle before using them. The temporary directory is removed on exit.
 
 ## Fresh install versus upgrade
 
@@ -200,6 +214,25 @@ docker compose -f docker-compose.noosphere.yml --env-file .env up -d app
 That sequence is valid only for an absent PostgreSQL volume. If
 `noosphere_postgres_data` already exists, follow the existing-volume transition
 guide before starting the candidate database image.
+
+### Explicit bootstrap full access
+
+Direct Compose/bootstrap defaults to `NOOSPHERE_BOOTSTRAP_FULL_ACCESS=false`.
+A newly inserted key then receives `allowedScopes: []`, which cannot manage
+keys even with ADMIN permission. To deliberately provision a **new dedicated**
+global-management credential, set `NOOSPHERE_BOOTSTRAP_FULL_ACCESS=true` in the
+protected `.env` before running init (ADMIN permission is required). The bootstrap
+process accepts only exact `true` and `false` strings. The Compose templates use
+`${NOOSPHERE_BOOTSTRAP_FULL_ACCESS:-false}`, so an unset or empty Compose input
+resolves to `false` before bootstrap; an empty value passed directly to the
+bootstrap process is rejected.
+
+The option never changes a row with a matching key hash. A conflicting scoped,
+less-privileged, revoked or principal-bound credential is not upgraded or
+reactivated; full-access provisioning aborts and rolls back its transaction.
+An already unbound, active ADMIN key containing literal `"*"` can be reused
+without changing its scopes or other metadata. Direct callers that do not opt
+in can also reuse active scoped credentials unchanged.
 
 ### Bootstrap credential file rules
 

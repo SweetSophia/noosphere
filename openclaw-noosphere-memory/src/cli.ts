@@ -13,9 +13,10 @@ import { NoosphereMemoryClient, type NoosphereStatusResponse } from "./client.js
 const PLUGIN_ID = "noosphere-memory";
 const DEFAULT_COMPOSE_FILE = "~/.noosphere/docker-compose.yml";
 const DEFAULT_LOG_TAIL = 80;
-const VERIFIED_INSTALLER_REF = "7ebffe1f21578cd6e2ad17a7f6fa5baddc88769e";
-const VERIFIED_INSTALLER_SHA256 = "f573463525c139e4cee69f5b002d2f8e0a15ad976063564fbb19cba5d3458586";
-const VERIFIED_NOOSPHERE_VERSION = "1.15.0";
+const VERIFIED_INSTALLER_REF = "2114560065aa4ea07b1f07175824eb645f4325a7";
+const VERIFIED_INSTALLER_SHA256 = "90432d088c8d4aa4d0220685c1f1801c1ce2d609d820e4cf309eb13a46f67701";
+const VERIFIED_BACKEND_SHA256 = "681db7ce3e08f9692bd9631160bc0d9b9f0e468a0338179ab2dd826d25400c9f";
+const VERIFIED_NOOSPHERE_VERSION = "1.15.1";
 const VERIFIED_INSTALLER_URL =
   `https://raw.githubusercontent.com/SweetSophia/noosphere/${VERIFIED_INSTALLER_REF}/install.sh`;
 
@@ -76,10 +77,15 @@ export function getVerifiedInstallerCommands(): string[] {
   return [
     "(",
     "  set -e",
-    '  installer="$(mktemp)"',
-    '  trap \'rm -f "$installer"\' EXIT',
+    '  installer_dir="$(mktemp -d)"',
+    '  trap \'rm -rf "$installer_dir"\' EXIT',
+    '  installer="$installer_dir/install.sh"',
+    '  backend="$installer_dir/install-openclaw.sh"',
+    '  unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256',
     `  curl -fsSL ${VERIFIED_INSTALLER_URL} -o "$installer"`,
+    `  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/${VERIFIED_INSTALLER_REF}/install-openclaw.sh -o "$backend"`,
     `  printf '%s  %s\\n' '${VERIFIED_INSTALLER_SHA256}' "$installer" | sha256sum -c -`,
+    `  printf '%s  %s\\n' '${VERIFIED_BACKEND_SHA256}' "$backend" | sha256sum -c -`,
     `  NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-${VERIFIED_NOOSPHERE_VERSION}}" NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${VERIFIED_NOOSPHERE_VERSION}}" NOOSPHERE_PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${VERIFIED_NOOSPHERE_VERSION}}" bash "$installer" --non-interactive --with openclaw`,
     ")",
   ];

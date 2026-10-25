@@ -8,8 +8,8 @@ x-noosphere-image: &noosphere-image
       # Prisma only needs a syntactically valid URL while generating/building;
       # the image build never authenticates or performs database work.
       DATABASE_URL: postgresql://localhost/noosphere
-      NOOSPHERE_VERSION: ${NOOSPHERE_VERSION:-1.15.0}
-  image: noosphere-local:${NOOSPHERE_VERSION:-1.15.0}
+      NOOSPHERE_VERSION: ${NOOSPHERE_VERSION:-1.15.1}
+  image: noosphere-local:${NOOSPHERE_VERSION:-1.15.1}
 
 services:
   init:
@@ -43,6 +43,7 @@ services:
       NOOSPHERE_ADMIN_PASSWORD_RESET: ${NOOSPHERE_ADMIN_PASSWORD_RESET:-false}
       NOOSPHERE_FORCE_ADMIN: ${NOOSPHERE_FORCE_ADMIN:-false}
       NOOSPHERE_BOOTSTRAP_API_KEY: ${NOOSPHERE_BOOTSTRAP_API_KEY:-}
+      NOOSPHERE_BOOTSTRAP_FULL_ACCESS: ${NOOSPHERE_BOOTSTRAP_FULL_ACCESS:-false}
       NOOSPHERE_BOOTSTRAP_SECRETS_FILE: ${NOOSPHERE_BOOTSTRAP_SECRETS_FILE:-/tmp/noosphere-bootstrap-secrets/secrets.json}
     volumes:
       - ./uploads:/app/uploads:rw
@@ -70,7 +71,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     labels:
-      org.opencontainers.image.version: "${NOOSPHERE_VERSION:-1.15.0}"
+      org.opencontainers.image.version: "${NOOSPHERE_VERSION:-1.15.1}"
     ports:
       - "6578:3000"
     environment:

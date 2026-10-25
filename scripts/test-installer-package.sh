@@ -4,6 +4,27 @@ set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+[[ $# == 0 || ($# == 1 && "$1" == --backend-resolution-only) ]] || {
+  echo 'Usage: test-installer-package.sh [--backend-resolution-only]' >&2
+  exit 2
+}
+
+# Exercise the checked-in launcher without the UX fixture's backend override.
+# Resolution mode exits before the backend can execute or load runtime config.
+source_backend_sha=$(sha256sum "$root/install-openclaw.sh" | awk '{print $1}')
+NOOSPHERE_INSTALLER_TEST_MODE=resolve-backend \
+  bash "$root/install.sh" --core-only > "$tmp/source-sibling-positive.out"
+grep -q "resolved_backend_sha256=$source_backend_sha" "$tmp/source-sibling-positive.out"
+mkdir -p "$tmp/tampered-source"
+cp "$root/install.sh" "$root/install-openclaw.sh" "$tmp/tampered-source/"
+printf '\n# tampered source sibling\n' >> "$tmp/tampered-source/install-openclaw.sh"
+if NOOSPHERE_INSTALLER_TEST_MODE=resolve-backend \
+  bash "$tmp/tampered-source/install.sh" --core-only > "$tmp/source-sibling-negative.out" 2>&1; then
+  echo 'tampered source sibling backend unexpectedly passed' >&2
+  exit 1
+fi
+grep -q 'unexpected checksum' "$tmp/source-sibling-negative.out"
+
 first="$tmp/first"
 second="$tmp/second"
 "$root/scripts/package-installer.sh" "$first" >/dev/null
@@ -31,6 +52,9 @@ for mode in 0755 0775 0700; do
   cp "$root/scripts/package-hermes-plugin.sh" "$root/scripts/package-installer.sh" \
     "$fixture/scripts/"
   cp -a "$root/hermes-noosphere-memory" "$fixture/"
+  # Different backend bytes prove packaging refreshes both pins, rather than
+  # accidentally inheriting the already-correct source sibling checksum.
+  printf '\n# packaging pin refresh fixture\n' >> "$fixture/install-openclaw.sh"
   FIXTURE_ROOT="$fixture" FIXTURE_MODE="$mode" node <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
@@ -50,6 +74,9 @@ const visit = (directory) => {
 visit(process.env.FIXTURE_ROOT);
 NODE
   "$fixture/scripts/package-installer.sh" "$output" >/dev/null
+  fixture_backend_sha=$(sha256sum "$output/install-openclaw.sh" | awk '{print $1}')
+  grep -q "^BACKEND_SHA256='$fixture_backend_sha'$" "$output/install.sh"
+  grep -q "^SOURCE_BACKEND_SHA256='$fixture_backend_sha'$" "$output/install.sh"
   if [[ -z "$mode_baseline" ]]; then
     mode_baseline="$output"
   else
@@ -77,6 +104,7 @@ bash -n "$first/install.sh" "$first/install-openclaw.sh"
 backend_sha=$(sha256sum "$first/install-openclaw.sh" | awk '{print $1}')
 hermes_sha=$(sha256sum "$first/hermes-noosphere-memory-${version}.tar.gz" | awk '{print $1}')
 grep -q "^BACKEND_SHA256='$backend_sha'$" "$first/install.sh"
+grep -q "^SOURCE_BACKEND_SHA256='$backend_sha'$" "$first/install.sh"
 grep -q "^HERMES_BUNDLE_SHA256='$hermes_sha'$" "$first/install.sh"
 
 NOOSPHERE_INSTALLER_TEST_MODE=resolve-backend \
@@ -132,6 +160,11 @@ if PATH="$tmp/fake-bin:$PATH" \
   exit 1
 fi
 grep -q 'unexpected checksum' "$tmp/remote-negative.out"
+
+if [[ "${1:-}" == --backend-resolution-only ]]; then
+  printf 'installer_backend_resolution_tests=GREEN source_sibling=yes source_tamper_rejected=yes package_deterministic=yes packaged_sibling=yes remote_stub=yes piped_stub=yes tamper_rejected=yes backend_execution=no\n'
+  exit 0
+fi
 
 (
   cd "$first"

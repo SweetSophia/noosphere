@@ -22,6 +22,12 @@ any tag is created.
 
 ## Pre-publication gate
 
+Before cutting a release tag, change that version's changelog heading from
+`Unreleased` to its release date and close its compare link at `vX.Y.Z`; advance
+the separate `[Unreleased]` link to start at that new tag. A candidate's `HEAD`
+compare link is temporary and must not survive into published release notes.
+This step is release preparation, not authorization to create tags or publish.
+
 1. Merge the release PR normally after exact-head local and hosted gates pass.
 2. Verify all six proposed tags are absent locally and remotely.
 3. Build every npm tarball with `npm pack --dry-run` and inspect its file list.
