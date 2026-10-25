@@ -7,7 +7,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 bash -n "$backend"
-BACKEND_UNDER_TEST="$backend" node <<'NODE'
+REPO_ROOT="$root" BACKEND_UNDER_TEST="$backend" node <<'NODE'
 const fs = require("node:fs");
 const source = fs.readFileSync(process.env.BACKEND_UNDER_TEST, "utf8");
 const required = [
@@ -25,7 +25,7 @@ if (source.includes("API KEY (save this - it will not be shown again)")) {
   throw new Error("backend prints the bootstrap key by default");
 }
 const path = require("node:path");
-const root = path.dirname(process.env.BACKEND_UNDER_TEST);
+const root = process.env.REPO_ROOT;
 function assertInitOnlySetting(text, setting, label) {
   const init = text.match(/^  init:\n([\s\S]*?)(?=^  [a-zA-Z0-9_-]+:|(?![\s\S]))/m)?.[1];
   const settings = text.match(/^      NOOSPHERE_BOOTSTRAP_FULL_ACCESS:.*$/gm) ?? [];
@@ -125,7 +125,12 @@ while (($# > 0)); do
     *) shift ;;
   esac
 done
-[[ "$disable" == true && "$noproxy" == true ]]
+if [[ "$disable" != true || "$noproxy" != true ]]; then
+  if [[ -n "${INSTALLER_TEST_PROXY_REJECTION:-}" ]]; then
+    printf 'proxy-policy-rejected\n' > "$INSTALLER_TEST_PROXY_REJECTION"
+  fi
+  exit 92
+fi
 [[ "$connect_timeout" == 5 && "$max_time" == 15 ]]
 [[ -f "$config" ]]
 grep -q 'header = "Authorization: Bearer noo_' "$config"
@@ -135,6 +140,7 @@ case "$FAKE_CURL_MODE:$method:$url" in
   reuse:GET:*/api/keys) printf '403' ;;
   create:POST:*/api/keys|read:POST:*/api/keys)
     printf '{"key":"%s"}\n' "$FAKE_CREATED_KEY" > "$output"
+    printf '201'
     ;;
   read:POST:*/api/articles) printf '403' ;;
   read:GET:*/api/keys) printf '403' ;;
@@ -263,6 +269,22 @@ grep -q '^CREDENTIAL_SENTINEL=yes$' "$tmp/credential-parent-target/sentinel"
 test ! -e "$tmp/credential-parent-target/credentials.json"
 grep -q 'Refusing symlinked credential path component' "$tmp/credential-parent-symlink.out"
 
+# Recursed controls run all assertions, then stop before creating more controls.
+if [[ "${INSTALLER_TEST_CONTROL_CHILD:-false}" == true ]]; then
+  printf 'installer_backend_control_behavior=GREEN\n'
+  exit 0
+fi
+
+# A relocated, unmodified backend must pass first. An unrelated fixture/path
+# failure must not be accepted as proof that a security sabotage was detected.
+cp "$backend" "$tmp/unchanged.sh"
+if ! INSTALLER_TEST_CONTROL_CHILD=true "$0" "$tmp/unchanged.sh" >"$tmp/control-baseline.out" 2>&1; then
+  cat "$tmp/control-baseline.out" >&2
+  echo 'unmodified relocated backend control failed' >&2
+  exit 1
+fi
+grep -q '^installer_backend_control_behavior=GREEN$' "$tmp/control-baseline.out"
+
 cp "$backend" "$tmp/proxy-sabotaged.sh"
 SABOTAGED_BACKEND="$tmp/proxy-sabotaged.sh" node <<'NODE'
 const fs = require("node:fs");
@@ -273,10 +295,13 @@ if (!source.includes(guarded)) throw new Error("cannot locate proxy sabotage tar
 source = source.replace(guarded, `curl "$@"`);
 fs.writeFileSync(path, source);
 NODE
-if "$0" "$tmp/proxy-sabotaged.sh" >/dev/null 2>&1; then
+if INSTALLER_TEST_CONTROL_CHILD=true INSTALLER_TEST_PROXY_REJECTION="$tmp/proxy-rejection" \
+  "$0" "$tmp/proxy-sabotaged.sh" >"$tmp/proxy-control.out" 2>&1; then
   echo 'backend proxy-bypass sabotage unexpectedly passed' >&2
   exit 1
 fi
+grep -q '^proxy-policy-rejected$' "$tmp/proxy-rejection"
+grep -q 'refusing to rotate it after a transport failure' "$tmp/proxy-control.out"
 
 cp "$backend" "$tmp/sabotaged.sh"
 SABOTAGED_BACKEND="$tmp/sabotaged.sh" node <<'NODE'
@@ -288,9 +313,10 @@ if (!source.includes(guarded)) throw new Error("cannot locate sabotage target");
 source = source.replace(guarded, "need openclaw");
 fs.writeFileSync(path, source);
 NODE
-if "$0" "$tmp/sabotaged.sh" >/dev/null 2>&1; then
+if INSTALLER_TEST_CONTROL_CHILD=true "$0" "$tmp/sabotaged.sh" >"$tmp/guard-control.out" 2>&1; then
   echo 'backend guard sabotage unexpectedly passed' >&2
   exit 1
 fi
+grep -q 'missing backend policy: if' "$tmp/guard-control.out"
 
 printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 scoped_keys=yes read_key_rejected=yes transport_rotation=blocked local_bootstrap_destination=yes article_floor=preserved proxy_bypass=yes secret_argv=clean child_env=clean credential_parent_symlink=blocked sabotage=red\n'

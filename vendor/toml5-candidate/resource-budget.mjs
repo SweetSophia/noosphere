@@ -145,7 +145,13 @@ export async function runWithBudget(binary, args, options, budget = {}) {
           checkDiskBudget(options.cwd, { ...budget, peak: 0 });
         } catch (error) {
           failure ||= error;
-          if (ownedGroups.has(child.pid)) monitor.ref(); // Keep ownership if quiescence failed.
+          if (ownedGroups.has(child.pid)) {
+            // Clearing the timer could abandon unknown writers. Retain owner,
+            // lock and output for intervention; the CI job timeout bounds this
+            // exceptional fail-closed state. Do not turn it into false success.
+            monitor.ref();
+            console.error(`Qualification could not prove writer group ${child.pid} stopped; retaining ownership and lock/output for supervisor intervention.`);
+          }
         }
         const text = { stdout: Buffer.concat(output.stdout).toString("utf8"), stderr: Buffer.concat(output.stderr).toString("utf8") };
         if (failure || code !== 0) reject(Object.assign(failure || new Error(`Command exited ${code} (${signal || "no signal"})`), text, { code, signal: cancellation?.signal || signal }));

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { katexOverrideFailures } from "./katex-override-policy.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
@@ -336,6 +337,7 @@ function hasForbiddenHelperTag(lines, forbiddenSignals) {
 
 const rootPackage = readJson("package.json");
 const rootLock = readJson("package-lock.json");
+failures.push(...katexOverrideFailures(rootPackage, rootLock));
 const injectedPackage = readJson(`${policy.helper.dir}/package.json`);
 const injectedLock = readJson(`${policy.helper.dir}/package-lock.json`);
 const openclawPackage = readJson(`${policy.openclaw.dir}/package.json`);

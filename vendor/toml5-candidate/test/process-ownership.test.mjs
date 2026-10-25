@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { pathToFileURL } from "node:url";
 import * as fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -89,3 +90,42 @@ try {
     await assert.rejects(fs.lstat(lock), { code: "ENOENT" });
   });
 }
+
+
+test("unknown writer quiescence retains owner and lock with an explicit intervention diagnostic", { timeout: 8000 }, async (t) => {
+  const { root } = await fixture(t);
+  const fault = path.join(root, "unknown-quiescence");
+  const marker = path.join(root, "failure.json");
+  const lock = path.join(root, "install.lock");
+  await fs.writeFile(fault, "fixture");
+  const original = await fs.readFile(new URL("../resource-budget.mjs", import.meta.url), "utf8");
+  const needle = "async function stopGroup(pid) {";
+  assert.equal(original.split(needle).length, 2);
+  const copy = path.join(root, "resource-budget.mjs");
+  // Fault only the copied helper. The tiny child has exited; simulate inability
+  // to prove that state, without creating an unkillable or real writing process.
+  await fs.writeFile(copy, original.replace(needle, `${needle}\n  if (await fs.access(${JSON.stringify(fault)}).then(() => true, () => false)) throw new Error("fixture quiescence unknown");`));
+  const script = `import * as budget from ${JSON.stringify(pathToFileURL(copy).href)};
+import * as fs from 'node:fs/promises';
+const restore=budget.installSignalHandlers();
+const release=await budget.acquireQualificationLock(${JSON.stringify(lock)});
+process.once('SIGTERM',async()=>{await budget.stopOwnedWriters();await release();restore();});
+try { await budget.runWithBudget(process.execPath,['-e','console.log("tiny child")'],{cwd:${JSON.stringify(root)},timeout:2000},{reserve:100,pollMs:20,statfs:()=>({bavail:1000,bsize:1})}); }
+catch(error){process.exitCode=1;await fs.writeFile(${JSON.stringify(marker)},JSON.stringify({message:error.message}));}`;
+  const owner = spawn(process.execPath, ["--input-type=module", "-e", script], { stdio: ["ignore", "pipe", "pipe"] });
+  owner.stdout.resume(); let diagnostic = ""; owner.stderr.on("data", bytes => { diagnostic += bytes; });
+  t.after(() => { if (owner.exitCode === null && owner.signalCode === null) owner.kill("SIGKILL"); });
+  const closed = once(owner, "close");
+  const failure = await waitForFile(marker);
+  assert.match(failure.message, /quiescence unknown/);
+  await delay(100);
+  assert.equal(owner.exitCode, null, "owner exited while quiescence was unknown");
+  assert.equal(owner.signalCode, null);
+  await fs.lstat(lock);
+  assert.match(diagnostic, /retaining ownership and lock\/output for supervisor intervention/);
+  await fs.rm(fault); // Simulated supervisor confirms that quiescence can be checked.
+  owner.kill("SIGTERM");
+  const [code] = await closed;
+  assert.notEqual(code, 0, "supervised failure became success");
+  await assert.rejects(fs.lstat(lock), { code: "ENOENT" });
+});

@@ -309,3 +309,20 @@ integers without opting into bigint. Overall PR/release readiness requires the
 remaining gates above.
 Only explicit manual dispatch enables the dependency publication job; its accepted
 submission receipts and verified-publication receipts are distinct evidence.
+
+## Failure ownership and proxy maintenance
+
+A failure to prove an owned writer group is quiescent is an intervention boundary,
+not permission to drop the owner, clear the monitor or release the install lock.
+The owner emits an explicit diagnostic and retains its lock/output; the hosted
+qualification job has a finite timeout and its supervisor owns final intervention.
+The process-ownership regression exercises this exceptional fail-closed state and
+subsequent supervised cleanup. Ordinary child failure, timeout and cancellation
+still stop writers and release ownership normally. Do not apply a timer-clearing
+"fix" that permits unknown writers to outlive their owner.
+
+The loopback registry forwards only to the fixed public npm origin and rejects
+upstream redirects. The focused proxy test executes the actual forwarding core
+against local HTTP fixtures: an upstream redirect must never reach its target.
+Historical reconstruction is isolated from the consumer/server branch and lets
+piped stdout drain naturally rather than calling process.exit(0).

@@ -89,6 +89,12 @@ The affected subset was repeated on Node 24. Hosted CI has not yet run on this
 head, so nothing here implies a passing hosted pipeline or an approved
 release.
 
+The qualified KaTeX edge contract is enforced by `scripts/katex-override-policy.mjs`
+through the existing package-policy gate: changes to the three parents' declared
+ranges, the exact root pin or the scoped overrides fail until explicitly
+re-qualified. This deliberately checks the approved exception, rather than an
+ordinary range-satisfaction rule that would reject the current qualified graph.
+
 ## Quick Start
 
 ### Prerequisites

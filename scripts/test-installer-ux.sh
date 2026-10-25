@@ -112,6 +112,7 @@ case "$method:$url" in
     ;;
   POST:*/api/keys)
     printf '{"key":"%s"}\n' "$INSTALLER_TEST_CREATED_KEY" > "$output"
+    printf '201'
     ;;
   *) exit 91 ;;
 esac

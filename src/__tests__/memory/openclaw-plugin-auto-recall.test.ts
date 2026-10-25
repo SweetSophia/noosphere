@@ -2363,8 +2363,8 @@ describe("OpenClaw Noosphere CLI helpers", () => {
     const combined = commands.join("\n");
 
     assert.equal(commands.length, 13);
-    assert.match(combined, /243892c40fb4659066bc9b13b555e1b5e0eb4039/);
-    assert.match(combined, /9e190014a8738d54a3904050c4dce6a330f6682d43af7d8d2b61684d7694c815/);
+    assert.match(combined, /f86e04d4dfc1a31de26b51c43cee3318386d1855/);
+    assert.match(combined, /36949e7abf2e035669f3af4ff5331e44d88b6980c051642073dd8bfd18e98158/);
     assert.equal(commands[0], "(");
     assert.equal(commands[1], "  set -e");
     assert.match(commands[2], /mktemp -d/);
@@ -2372,7 +2372,7 @@ describe("OpenClaw Noosphere CLI helpers", () => {
     assert.match(commands[7], /curl .* -o \"\$installer\"/);
     assert.match(commands[8], /curl .* -o \"\$backend\"/);
     assert.match(commands[9], /sha256sum -c -/);
-    assert.match(commands[10], /c82a6e0cca5fa90b05a8d6246205a8490ae653652fb8f82c8a86ccc9128684a3.*sha256sum -c -/);
+    assert.match(commands[10], /3765d12904a583cd1a513f0622924ee0e71d675ce7225e0ebd90389837e86bee.*sha256sum -c -/);
     assert.equal(
       commands[11],
       '  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.1}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.1}" bash "$installer" --non-interactive --with openclaw',

@@ -35,8 +35,8 @@ For an existing installation using a custom image, export `NOOSPHERE_IMAGE` expl
 before running this block. The version-bound default does not reuse a persisted image automatically.
 
 ```bash
-# Installer commit: 243892c40fb4659066bc9b13b555e1b5e0eb4039
-# Expected SHA-256: 9e190014a8738d54a3904050c4dce6a330f6682d43af7d8d2b61684d7694c815
+# Installer commit: f86e04d4dfc1a31de26b51c43cee3318386d1855
+# Expected SHA-256: 36949e7abf2e035669f3af4ff5331e44d88b6980c051642073dd8bfd18e98158
 (
   set -e
   installer_dir="$(mktemp -d)"
@@ -44,10 +44,10 @@ before running this block. The version-bound default does not reuse a persisted 
   installer="$installer_dir/install.sh"
   backend="$installer_dir/install-openclaw.sh"
   unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/243892c40fb4659066bc9b13b555e1b5e0eb4039/install.sh -o "$installer"
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/243892c40fb4659066bc9b13b555e1b5e0eb4039/install-openclaw.sh -o "$backend"
-  printf '%s  %s\n' '9e190014a8738d54a3904050c4dce6a330f6682d43af7d8d2b61684d7694c815' "$installer" | sha256sum -c -
-  printf '%s  %s\n' 'c82a6e0cca5fa90b05a8d6246205a8490ae653652fb8f82c8a86ccc9128684a3' "$backend" | sha256sum -c -
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/f86e04d4dfc1a31de26b51c43cee3318386d1855/install.sh -o "$installer"
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/f86e04d4dfc1a31de26b51c43cee3318386d1855/install-openclaw.sh -o "$backend"
+  printf '%s  %s\n' '36949e7abf2e035669f3af4ff5331e44d88b6980c051642073dd8bfd18e98158' "$installer" | sha256sum -c -
+  printf '%s  %s\n' '3765d12904a583cd1a513f0622924ee0e71d675ce7225e0ebd90389837e86bee' "$backend" | sha256sum -c -
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.1}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.1}" bash "$installer" --non-interactive --with openclaw
 )
 ```

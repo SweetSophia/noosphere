@@ -128,8 +128,8 @@ if (mode === "--reconstruct-only") {
   const ordered = (entries) => [...entries].sort((a, b) => `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`));
   assert.deepEqual(ordered(receipts), ordered(approved), "Reconstructed archives differ from the historical approvals");
   await fs.writeFile(path.join(output, "reconstruction.json"), `${JSON.stringify({ node: process.version, artifacts: receipts, distribution: "historical-archives-only-not-consumer-qualification" }, null, 2)}\n`);
-  process.exit(0); // All archive checks/writes awaited; no loopback server was started.
-}
+  // Let stdout drain naturally when CI captures the proof through a pipe.
+} else {
 
 // The registry serves only the exact reconstructed candidate artifacts; upstream
 // packages retain public-registry metadata and tarball URLs. It is loopback-only.
@@ -166,7 +166,7 @@ const server = createServer(async (request, response) => {
       response.writeHead(400).end();
       return;
     }
-    const upstream = await fetch(upstreamUrl, { signal: AbortSignal.timeout(30_000) });
+    const upstream = await fetch(upstreamUrl, { redirect: "error", signal: AbortSignal.timeout(30_000) });
     response.writeHead(upstream.status, { "content-type": upstream.headers.get("content-type") || "application/json" });
     response.end(Buffer.from(await upstream.arrayBuffer()));
   } catch (error) {
@@ -218,4 +218,5 @@ try {
 } finally {
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
+}
 }
