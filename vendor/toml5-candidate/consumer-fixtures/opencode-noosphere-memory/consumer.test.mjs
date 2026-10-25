@@ -72,18 +72,41 @@ test("installed aliases use declared fork edges without overrides or builder ref
  const parent=JSON.parse(fsNode.readFileSync(path.join(path.dirname(pluginUrl),"../package.json")));
  const effect=effectRequire("effect/package.json");
  const consumer=JSON.parse(fsNode.readFileSync(new URL("./package.json",import.meta.url)));
+ // This fixture serves two dependency graphs: the frozen publication candidate and
+ // the active candidate. Each is checked against the alias its own adapter manifest
+ // declares, so neither graph's versions are hardcoded into the other.
+ let dir=path.dirname(adapterUrl);
+ let adapter;
+ for (let depth=0; depth<4; depth+=1) {
+   const candidate=path.join(dir,"package.json");
+   if (fsNode.existsSync(candidate)) {
+     const parsed=JSON.parse(fsNode.readFileSync(candidate));
+     if (parsed.name==="@sweetsophia/opencode-noosphere-memory") { adapter=parsed; break; }
+   }
+   dir=path.dirname(dir);
+ }
+ assert.ok(adapter, "Adapter manifest not found");
+ const declaredPlugin=adapter.dependencies["@opencode-ai/plugin"];
+ assert.match(declaredPlugin,/^npm:@sweetsophia\/noosphere-opencode-plugin@/);
+ const declaredVersion=declaredPlugin.slice(declaredPlugin.lastIndexOf("@")+1);
  assert.equal(consumer.overrides,undefined);
  assert.equal(parent.name, "@sweetsophia/noosphere-opencode-plugin");
- assert.equal(parent.version, "1.15.5-noosphere.4");
- assert.equal(parent.dependencies.zod, "4.6.7");
- assert.equal(pluginRequire("zod/package.json").version, "4.6.7");
- assert.equal(parent.dependencies.effect, "npm:@sweetsophia/noosphere-effect@4.0.0-beta.65-noosphere.3");
+ assert.equal(parent.version, declaredVersion);
+ const declaredZod=String(parent.dependencies.zod);
+ const installedZod=pluginRequire("zod/package.json").version;
+ if (declaredZod.startsWith("^") || declaredZod.startsWith("~")) {
+   const base=declaredZod.slice(1);
+   assert.ok(installedZod===base || installedZod.startsWith(base.split(".").slice(0,-1).join(".")+"."), 'installed zod '+installedZod+' does not satisfy the declared '+declaredZod);
+ } else {
+   assert.equal(installedZod, declaredZod);
+ }
  assert.match(parent.dependencies.effect,/^npm:@sweetsophia\/noosphere-effect@/);
- assert.ok(effect.version.endsWith("-noosphere.3"));
+ assert.equal(effect.version, parent.dependencies.effect.slice(parent.dependencies.effect.lastIndexOf("@")+1));
  assert.equal(effect.dependencies.toml,"5.0.1");
  assert.ok(effectUrl.includes(path.dirname(new URL(import.meta.url).pathname)));
  assert.equal(effectRequire("toml/package.json").version,"5.0.1");
 });
+
 test("public entrypoint preserves the declared host export shape", async () => {
  const p=await import("@sweetsophia/opencode-noosphere-memory");
  assert.equal(typeof p.server,"function");
