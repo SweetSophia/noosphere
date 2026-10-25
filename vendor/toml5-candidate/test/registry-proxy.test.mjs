@@ -67,3 +67,25 @@ test("historical reconstruction returns naturally without starting the consumer 
   assert.equal(written.name, "output/reconstruction.json");
   assert.equal(JSON.parse(written.data).distribution, "historical-archives-only-not-consumer-qualification");
 });
+
+
+for (const target of ["//attacker.invalid/private", "https://user:password@registry.npmjs.org/private"]) {
+  test(`registry proxy rejects an untrusted authority: ${target}`, async () => {
+    let calls = 0; const result = response();
+    await proxy({ url: target }, result, async () => { calls++; }, registry);
+    assert.equal(result.status, 400); assert.equal(calls, 0);
+  });
+}
+test("encoded path and query data cannot alter the constant network authority", async () => {
+  const target = "/@scope%2fpackage?next=https://attacker.invalid/private";
+  const result = response();
+  await proxy({ url: target }, result, async (url, options) => {
+    assert.equal(url.origin, registry); assert.equal(url.protocol, "https:");
+    assert.equal(url.hostname, "registry.npmjs.org"); assert.equal(url.username, "");
+    assert.equal(url.pathname, "/@scope%2fpackage");
+    assert.equal(url.search, "?next=https://attacker.invalid/private");
+    assert.equal(options.redirect, "error");
+    return new Response("{}");
+  }, registry);
+  assert.equal(result.status, 200);
+});

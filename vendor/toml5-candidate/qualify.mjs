@@ -161,11 +161,16 @@ const server = createServer(async (request, response) => {
     // Forward only to the fixed public registry origin: an absolute-form or
     // protocol-relative request target must never steer this loopback proxy
     // elsewhere (request forgery). The origin guard fails closed.
-    const upstreamUrl = new URL(`${registry}${request.url}`);
-    if (upstreamUrl.origin !== registry) {
+    // Build the network authority from a trusted constant. User input may
+    // select only the path/query; it cannot influence hostname or protocol.
+    const upstreamUrl = new URL(registry);
+    const requested = new URL(request.url, registry);
+    if (requested.origin !== registry || requested.username || requested.password) {
       response.writeHead(400).end();
       return;
     }
+    upstreamUrl.pathname = requested.pathname;
+    upstreamUrl.search = requested.search;
     const upstream = await fetch(upstreamUrl, { redirect: "error", signal: AbortSignal.timeout(30_000) });
     response.writeHead(upstream.status, { "content-type": upstream.headers.get("content-type") || "application/json" });
     response.end(Buffer.from(await upstream.arrayBuffer()));

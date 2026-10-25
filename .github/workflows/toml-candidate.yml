@@ -226,7 +226,7 @@ jobs:
       - name: Use the exact reviewed archive packer
         run: npm install --global npm@12.1.0 --ignore-scripts
       - name: Test SDK publication guards without network or registry writes
-        run: node --test vendor/zod-sdk-candidate/publish.test.mjs vendor/zod-sdk-candidate/ci-receipt.test.mjs
+        run: node --test vendor/zod-sdk-candidate/publish.test.mjs vendor/zod-sdk-candidate/ci-receipt.test.mjs vendor/zod-sdk-candidate/consumer-fixture.test.mjs
       - name: Reconstruct and qualify both local SDK prototypes
         run: node vendor/zod-sdk-candidate/qualify.mjs "$RUNNER_TEMP/zod-sdk-qualified"
       - name: Preserve scoped SDK qualification evidence

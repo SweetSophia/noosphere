@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { approved, reconstruct } from "./reconstruct.mjs";
+import { bindLocalSdkFixture } from "./consumer-fixture.mjs";
 const execFile = promisify(callback);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, "../..");
@@ -68,15 +69,9 @@ try {
     await fs.copyFile(path.join(repo, "vendor/toml5-candidate/consumer-fixtures/toml-boundaries.test.mjs"), path.join(consumer, "toml-boundaries.test.mjs"));
     const fixture = path.join(consumer, "consumer.test.mjs");
     let text = await fs.readFile(fixture, "utf8");
-    const old = ` assert.ok(parent.version.endsWith("-noosphere.${index === 0 ? 3 : 4}"));`;
-    assert.equal(text.split(old).length, 2, "SDK fixture oracle drift");
-    const exact = ` assert.equal(parent.version, ${JSON.stringify(artifact.version)});`;
-    text = text.replace(old, [
-      ` assert.equal(parent.name, ${JSON.stringify(artifact.name)});`, exact,
-      ' assert.equal(parent.dependencies.zod, "4.6.7");',
-      ' assert.equal(pluginRequire("zod/package.json").version, "4.6.7");',
-      ` assert.equal(parent.dependencies.effect, ${JSON.stringify(artifact.effectAlias)});`,
-    ].join("\n")).replace("installed aliases use declared fork edges without overrides or builder references", "local SDK retains exact identity and unchanged Effect/TOML edges without overrides");
+    const bound = bindLocalSdkFixture(text, artifact, manifest.dependencies[plugin]);
+    text = bound.text;
+    const exact = bound.versionBinding;
     await fs.writeFile(fixture, text);
     await npmRun(["install", ...install], consumer, `${adapter}-consumer-install`);
     await npmRun(["ci", ...install], consumer, `${adapter}-consumer-reinstall`);
@@ -92,7 +87,7 @@ try {
     assert.match(runtime, /^# pass 12$/m); assert.match(runtime, /^# fail 0$/m); assert.match(runtime, /^# skipped 0$/m);
     await run(process.execPath, ["node_modules/typescript/bin/tsc", "--noEmit", "--strict", "--skipLibCheck", "false", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--target", "ES2022", "consumer.ts"], consumer, `${adapter}-consumer-types`);
     if (index === 0) {
-      await fs.writeFile(path.join(consumer, "wrong-sdk.test.mjs"), text.replace(exact, ' assert.equal(parent.version, "1.15.5-noosphere.3");'));
+      await fs.writeFile(path.join(consumer, "wrong-sdk.test.mjs"), text.replace(exact, ' const declaredVersion="1.15.5-noosphere.3";'));
       await run(process.execPath, ["--test", "--test-reporter=tap", "wrong-sdk.test.mjs"], consumer, "wrong-sdk-revision-rejected", true);
     }
     qualification.consumers.push({ adapter, runtimeCases: 12, strictTypes: true, zod: "4.6.7", toml: "5.0.1", sdk: artifact.version, privateFileSdkEdge: true });
