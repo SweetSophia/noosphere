@@ -15,13 +15,22 @@ after(async () => {
 
 test("actual article CTE stems all four fields while preserving ranking and scope filters", async () => {
   const prefix = `stemming-${randomUUID()}`;
-  const topic = await prisma.topic.create({ data: { name: prefix, slug: prefix } });
-  const title = await prisma.article.create({ data: { title: "running", slug: "title", content: "sleeping", excerpt: "photos", topicId: topic.id } });
-  const content = await prisma.article.create({ data: { title: "Other", slug: "content", content: "running", topicId: topic.id } });
-  const restricted = await prisma.article.create({ data: { title: "running", slug: "private", content: "restricted", topicId: topic.id, restrictedTags: ["team-a"] } });
-  const tag = await prisma.tag.create({ data: { name: `deployments ${prefix}`, slug: prefix } });
+  // Allocate owned identities before setup so even a failed create is covered
+  // by cleanup, and make setup atomic instead of committing partial fixtures.
+  const topic = { id: `${prefix}-topic`, slug: prefix };
+  const title = { id: `${prefix}-title` };
+  const content = { id: `${prefix}-content` };
+  const restricted = { id: `${prefix}-private` };
+  const tag = { id: `${prefix}-tag` };
   try {
-    await prisma.articleTag.create({ data: { articleId: title.id, tagId: tag.id } });
+    await prisma.$transaction(async (tx) => {
+      await tx.topic.create({ data: { id: topic.id, name: prefix, slug: prefix } });
+      await tx.article.create({ data: { id: title.id, title: "running", slug: "title", content: "sleeping", excerpt: "photos", topicId: topic.id } });
+      await tx.article.create({ data: { id: content.id, title: "Other", slug: "content", content: "running", topicId: topic.id } });
+      await tx.article.create({ data: { id: restricted.id, title: "running", slug: "private", content: "restricted", topicId: topic.id, restrictedTags: ["team-a"] } });
+      await tx.tag.create({ data: { id: tag.id, name: `deployments ${prefix}`, slug: prefix } });
+      await tx.articleTag.create({ data: { articleId: title.id, tagId: tag.id } });
+    });
     const search = async (query: string, allowedScopes: string[] = [], fallback = false) => {
       const cte = buildSearchableCTE(buildArticleSearchFilters({ topicSlug: topic.slug, allowedScopes }));
       const tsquery = fallback ? buildFallbackSearchTsQuery(query) : buildSearchTsQuery(query);
@@ -51,8 +60,8 @@ test("actual article CTE stems all four fields while preserving ranking and scop
     assert.deepEqual(await search("photo", ["*"]), [], "stemming must not bypass article eligibility");
   } finally {
     await prisma.articleTag.deleteMany({ where: { tagId: tag.id } });
-    await prisma.tag.delete({ where: { id: tag.id } });
+    await prisma.tag.deleteMany({ where: { id: tag.id } });
     await prisma.article.deleteMany({ where: { topicId: topic.id } });
-    await prisma.topic.delete({ where: { id: topic.id } });
+    await prisma.topic.deleteMany({ where: { id: topic.id } });
   }
 });
