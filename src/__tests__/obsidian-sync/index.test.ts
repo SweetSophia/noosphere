@@ -1,7 +1,7 @@
 /**
  * Obsidian Shadow Sync — Unit Tests
  *
- * Run with: npx tsx src/__tests__/obsidian-sync/index.test.ts
+ * Run with: npm run test:obsidian-sync
  *
  * Tests cover:
  * 1. Path building (topic hierarchy)
@@ -13,6 +13,7 @@
  */
 
 import { createHash } from "crypto";
+import test from "node:test";
 import { writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, renameSync } from "fs";
 import { join, resolve } from "path";
 import yaml from "js-yaml";
@@ -20,19 +21,9 @@ import { spawn } from "child_process";
 
 // ─── Test helpers ────────────────────────────────────────────────────────────
 
-let testCounter = 0;
+// The native runner owns each async result. A dangling promise is a cancelled
+// test (and a failing process), not a silently successful microtask launch.
 let tempDirCounter = 0;
-function test(name: string, fn: () => void | Promise<void>): void {
-  testCounter++;
-  const label = `[${testCounter}] ${name}`;
-  Promise.resolve()
-    .then(() => fn())
-    .then(() => console.log(`  ✓ ${label}`))
-    .catch((err: unknown) => {
-      console.error(`  ✗ ${label}: ${(err as Error).message}`);
-      process.exitCode = 1;
-    });
-}
 
 function eq<T>(got: T, want: T, msg = ""): void {
   const gotStr = JSON.stringify(got);
@@ -656,6 +647,3 @@ test("git status shows changes for modified file", async () => {
 
 // ─── Summary ─────────────────────────────────────────────────────────────────
 
-process.on("exit", () => {
-  console.log(`\n  ${testCounter} test(s) run\n`);
-});
