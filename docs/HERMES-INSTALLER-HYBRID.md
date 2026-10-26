@@ -67,16 +67,21 @@ not copy another host's Tailscale URL.
 
 ### Interactive (TTY)
 
-Checksum the launcher, then run it with no flags. It prompts for each agent
+Checksum the launcher and its sibling backend, then run it with no flags. It prompts for each agent
 CLI it finds (`[Y/n]`, empty enter = Yes):
 
 ```bash
 (
   set -e
-  installer="$(mktemp)"
-  trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/182e0dceade3f0ac31e5d14f42f091d4075793a2/install.sh -o "$installer"
-  printf '%s  %s\n' '5fd69c4125ba02fdcc36e1bb54b66628dc5d324f7c04cea13d5dae3729035601' "$installer" | sha256sum -c -
+  installer_dir="$(mktemp -d)"
+  trap 'rm -rf "$installer_dir"' EXIT
+  installer="$installer_dir/install.sh"
+  backend="$installer_dir/install-openclaw.sh"
+  unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/2114560065aa4ea07b1f07175824eb645f4325a7/install.sh -o "$installer"
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/2114560065aa4ea07b1f07175824eb645f4325a7/install-openclaw.sh -o "$backend"
+  printf '%s  %s\n' '90432d088c8d4aa4d0220685c1f1801c1ce2d609d820e4cf309eb13a46f67701' "$installer" | sha256sum -c -
+  printf '%s  %s\n' '681db7ce3e08f9692bd9631160bc0d9b9f0e468a0338179ab2dd826d25400c9f' "$backend" | sha256sum -c -
   bash "$installer"
 )
 ```
@@ -223,13 +228,13 @@ Never `docker compose` from a git clone. Never re-run `init`.
 ### 4.1 Scripts checkout (not the runtime)
 
 ```bash
-git clone --branch v1.14.0 --depth 1 https://github.com/SweetSophia/noosphere.git ~/src/noosphere-scripts
+git clone --branch v1.15.0 --depth 1 https://github.com/SweetSophia/noosphere.git ~/src/noosphere-scripts
 cd ~/src/noosphere-scripts
-test "$(git describe --tags --exact-match)" = v1.14.0
+test "$(git describe --tags --exact-match)" = v1.15.0
 npm ci
 ```
 
-That commit is tag `v1.14.0`. `npm ci` is for activators only. Do not run
+That commit is tag `v1.15.0`. `npm ci` is for activators only. Do not run
 Compose from this clone.
 
 ### 4.2 Snapshot

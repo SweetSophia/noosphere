@@ -25,15 +25,16 @@ import { resolveScopeAccess } from "@/lib/api/scope-filter";
  * NOT conflate. Common function words (`the`, `of`, `is`, …) are stripped
  * by the query parser, so a query of only stop words yields an empty tsquery.
  *
- * Both sides of the `@@` operator MUST agree on the configuration or the
- * operator returns `false` for every row.
+ * Document and query builders share the configuration so their stemming and
+ * stop-word semantics agree. PostgreSQL does not retain a configuration label
+ * in tsvector/tsquery values; mixed configurations can still match coincident
+ * lexemes, but may silently miss inflected forms.
  *
  * The English configuration is part of the standard PostgreSQL distribution
  * (`pg_catalog.english`), so no extension or migration is required — only the
  * `english` text-search dictionary must be present in the cluster. The unit
- * tests in `src/__tests__/memory/article-search.test.ts` guard against a
- * stale `'simple'` literal surviving in the generated SQL; they do not
- * assert dictionary presence on the cluster itself.
+ * tests guard against stale `'simple'` SQL, and the app-role persistence suite
+ * executes the real CTE, strict/fallback queries and rankings against PostgreSQL.
  *
  * Issue #256 (M2): previously `'simple'`, which tokenized without stemming.
  */
@@ -265,8 +266,7 @@ function buildWhereClause(filters: Prisma.Sql[]): Prisma.Sql {
  * Build a tsquery fragment from a user query string using `websearch_to_tsquery`.
  *
  * Uses `TSQUERY_CONFIG` so the resulting tsquery matches the tsvector document
- * produced by `buildSearchableCTE` — both sides must agree on the text-search
- * configuration or the `@@` operator returns `false` for every row.
+ * produced by `buildSearchableCTE`, avoiding mismatched stemming semantics.
  */
 export function buildSearchTsQuery(query: string): Prisma.Sql {
   return Prisma.sql`websearch_to_tsquery(${Prisma.raw(`'${TSQUERY_CONFIG}'`)}, ${query})`;

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { katexOverrideFailures } from "./katex-override-policy.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
@@ -336,6 +337,7 @@ function hasForbiddenHelperTag(lines, forbiddenSignals) {
 
 const rootPackage = readJson("package.json");
 const rootLock = readJson("package-lock.json");
+failures.push(...katexOverrideFailures(rootPackage, rootLock));
 const injectedPackage = readJson(`${policy.helper.dir}/package.json`);
 const injectedLock = readJson(`${policy.helper.dir}/package-lock.json`);
 const openclawPackage = readJson(`${policy.openclaw.dir}/package.json`);
@@ -691,12 +693,21 @@ expect(
   "The release Compose file must use a configurable Obsidian host path and must not contain personal home paths or non-loopback URL defaults.",
 );
 for (const { relativePath, text } of guidedCommandDocs) {
+  const imageBinding = `NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${releaseVersion}}"`;
+  const openClawInvocation = 'bash "$installer" --non-interactive --with openclaw';
+  const versionBoundCommand =
+    `NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-${releaseVersion}}" ${imageBinding} ` +
+    `NOOSPHERE_PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@${releaseVersion}}" ${openClawInvocation}`;
   expect(
     text.includes(`releases/tag/v${releaseVersion}`) &&
       text.includes("all six installer assets") &&
       text.includes("sha256sum -c -") &&
-      !text.includes(`NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:${releaseVersion}}"`),
-    `${relativePath} must gate pinned commands on the coordinated release and preserve persisted custom images.`,
+      (text.includes(openClawInvocation)
+        ? text.includes(versionBoundCommand) &&
+          text.includes("export `NOOSPHERE_IMAGE` explicitly") &&
+          text.includes("does not reuse a persisted image automatically")
+        : !text.includes(imageBinding)),
+    `${relativePath} must gate pinned commands on the coordinated release, bind OpenClaw's image, and explain explicit custom-image preservation.`,
   );
 }
 expect(
@@ -880,10 +891,10 @@ expect(
   "The coordinated release guide must attach/read back all checksum-owned installer assets before publication.",
 );
 expect(
-  installer.includes("BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/ef36b7da94b64cd2c63e66c7731c2de4e5ca69cf/install-openclaw.sh'") &&
-    installer.includes("BACKEND_SHA256='224dd8211df0d985d3815472a41d411836c64c8061c92be9315208a353563976'") &&
-    installer.includes("HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.14.0/hermes-noosphere-memory-1.14.0.tar.gz'") &&
-    installer.includes("HERMES_BUNDLE_SHA256='0167e0eef924c0c911aad609cc6328185291d9b11d07308b684c7e405f7b0e45'") &&
+  installer.includes("BACKEND_URL='https://raw.githubusercontent.com/SweetSophia/noosphere/d0cef60aad8a0f5dea8ed4d2dc2e6f93629dab29/install-openclaw.sh'") &&
+    installer.includes("BACKEND_SHA256='04a3cd17d75542dca48b0f4bdd7cc7cffa926629b192c0e79bea91d2e44b2952'") &&
+    installer.includes("HERMES_BUNDLE_URL='https://github.com/SweetSophia/noosphere/releases/download/v1.15.0/hermes-noosphere-memory-1.15.0.tar.gz'") &&
+    installer.includes("HERMES_BUNDLE_SHA256='3bee19d869243250eb5aec6a4b9211b1c68bd39685c87e7106546aa6b24cedd7'") &&
     installer.includes("Refusing Noosphere backend with an unexpected checksum") &&
     installer.includes("Refusing Hermes bundle with an unexpected checksum") &&
     installer.includes("--core-only") &&

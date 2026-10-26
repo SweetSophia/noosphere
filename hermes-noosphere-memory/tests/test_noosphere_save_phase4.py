@@ -89,7 +89,7 @@ class NoosphereSavePhase4Test(unittest.TestCase):
         provider._client = _FakeClient()
         return provider
 
-    def test_save_tool_uses_default_topic_and_author_template(self):
+    def test_save_tool_rejects_injected_context_in_content(self):
         provider = self.initialized_provider(topic_id="topic-1")
 
         result = json.loads(
@@ -97,12 +97,20 @@ class NoosphereSavePhase4Test(unittest.TestCase):
                 "noosphere_save",
                 {
                     "title": "Deployment rule",
-                    "content": "<memory-context>Use pkapp PM2.</memory-context>",
+                    "content": "Durable prefix. <memory-context>Use pkapp PM2.</memory-context>",
                     "tags": ["ops", ""],
                 },
             )
         )
 
+        self.assertEqual(result.get("error"), "content is required")
+        self.assertEqual(provider._client.saved, [])
+
+    def test_save_tool_uses_default_topic_and_author_template(self):
+        provider = self.initialized_provider(topic_id="topic-1")
+        result = json.loads(provider.handle_tool_call("noosphere_save", {
+            "title": "Deployment rule", "content": "Use pkapp PM2.", "tags": ["ops", ""],
+        }))
         self.assertTrue(result["success"])
         saved = provider._client.saved[0]
         self.assertEqual(saved["topicId"], "topic-1")
@@ -170,16 +178,16 @@ class NoosphereSavePhase4Test(unittest.TestCase):
         self.assertEqual(error["error"], "confidence must be low, medium, or high")
         self.assertEqual(provider._client.saved, [])
 
-    def test_save_tool_strips_context_fences_from_metadata(self):
+    def test_save_tool_drops_fenced_excerpt_and_source(self):
         provider = self.initialized_provider(topic_id="topic-1")
 
         result = json.loads(
             provider.handle_tool_call(
                 "noosphere_save",
                 {
-                    "title": "<memory-context>Deployment rule</memory-context>",
+                    "title": "Deployment rule",
                     "content": "Use this durable deployment rule for the configured system.",
-                    "excerpt": "<memory-context>PM2 restart rule</memory-context>",
+                    "excerpt": "< memory-context >PM2 restart rule</ memory-context >",
                     "source": "<memory-context>hermes:test</memory-context>",
                     "confidence": "HIGH",
                 },
@@ -189,9 +197,44 @@ class NoosphereSavePhase4Test(unittest.TestCase):
         self.assertTrue(result["success"])
         saved = provider._client.saved[0]
         self.assertEqual(saved["title"], "Deployment rule")
-        self.assertEqual(saved["excerpt"], "PM2 restart rule")
-        self.assertEqual(saved["source"], "hermes:test")
+        self.assertNotIn("excerpt", saved)
+        self.assertNotIn("source", saved)
         self.assertEqual(saved["confidence"], "high")
+
+    def test_save_tool_rejects_fenced_title_with_durable_content(self):
+        provider = self.initialized_provider(topic_id="topic-1")
+        result = json.loads(provider.handle_tool_call("noosphere_save", {
+            "title": "<noosphere-context>private title</noosphere-context>",
+            "content": "Durable content outside the recall block.",
+        }))
+        self.assertEqual(result.get("error"), "title is required")
+        self.assertEqual(provider._client.saved, [])
+
+    def test_save_tool_rejects_attributed_context_fence(self):
+        provider = self.initialized_provider(topic_id="topic-1")
+        result = json.loads(provider.handle_tool_call("noosphere_save", {
+            "title": "Deployment rule",
+            "content": 'Durable prefix. <memory-context class="recalled">private fact</memory-context>',
+        }))
+        self.assertEqual(result.get("error"), "content is required")
+        self.assertEqual(provider._client.saved, [])
+
+    def test_save_tool_rejects_self_closing_context_fence(self):
+        provider = self.initialized_provider(topic_id="topic-1")
+        result = json.loads(provider.handle_tool_call("noosphere_save", {
+            "title": "Deployment rule", "content": "Durable prefix. <memory-context/>private fact",
+        }))
+        self.assertEqual(result.get("error"), "content is required")
+        self.assertEqual(provider._client.saved, [])
+
+    def test_save_tool_preserves_distinct_hyphenated_tag(self):
+        provider = self.initialized_provider(topic_id="topic-1")
+        content = "<memory-context-note>Durable note</memory-context-note>"
+        result = json.loads(provider.handle_tool_call("noosphere_save", {
+            "title": "Deployment rule", "content": content,
+        }))
+        self.assertTrue(result["success"])
+        self.assertEqual(provider._client.saved[0]["content"], content)
 
     def test_save_async_does_not_block_behind_in_flight_write(self):
         provider = self.initialized_provider(topic_id="topic-1")
@@ -220,6 +263,22 @@ class NoosphereSavePhase4Test(unittest.TestCase):
         self.assertEqual(len(provider._client.saved), 1)
         self.assertEqual(provider._client.saved[0]["tags"], ["hermes", "explicit-memory", "memory"])
 
+    def test_memory_write_mirror_does_not_capture_fenced_context(self):
+        provider = self.initialized_provider(topic_id="topic-1")
+        provider.on_memory_write("add", "memory", "Durable prefix < memory-context >private recall</ memory-context >")
+        provider.shutdown()
+        self.assertEqual(provider._client.saved, [])
+
+    def test_memory_write_mirror_rejects_fenced_target_and_source(self):
+        provider = self.initialized_provider(topic_id="topic-1")
+        content = "Remember this specific durable operating fact about the system configuration."
+        provider.on_memory_write("add", "<memory-context>private target</memory-context>", content)
+        provider.on_memory_write("add", "memory", content, {
+            "source": "<noosphere-context>private source</noosphere-context>",
+        })
+        provider.shutdown()
+        self.assertEqual(provider._client.saved, [])
+
     def test_memory_write_mirror_skips_subagent_context(self):
         provider = self.initialized_provider(topic_id="topic-1", context="subagent")
 
@@ -236,6 +295,12 @@ class NoosphereSavePhase4Test(unittest.TestCase):
 
         self.assertEqual(len(provider._client.saved), 1)
         self.assertIn("[role: user]", provider._client.saved[0]["content"])
+
+    def test_sync_turn_does_not_capture_fenced_context(self):
+        provider = self.initialized_provider(topic_id="topic-1", auto_capture=True)
+        provider.sync_turn("<memory-context>private recalled text</memory-context>", "I documented the durable deployment rule with a verification command.")
+        provider.shutdown()
+        self.assertEqual(provider._client.saved, [])
 
     def test_sync_turn_captures_when_assistant_side_is_substantial(self):
         provider = self.initialized_provider(topic_id="topic-1", auto_capture=True)

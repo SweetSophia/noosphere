@@ -2,23 +2,24 @@
 
 ## Overview
 
-A Prisma client `$extends` query interceptor that acts as a **hard boundary** against injected-memory blocks (`<recall>`, `<hindsight_memories>`, `<noosphere_auto_recall>`) reaching the `article` and `articleRevision` tables in PostgreSQL.
+A Prisma client `$extends` query interceptor that strips registered injected-memory blocks (including Hermes context fences) from article and revision text fields (`content`, `excerpt`, `title`, `sourceUrl`, `authorName`) before PostgreSQL writes.
 
-The extension intercepts all write operations — `create`, `update`, `upsert`, `createMany`, `updateMany` — on both models. Even if a future route forgets route-level sanitization, injected blocks cannot reach those tables.
+The extension intercepts `create`, `update`, `upsert`, `createMany`, `updateMany`, `createManyAndReturn`, and `updateManyAndReturn` on both models. This is a backstop for those fields, not a claim that every metadata field or related table is sanitized.
 
 ## What It Does
 
-1. **Strips** injected-memory blocks from `content` and `excerpt` fields before write
-2. **Rejects** writes where `content` becomes empty after stripping (injected-only content)
+1. **Strips** injected-memory blocks from `content`, `excerpt`, `title`, `sourceUrl`, and `authorName` fields before write
+2. **Rejects** writes where `content` or `title` becomes empty after stripping
 3. **Recurses** into nested Prisma write payloads (e.g. `revisions: { create: [...] }`) — handles all payload shapes including arrays, `connectOrCreate`, `{ where, data }` wrappers, and Prisma field operations (`content: { set: "..." }`)
 4. **Skips** `where` clauses — query conditions are never stripped or rejected
-5. **Rejects** `createMany`/`updateMany` calls that include `content` or `excerpt` fields — bulk operations are metadata-only
+5. **Rejects** bulk writes (including `AndReturn` variants) that include `content` or `excerpt`; sanitizes metadata fields on permitted bulk writes
 6. **Protects** both `article` and `articleRevision` tables
 
 ## What Stays at Route Level
 
 - **Secret detection** — needs caller context (HTTP request, auth session) for proper error responses
 - **Activity logging** — needs `route` and `kind` metadata
+- **Memory-save metadata gate** — the API rejects context-bearing `excerpt`, `source`, `authorName`, `tags`, and `restrictedTags` before they can reach Tag or ActivityLog. Direct writes to those other tables remain outside this extension.
 - **HTTP error responses** — the extension throws a plain `Error`; routes should catch via `isPersistenceLayerSanitizerError()` and convert to HTTP 400
 
 ## Files
@@ -33,7 +34,7 @@ The extension intercepts all write operations — `create`, `update`, `upsert`, 
 
 ## Testing
 
-The persistence-layer regression suite (`npm run test:persistence-layer`) covers 16 cases:
+Examples from the persistence-layer regression suite (`npm run test:persistence-layer`):
 
 | # | Test | What it proves |
 |---|------|----------------|
@@ -43,13 +44,16 @@ The persistence-layer regression suite (`npm run test:persistence-layer`) covers
 | 4 | `article.update` rejects injected-only content | Update path rejects empty |
 | 5 | `article.upsert` strips (create branch) | Upsert create sanitized |
 | 6 | `article.upsert` strips (update branch) | Upsert update sanitized |
-| 7 | `article.updateMany` allows metadata-only | Bulk metadata not affected |
+| 7 | `article.updateMany` allows metadata-only | Bulk metadata fields sanitized |
 | 8 | `article.updateMany` rejects content fields | Bulk content blocked |
 | 9 | `article.createMany` rejects content fields | Bulk create content blocked |
+| 9a | `createManyAndReturn` rejects content on both models | Bulk-return create cannot bypass the guard |
+| 9b | `updateManyAndReturn` sanitizes metadata and rejects content | Bulk-return update cannot bypass the guard |
 | 10 | Nested `revision.create` (single object) strips | Nested writes sanitized |
 | 11 | Nested `revision.create` (array form) strips | Array nested writes sanitized |
 | 12 | Excerpt-only stripping (clean content) | Excerpt independently sanitized |
 | 13 | `{ set }` field operation strips | Prisma field ops unwrapped |
+| 13a | Injected-only `{ set }` rejects | Article/revision content cannot be replaced with blank injected text |
 | 14 | `articleRevision.create` strips injected blocks | Revision model protected |
 | 15 | `articleRevision.create` rejects injected-only | Revision model rejects empty |
 | 16 | `where` clause content not stripped or rejected | Query conditions left alone |
@@ -63,7 +67,7 @@ The extension exports two type guards and one combined guard:
 ```typescript
 isPersistenceLayerInjectedOnlyError(err)   // content empty after stripping
 isPersistenceLayerBulkContentError(err)    // createMany/updateMany with content
-isPersistenceLayerSanitizerError(err)      // either of the above
+isPersistenceLayerSanitizerError(err)      // content/title empty or bulk content
 ```
 
 ## Issue

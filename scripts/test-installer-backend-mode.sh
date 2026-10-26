@@ -7,7 +7,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 bash -n "$backend"
-BACKEND_UNDER_TEST="$backend" node <<'NODE'
+REPO_ROOT="$root" BACKEND_UNDER_TEST="$backend" node <<'NODE'
 const fs = require("node:fs");
 const source = fs.readFileSync(process.env.BACKEND_UNDER_TEST, "utf8");
 const required = [
@@ -24,9 +24,68 @@ for (const needle of required) {
 if (source.includes("API KEY (save this - it will not be shown again)")) {
   throw new Error("backend prints the bootstrap key by default");
 }
+const path = require("node:path");
+const root = process.env.REPO_ROOT;
+function assertInitOnlySetting(text, setting, label) {
+  const init = text.match(/^  init:\n([\s\S]*?)(?=^  [a-zA-Z0-9_-]+:|(?![\s\S]))/m)?.[1];
+  const settings = text.match(/^      NOOSPHERE_BOOTSTRAP_FULL_ACCESS:.*$/gm) ?? [];
+  if (!init?.includes(setting) || settings.length !== 1) {
+    throw new Error(`${label} must declare bootstrap full access only in init: ${setting}`);
+  }
+}
+assertInitOnlySetting(source, 'NOOSPHERE_BOOTSTRAP_FULL_ACCESS: "${BOOTSTRAP_FULL_ACCESS}"', "guided backend");
+for (const template of ["docker-compose.yml", "docker-compose.noosphere.yml"]) {
+  assertInitOnlySetting(
+    fs.readFileSync(path.join(root, template), "utf8"),
+    'NOOSPHERE_BOOTSTRAP_FULL_ACCESS: ${NOOSPHERE_BOOTSTRAP_FULL_ACCESS:-false}',
+    template,
+  );
+}
 NODE
 
 source "$backend"
+
+# The guided full-scope grant must be requested for a credential the installer
+# creates. An upgrade reuses the key persisted in .env: demanding "*" from that
+# key aborts the bootstrap transaction and breaks every pre-1.15.1 upgrade.
+assert_bootstrap_full_access_behavior() (
+  local failures=0
+  # A fresh guided install creates the credential and keeps the guided grant.
+  [[ "$(resolve_bootstrap_full_access false "")" == true ]] || failures=$((failures + 1))
+  # An upgrade reuses the persisted key and must not demand "*" from it.
+  [[ "$(resolve_bootstrap_full_access true "")" == false ]] || failures=$((failures + 1))
+  # An explicit operator choice always wins, in both directions.
+  [[ "$(resolve_bootstrap_full_access true true)" == true ]] || failures=$((failures + 1))
+  [[ "$(resolve_bootstrap_full_access false false)" == false ]] || failures=$((failures + 1))
+  # A malformed explicit value is rejected instead of being coerced.
+  if resolve_bootstrap_full_access false maybe >/dev/null 2>&1; then
+    failures=$((failures + 1))
+  fi
+  # Only the key already persisted in .env counts as an existing credential.
+  bootstrap_key_is_persisted "noo_fixture_same" "noo_fixture_same" || failures=$((failures + 1))
+  if bootstrap_key_is_persisted "noo_fixture_new" "noo_fixture_old"; then
+    failures=$((failures + 1))
+  fi
+  if bootstrap_key_is_persisted "noo_fixture_new" ""; then
+    failures=$((failures + 1))
+  fi
+  if bootstrap_key_is_persisted "" ""; then
+    failures=$((failures + 1))
+  fi
+  [[ "$failures" == 0 ]]
+)
+
+if ! assert_bootstrap_full_access_behavior; then
+  echo 'bootstrap full-access behavior assertions failed' >&2
+  exit 1
+fi
+if (
+  resolve_bootstrap_full_access() { printf 'true'; }
+  assert_bootstrap_full_access_behavior
+); then
+  echo 'constant bootstrap full-access sabotage unexpectedly passed' >&2
+  exit 1
+fi
 
 assert_article_verification_floor_behavior() (
   local floor
@@ -108,7 +167,12 @@ while (($# > 0)); do
     *) shift ;;
   esac
 done
-[[ "$disable" == true && "$noproxy" == true ]]
+if [[ "$disable" != true || "$noproxy" != true ]]; then
+  if [[ -n "${INSTALLER_TEST_PROXY_REJECTION:-}" ]]; then
+    printf 'proxy-policy-rejected\n' > "$INSTALLER_TEST_PROXY_REJECTION"
+  fi
+  exit 92
+fi
 [[ "$connect_timeout" == 5 && "$max_time" == 15 ]]
 [[ -f "$config" ]]
 grep -q 'header = "Authorization: Bearer noo_' "$config"
@@ -118,6 +182,7 @@ case "$FAKE_CURL_MODE:$method:$url" in
   reuse:GET:*/api/keys) printf '403' ;;
   create:POST:*/api/keys|read:POST:*/api/keys)
     printf '{"key":"%s"}\n' "$FAKE_CREATED_KEY" > "$output"
+    printf '201'
     ;;
   read:POST:*/api/articles) printf '403' ;;
   read:GET:*/api/keys) printf '403' ;;
@@ -246,6 +311,22 @@ grep -q '^CREDENTIAL_SENTINEL=yes$' "$tmp/credential-parent-target/sentinel"
 test ! -e "$tmp/credential-parent-target/credentials.json"
 grep -q 'Refusing symlinked credential path component' "$tmp/credential-parent-symlink.out"
 
+# Recursed controls run all assertions, then stop before creating more controls.
+if [[ "${INSTALLER_TEST_CONTROL_CHILD:-false}" == true ]]; then
+  printf 'installer_backend_control_behavior=GREEN\n'
+  exit 0
+fi
+
+# A relocated, unmodified backend must pass first. An unrelated fixture/path
+# failure must not be accepted as proof that a security sabotage was detected.
+cp "$backend" "$tmp/unchanged.sh"
+if ! INSTALLER_TEST_CONTROL_CHILD=true "$0" "$tmp/unchanged.sh" >"$tmp/control-baseline.out" 2>&1; then
+  cat "$tmp/control-baseline.out" >&2
+  echo 'unmodified relocated backend control failed' >&2
+  exit 1
+fi
+grep -q '^installer_backend_control_behavior=GREEN$' "$tmp/control-baseline.out"
+
 cp "$backend" "$tmp/proxy-sabotaged.sh"
 SABOTAGED_BACKEND="$tmp/proxy-sabotaged.sh" node <<'NODE'
 const fs = require("node:fs");
@@ -256,10 +337,13 @@ if (!source.includes(guarded)) throw new Error("cannot locate proxy sabotage tar
 source = source.replace(guarded, `curl "$@"`);
 fs.writeFileSync(path, source);
 NODE
-if "$0" "$tmp/proxy-sabotaged.sh" >/dev/null 2>&1; then
+if INSTALLER_TEST_CONTROL_CHILD=true INSTALLER_TEST_PROXY_REJECTION="$tmp/proxy-rejection" \
+  "$0" "$tmp/proxy-sabotaged.sh" >"$tmp/proxy-control.out" 2>&1; then
   echo 'backend proxy-bypass sabotage unexpectedly passed' >&2
   exit 1
 fi
+grep -q '^proxy-policy-rejected$' "$tmp/proxy-rejection"
+grep -q 'refusing to rotate it after a transport failure' "$tmp/proxy-control.out"
 
 cp "$backend" "$tmp/sabotaged.sh"
 SABOTAGED_BACKEND="$tmp/sabotaged.sh" node <<'NODE'
@@ -271,9 +355,10 @@ if (!source.includes(guarded)) throw new Error("cannot locate sabotage target");
 source = source.replace(guarded, "need openclaw");
 fs.writeFileSync(path, source);
 NODE
-if "$0" "$tmp/sabotaged.sh" >/dev/null 2>&1; then
+if INSTALLER_TEST_CONTROL_CHILD=true "$0" "$tmp/sabotaged.sh" >"$tmp/guard-control.out" 2>&1; then
   echo 'backend guard sabotage unexpectedly passed' >&2
   exit 1
 fi
+grep -q 'missing backend policy: if' "$tmp/guard-control.out"
 
 printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 scoped_keys=yes read_key_rejected=yes transport_rotation=blocked local_bootstrap_destination=yes article_floor=preserved proxy_bypass=yes secret_argv=clean child_env=clean credential_parent_symlink=blocked sabotage=red\n'

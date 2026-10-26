@@ -1,0 +1,77 @@
+{
+  "name": "@sweetsophia/kilocode-noosphere-memory",
+  "version": "1.15.0-noosphere.toml.2",
+  "private": false,
+  "description": "Connect Kilo Code to self-hosted Noosphere memory for recall, draft saves, and optional idle auto-save.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./server": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "config": {
+        "baseUrl": "{env:KILOCODE_NOOSPHERE_BASE_URL}",
+        "apiKey": "{env:KILOCODE_NOOSPHERE_API_KEY}"
+      }
+    }
+  },
+  "files": [
+    "dist/",
+    "src/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "npm run build",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@kilocode/plugin": "npm:@sweetsophia/noosphere-kilocode-plugin@7.3.1-noosphere.4",
+    "@kilocode/sdk": "^7.3.1",
+    "@sweetsophia/noosphere-client": "1.15.0"
+  },
+  "bundledDependencies": [
+    "@sweetsophia/noosphere-client"
+  ],
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5"
+  },
+  "kilocode": {
+    "type": "plugin",
+    "hooks": [
+      "chat.message",
+      "event"
+    ]
+  },
+  "engines": {
+    "node": ">=22",
+    "kilocode": "^7.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SweetSophia/noosphere.git",
+    "directory": "kilocode-noosphere-memory"
+  },
+  "bugs": {
+    "url": "https://github.com/SweetSophia/noosphere/issues"
+  },
+  "homepage": "https://github.com/SweetSophia/noosphere/tree/master/kilocode-noosphere-memory",
+  "keywords": [
+    "kilocode",
+    "kilocode-plugin",
+    "noosphere",
+    "memory",
+    "recall"
+  ]
+}

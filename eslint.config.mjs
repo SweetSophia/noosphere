@@ -15,6 +15,23 @@ const eslintConfig = defineConfig([
     "noosphere-injected-memory/dist/**",
     "next-env.d.ts",
   ]),
+  // Route authorization must work for both API keys and human sessions.
+  {
+    files: ["src/app/api/**/*.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "BinaryExpression > MemberExpression[object.name='auth'][property.name='role']",
+          message: "Use hasPermission/requirePermission; auth.role is absent for API keys.",
+        },
+        {
+          selector: "BinaryExpression > MemberExpression[object.name='auth'][computed=true][property.value='role']",
+          message: "Use hasPermission/requirePermission; auth.role is absent for API keys.",
+        },
+      ],
+    },
+  },
   // Allow underscore-prefixed variables to be unused in test files (intentional discard pattern)
   {
     files: ["**/*.test.ts", "**/*.test.tsx"],

@@ -9,6 +9,7 @@ RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
+COPY vendor/sweetsophia-noosphere-braces-3.0.3-noosphere.2.tgz ./vendor/
 RUN npm ci
 
 # Build a production-only node_modules tree with generated Prisma client.
@@ -19,6 +20,7 @@ RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
+COPY vendor/sweetsophia-noosphere-braces-3.0.3-noosphere.2.tgz ./vendor/
 COPY prisma ./prisma
 COPY prisma.config.ts ./prisma.config.ts
 RUN npm ci --omit=dev && npx prisma generate

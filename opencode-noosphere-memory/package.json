@@ -1,8 +1,8 @@
 {
   "name": "@sweetsophia/opencode-noosphere-memory",
-  "version": "1.14.0",
+  "version": "1.15.1",
   "private": false,
-  "description": "Opencode plugin for Noosphere memory: prompt-time auto-recall, optional idle auto-save, and explicit memory tools.",
+  "description": "Connect OpenCode to self-hosted Noosphere memory for recall, draft saves, and optional idle auto-save.",
   "type": "module",
   "license": "Apache-2.0",
   "main": "./dist/index.js",
@@ -21,12 +21,17 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.mjs",
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "^1.14.18",
-    "@opencode-ai/sdk": "^1.14.18"
+    "@opencode-ai/plugin": "npm:@sweetsophia/noosphere-opencode-plugin@1.15.5-noosphere.4",
+    "@opencode-ai/sdk": "^1.14.18",
+    "@sweetsophia/noosphere-client": "file:../noosphere-client"
   },
+  "bundledDependencies": [
+    "@sweetsophia/noosphere-client"
+  ],
   "devDependencies": {
     "@types/node": "^20",
     "typescript": "^5"

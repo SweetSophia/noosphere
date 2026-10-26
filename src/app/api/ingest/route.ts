@@ -19,6 +19,7 @@ import {
   sanitizeArticleExcerpt,
 } from "@/lib/api/article-content";
 import { detectSecretInInputs } from "@/lib/memory/api/save";
+import { isPersistenceLayerInjectedTitleError, PERSISTENCE_LAYER_INJECTED_TITLE_ERROR } from "@/lib/prisma-extensions/article-sanitizer";
 
 // Ingest is a multi-article batch endpoint, so it needs more headroom than a
 // single article while still rejecting payloads large enough to amplify work.
@@ -223,7 +224,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Use a transaction to keep everything consistent
-  const result = await prisma.$transaction(async (tx) => {
+  const resultTransaction = prisma.$transaction(async (tx) => {
     for (const [index, article] of articles.entries()) {
       // Check slug uniqueness within topic
       const existing = await tx.article.findUnique({
@@ -368,6 +369,13 @@ export async function POST(request: NextRequest) {
 
     return { logId: logEntry.id };
   });
+  let result;
+  try {
+    result = await resultTransaction;
+  } catch (error) {
+    if (!isPersistenceLayerInjectedTitleError(error)) throw error;
+    return NextResponse.json({ error: PERSISTENCE_LAYER_INJECTED_TITLE_ERROR }, { status: 400 });
+  }
 
   if (createdArticles.length > 0) {
     await invalidateSearchCache();

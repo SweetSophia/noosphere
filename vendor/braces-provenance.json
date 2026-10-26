@@ -1,0 +1,60 @@
+{
+  "status": "local candidate; no complete advisory-coverage or publication-readiness claim",
+  "upstream": {
+    "name": "braces",
+    "version": "3.0.3",
+    "url": "https://registry.npmjs.org/braces/-/braces-3.0.3.tgz",
+    "integrity": "sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==",
+    "verified": true
+  },
+  "derivative": {
+    "name": "@sweetsophia/noosphere-braces",
+    "version": "3.0.3-noosphere.2",
+    "archive": "sweetsophia-noosphere-braces-3.0.3-noosphere.2.tgz",
+    "sha256": "a3d16c774b609d0c43132e1b390f570544fd3e209ed7ca55a3e0b547f924ed8b",
+    "integrity": "sha512-v4hqTiQ4RbSvBvG/j51Vv/e4EBGLVPQ61SsU89qRoy5umJbnnscc7HCvcHTPlYOMjWN6eooH/sU496qkdbP1cw==",
+    "filesSha256": {
+      "index.js": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+      "package.json": "ec9a88e2a49c074c3c666f070650015882bcc6cd498993e7e9aa288081c6a080",
+      "LICENSE": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+      "README.md": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+      "SECURITY-PATCH.md": "ad5bae57797a4408a78acf9cf294176000c238fbb18bfe199272e88105ce5eaf",
+      "lib/stringify.js": "865eb59da83cbffd41122a0586f4826e1aed2ef76045b6e0a25b0dfee7276593",
+      "lib/utils.js": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+      "lib/nesting.js": "9b3de76df37be7e79485ad5049e9592420e8ecfad2e96f44971a13009cf805cd",
+      "lib/parse.js": "fe0163b55630684a6761acfa8080a7688e51668eecf9aab4931abfd2e4b0a4e5",
+      "lib/constants.js": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+      "lib/compile.js": "13da89e2459bfbd841f0b74cf92eb94b2e877b48194fb4e5013581a4eb0196ce",
+      "lib/expand.js": "d39e8a3c2e3dbffdd33f963f4f421f1a002cd0f8bb627ebb36dc453033db45d2"
+    }
+  },
+  "license": {
+    "spdx": "MIT",
+    "file": "braces-LICENSE",
+    "sha256": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+    "unchangedFromUpstream": true
+  },
+  "sourceDiff": "braces-3.0.3-noosphere.2.patch",
+  "verification": {
+    "runtime": "v24.22.0",
+    "npm": "12.1.0",
+    "ordinaryStepsPassed": [
+      "lock",
+      "audit",
+      "install",
+      "resolution",
+      "generate",
+      "lint",
+      "typecheck",
+      "build"
+    ],
+    "standaloneProbe": "skipped by owner; not rerun or replaced",
+    "auditInventory": {
+      "high": 0,
+      "critical": 0,
+      "low": 5
+    },
+    "auditLimitation": "Registry audit metadata does not independently assess the renamed private derivative.",
+    "coverageLimitation": "No fresh exploit, boundary, stress, or dedicated behavioral regression coverage for revision .2; no complete advisory-coverage proof."
+  }
+}

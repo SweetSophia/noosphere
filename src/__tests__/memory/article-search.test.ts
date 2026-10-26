@@ -49,11 +49,11 @@ describe("article search fallback terms", () => {
 /**
  * Issue #256 (M2) — the tsvector and tsquery builders must use the same
  * PostgreSQL text-search configuration. The CTE produces a `document`
- * tsvector and the query produces a tsquery; the `@@` operator only matches
- * if both sides agree on the regconfig name.
+ * tsvector and the query produces a tsquery; both must normalize words
+ * consistently to avoid false misses on inflections.
  *
  * Before #256 the builders used `'simple'`, which tokenized without stemming
- * (so "running" and "ran" did not match). These tests assert the builders
+ * (so "running" and "run" did not match). "ran" is not conflated by English either. These tests assert the builders
  * emit the post-fix configuration and that no `'simple'` literal survives
  * in the generated SQL.
  */

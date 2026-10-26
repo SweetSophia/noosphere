@@ -2362,20 +2362,22 @@ describe("OpenClaw Noosphere CLI helpers", () => {
     const commands = getVerifiedInstallerCommands();
     const combined = commands.join("\n");
 
-    assert.equal(commands.length, 8);
-    assert.match(combined, /182e0dceade3f0ac31e5d14f42f091d4075793a2/);
-    assert.match(combined, /5fd69c4125ba02fdcc36e1bb54b66628dc5d324f7c04cea13d5dae3729035601/);
+    assert.equal(commands.length, 13);
+    assert.match(combined, /2114560065aa4ea07b1f07175824eb645f4325a7/);
+    assert.match(combined, /90432d088c8d4aa4d0220685c1f1801c1ce2d609d820e4cf309eb13a46f67701/);
     assert.equal(commands[0], "(");
     assert.equal(commands[1], "  set -e");
-    assert.match(commands[2], /mktemp/);
-    assert.match(commands[3], /trap .*rm -f .* EXIT/);
-    assert.match(commands[4], /curl .* -o \"\$installer\"/);
-    assert.match(commands[5], /sha256sum -c -/);
+    assert.match(commands[2], /mktemp -d/);
+    assert.match(commands[3], /trap .*rm -rf .* EXIT/);
+    assert.match(commands[7], /curl .* -o \"\$installer\"/);
+    assert.match(commands[8], /curl .* -o \"\$backend\"/);
+    assert.match(commands[9], /sha256sum -c -/);
+    assert.match(commands[10], /681db7ce3e08f9692bd9631160bc0d9b9f0e468a0338179ab2dd826d25400c9f.*sha256sum -c -/);
     assert.equal(
-      commands[6],
-      '  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.14.0}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.14.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.14.0}" bash "$installer" --non-interactive --with openclaw',
+      commands[11],
+      '  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.1}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.1}" bash "$installer" --non-interactive --with openclaw',
     );
-    assert.equal(commands[7], ")");
+    assert.equal(commands[12], ")");
     assert.doesNotMatch(combined, /\/master\/install-openclaw\.sh|install-openclaw\.sh \| bash/);
   });
 

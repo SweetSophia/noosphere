@@ -1,0 +1,28 @@
+--- a/package.json
++++ b/package.json
+@@ -1,7 +1,7 @@
+ {
+-  "name": "effect",
++  "name": "@sweetsophia/noosphere-effect",
+   "type": "module",
+-  "version": "4.0.0-beta.65",
++  "version": "4.0.0-beta.65-noosphere.3",
+   "license": "MIT",
+   "description": "The missing standard library for TypeScript, for writing production-grade software.",
+   "homepage": "https://effect.website",
+@@ -83,7 +83,7 @@
+     "kubernetes-types": "^1.30.0",
+     "msgpackr": "^1.11.9",
+     "multipasta": "^0.2.7",
+-    "toml": "^4.1.1",
++    "toml": "5.0.1",
+     "uuid": "^13.0.0",
+     "yaml": "^2.8.3"
+   },
+@@ -96,4 +96,4 @@
+     "test": "vitest",
+     "coverage": "vitest --coverage"
+   }
+-}
+\ No newline at end of file
++}

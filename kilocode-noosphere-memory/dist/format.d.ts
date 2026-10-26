@@ -1,6 +1,2 @@
-import type { MemoryRecallResponse, RecallResult } from "./types.js";
-export declare function formatAutoRecall(response: MemoryRecallResponse): string;
-export declare function formatRecallResults(results: RecallResult[]): string;
-export declare function jsonToolResult(payload: unknown): string;
-export declare function truncate(value: string, maxLength: number): string;
+export { formatAutoRecall, formatRecallResults, jsonToolResult, truncate, AUTO_RECALL_BLOCK_TAG, AUTO_RECALL_SYSTEM_NOTE, } from "@sweetsophia/noosphere-client";
 //# sourceMappingURL=format.d.ts.map

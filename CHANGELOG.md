@@ -9,28 +9,162 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Use PostgreSQL English stemming consistently for article documents and strict/
+  fallback search queries (#256). Regular forms such as running/runs/run match;
+  English stop words are filtered. This deliberately changes search semantics,
+  including stop-word-only queries; it is not a multilingual language detector.
+  Per-article language remains tracked in #331.
+- On deployment with hybrid retrieval, bump `noosphere_hybrid.search_cache_epoch`
+  using the authorized hybrid maintenance identity after switching all app instances.
+  Keyword-only Redis ranking hints expire within 30 seconds; drain/wait that TTL
+  when a clean semantic cutover is required. No feature activation is implied.
 
-- **English stemming on article search
-  ([#256](https://github.com/SweetSophia/noosphere/issues/256))**: the shared
-  full-text search builders (`to_tsvector`, `websearch_to_tsquery`,
-  `to_tsquery`) now use the `'english'` text-search configuration instead of
-  `'simple'`, so stemmed regular word forms match (`running`/`runs` ↔ `run`,
-  `photos` ↔ `photo`) and English stop words are filtered by the query
-  parser. The configuration is exposed as a module-level
-  `TSQUERY_CONFIG` constant in `src/lib/memory/article-search.ts` for
-  internal use; it is not read from the environment. Both sides of the
-  `@@` operator use the same config so ranking semantics are preserved;
-  the change is otherwise backward compatible.
+## [1.15.1] - 2026-10-25
 
-  **Deployment note for hybrid retrieval:** the search-result cache for
-  hybrid retrieval is keyed by `noosphere_hybrid.search_cache_epoch`, which
-  is bumped only by data-mutation triggers on `embedding_profile` and
-  `article_embedding`. Operators should call
-  `noosphere_hybrid.bump_search_cache_epoch()` once after deploying this
-  change so cached hybrid results computed under `'simple'` semantics are
-  invalidated. Without this manual bump, cached results expire gradually on
-  the next article write (the same TTL window applies to the legacy Redis
-  search cache).
+Coordinated application and integration release. Artifact publication and production
+activation are independently verified through the coordinated release procedure.
+
+### Security
+- Raise the MCP direct Zod minimum to `^4.6.7` and refresh its lock for
+  GHSA-mrhx-c7xc-m3w5 (oversized constrained-collection memory exhaustion).
+  OpenCode/Kilo now select the published maintained SDK revisions
+  `1.15.5-noosphere.4` / `7.3.1-noosphere.5`, which declare Zod `4.6.7`.
+- Add explicit full-scope provisioning for new dedicated bootstrap ADMIN
+  credentials used by guided installers. Direct Compose remains opt-in via
+  `NOOSPHERE_BOOTSTRAP_FULL_ACCESS`; existing key scopes, permissions, revocation
+  and principal binding are preserved rather than broadened or reset. Conflicting
+  credentials fail safely. Per-tool WRITE credentials remain public-only, and
+  global key management continues to require ADMIN plus literal `*` scope.
+- Switch OpenCode/Kilo to maintained SDK/Effect aliases that explicitly require
+  TOML 5.0.1 for GHSA-4qx8-w7c3-pj3p, GHSA-9j65-hcg3-gc64 and GHSA-9qmh-m7c6-f92p,
+  with public-registry locks and checks of the exact packed adapters.
+  The shared client remains bundled and unpublished. TOML tables now have null
+  prototypes and unsafe integers fail; see [qualification and release limits](vendor/toml5-candidate/README.md).
+- Pin root DOMPurify to 3.4.17 through an override for
+  [GHSA-c6gr-qvv4-5v3f](https://github.com/cure53/DOMPurify/security/advisories/GHSA-c6gr-qvv4-5v3f)
+  (XHTML/SMIL attribute guard),
+  [GHSA-mrv2-3pqr-j5jr](https://github.com/cure53/DOMPurify/security/advisories/GHSA-mrv2-3pqr-j5jr)
+  (IN_PLACE hook handling) and
+  [GHSA-cg2g-xh64-v4q7](https://github.com/cure53/DOMPurify/security/advisories/GHSA-cg2g-xh64-v4q7)
+  (SAFE_FOR_TEMPLATES shadow-root handling). The upload sanitizer uses the default
+  HTML parser and excludes SMIL animation elements; it enables neither IN_PLACE
+  hooks nor SAFE_FOR_TEMPLATES. These are defense-in-depth/audit updates for that
+  upload path. Review the exact override when updating its requirers: overrides
+  can force a version below a future transitive minimum.
+- Refresh the MCP `ip-address` lock to 10.7.4 for the IPv6 zone-identifier
+  regular-expression denial of service,
+  [GHSA-rxp7-6hxx-x8q5](https://github.com/beaugunderson/ip-address/security/advisories/GHSA-rxp7-6hxx-x8q5).
+  It arrives through `@modelcontextprotocol/sdk` → `express-rate-limit` for HTTP
+  transport support. Noosphere's CLI uses stdio and does not construct that HTTP
+  transport; this is an audit-driven dependency repair, not a demonstrated
+  reachable exploit. Audit thresholds are unchanged. Existing MCP consumer
+  lockfiles may need a dependency refresh to pick up the patched transitive.
+- Require ADMIN permission plus explicit full content scope (`*`) for global
+  API-key list, metadata, creation, updates (including self-updates) and revocation.
+  Scoped ADMIN credentials can no longer mint or upgrade wildcard credentials to
+  bypass content-scope boundaries. This intentionally removes key-management
+  access from existing ADMIN API keys without `*`; human ADMIN sessions and
+  explicitly full-scope ADMIN keys retain access. No keys are auto-expanded.
+
+- Update Next.js and its ESLint configuration to 16.4.2 for the App Router
+  Server Actions denial-of-service advisory GHSA-p3m5-59mp-jv5r and to satisfy
+  the patched Next.js floor for GHSA-2464-fhr4-w9xw. The existing sharp 0.35.5
+  lock already implements the latter advisory's documented image workaround;
+  this update does not claim a reproduced exploit or change audit thresholds.
+- Refresh the root application's sharp lock to 0.35.5, including its patched
+  prebuilt libvips/librsvg dependencies (GHSA-wq5f-xc86-pv6w), and source-map-js
+  to 1.2.2 (GHSA-68fv-2mgg-jv7q). Both updates stay within existing dependency
+  ranges; unrelated dependency advisories remain tracked separately.
+- Add a local private `braces@3.0.3` derivative candidate with fixed parser and
+  AST traversal budgets, pinned through an exact vendored archive and override.
+  This is not an upstream security release or complete advisory-coverage proof.
+  Registry audit does not independently assess the renamed package; the
+  standalone regression probe remains explicitly skipped. See
+  [candidate provenance and limitations](vendor/README.md).
+- Raise the MCP SDK minimum to 1.32.1 and refresh its Hono overrides to
+  `hono` 4.13.13 and `@hono/node-server` 2.1.5 to clear the SDK session,
+  redirect, validation-memory, bearer-audience and Hono static-path advisories.
+  Keep the patched `proxy-addr` 2.0.8 lock and package-root install floor.
+  The bundled CLI continues to use stdio; no HTTP transport or authentication
+  behavior is changed.
+- Article tag attachment now preserves existing shared tag names on slug conflicts;
+  authorized global renames remain available through the protected tag endpoint.
+- API-key scope forms offer explicit opt-in full access (`*`), preserve existing
+  wildcard selections, and correctly label empty scopes as public-article-only.
+  No existing key is automatically granted broader access.
+- Require explicit full scope (`allowedScopes` containing `"*"`) as well as
+  operation permission for existing shared tag/topic updates and deletions.
+  Scoped ADMIN keys cannot bypass this boundary; deletions remain ADMIN-only.
+  Human-session thresholds are unchanged. Tag creation now accepts WRITE/ADMIN
+  API keys; new tag/topic creation does not require full scope
+  ([#351](https://github.com/SweetSophia/noosphere/issues/351)).
+- Remediate the root application's own dependency advisories. Raise the
+  development `happy-dom` dependency to `21.0.4` (semver-major 20.x -> 21.x)
+  for [GHSA-834v-8h66-3h79](https://github.com/advisories/GHSA-834v-8h66-3h79),
+  pin `katex` to `0.18.2` for
+  [GHSA-238p-pmpm-9mq7](https://github.com/advisories/GHSA-238p-pmpm-9mq7),
+  and refresh the `fast-uri` and `undici` locks inside their existing ranges
+  (3.1.8 -> 3.1.9 and 7.30.0 -> 7.30.1). `mermaid`, `rehype-katex` and
+  `micromark-extension-math` inherited the KaTeX advisory through their own
+  KaTeX dependency edge, and `remark-math` inherited it through
+  `micromark-extension-math`; three narrow `katex` overrides resolve them
+  without a major upgrade of any of those packages. Each of those three
+  parents declares `katex` as `^0.16.47` (mermaid) or `^0.16.0`
+  (rehype-katex, micromark-extension-math), so the override deliberately
+  installs 0.18.2 outside that declared range and needs re-qualification
+  whenever a parent changes its range or a new `katex` release appears; drop
+  the override once a parent accepts 0.18.2 on its own. Both `katex` and
+  `happy-dom` are now exact pins and must be bumped manually to receive
+  future security fixes, and `@types/katex` stays on the 0.16.x declarations
+  its parents require while the runtime is 0.18.2. For this remediation only
+  `package.json` and `package-lock.json` change; no application source
+  changes. The installed root tree audits 0 vulnerabilities at
+  `--audit-level=low`, down from 8 (2 high, 1 moderate, 5 low); that count
+  does not cover the vendored `braces` derivative, which registry audit
+  cannot assess (see the `braces` entry above and `vendor/README.md`).
+
+### Fixed
+
+- Deliver and verify both immutable installer files in CLI-generated commands and
+  installation guides, so the launcher selects the reviewed sibling backend
+  rather than its older standalone fallback. Bind OpenClaw's image, application
+  and plugin defaults to the same candidate version, and check the actual
+  delivery chain in policy and tamper-rejection regression tests.
+- Authorize tag creation/renaming and topic updates through the shared permission
+  ladder for API keys and human sessions. Tag/topic deletion remains admin-only
+  ([#332](https://github.com/SweetSophia/noosphere/issues/332)).
+
+## [1.15.0] - 2026-10-02
+
+Coordinated maintenance release for the application and all integrations.
+No database migration or change to hybrid-serving defaults is required.
+
+### Fixed
+
+- **OpenClaw SecretRef initialization ([#345](https://github.com/SweetSophia/noosphere/pull/345))**:
+  declare the API-key secret input in top-level `configContracts`, allowing
+  OpenClaw to resolve credential references before Noosphere registers its
+  tools and auto-recall hook. Runtime credential guards remain unchanged.
+
+### Security
+
+- Update Next.js and its ESLint configuration to 16.3.8, including the
+  `next/og` ImageResponse remote-code-execution fix and subsequent security fixes.
+- Refresh DOMPurify and brace-expansion locks to patched versions.
+- Update the MCP package's Hono override to 4.13.7 and ip-address lock to 10.7.3.
+
+## [1.14.1] - 2026-09-29
+
+Patch release to complete the coordinated 1.14 release after npm publication
+was stopped by newly reported dependency advisories. The 1.14.0 application
+image was published, but its integration packages and GitHub Release were not;
+use 1.14.1 for the complete release once all publication gates pass.
+
+### Security
+
+- Refresh the root and Codex MCP dependency locks to resolve `fast-uri`
+  GHSA-qw65-cvwx-89v3 / GHSA-58mr-gqgx-xq4g and `undici`
+  GHSA-3wwx-pv8p-q78v. No application or integration behavior changes.
 
 ## [1.14.0] - 2026-09-14
 
@@ -501,7 +635,10 @@ changes.
   backfill pipeline, and the memory provider refactor. Refer to the commit
   history (`git log v1.8.0..v1.9.0`) for the full set of changes.
 
-[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.14.0...HEAD
+[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.15.1...HEAD
+[1.15.1]: https://github.com/SweetSophia/noosphere/compare/v1.15.0...v1.15.1
+[1.15.0]: https://github.com/SweetSophia/noosphere/compare/v1.14.1...v1.15.0
+[1.14.1]: https://github.com/SweetSophia/noosphere/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/SweetSophia/noosphere/compare/v1.13.3...v1.14.0
 [1.13.3]: https://github.com/SweetSophia/noosphere/compare/v1.13.2...v1.13.3
 [1.13.2]: https://github.com/SweetSophia/noosphere/compare/v1.13.1...v1.13.2
