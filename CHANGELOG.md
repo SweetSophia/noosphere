@@ -8,7 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No changes yet.
+### Security
+- Harden the route-auth lint guard against truthiness, unary/optional access,
+  aliases and role destructuring using an explicit conservative static-role-read
+  policy, retaining both line-scoped exceptions and shared permission helpers.
 
 ## [1.15.1] - 2026-10-25
 

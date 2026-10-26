@@ -21,13 +21,22 @@ const eslintConfig = defineConfig([
     rules: {
       "no-restricted-syntax": [
         "error",
+        // Conservative policy: route modules may not read statically named
+        // role fields or destructure them from ANY value. This also rejects
+        // aliases without pretending a syntax selector proves data-flow auth.
+        // Human-session logic outside routes is unaffected; the two legitimate
+        // route policy exceptions remain individually line-scoped.
         {
-          selector: "BinaryExpression > MemberExpression[object.name='auth'][property.name='role']",
-          message: "Use hasPermission/requirePermission; auth.role is absent for API keys.",
+          selector: "MemberExpression[computed=false][property.name='role']",
+          message: "Use hasPermission/requirePermission; route role reads can exclude API keys.",
         },
         {
-          selector: "BinaryExpression > MemberExpression[object.name='auth'][computed=true][property.value='role']",
-          message: "Use hasPermission/requirePermission; auth.role is absent for API keys.",
+          selector: "MemberExpression[computed=true][property.value='role']",
+          message: "Use hasPermission/requirePermission; route role reads can exclude API keys.",
+        },
+        {
+          selector: "ObjectPattern > Property[key.name='role'], ObjectPattern > Property[key.value='role']",
+          message: "Do not extract role in API routes; use hasPermission/requirePermission.",
         },
       ],
     },

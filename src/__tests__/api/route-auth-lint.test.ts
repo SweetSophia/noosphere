@@ -30,6 +30,45 @@ for (const [name, expression] of [
   });
 }
 
+// Conservative route policy: reject extracting any statically named role from
+// route-local values, rather than guessing which aliases originate in AuthResult.
+for (const [name, body] of [
+  ["truthiness", "return !!auth.role;"],
+  ["unary", "return !auth.role;"],
+  ["logical", "return auth.role && true;"],
+  ["optional access", "return auth?.role;"],
+  ["role alias", 'const level = auth.role; return level === "ADMIN";'],
+  ["auth alias", 'const caller = auth; return caller.role === "ADMIN";'],
+  ["bracket alias", 'const caller = auth; return caller["role"] === "ADMIN";'],
+  ["destructuring", 'const { role } = auth; return role === "ADMIN";'],
+  ["renamed destructuring", 'const { role: access } = auth; return access === "ADMIN";'],
+  ["literal destructuring", 'const { "role": access } = auth; return access === "ADMIN";'],
+  ["default destructuring", 'const { role = "VIEWER" } = auth; return role === "ADMIN";'],
+  ["renamed source", 'const user = auth; const { role: access } = user; return access === "ADMIN";'],
+  ["nested auth", 'const result = { auth }; return result.auth.role === "ADMIN";'],
+]) {
+  test(`route auth lint rejects ${name}`, async () => {
+    assert.ok((await roleDiagnostics(
+      `export function canWrite(auth: { role?: string }) { ${body} }`,
+      "src/app/api/lint-policy-probe/route.ts",
+    )).length > 0);
+  });
+}
+
+test("route auth lint rejects parameter destructuring", async () => {
+  assert.ok((await roleDiagnostics(
+    'export function canWrite({ role: access }: { role?: string }) { return access === "ADMIN"; }',
+    "src/app/api/lint-policy-probe/route.ts",
+  )).length > 0);
+});
+
+test("route policy does not prohibit human-session role reads outside API routes", async () => {
+  assert.equal((await roleDiagnostics(
+    'export function canEdit(session: { role?: string }) { return session.role === "ADMIN"; }',
+    "src/lib/lint-policy-probe.ts",
+  )).length, 0);
+});
+
 test("route auth lint accepts shared permission helpers", async () => {
   const diagnostics = await roleDiagnostics(
     'import { hasPermission } from "@/lib/api/auth";\n' +

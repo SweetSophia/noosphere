@@ -551,3 +551,20 @@ Attaching tags to an accessible article may create a new tag or link an existing
 normalized slug, but never renames an existing shared tag. Name changes must use
 the protected tag-update endpoint; changing submitted casing or punctuation during
 article attachment is not an alternate global rename path.
+
+
+### API route role-read lint policy
+
+API route modules must use `hasPermission` / `requirePermission` rather than
+extracting a statically named `role` property. The guard conservatively rejects
+static role member reads and object/parameter destructuring from **any** route-local
+value, including aliases and nested wrappers. It does not try to infer whether
+an arbitrary identifier originates in `AuthResult`; this deliberate restriction
+also rejects otherwise harmless static role reads in a route. Keep such policy
+logic in shared helpers, or justify a narrow exception rather than disabling a file.
+The two existing line-scoped policy exceptions remain tested in their real files.
+
+This syntactic maintenance guard is not an authorization proof: dynamic property
+names, reflection and arbitrary runtime data flow are outside its contract. Runtime
+permission and content-scope tests remain the actual allow/deny evidence. Session
+role checks outside API route modules are unaffected.
