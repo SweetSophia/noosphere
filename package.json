@@ -40,7 +40,7 @@
     "version:sync": "node scripts/sync-version.mjs",
     "version:check": "node scripts/sync-version.mjs --check",
     "test:persistence-layer": "node --env-file=.env.test --import tsx --test 'src/__tests__/persistence-layer/**/*.test.ts'",
-    "test:obsidian-sync": "node --import tsx --test 'src/__tests__/obsidian-sync/**/*.test.ts'"
+    "test:obsidian-sync": "node --test-timeout=15000 --import tsx --test 'src/__tests__/obsidian-sync/**/*.test.ts'"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
