@@ -23,10 +23,12 @@ for (const [name, expression] of [
 ]) {
   test(`route auth lint rejects ${name}`, async () => {
     const diagnostics = await roleDiagnostics(
-      `export function canWrite(auth: { role?: string }) { return ${expression}; }`,
+      `export function canWrite(auth: { role?: string }) {
+return ${expression};
+}`,
       "src/app/api/lint-policy-probe/route.ts",
     );
-    assert.ok(diagnostics.length > 0, "role-only authorization must remain rejected");
+    assert.ok(diagnostics.some((d) => d.line === 2), "diagnostic must target the role access, not its parameter type");
   });
 }
 
@@ -51,12 +53,17 @@ for (const [name, body] of [
   ["default destructuring", 'const { role = "VIEWER" } = auth; return role === "ADMIN";'],
   ["renamed source", 'const user = auth; const { role: access } = user; return access === "ADMIN";'],
   ["nested auth", 'const result = { auth }; return result.auth.role === "ADMIN";'],
+  ["nested destructuring", 'const wrapper = { user: auth }; const { user: { role: access } } = wrapper; return access === "ADMIN";'],
 ]) {
   test(`route auth lint rejects ${name}`, async () => {
-    assert.ok((await roleDiagnostics(
-      `export function canWrite(auth: { role?: string }) { ${body} }`,
+    const diagnostics = await roleDiagnostics(
+      `export function canWrite(auth: { role?: string }) {
+${body}
+}`,
       "src/app/api/lint-policy-probe/route.ts",
-    )).length > 0);
+    );
+    assert.ok(diagnostics.some((d) => d.line === 2),
+      "diagnostic must target the tested expression, not its parameter type");
   });
 }
 
@@ -117,6 +124,14 @@ for (const relativePath of [
 test("route auth lint permits non-role static template and cast keys", async () => {
   assert.equal((await roleDiagnostics(
     'export function isAllowed(auth: { authorized: boolean }) { return auth[`authorized`] && auth["authorized" as const]; }',
+    "src/app/api/lint-policy-probe/route.ts",
+  )).length, 0);
+});
+
+
+test("route auth lint leaves a role type declaration alone", async () => {
+  assert.equal((await roleDiagnostics(
+    'export function noRoleAccess(auth: { role?: string }) { return Boolean(auth); }',
     "src/app/api/lint-policy-probe/route.ts",
   )).length, 0);
 });

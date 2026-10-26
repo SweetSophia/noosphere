@@ -552,8 +552,7 @@ normalized slug, but never renames an existing shared tag. Name changes must use
 the protected tag-update endpoint; changing submitted casing or punctuation during
 article attachment is not an alternate global rename path.
 
-
-### API route role-read lint policy
+## API route role-read lint policy
 
 API route modules must use `hasPermission` / `requirePermission` rather than
 extracting a statically named `role` property. The guard conservatively rejects
@@ -563,7 +562,9 @@ keys. This conservative rule also rejects writes to those fields; it is not a
 read/write data-flow analysis. It does not try to infer whether
 an arbitrary identifier originates in `AuthResult`; this deliberate restriction
 also rejects otherwise harmless static role reads in a route. Keep such policy
-logic in shared helpers, or justify a narrow exception rather than disabling a file.
+logic in the existing reviewed permission helpers, or justify a narrow exception
+rather than disabling a file. Moving a custom role-only check to another module
+does not satisfy the runtime policy and is beyond this syntactic guard's reach.
 The two existing line-scoped policy exceptions remain tested in their real files.
 
 This syntactic maintenance guard is not an authorization proof: dynamic property
