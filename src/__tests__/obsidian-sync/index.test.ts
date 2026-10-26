@@ -646,4 +646,3 @@ test("git status shows changes for modified file", async () => {
 });
 
 // ─── Summary ─────────────────────────────────────────────────────────────────
-
