@@ -13,6 +13,7 @@ import type { Permissions, Role, PrismaClient } from "@prisma/client";
 const lookup = async (_args: { where: { id?: string; slug?: string; keyHash?: string } }): Promise<unknown> => null;
 const mutation = async (): Promise<unknown> => null;
 const persistence = {
+  $transaction: async (fn: (tx: unknown) => unknown) => fn(persistence),
   apiKey: { findUnique: lookup, updateMany: async () => ({ count: 0 }) },
   tag: { findFirst: mutation, findUnique: lookup, create: mutation, update: mutation, delete: mutation },
   topic: { findUnique: lookup, findMany: async () => [], count: async () => 0, update: mutation, delete: mutation },
@@ -149,3 +150,42 @@ for (const [routeIndex, route] of routes.entries()) {
     }
   });
 }
+
+for (const [code, expected] of [["P2003", 409], ["P2025", 404]] as const) {
+  test(`tag DELETE maps a post-check ${code} race to HTTP ${expected}`, async (t) => {
+    session = { user: { id: "user-1", name: "Admin", role: "ADMIN" } };
+    t.after(() => { session = null; });
+    t.mock.method(persistence.tag, "findUnique", async () => ({ id: "tag-1", name: "Tag", slug: "tag" }));
+    t.mock.method(persistence.articleTag, "count", async () => 0);
+    t.mock.method(persistence.tag, "delete", async () => { throw Object.assign(new Error("fixture"), { code }); });
+    const { DELETE } = await import("@/app/api/tags/[id]/route");
+    const response = await DELETE(new NextRequest("http://localhost/api/tags/tag-1", {
+      method: "DELETE", headers: { "x-real-ip": "192.0.2.250" },
+    }), { params: Promise.resolve({ id: "tag-1" }) });
+    assert.equal(response.status, expected);
+  });
+}
+
+test("topic serialization retries are bounded and do not swallow unrelated failures", async () => {
+  const { TaxonomyConflict, updateTopicSafely } = await import("@/lib/taxonomy");
+  for (const error of [
+    Object.assign(new Error("fixture"), { code: "P2034" }),
+    Object.assign(new Error("fixture"), { name: "DriverAdapterError", cause: { kind: "TransactionWriteConflict", originalCode: "40001" } }),
+    Object.assign(new Error("fixture"), { name: "DriverAdapterError", cause: { kind: "TransactionWriteConflict", originalCode: "40P01" } }),
+  ]) {
+    let attempts = 0;
+    const client = { $transaction: async (_fn: unknown, options: { isolationLevel: string }) => {
+      attempts++;
+      assert.equal(options.isolationLevel, "Serializable");
+      throw error;
+    } } as unknown as PrismaClient;
+    await assert.rejects(updateTopicSafely("topic", {}, client), (e: unknown) => e instanceof TaxonomyConflict && e.status === 409);
+    assert.equal(attempts, 3);
+  }
+  for (const error of [new Error("unrelated"), Object.assign(new Error("bad query"), { name: "DriverAdapterError", cause: { kind: "Unknown", originalCode: "42601" } })]) {
+    let attempts = 0;
+    const client = { $transaction: async () => { attempts++; throw error; } } as unknown as PrismaClient;
+    await assert.rejects(updateTopicSafely("topic", {}, client), (e: unknown) => e === error);
+    assert.equal(attempts, 1);
+  }
+});

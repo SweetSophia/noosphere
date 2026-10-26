@@ -6,6 +6,7 @@ import { Permissions } from "@prisma/client";
 import { getJsonBodyError, readBoundedJsonObject } from "@/lib/api/body";
 import { rateLimit } from "@/lib/rate-limit";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
+import { isPrismaCode } from "@/lib/taxonomy";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -112,6 +113,12 @@ export async function DELETE(request: NextRequest, { params }: Props) {
     await invalidateSearchCache();
     return new NextResponse(null, { status: 204 });
   } catch (error) {
+    if (isPrismaCode(error, "P2003")) {
+      return NextResponse.json({ error: "Tag became in use; remove it from articles before deleting it." }, { status: 409 });
+    }
+    if (isPrismaCode(error, "P2025")) {
+      return NextResponse.json({ error: "Tag not found" }, { status: 404 });
+    }
     console.error("[DELETE /api/tags/[id]]", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

@@ -6,6 +6,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { closePrisma, prisma } from "./_prisma";
+import { updateTopicSafely } from "../src/lib/taxonomy";
 
 interface BootstrapTopic {
   name: string;
@@ -38,10 +39,13 @@ async function seedTopics() {
 
     if (topic.children) {
       for (const child of topic.children) {
-        await prisma.topic.upsert({
-          where: { slug: child.slug },
-          update: { name: child.name, description: child.description ?? null, parentId: parent.id },
-          create: {
+        const existing = await prisma.topic.findUnique({ where: { slug: child.slug } });
+        if (existing) {
+          await updateTopicSafely(existing.id, {
+            name: child.name, description: child.description ?? null, parentId: parent.id,
+          }, prisma);
+        } else await prisma.topic.create({
+          data: {
             name: child.name,
             slug: child.slug,
             description: child.description ?? null,
