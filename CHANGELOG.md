@@ -14,10 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   English stop words are filtered. This deliberately changes search semantics,
   including stop-word-only queries; it is not a multilingual language detector.
   Per-article language remains tracked in #331.
-- On deployment with hybrid retrieval, bump `noosphere_hybrid.search_cache_epoch`
-  using the authorized hybrid maintenance identity after switching all app instances.
-  Keyword-only Redis ranking hints expire within 30 seconds; drain/wait that TTL
-  when a clean semantic cutover is required. No feature activation is implied.
+- Keyword and hybrid Redis ranking hints both have a 30-second TTL. For a clean
+  semantic cutover, stop/drain all old instances and in-flight writers, then wait
+  out that TTL before resuming search traffic. No privileged epoch mutation or
+  hybrid feature activation is required by this source change.
 
 ## [1.15.1] - 2026-10-25
 
