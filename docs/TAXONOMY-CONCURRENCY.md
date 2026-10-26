@@ -11,7 +11,9 @@ exhaustion returns a conflict (HTTP 409 for REST) for the caller to retry.
 
 Ancestor traversal is iterative with a visited set. A pre-existing cycle is rejected
 rather than recursed forever, and detaching a topic to the root remains possible.
-A metadata-only PATCH does not write an old `parentId` back over a concurrent move.
+A metadata-only REST PATCH does not write an old `parentId` back over a concurrent move.
+The admin edit form explicitly submits its selected parent; that remains a requested
+move (with the same cycle protection), not optimistic stale-form conflict detection.
 The topic seed script also uses the shared helper for existing-child moves.
 
 This is an application transaction guarantee, not a database-wide acyclicity

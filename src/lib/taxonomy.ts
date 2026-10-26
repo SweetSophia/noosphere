@@ -80,6 +80,12 @@ export function isPrismaCode(error: unknown, code: string): boolean {
 
 function isTransactionConflict(error: unknown): boolean {
   if (isPrismaCode(error, "P2034")) return true;
+  if (isPrismaCode(error, "P2010")) {
+    const known = error as { message?: unknown; meta?: { code?: unknown; driverAdapterError?: unknown } };
+    return [known.meta?.code, known.meta?.driverAdapterError, known.message].some(
+      (detail) => typeof detail === "string" && /\b(?:40001|40P01)\b/.test(detail),
+    );
+  }
   // Prisma's pg adapter can surface commit-time SSI failures directly instead
   // of wrapping them in P2034. Do not retry arbitrary driver/application errors.
   if (!(error instanceof Error) || error.name !== "DriverAdapterError") return false;

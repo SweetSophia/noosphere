@@ -172,6 +172,9 @@ test("topic serialization retries are bounded and do not swallow unrelated failu
   const { TaxonomyConflict, updateTopicSafely } = await import("@/lib/taxonomy");
   for (const error of [
     Object.assign(new Error("fixture"), { code: "P2034" }),
+    Object.assign(new Error("fixture"), { code: "P2010", meta: { code: "40001" } }),
+    Object.assign(new Error("fixture"), { code: "P2010", meta: { driverAdapterError: "deadlock 40P01" } }),
+    Object.assign(new Error("database failure 40001"), { code: "P2010" }),
     Object.assign(new Error("fixture"), { name: "DriverAdapterError", cause: { kind: "TransactionWriteConflict", originalCode: "40001" } }),
     Object.assign(new Error("fixture"), { name: "DriverAdapterError", cause: { kind: "TransactionWriteConflict", originalCode: "40P01" } }),
   ]) {
@@ -184,7 +187,7 @@ test("topic serialization retries are bounded and do not swallow unrelated failu
     await assert.rejects(updateTopicSafely("topic", {}, client), (e: unknown) => e instanceof TaxonomyConflict && e.status === 409);
     assert.equal(attempts, 3);
   }
-  for (const error of [new Error("unrelated"), Object.assign(new Error("bad query"), { name: "DriverAdapterError", cause: { kind: "Unknown", originalCode: "42601" } })]) {
+  for (const error of [new Error("unrelated"), Object.assign(new Error("syntax 42601"), { code: "P2010", meta: { code: "42601" } }), Object.assign(new Error("bad query"), { name: "DriverAdapterError", cause: { kind: "Unknown", originalCode: "42601" } })]) {
     let attempts = 0;
     const client = { $transaction: async () => { attempts++; throw error; } } as unknown as PrismaClient;
     await assert.rejects(updateTopicSafely("topic", {}, client), (e: unknown) => e === error);
