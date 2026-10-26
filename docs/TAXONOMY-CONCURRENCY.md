@@ -14,7 +14,10 @@ rather than recursed forever, and detaching a topic to the root remains possible
 A metadata-only REST PATCH does not write an old `parentId` back over a concurrent move.
 The admin edit form explicitly submits its selected parent; that remains a requested
 move (with the same cycle protection), not optimistic stale-form conflict detection.
-The topic seed script also uses the shared helper for existing-child moves.
+The topic seed script creates or updates each child and attaches it to its parent
+in one serializable transaction through the same validation helper. A rejected
+or failed child write never leaves a detached topic behind, and a concurrent
+second seed run observes the committed row instead of duplicating it.
 
 This is an application transaction guarantee, not a database-wide acyclicity
 constraint. Trusted bootstrap/repair scripts and direct SQL are privileged
@@ -49,9 +52,15 @@ production migration is implied by this source change or its local tests.
 `src/__tests__/persistence-layer/taxonomy-concurrency.test.ts` runs as the application
 role against the CI/disposable database. A rendezvous forces opposing topic moves
 past validation before either writes; exactly one commits and the other rejects
-as cyclic or returns the documented bounded-contention conflict. Unrelated
-parallel fixture writers can consume the three retry attempts before the winner
-commits; the invariant remains one successful move and no persisted cycle.
+as cyclic or returns the documented bounded-contention conflict. The bounded
+race itself can end in 409 while the winning transaction is still committing,
+so the revalidation is proven separately: replaying the losing move after the
+winner is committed must be rejected as a cycle (400). The invariant remains
+one successful move and no persisted cycle, and switching the helper to
+Read Committed still fails this test.
+The seed regression asserts that a new child is created already attached and
+that a rejected write leaves no row; two simultaneous real seed processes
+against a fresh disposable database both succeed and produce one correct tree.
 The tag test explicitly interleaves a committed link between
 the zero-use count and DELETE, asserting both the conflict and the retained link.
 It also covers delete-first rejection, safe detach and corrupt-cycle termination.

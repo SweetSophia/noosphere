@@ -168,12 +168,59 @@ for (const [code, expected] of [["P2003", 409], ["P2025", 404]] as const) {
   });
 }
 
+test("seed child creation and attachment are one serializable operation", async () => {
+  const { TaxonomyConflict, upsertTopicWithParentSafely } = await import("@/lib/taxonomy");
+  let attempts = 0;
+  const client = {
+    $transaction: async (fn: (tx: unknown) => unknown, options: { isolationLevel: string }) => {
+      attempts++;
+      assert.equal(options.isolationLevel, "Serializable");
+      return fn({
+        topic: {
+          findUnique: async ({ where }: { where: { id?: string; slug?: string } }) =>
+            where.id === "parent" ? { id: where.id, parentId: null } : null,
+          create: async ({ data }: { data: { parentId: string; slug: string } }) => ({
+            id: "child",
+            ...data,
+          }),
+        },
+      });
+    },
+  } as unknown as PrismaClient;
+  const child = await upsertTopicWithParentSafely({
+    name: "Child", slug: "child", description: null, parentId: "parent",
+  }, client);
+  assert.equal(child.parentId, "parent");
+  assert.equal(attempts, 1);
+
+  const missingParent = {
+    $transaction: async (fn: (tx: unknown) => unknown) => fn({
+      topic: {
+        findUnique: async () => null,
+        create: async () => { throw new Error("must not create without a parent"); },
+      },
+    }),
+  } as unknown as PrismaClient;
+  await assert.rejects(
+    upsertTopicWithParentSafely({ name: "Child", slug: "child", parentId: "missing" }, missingParent),
+    (error: unknown) => error instanceof TaxonomyConflict && error.status === 400,
+  );
+});
+
 test("topic serialization retries are bounded and do not swallow unrelated failures", async () => {
   const { TaxonomyConflict, updateTopicSafely } = await import("@/lib/taxonomy");
   for (const error of [
     Object.assign(new Error("fixture"), { code: "P2034" }),
     Object.assign(new Error("fixture"), { code: "P2010", meta: { code: "40001" } }),
     Object.assign(new Error("fixture"), { code: "P2010", meta: { driverAdapterError: "deadlock 40P01" } }),
+    Object.assign(new Error("fixture"), {
+      code: "P2010",
+      meta: { driverAdapterError: { kind: "TransactionWriteConflict", originalCode: "40001" } },
+    }),
+    Object.assign(new Error("fixture"), {
+      code: "P2010",
+      meta: { cause: { originalCode: "40P01" } },
+    }),
     Object.assign(new Error("database failure 40001"), { code: "P2010" }),
     Object.assign(new Error("fixture"), { name: "DriverAdapterError", cause: { kind: "TransactionWriteConflict", originalCode: "40001" } }),
     Object.assign(new Error("fixture"), { name: "DriverAdapterError", cause: { kind: "TransactionWriteConflict", originalCode: "40P01" } }),

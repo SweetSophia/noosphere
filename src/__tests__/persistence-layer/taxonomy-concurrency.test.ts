@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import test, { after } from "node:test";
 import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { TaxonomyConflict, updateTopicSafely } from "@/lib/taxonomy";
+import { TaxonomyConflict, updateTopicSafely, upsertTopicWithParentSafely } from "@/lib/taxonomy";
 
 after(async () => {
   await prisma.$disconnect();
@@ -48,9 +48,47 @@ test("opposing topic moves cannot both commit after concurrent validation", { ti
       "the loser must reject a revalidated cycle or report bounded contention, never commit it");
     const rows = await prisma.topic.findMany({ where: { id: { in: [a.id, b.id] } } });
     assert.equal(rows.filter((r) => r.parentId !== null).length, 1);
+    // The bounded race itself may end in 409 while the winner is still
+    // committing, so prove the revalidation separately: once the winning move
+    // is committed, the same losing move must be rejected as a real cycle.
+    const winner = rows.find((r) => r.parentId !== null)!;
+    const loser = rows.find((r) => r.parentId === null)!;
+    await assert.rejects(
+      updateTopicSafely(loser.id, { parentId: winner.id }),
+      (e: unknown) => e instanceof TaxonomyConflict && e.status === 400,
+      "a retried move must re-read the committed chain and reject the cycle",
+    );
   } finally {
     await prisma.topic.updateMany({ where: { id: { in: [a.id, b.id] } }, data: { parentId: null } });
     await prisma.topic.deleteMany({ where: { id: { in: [a.id, b.id] } } });
+  }
+});
+
+test("seed children are attached in the same transaction that creates them", async () => {
+  const prefix = `taxonomy-${randomUUID()}`;
+  const parent = await prisma.topic.create({ data: { name: prefix, slug: prefix } });
+  try {
+    const child = await upsertTopicWithParentSafely({
+      name: `${prefix}-child`,
+      slug: `${prefix}-child`,
+      description: null,
+      parentId: parent.id,
+    });
+    assert.equal(child.parentId, parent.id, "a new child must never be committed detached");
+    // An unusable parent is rejected before anything is written.
+    await assert.rejects(
+      upsertTopicWithParentSafely({
+        name: `${prefix}-orphan`,
+        slug: `${prefix}-orphan`,
+        parentId: `${prefix}-missing-parent`,
+      }, prisma),
+      (e: unknown) => e instanceof TaxonomyConflict && e.status === 400,
+    );
+    assert.equal(await prisma.topic.count({ where: { slug: `${prefix}-orphan` } }), 0,
+      "a rejected child must not leave a detached row behind");
+  } finally {
+    await prisma.topic.updateMany({ where: { parentId: parent.id }, data: { parentId: null } });
+    await prisma.topic.deleteMany({ where: { id: parent.id } });
   }
 });
 
