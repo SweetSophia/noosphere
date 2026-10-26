@@ -44,7 +44,8 @@ test("opposing topic moves cannot both commit after concurrent validation", { ti
     assert.equal(result.filter((r) => r.status === "fulfilled").length, 1);
     const rejected = result.find((r) => r.status === "rejected");
     assert.ok(rejected?.status === "rejected" && rejected.reason instanceof TaxonomyConflict, JSON.stringify(rejected));
-    assert.equal(rejected.reason.status, 400, "serialization retry must revalidate and reject the cycle");
+    assert.ok([400, 409].includes(rejected.reason.status),
+      "the loser must reject a revalidated cycle or report bounded contention, never commit it");
     const rows = await prisma.topic.findMany({ where: { id: { in: [a.id, b.id] } } });
     assert.equal(rows.filter((r) => r.parentId !== null).length, 1);
   } finally {

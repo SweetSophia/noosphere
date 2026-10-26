@@ -46,9 +46,18 @@ production migration is implied by this source change or its local tests.
 
 `src/__tests__/persistence-layer/taxonomy-concurrency.test.ts` runs as the application
 role against the CI/disposable database. A rendezvous forces opposing topic moves
-past validation before either writes; exactly one commits and the retry rejects
-the other as cyclic. The tag test explicitly interleaves a committed link between
+past validation before either writes; exactly one commits and the other rejects
+as cyclic or returns the documented bounded-contention conflict. Unrelated
+parallel fixture writers can consume the three retry attempts before the winner
+commits; the invariant remains one successful move and no persisted cycle.
+The tag test explicitly interleaves a committed link between
 the zero-use count and DELETE, asserting both the conflict and the retained link.
 It also covers delete-first rejection, safe detach and corrupt-cycle termination.
 API tests retain the credential matrix and cover post-count HTTP error mapping
 and bounded serialization retries, including pg-adapter commit-time failures.
+
+The pgvector upgrade rehearsal baseline includes all 11 application migrations,
+with exact migration names/checksums and a newly recorded deterministic fixture
+integrity hash. The count and digest were updated for this actual schema change,
+not disabled; physical rollback, both logical restores and value-only corruption
+negative controls continue to enforce the same preservation contract.

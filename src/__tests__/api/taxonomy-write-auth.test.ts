@@ -35,25 +35,27 @@ const sessionMock = mock.method(
 );
 after(() => sessionMock.mock.restore());
 
+// Scope expectations are explicit test data, not a reimplementation of the
+// route predicate; changing the production scope rule cannot change this oracle.
 const credentials = [
-  { name: "READ key", permission: "READ", level: 1, scopes: ["*"] },
-  { name: "WRITE key", permission: "WRITE", level: 2, scopes: ["*"] },
-  { name: "ADMIN key", permission: "ADMIN", level: 3, scopes: ["*"] },
-  { name: "unrestricted-only WRITE key", permission: "WRITE", level: 2, scopes: [] },
-  { name: "scoped WRITE key", permission: "WRITE", level: 2, scopes: ["team-a"] },
-  { name: "scoped ADMIN key", permission: "ADMIN", level: 3, scopes: ["team-a"] },
-  { name: "unrestricted-only ADMIN key", permission: "ADMIN", level: 3, scopes: [] },
-  { name: "WRITE key without scopes", permission: "WRITE", level: 2, scopes: undefined },
-  { name: "ADMIN key without scopes", permission: "ADMIN", level: 3, scopes: undefined },
-  { name: "mixed wildcard WRITE key", permission: "WRITE", level: 2, scopes: ["team-a", "*"] },
-  { name: "key without permission", permission: undefined, level: 0, scopes: ["*"] },
-  { name: "VIEWER session", role: "VIEWER", level: 1 },
-  { name: "EDITOR session", role: "EDITOR", level: 2 },
-  { name: "ADMIN session", role: "ADMIN", level: 3 },
-  { name: "session without role", level: 0, missingRole: true },
-  { name: "anonymous request", level: -1 },
-  { name: "unknown key", level: -1, invalidKey: true },
-  { name: "revoked ADMIN key", permission: "ADMIN", level: -1, revoked: true },
+  { name: "READ key", permission: "READ", level: 1, scopes: ["*"], expectedGlobalScope: true },
+  { name: "WRITE key", permission: "WRITE", level: 2, scopes: ["*"], expectedGlobalScope: true },
+  { name: "ADMIN key", permission: "ADMIN", level: 3, scopes: ["*"], expectedGlobalScope: true },
+  { name: "unrestricted-only WRITE key", permission: "WRITE", level: 2, scopes: [], expectedGlobalScope: false },
+  { name: "scoped WRITE key", permission: "WRITE", level: 2, scopes: ["team-a"], expectedGlobalScope: false },
+  { name: "scoped ADMIN key", permission: "ADMIN", level: 3, scopes: ["team-a"], expectedGlobalScope: false },
+  { name: "unrestricted-only ADMIN key", permission: "ADMIN", level: 3, scopes: [], expectedGlobalScope: false },
+  { name: "WRITE key without scopes", permission: "WRITE", level: 2, scopes: undefined, expectedGlobalScope: false },
+  { name: "ADMIN key without scopes", permission: "ADMIN", level: 3, scopes: undefined, expectedGlobalScope: false },
+  { name: "mixed wildcard WRITE key", permission: "WRITE", level: 2, scopes: ["team-a", "*"], expectedGlobalScope: true },
+  { name: "key without permission", permission: undefined, level: 0, scopes: ["*"], expectedGlobalScope: true },
+  { name: "VIEWER session", role: "VIEWER", level: 1, expectedGlobalScope: true },
+  { name: "EDITOR session", role: "EDITOR", level: 2, expectedGlobalScope: true },
+  { name: "ADMIN session", role: "ADMIN", level: 3, expectedGlobalScope: true },
+  { name: "session without role", level: 0, missingRole: true, expectedGlobalScope: true },
+  { name: "anonymous request", level: -1, expectedGlobalScope: false },
+  { name: "unknown key", level: -1, invalidKey: true, expectedGlobalScope: false },
+  { name: "revoked ADMIN key", permission: "ADMIN", level: -1, revoked: true, expectedGlobalScope: false },
 ] as const;
 
 const routes = [
@@ -135,7 +137,7 @@ for (const [routeIndex, route] of routes.entries()) {
         // scopes. Deny before any lookup, including keys with ADMIN permission.
         // New tag creation deliberately retains its existing WRITE policy.
         const lacksGlobalScope = route.method !== "POST" && "permission" in credential
-          && !("scopes" in credential && credential.scopes?.some((scope) => scope === "*"));
+          && !credential.expectedGlobalScope;
         const expected = credential.level < 0 ? 401
           : credential.level < route.level || lacksGlobalScope ? 403 : route.status;
         assert.equal(response.status, expected);
