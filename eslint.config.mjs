@@ -28,11 +28,19 @@ const eslintConfig = defineConfig([
         // route policy exceptions remain individually line-scoped.
         {
           selector: "MemberExpression[computed=false][property.name='role']",
-          message: "Use hasPermission/requirePermission; route role reads can exclude API keys.",
+          message: "Use hasPermission/requirePermission; route role access can exclude API keys.",
         },
         {
           selector: "MemberExpression[computed=true][property.value='role']",
-          message: "Use hasPermission/requirePermission; route role reads can exclude API keys.",
+          message: "Use hasPermission/requirePermission; route role access can exclude API keys.",
+        },
+        {
+          selector: ":matches(MemberExpression[computed=true], ObjectPattern > Property[computed=true]) > :matches(TSAsExpression, TSTypeAssertion, TSNonNullExpression, TSSatisfiesExpression) Literal[value='role']",
+          message: "Use shared permissions, not a role key hidden behind a TypeScript wrapper.",
+        },
+        {
+          selector: ":matches(MemberExpression[computed=true], ObjectPattern > Property[computed=true]) TemplateLiteral[expressions.length=0] > TemplateElement[value.cooked='role']",
+          message: "Use shared permissions, not a static role template key.",
         },
         {
           selector: "ObjectPattern > Property[key.name='role'], ObjectPattern > Property[key.value='role']",

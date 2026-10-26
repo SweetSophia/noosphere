@@ -557,8 +557,10 @@ article attachment is not an alternate global rename path.
 
 API route modules must use `hasPermission` / `requirePermission` rather than
 extracting a statically named `role` property. The guard conservatively rejects
-static role member reads and object/parameter destructuring from **any** route-local
-value, including aliases and nested wrappers. It does not try to infer whether
+static role member access and object/parameter destructuring from **any** route-local
+value, including aliases, nested wrappers, static template keys and TypeScript-cast
+keys. This conservative rule also rejects writes to those fields; it is not a
+read/write data-flow analysis. It does not try to infer whether
 an arbitrary identifier originates in `AuthResult`; this deliberate restriction
 also rejects otherwise harmless static role reads in a route. Keep such policy
 logic in shared helpers, or justify a narrow exception rather than disabling a file.

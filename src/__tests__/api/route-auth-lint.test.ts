@@ -34,6 +34,11 @@ for (const [name, expression] of [
 // route-local values, rather than guessing which aliases originate in AuthResult.
 for (const [name, body] of [
   ["truthiness", "return !!auth.role;"],
+  ["template key", 'return auth[`role`] === "ADMIN";'],
+  ["escaped static template key", 'return auth[`ro\\u006ce`] === "ADMIN";'],
+  ["cast key", 'return auth["role" as const] === "ADMIN";'],
+  ["wrapped cast key", 'return auth[("role" as const)!] === "ADMIN";'],
+  ["computed destructuring", 'const { ["role" as const]: access } = auth; return access === "ADMIN";'],
   ["unary", "return !auth.role;"],
   ["logical", "return auth.role && true;"],
   ["optional access", "return auth?.role;"],
@@ -107,3 +112,11 @@ for (const relativePath of [
     );
   });
 }
+
+
+test("route auth lint permits non-role static template and cast keys", async () => {
+  assert.equal((await roleDiagnostics(
+    'export function isAllowed(auth: { authorized: boolean }) { return auth[`authorized`] && auth["authorized" as const]; }',
+    "src/app/api/lint-policy-probe/route.ts",
+  )).length, 0);
+});
