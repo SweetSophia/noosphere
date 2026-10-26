@@ -7,6 +7,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/wiki";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
+import { updateTopicSafely } from "@/lib/taxonomy";
 
 async function requireEditor() {
   const session = await getServerSession(authOptions);
@@ -85,45 +86,12 @@ export async function updateTopicAction(formData: FormData) {
   if (!id) throw new Error("Topic ID is required.");
   if (!name) throw new Error("Topic name is required.");
 
-  const existing = await prisma.topic.findUnique({ where: { id } });
-  if (!existing) throw new Error("Topic not found.");
-
   const parentIdValue = parentId && typeof parentId === "string" && parentId !== "" ? String(parentId) : null;
-
-  // Validate parent
-  if (parentIdValue === id) throw new Error("A topic cannot be its own parent.");
-  if (parentIdValue) {
-    const parent = await prisma.topic.findUnique({ where: { id: parentIdValue } });
-    if (!parent) throw new Error("Parent topic not found.");
-    // Cycle check
-    const descendants: string[] = [];
-    const getDescendants = async (topicId: string): Promise<string[]> => {
-      const children = await prisma.topic.findMany({ where: { parentId: topicId }, select: { id: true } });
-      const desc: string[] = [];
-      for (const c of children) {
-        desc.push(c.id);
-        desc.push(...await getDescendants(c.id));
-      }
-      return desc;
-    };
-    const desc = await getDescendants(id);
-    if (desc.includes(parentIdValue)) throw new Error("Cannot set a descendant as the parent (cycle).");
-  }
-
-  const finalSlug = slugInput ? slugify(slugInput) : existing.slug;
-  if (finalSlug !== existing.slug) {
-    const conflict = await prisma.topic.findUnique({ where: { slug: finalSlug } });
-    if (conflict) throw new Error("Slug already in use.");
-  }
-
-  await prisma.topic.update({
-    where: { id },
-    data: {
-      name,
-      slug: finalSlug,
-      parentId: parentIdValue,
-      description: description || null,
-    },
+  await updateTopicSafely(id, {
+    name,
+    ...(slugInput ? { slug: slugify(slugInput) } : {}),
+    parentId: parentIdValue,
+    description,
   });
 
   await invalidateSearchCache();

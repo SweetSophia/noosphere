@@ -6,6 +6,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { closePrisma, prisma } from "./_prisma";
+import { upsertTopicWithParentSafely } from "../src/lib/taxonomy";
 
 interface BootstrapTopic {
   name: string;
@@ -38,16 +39,14 @@ async function seedTopics() {
 
     if (topic.children) {
       for (const child of topic.children) {
-        await prisma.topic.upsert({
-          where: { slug: child.slug },
-          update: { name: child.name, description: child.description ?? null, parentId: parent.id },
-          create: {
-            name: child.name,
-            slug: child.slug,
-            description: child.description ?? null,
-            parentId: parent.id,
-          },
-        });
+        // Create/update and attach happen in one serializable transaction. A
+        // failed validation cannot leave a new child visible at the wrong depth.
+        await upsertTopicWithParentSafely({
+          name: child.name,
+          slug: child.slug,
+          description: child.description ?? null,
+          parentId: parent.id,
+        }, prisma);
         console.log("     + " + child.name);
       }
     }
