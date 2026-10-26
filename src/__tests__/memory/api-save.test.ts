@@ -75,6 +75,30 @@ test("memory save strips injected memory blocks before validation", () => {
   );
 });
 
+test("memory save sanitizes title before it reaches the writer", () => {
+  const result = validateMemorySaveRequest(validRequest({
+    title: "Durable title. <memory-context>private title</memory-context>",
+  }));
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.input.title.includes("private title"), false);
+  const onlyInjected = validateMemorySaveRequest(validRequest({
+    title: "<memory-context>private title</memory-context>",
+  }));
+  assert.equal(onlyInjected.ok, false);
+});
+
+test("memory save rejects context-bearing metadata before it reaches other tables", () => {
+  for (const field of ["excerpt", "source", "authorName", "tags", "restrictedTags"] as const) {
+    const value = `<memory-context>recalled ${field}</memory-context>`;
+    const result = validateMemorySaveRequest(
+      validRequest({ [field]: field === "tags" || field === "restrictedTags" ? [value] : value }),
+      { allowedScopes: ["*"] },
+    );
+    assert.equal(result.ok, false, field);
+    if (!result.ok) assert.equal(result.status, 400, field);
+  }
+});
+
 test("memory save strip helper handles noosphere auto recall blocks", () => {
   const stripped = stripInjectedMemoryBlocks(
     "keep this\n<noosphere_auto_recall><recall>nested</recall></noosphere_auto_recall>\nkeep that",

@@ -1,0 +1,81 @@
+{
+  "status": "unpublished-local-fixture-qualified-not-release",
+  "baseCommit": "412e132aa2ee380d16b74344c18c462974bb1337",
+  "upstreamRegistry": "https://registry.npmjs.org",
+  "forks": [
+    {
+      "upstream": "opencode-ai-plugin-1.15.5.tgz",
+      "upstreamSha256": "28fd011eb98ab0907f8e84f9ee20815071d638dd823c68b70fdc5bacc707a27a",
+      "finalArtifact": "sweetsophia-noosphere-opencode-plugin-1.15.5-noosphere.3.tgz",
+      "finalSha256": "b3be7a902c22bf2e0fb0c19ac519fcbb6d1af1c4c446db0d30da7039695bce07",
+      "changedMembers": [
+        "package/package.json"
+      ],
+      "unchangedMemberCount": 12,
+      "patch": "patches/sweetsophia-noosphere-opencode-plugin-1.15.5-noosphere.3.patch",
+      "changedFileHashes": {
+        "package/package.json": "4463237012497070b911fd787e6648c5d73498f4f65c323b90e9181c2da45936"
+      }
+    },
+    {
+      "upstream": "effect-4.0.0-beta.65.tgz",
+      "upstreamSha256": "fdd899cda7d758f28203942c926ebfda8ec954a726a0da3e1669e39552c0e589",
+      "finalArtifact": "sweetsophia-noosphere-effect-4.0.0-beta.65-noosphere.3.tgz",
+      "finalSha256": "5174e0710593a000a244e656df482c941e11fff8d4a9046d1080515a3a295084",
+      "changedMembers": [
+        "package/package.json"
+      ],
+      "unchangedMemberCount": 2052,
+      "patch": "patches/sweetsophia-noosphere-effect-4.0.0-beta.65-noosphere.3.patch",
+      "changedFileHashes": {
+        "package/package.json": "5d48bf1c9f55fc55826fae8013e4ef230027a7ee512b8693f9371ce9e711d4a0"
+      }
+    },
+    {
+      "upstream": "kilocode-plugin-7.3.1.tgz",
+      "upstreamSha256": "02b25ccccb720b585f03631edd210dff95784b554e094eba0232ee1e5b557513",
+      "finalArtifact": "sweetsophia-noosphere-kilocode-plugin-7.3.1-noosphere.4.tgz",
+      "finalSha256": "030dca359fc9698cb71e6a11c1f8d644d4486a7c1c05c8e930e77980ea8ce239",
+      "changedMembers": [
+        "package/package.json"
+      ],
+      "unchangedMemberCount": 12,
+      "patch": "patches/sweetsophia-noosphere-kilocode-plugin-7.3.1-noosphere.4.patch",
+      "changedFileHashes": {
+        "package/package.json": "65d576f8226da05a6fafe7841a876c8740d2e7af6b025f777d850cc2e19bf73e"
+      }
+    },
+    {
+      "upstream": "effect-4.0.0-beta.57.tgz",
+      "upstreamSha256": "901be119e21052d62ad4f9f80864dcf55c86f1ba6dc25a9b3fa3ac93e821b99c",
+      "finalArtifact": "sweetsophia-noosphere-effect-4.0.0-beta.57-noosphere.4.tgz",
+      "finalSha256": "b29bb00619d18a52a333d692af8e1943375ce8c67e947e9b3b0db13ea378bba7",
+      "changedMembers": [
+        "package/package.json",
+        "package/dist/internal/schema/schema.d.ts.map",
+        "package/dist/internal/schema/schema.d.ts"
+      ],
+      "unchangedMemberCount": 2045,
+      "patch": "patches/sweetsophia-noosphere-effect-4.0.0-beta.57-noosphere.4.patch",
+      "changedFileHashes": {
+        "package/package.json": "0f2e4b4f8ba3dee91ded5c4862fb0e6c32656837266b68fa931bf8c9809e3705",
+        "package/dist/internal/schema/schema.d.ts.map": "112582553a0429c352e4bc3e750dbb53a724c20cf0dc3520faeaaade076a913d",
+        "package/dist/internal/schema/schema.d.ts": "ab967fb1b2c285263604549155e08f2f987dc3795ac30faf365232ccd83c3410"
+      }
+    }
+  ],
+  "adapterArtifacts": {
+    "sweetsophia-opencode-noosphere-memory-1.15.0-noosphere.toml.1.tgz": "abcf4a234cd5ad67ed0d1b8d256075849660ca76cea6b81e8daf0d2c56cb8b98",
+    "sweetsophia-kilocode-noosphere-memory-1.15.0-noosphere.toml.2.tgz": "47253997783f7f8b13f11e413fa6e857c58deeb24b2d2eba25e4735ea3fc2400"
+  },
+  "qualification": {
+    "node": "24.22.0",
+    "npm": "12.1.0",
+    "distinctInstalledConsumerRuntimeCases": 14,
+    "strictPublicTypeConsumers": 2,
+    "distinctAdapterTests": 11,
+    "sequentialIndependentNativeInspections": 2,
+    "localBlockers": 0,
+    "acceptedLowDocumentationEvidenceNotes": 3
+  }
+}

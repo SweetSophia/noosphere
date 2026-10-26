@@ -25,6 +25,7 @@ import {
   sanitizeArticleExcerpt,
 } from "@/lib/api/article-content";
 import { detectSecretInInputs } from "@/lib/memory/api/save";
+import { isPersistenceLayerInjectedTitleError, PERSISTENCE_LAYER_INJECTED_TITLE_ERROR } from "@/lib/prisma-extensions/article-sanitizer";
 
 const ANSWER_SLUG_MAX_LENGTH = 80;
 const ANSWER_JSON_BODY_MAX_BYTES =
@@ -185,7 +186,7 @@ export async function POST(request: NextRequest) {
   // Derive excerpt if not provided
   const derivedExcerpt = sanitizedExcerpt || deriveExcerpt(sanitizedContent, 200);
 
-  const article = await prisma.$transaction(async (tx) => {
+  const articleTransaction = prisma.$transaction(async (tx) => {
     const created = await tx.article.create({
       data: {
         title,
@@ -251,6 +252,13 @@ export async function POST(request: NextRequest) {
 
     return created;
   });
+  let article;
+  try {
+    article = await articleTransaction;
+  } catch (error) {
+    if (!isPersistenceLayerInjectedTitleError(error)) throw error;
+    return NextResponse.json({ error: PERSISTENCE_LAYER_INJECTED_TITLE_ERROR }, { status: 400 });
+  }
 
   await invalidateSearchCache();
 

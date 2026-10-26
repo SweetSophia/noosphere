@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Permissions } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requirePermission } from "@/lib/api/auth";
+import { requireGlobalKeyManagement } from "@/lib/api/key-management-auth";
 import { getJsonBodyError, readBoundedJsonObject } from "@/lib/api/body";
 import { withApiErrorBoundary } from "@/lib/api/errors";
 import { createApiKeyRecord } from "@/lib/api/key-mutations";
@@ -9,12 +9,12 @@ import { MemoryCaptureError } from "@/lib/memory/capture/repository";
 import { rateLimit } from "@/lib/rate-limit";
 
 // GET /api/keys — List all API keys (metadata only)
-// Auth: ADMIN only
+// Auth: ADMIN and explicit full content scope
 export async function GET(_request: NextRequest) {
   const rl = await rateLimit(_request, { windowMs: 60_000, maxRequests: 30, keyPrefix: "keys-get" });
   if (!rl.allowed) return rl.response;
 
-  const auth = await requirePermission(_request, [Permissions.ADMIN]);
+  const auth = await requireGlobalKeyManagement(_request);
   if (!auth.success) {
     return auth.response;
   }
@@ -41,7 +41,7 @@ export async function GET(_request: NextRequest) {
 }
 
 // POST /api/keys — Create a new API key
-// Auth: ADMIN only
+// Auth: ADMIN and explicit full content scope
 export async function POST(request: NextRequest) {
   return withApiErrorBoundary("Keys POST", async () => {
     const rl = await rateLimit(request, {
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     });
     if (!rl.allowed) return rl.response;
 
-    const auth = await requirePermission(request, [Permissions.ADMIN]);
+    const auth = await requireGlobalKeyManagement(request);
     if (!auth.success) {
       return auth.response;
     }

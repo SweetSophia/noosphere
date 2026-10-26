@@ -17,16 +17,16 @@
     ],
     "memoryCorpusSupplements": [
       "noosphere"
-    ],
-    "config": {
-      "secretInputs": {
-        "paths": [
-          {
-            "path": "apiKey",
-            "expected": "string"
-          }
-        ]
-      }
+    ]
+  },
+  "configContracts": {
+    "secretInputs": {
+      "paths": [
+        {
+          "path": "apiKey",
+          "expected": "string"
+        }
+      ]
     }
   },
   "setup": {

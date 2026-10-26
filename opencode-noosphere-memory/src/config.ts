@@ -22,6 +22,8 @@ export function resolveConfig(
       readString(raw.apiKey) ||
       readString(env.OPENCODE_NOOSPHERE_API_KEY) ||
       readString(env.NOOSPHERE_API_KEY),
+    missingApiKeyMessage:
+      "Set OPENCODE_NOOSPHERE_API_KEY for Opencode Noosphere memory requests, or NOOSPHERE_API_KEY as a compatibility fallback",
     timeoutMs: readInteger(
       raw.timeoutMs,
       firstEnv(env.OPENCODE_NOOSPHERE_TIMEOUT_MS, env.NOOSPHERE_TIMEOUT_MS),

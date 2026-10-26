@@ -1,43 +1,30 @@
 # Noosphere Memory for OpenClaw
 
-OpenClaw plugin for Noosphere memory over HTTP. It provides explicit memory
-tools, optional prompt-time auto-recall, and an optional shared memory corpus
-supplement.
+> **1.15.1 release candidate — not published.** Version-bound commands below
+> are for the candidate and must not run until the coordinated public release
+> and all six installer assets exist. Merge/publication/production remain on hold.
 
-## Install
+Connect OpenClaw to self-hosted Noosphere memory. Recall relevant knowledge,
+save draft memories, and optionally inject recalled context into prompts.
 
-Use OpenClaw's plugin installer:
+## Quick start
 
-```bash
-openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.14.0 --pin
-```
+You need a running Noosphere instance and a dedicated OpenClaw WRITE key. For a
+new local setup, select OpenClaw in the [guided installer](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#guided-installation)
+after confirming the [v1.15.1 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.1)
+has all six installer assets. The [auditable download](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#auditable-download)
+explains checksum verification.
 
-For the full local Noosphere + OpenClaw setup, first confirm that the
-coordinated [`v1.14.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.14.0)
-exists with all six installer assets. Source merge alone does not publish the
-image, package, or release assets. Then use the checksum-verifying download form
-below; it runs the guided `1.14.0` launcher non-interactively for OpenClaw.
-
-It verifies the reviewed launcher and backend before configuring OpenClaw through
-its protected file secret provider. For the full lifecycle and auditable download,
-see [Installing Noosphere](../docs/INSTALLATION.md). Guided setup creates a
-separate OpenClaw WRITE key, never the bootstrap ADMIN key. The key is
-unrestricted across corpus scopes by default so ordinary saves without
-`restrictedTags` work; apply restricted scopes only together with matching
-integration tags.
+If Noosphere is already running, create an OpenClaw-specific WRITE key at
+`/wiki/admin/keys` (not the bootstrap ADMIN key), then install the plugin:
 
 ```bash
-# Installer commit: 182e0dceade3f0ac31e5d14f42f091d4075793a2
-# Expected SHA-256: 5fd69c4125ba02fdcc36e1bb54b66628dc5d324f7c04cea13d5dae3729035601
-(
-  set -e
-  installer="$(mktemp)"
-  trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/182e0dceade3f0ac31e5d14f42f091d4075793a2/install.sh -o "$installer"
-  printf '%s  %s\n' '5fd69c4125ba02fdcc36e1bb54b66628dc5d324f7c04cea13d5dae3729035601' "$installer" | sha256sum -c -
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.14.0}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.14.0}" bash "$installer" --non-interactive --with openclaw
-)
+openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.15.1 --pin
 ```
+
+Then [configure the plugin](#configuration) with that key. See the
+[full OpenClaw guide on GitHub](https://github.com/SweetSophia/noosphere/tree/master/openclaw-noosphere-memory)
+for remote setup and configuration details.
 
 ## Configuration
 
@@ -148,7 +135,7 @@ advisory; it does not perform an automatic save.
 
 This is the implemented Phase 0 behavior. The opt-in automatic-capture and
 recall-enrichment phases are tracked in the
-[Automatic Memory Capture and Recall Enrichment ADR](../docs/AUTOMATIC-MEMORY-CAPTURE-AND-ENRICHMENT-ADR.md).
+[Automatic Memory Capture and Recall Enrichment ADR](https://github.com/SweetSophia/noosphere/blob/master/docs/AUTOMATIC-MEMORY-CAPTURE-AND-ENRICHMENT-ADR.md).
 
 ## Corpus Supplement
 
@@ -168,19 +155,47 @@ Use a narrow default key if you enable this. The default corpus key should be
 READ-only when the shared corpus is used for search only, and its scopes should
 exclude private agent/project memory that other agents must not see.
 
+## Verified guided install
+
+For a new local setup, first confirm the [v1.15.1 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.1)
+has all six installer assets. This pinned launcher verifies its SHA-256 before
+execution; see the [GitHub installation guide](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md)
+for upgrade behavior and other installation paths.
+
+For an existing installation using a custom image, export `NOOSPHERE_IMAGE` explicitly
+before running this block. The version-bound default does not reuse a persisted image automatically.
+
+```bash
+# Installer commit: 2114560065aa4ea07b1f07175824eb645f4325a7
+# Expected SHA-256: 90432d088c8d4aa4d0220685c1f1801c1ce2d609d820e4cf309eb13a46f67701
+(
+  set -e
+  installer_dir="$(mktemp -d)"
+  trap 'rm -rf "$installer_dir"' EXIT
+  installer="$installer_dir/install.sh"
+  backend="$installer_dir/install-openclaw.sh"
+  unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/2114560065aa4ea07b1f07175824eb645f4325a7/install.sh -o "$installer"
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/2114560065aa4ea07b1f07175824eb645f4325a7/install-openclaw.sh -o "$backend"
+  printf '%s  %s\n' '90432d088c8d4aa4d0220685c1f1801c1ce2d609d820e4cf309eb13a46f67701' "$installer" | sha256sum -c -
+  printf '%s  %s\n' '681db7ce3e08f9692bd9631160bc0d9b9f0e468a0338179ab2dd826d25400c9f' "$backend" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.1}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.1}" bash "$installer" --non-interactive --with openclaw
+)
+```
+
 ## Release Tags
 
 Package releases use package-specific tag prefixes so independent packages do
 not trigger each other's publish jobs:
 
-- `v-openclaw-1.14.0` publishes `@sweetsophia/noosphere-injected-memory@1.14.0`
-  first, then `@sweetsophia/openclaw-noosphere-memory@1.14.0` after exact
+- `v-openclaw-1.15.1` publishes `@sweetsophia/noosphere-injected-memory@1.15.1`
+  first, then `@sweetsophia/openclaw-noosphere-memory@1.15.1` after exact
   integrity readback
-- `v-opencode-1.14.0` publishes `@sweetsophia/opencode-noosphere-memory@1.14.0`
-- `v-kilocode-1.14.0` publishes `@sweetsophia/kilocode-noosphere-memory@1.14.0`
-- `v-mcp-1.14.0` publishes `@sweetsophia/noosphere-mcp@1.14.0`
-- `v-hermes-1.14.0` produces the deterministic Hermes workflow artifact; the
-  trusted release publisher attaches that archive and checksum to `v1.14.0`
+- `v-opencode-1.15.1` publishes `@sweetsophia/opencode-noosphere-memory@1.15.1`
+- `v-kilocode-1.15.1` publishes `@sweetsophia/kilocode-noosphere-memory@1.15.1`
+- `v-mcp-1.15.1` publishes `@sweetsophia/noosphere-mcp@1.15.1`
+- `v-hermes-1.15.1` produces the deterministic Hermes workflow artifact; the
+  trusted release publisher attaches that archive and checksum to `v1.15.1`
   after independent readback
 
 New plugin packages should add their own `v-{package}-*` tag prefix in CI before

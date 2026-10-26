@@ -51,7 +51,7 @@ NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH="${NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH:-}"
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH="${NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH:-}"
 NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS="${NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS:-}"
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS="${NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS:-}"
-PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.14.0}"
+PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.1}"
 SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$HOME/.openclaw/secrets}"
 SECRETS_FILE="${NOOSPHERE_SECRETS_FILE:-$SECRETS_DIR/noosphere-memory.json}"
 SECRET_PROVIDER_ID="${NOOSPHERE_SECRET_PROVIDER_ID:-noosphere-memory}"
@@ -262,7 +262,7 @@ integration_key_is_safe() {
 }
 
 create_scoped_integration_key() {
-  local label=$1 config body response name raw base_url
+  local label=$1 config body response name raw base_url http_status curl_status
   [[ "$API_KEY" =~ ^noo_[A-Za-z0-9_-]+$ ]] || {
     echo 'Bootstrap API key has an unexpected format.' >&2
     return 1
@@ -278,10 +278,21 @@ create_scoped_integration_key() {
   chmod 600 "$config" "$body" "$response"
   printf 'silent\nshow-error\nfail-with-body\nheader = "Authorization: Bearer %s"\n' "$API_KEY" > "$config"
   printf '{"name":"%s","permissions":"WRITE","allowedScopes":[]}\n' "$name" > "$body"
-  if ! local_no_proxy_curl --config "$config" --request POST --header 'Content-Type: application/json' \
-    --data-binary "@$body" --output "$response" "$base_url/api/keys"; then
+  curl_status=0
+  http_status=$(local_no_proxy_curl --config "$config" --request POST --header 'Content-Type: application/json' \
+    --data-binary "@$body" --output "$response" --write-out '%{http_code}' "$base_url/api/keys") || curl_status=$?
+  if (( curl_status != 0 )) || [[ ! "$http_status" =~ ^2[0-9][0-9]$ ]]; then
     rm -f "$config" "$body" "$response"
     echo "Failed to create a scoped ${label} API key." >&2
+    if (( curl_status != 0 && curl_status != 22 )); then
+      echo "Transport/connectivity failure (curl exit ${curl_status}); check the local service and network. Do not rotate a credential based on this failure." >&2
+    elif [[ "$http_status" == 403 ]]; then
+      echo 'Provisioning requires an ADMIN bootstrap key with explicit full scope (*). Existing scoped keys are not automatically expanded; use a new dedicated bootstrap credential or the human administrator key console.' >&2
+    elif [[ "$http_status" == 401 ]]; then
+      echo 'Bootstrap authentication was rejected (HTTP 401); verify the protected credential rather than changing its content scope.' >&2
+    else
+      echo "Noosphere returned HTTP ${http_status:-000}; check service availability, rate limits and server logs before changing credentials." >&2
+    fi
     return 1
   fi
   raw=$(json_get "$response" key)
@@ -367,6 +378,36 @@ reject_multiline_env_value() {
     echo "$label must not contain CR or LF characters." >&2
     exit 1
   fi
+}
+
+# Resolve the bootstrap full-scope request. The guided installer may request the
+# grant for a credential it creates; it must never demand "*" from a persisted
+# key, because widening that key is forbidden and the bootstrap transaction
+# aborts on it. An explicit operator choice always wins.
+resolve_bootstrap_full_access() {
+  local reused_persisted_key=${1:-false} requested=${2:-}
+  if [[ -n "$requested" ]]; then
+    case "$requested" in
+      true|false) printf '%s' "$requested" ;;
+      *)
+        echo 'NOOSPHERE_BOOTSTRAP_FULL_ACCESS must be true or false.' >&2
+        return 1
+        ;;
+    esac
+    return 0
+  fi
+  if [[ "$reused_persisted_key" == true ]]; then
+    printf 'false'
+  else
+    printf 'true'
+  fi
+}
+
+# True when the key the installer will use is the one already persisted in
+# .env. Only such a key is an existing credential that must not be widened.
+bootstrap_key_is_persisted() {
+  local api_key=${1:-} persisted=${2:-}
+  [[ -n "$api_key" && "$api_key" == "$persisted" ]]
 }
 
 normalize_hybrid_provider_config() {
@@ -546,7 +587,7 @@ resolve_runtime_config() {
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-$(env_get "$runtime_env" NOOSPHERE_PORT)}"
   NOOSPHERE_PORT="${NOOSPHERE_PORT:-6578}"
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-$(env_get "$runtime_env" NOOSPHERE_VERSION)}"
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.14.0}"
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.1}"
   if ((NOOSPHERE_VERSION_WAS_EXPLICIT == 1 && NOOSPHERE_IMAGE_WAS_EXPLICIT == 0)); then
     # A version-bound public upgrade must not inherit an installer-persisted
     # image from the previous release. Operators retaining a custom registry or
@@ -1771,6 +1812,18 @@ if [[ "$existing_switch_required" == true ]]; then
   compose_target="$POSTGRES_CONTROLLER_CANDIDATE"
 fi
 
+# An upgrade reuses the bootstrap key persisted in .env, while a fresh guided
+# install creates one here. The guided full-scope grant is requested only for a
+# new credential: the persisted key must never be widened, and demanding "*"
+# from it aborts every pre-1.15.1 upgrade. An operator-supplied key that
+# differs from the persisted one is a new credential and keeps the grant.
+persisted_bootstrap_key="$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_API_KEY)"
+bootstrap_reuses_persisted_key=false
+if bootstrap_key_is_persisted "${API_KEY:-}" "$persisted_bootstrap_key"; then
+  bootstrap_reuses_persisted_key=true
+fi
+BOOTSTRAP_FULL_ACCESS="$(resolve_bootstrap_full_access "$bootstrap_reuses_persisted_key" "${NOOSPHERE_BOOTSTRAP_FULL_ACCESS:-}")"
+
 cat > "$compose_target" <<YAML
 name: noosphere
 
@@ -1789,6 +1842,11 @@ services:
       NOOSPHERE_ADMIN_PASSWORD_RESET: \${NOOSPHERE_ADMIN_PASSWORD_RESET:-false}
       NOOSPHERE_FORCE_ADMIN: \${NOOSPHERE_FORCE_ADMIN:-false}
       NOOSPHERE_BOOTSTRAP_API_KEY: \${NOOSPHERE_BOOTSTRAP_API_KEY}
+      # Guided provisioning needs global key management. This opt-in applies
+      # only to NEW bootstrap keys; existing scoped/revoked keys are not widened.
+      # A fresh guided install requests the grant; an upgrade that reuses the
+      # persisted key does not, because that key must not be widened.
+      NOOSPHERE_BOOTSTRAP_FULL_ACCESS: "${BOOTSTRAP_FULL_ACCESS}"
       # Keep the default in a dedicated directory because bootstrap tightens the
       # parent directory to 0700 before writing the 0600 credentials file.
       NOOSPHERE_BOOTSTRAP_SECRETS_FILE: \${NOOSPHERE_BOOTSTRAP_SECRETS_FILE:-/tmp/noosphere-bootstrap-secrets/secrets.json}

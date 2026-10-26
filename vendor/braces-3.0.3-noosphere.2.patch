@@ -1,0 +1,240 @@
+--- upstream/SECURITY-PATCH.md
++++ candidate/SECURITY-PATCH.md
+@@ -0,0 +1,30 @@
++# Private local patch candidate
++
++This package is a privately maintained derivative of npm `braces@3.0.3`,
++not an upstream release or an independently certified security fix.
++Its upstream MIT license and attribution are retained.
++
++The published advisory GHSA-vfj7-8cjw-p6xm describes uncontrolled recursion
++and has no listed upstream fixed version at the time of this assessment.
++
++Local changes:
++
++- String parsing enforces a non-configurable limit of 64 nested containers.
++- Compile, stringify, and expand also accept existing AST objects. Their
++  internal entry points now inspect child edges iteratively before recursion,
++  rejecting child cycles and depths above 65 edges. The extra edge permits
++  leaf nodes beneath 64 parsed containers.
++- Expansion's parent-chain walks have a fixed hop limit as well.
++- The validator expects AST child lists to be arrays. Parser-produced cyclic
++  parent/previous backlinks are deliberately excluded from child traversal.
++
++Limits are intentional compatibility restrictions. This patch is not a general
++resource quota for expansion cardinality, arbitrary getters/proxies, or all
++possible JavaScript objects. Existing expansion range limits are unchanged.
++
++The standalone regression probe is explicitly skipped by owner instruction.
++No replacement or stress/boundary probes are authorized. The earlier ordinary
++root install/lint/typecheck/build results apply to the previous parser-only
++candidate, not automatically to this revision. Further ordinary validation is
++required before integration. Registry audit inventory for a renamed private
++package is not evidence that its implementation is safe.
+--- upstream/lib/compile.js
++++ candidate/lib/compile.js
+@@ -2,8 +2,10 @@
+ 
+ const fill = require('fill-range');
+ const utils = require('./utils');
++const { assertAstBudget } = require('./nesting');
+ 
+ const compile = (ast, options = {}) => {
++  assertAstBudget(ast);
+   const walk = (node, parent = {}) => {
+     const invalidBlock = utils.isInvalidBrace(parent);
+     const invalidNode = node.invalid === true && options.escapeInvalid === true;
+--- upstream/lib/expand.js
++++ candidate/lib/expand.js
+@@ -3,6 +3,7 @@
+ const fill = require('fill-range');
+ const stringify = require('./stringify');
+ const utils = require('./utils');
++const { MAX_AST_DEPTH, assertAstBudget } = require('./nesting');
+ 
+ const append = (queue = '', stash = '', enclose = false) => {
+   const result = [];
+@@ -31,6 +32,7 @@
+ };
+ 
+ const expand = (ast, options = {}) => {
++  assertAstBudget(ast);
+   const rangeLimit = options.rangeLimit === undefined ? 1000 : options.rangeLimit;
+ 
+   const walk = (node, parent = {}) => {
+@@ -38,8 +40,12 @@
+ 
+     let p = parent;
+     let q = parent.queue;
++    let parentHops = 0;
+ 
+     while (p.type !== 'brace' && p.type !== 'root' && p.parent) {
++      if (++parentHops > MAX_AST_DEPTH) {
++        throw new SyntaxError('AST parent chain exceeds maximum depth (65)');
++      }
+       p = p.parent;
+       q = p.queue;
+     }
+@@ -74,8 +80,12 @@
+     const enclose = utils.encloseBrace(node);
+     let queue = node.queue;
+     let block = node;
++    let blockHops = 0;
+ 
+     while (block.type !== 'brace' && block.type !== 'root' && block.parent) {
++      if (++blockHops > MAX_AST_DEPTH) {
++        throw new SyntaxError('AST parent chain exceeds maximum depth (65)');
++      }
+       block = block.parent;
+       queue = block.queue;
+     }
+--- upstream/lib/nesting.js
++++ candidate/lib/nesting.js
+@@ -0,0 +1,46 @@
++'use strict';
++
++// Fixed local-fork limits, not caller-controlled options. Parsed trees contain
++// a root, up to MAX_NESTING containers, and a final leaf node.
++const MAX_NESTING = 64;
++const MAX_AST_DEPTH = MAX_NESTING + 1;
++
++// Object inputs bypass parse(). Check their child edges iteratively before any
++// recursive consumer runs. Parser-generated parent/prev backlinks are not child
++// edges; checking them here would incorrectly reject ordinary parsed trees.
++const assertAstBudget = ast => {
++  const active = new WeakSet();
++  const stack = [];
++
++  const enter = (node, depth) => {
++    if (!node || typeof node !== 'object') {
++      throw new TypeError('Expected an AST node');
++    }
++    if (depth > MAX_AST_DEPTH) {
++      throw new SyntaxError('AST nesting exceeds maximum depth (65)');
++    }
++    if (active.has(node)) {
++      throw new SyntaxError('Cyclic AST child nodes are not supported');
++    }
++    const children = node.nodes;
++    if (!children) return;
++    if (!Array.isArray(children)) {
++      throw new TypeError('Expected AST nodes to be an array');
++    }
++    active.add(node);
++    stack.push({ node, depth, children, index: 0 });
++  };
++
++  enter(ast, 0);
++  while (stack.length > 0) {
++    const frame = stack[stack.length - 1];
++    if (frame.index === frame.children.length) {
++      active.delete(frame.node);
++      stack.pop();
++    } else {
++      enter(frame.children[frame.index++], frame.depth + 1);
++    }
++  }
++};
++
++module.exports = { MAX_NESTING, MAX_AST_DEPTH, assertAstBudget };
+--- upstream/lib/parse.js
++++ candidate/lib/parse.js
+@@ -1,6 +1,7 @@
+ 'use strict';
+ 
+ const stringify = require('./stringify');
++const { MAX_NESTING } = require('./nesting');
+ 
+ /**
+  * Constants
+@@ -41,6 +42,13 @@
+ 
+   const ast = { type: 'root', input, nodes: [] };
+   const stack = [ast];
++  // Keep recursive stringify/compile/expand consumers below a fixed stack budget.
++  // Options must not be able to raise this security boundary.
++  const assertNestingBudget = () => {
++    if (stack.length > MAX_NESTING) {
++      throw new SyntaxError('Pattern nesting exceeds maximum depth (64)');
++    }
++  };
+   let block = ast;
+   let prev = ast;
+   let brackets = 0;
+@@ -143,6 +151,7 @@
+      */
+ 
+     if (value === CHAR_LEFT_PARENTHESES) {
++      assertNestingBudget();
+       block = push({ type: 'paren', nodes: [] });
+       stack.push(block);
+       push({ type: 'text', value });
+@@ -195,6 +204,7 @@
+      */
+ 
+     if (value === CHAR_LEFT_CURLY_BRACE) {
++      assertNestingBudget();
+       depth++;
+ 
+       const dollar = prev.value && prev.value.slice(-1) === '$' || block.dollar === true;
+--- upstream/lib/stringify.js
++++ candidate/lib/stringify.js
+@@ -1,8 +1,10 @@
+ 'use strict';
+ 
+ const utils = require('./utils');
++const { assertAstBudget } = require('./nesting');
+ 
+ module.exports = (ast, options = {}) => {
++  assertAstBudget(ast);
+   const stringify = (node, parent = {}) => {
+     const invalidBlock = options.escapeInvalid && utils.isInvalidBrace(parent);
+     const invalidNode = node.invalid === true && options.escapeInvalid === true;
+--- upstream/package.json
++++ candidate/package.json
+@@ -1,7 +1,7 @@
+ {
+-  "name": "braces",
+-  "description": "Bash-like brace expansion, implemented in JavaScript. Safer than other brace expansion libs, with complete support for the Bash 4.3 braces specification, without sacrificing speed.",
+-  "version": "3.0.3",
++  "name": "@sweetsophia/noosphere-braces",
++  "description": "Private local braces 3.0.3 patch candidate with fixed parser and AST traversal budgets",
++  "version": "3.0.3-noosphere.2",
+   "homepage": "https://github.com/micromatch/braces",
+   "author": "Jon Schlinkert (https://github.com/jonschlinkert)",
+   "contributors": [
+@@ -18,24 +18,15 @@
+   "license": "MIT",
+   "files": [
+     "index.js",
+-    "lib"
++    "lib",
++    "SECURITY-PATCH.md"
+   ],
+   "main": "index.js",
+   "engines": {
+     "node": ">=8"
+   },
+-  "scripts": {
+-    "test": "mocha",
+-    "benchmark": "node benchmark"
+-  },
+   "dependencies": {
+     "fill-range": "^7.1.1"
+-  },
+-  "devDependencies": {
+-    "ansi-colors": "^3.2.4",
+-    "bash-path": "^2.0.1",
+-    "gulp-format-md": "^2.0.0",
+-    "mocha": "^6.1.1"
+   },
+   "keywords": [
+     "alpha",
+@@ -73,5 +64,6 @@
+     "plugins": [
+       "gulp-format-md"
+     ]
+-  }
++  },
++  "private": true
+ }

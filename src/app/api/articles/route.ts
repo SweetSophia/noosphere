@@ -30,6 +30,7 @@ import {
 } from "@/lib/validation";
 import { parsePagination } from "@/lib/pagination";
 import { rateLimit } from "@/lib/rate-limit";
+import { isPersistenceLayerInjectedTitleError } from "@/lib/prisma-extensions/article-sanitizer";
 
 const ARTICLE_JSON_BODY_MAX_BYTES =
   ARTICLE_LIMITS.maxContentSize + DEFAULT_JSON_BODY_MAX_BYTES;
@@ -485,6 +486,9 @@ export async function POST(request: NextRequest) {
         { error: "Article with this slug already exists in this topic" },
         { status: 409 }
       );
+    }
+    if (error instanceof Error && isPersistenceLayerInjectedTitleError(error)) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
     console.error("[POST /api/articles]", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

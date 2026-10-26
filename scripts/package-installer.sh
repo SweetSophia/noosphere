@@ -36,6 +36,7 @@ const replacements = [
   [/^RELEASE_VERSION='[^']+'$/m, `RELEASE_VERSION='${process.env.INSTALLER_VERSION}'`],
   [/^BACKEND_URL='[^']+'$/m, `BACKEND_URL='${process.env.INSTALLER_BACKEND_URL}'`],
   [/^BACKEND_SHA256='[a-f0-9]{64}'$/m, `BACKEND_SHA256='${process.env.INSTALLER_BACKEND_SHA256}'`],
+  [/^SOURCE_BACKEND_SHA256='[a-f0-9]{64}'$/m, `SOURCE_BACKEND_SHA256='${process.env.INSTALLER_BACKEND_SHA256}'`],
   [/^HERMES_BUNDLE_URL='[^']+'$/m, `HERMES_BUNDLE_URL='${process.env.INSTALLER_HERMES_URL}'`],
   [/^HERMES_BUNDLE_SHA256='[a-f0-9]{64}'$/m, `HERMES_BUNDLE_SHA256='${process.env.INSTALLER_HERMES_SHA256}'`],
 ];

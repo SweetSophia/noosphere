@@ -23,6 +23,78 @@ It sits between a chat transcript and a full documentation site:
 
 The old long-form README is preserved at [README-legacy.md](README-legacy.md).
 
+## Release candidate
+
+**Qualification hold:** the current Zod advisory blocks the existing OpenCode/Kilo
+SDK pins. A local MCP floor repair is verified; two revised SDK artifacts still
+need compatibility qualification and separately approved publication before the
+adapter aliases can be activated. No adapter release is available yet.
+
+This branch prepares coordinated **1.15.1** by combining the reviewed dependency
+repair and explicit bootstrap-scope provisioning. It is **not published**; 1.15.0
+remains the public release below. Merge, publication and production deployment
+remain on hold pending review and approval. The source launcher's immutable remote
+fallback still identifies the previous release; the packaging helper binds the
+candidate launcher/backend/Hermes set together. Do not use a source checkout as
+proof that a 1.15.1 image or registry adapter exists.
+
+### Root application dependency remediation
+
+The root application's own audit findings are remediated in this candidate. The
+installed tree audits **0** vulnerabilities at `--audit-level=low`, down from 8
+(2 high, 1 moderate, 5 low). That count does not cover the vendored `braces`
+derivative, which registry audit cannot assess (see the changelog's `braces`
+entry and `vendor/README.md`).
+
+- `happy-dom` moves from `^20.10.6` to `21.0.4` (a semver-major 20.x -> 21.x
+  bump of the DOM implementation)
+  ([GHSA-834v-8h66-3h79](https://github.com/advisories/GHSA-834v-8h66-3h79)).
+  It is a development-only dependency used by the DOM test suite. Like
+  `katex`, it is now an exact pin and must be bumped manually to receive
+  future security fixes.
+- `katex` is pinned to `0.18.2`
+  ([GHSA-238p-pmpm-9mq7](https://github.com/advisories/GHSA-238p-pmpm-9mq7)).
+  `mermaid`, `rehype-katex` and `micromark-extension-math` each inherited that
+  advisory through their own KaTeX dependency edge, and `remark-math` inherited
+  it through `micromark-extension-math`. Three parent-scoped overrides
+  (`mermaid`, `rehype-katex`, `micromark-extension-math` -> `$katex`) resolve
+  them without a major upgrade or downgrade of any of those packages, and
+  without touching the locked `sharp` 0.35.5 (an optional dependency of
+  Next.js) or its parents. Each of those three
+  parents declares `katex` as `^0.16.47` (mermaid) or `^0.16.0`
+  (rehype-katex, micromark-extension-math), so the override deliberately installs
+  0.18.2 outside that declared range: it needs re-qualification whenever a
+  parent changes its range or a new `katex` release appears, and it should be
+  dropped once a parent accepts 0.18.2 on its own. npm's v3 lockfile does not
+  persist `overrides`, so `package.json` is the only durable record of that
+  forcing. The `@types/katex` 0.16.8 package remains installed only because
+  `micromark-extension-math` and `rehype-katex` declare `^0.16.0`; KaTeX 0.18.2
+  ships its own bundled declarations, which TypeScript resolves in preference
+  to `@types/katex`, so the typecheck surface tracks the 0.18.2 runtime.
+- `fast-uri` (3.1.8 -> 3.1.9) and `undici` (7.30.0 -> 7.30.1) are refreshed
+  inside their existing declared ranges.
+
+For this remediation only `package.json` and `package-lock.json` change; no
+application source changes.
+
+**Qualification performed so far** (local, unpublished): a full root install with
+optional dependencies but with install scripts disabled (`npm ci
+--ignore-scripts --include=optional`), the complete dependency tree, an
+installed-tree audit, Prisma client generation, the focused
+DOM/markdown/dependency test files (30 tests), a non-incremental typecheck,
+lint, a production build, and a hydrated browser check of the real wiki
+Markdown and Mermaid components on Node 22 - that browser check runs an
+esbuild fixture bundle of those components, not the production build output.
+The affected subset was repeated on Node 24. Hosted CI has not yet run on this
+head, so nothing here implies a passing hosted pipeline or an approved
+release.
+
+The qualified KaTeX edge contract is enforced by `scripts/katex-override-policy.mjs`
+through the existing package-policy gate: changes to the three parents' declared
+ranges, the exact root pin or the scoped overrides fail until explicitly
+re-qualified. This deliberately checks the approved exception, rather than an
+ordinary range-satisfaction rule that would reject the current qualified graph.
+
 ## Quick Start
 
 ### Prerequisites
@@ -33,19 +105,14 @@ machine.
 
 ### Install
 
-This launcher is coupled to the coordinated `v1.14.0` image, packages, and
+This launcher is coupled to the coordinated `v1.15.0` image, packages, and
 Hermes archive. Before running it, confirm that the
-[`v1.14.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.14.0)
+[`v1.15.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.0)
 exists with all six installer assets; a merged commit alone is not a release.
 
-Run the guided installer:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/182e0dceade3f0ac31e5d14f42f091d4075793a2/install.sh | bash
-```
-
-The URL is pinned to an immutable Git commit—never `master` or `main`. The
-launcher then checksum-verifies its exact backend before execution.
+Use the [verified two-file download](docs/INSTALLATION.md#auditable-download)
+to run the guided installer. It downloads the launcher and its reviewed backend
+from an immutable commit, verifies both checksums, then runs them together.
 
 The installer:
 
@@ -73,10 +140,8 @@ warnings, manual Compose deployment, and bootstrap-secret path rules, read
 Do not replace the guided upgrade with an unrestricted `docker compose pull &&
 docker compose up`. First inspect the plan without changing the machine:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/182e0dceade3f0ac31e5d14f42f091d4075793a2/install.sh \
-  | bash -s -- --dry-run --core-only
-```
+Use the [verified two-file download](docs/INSTALLATION.md#auditable-download)
+and add `--dry-run --core-only` to its final invocation.
 
 Preserve your configuration, database backup, and local repair records before
 upgrading. The installer keeps the `noosphere_postgres_data` volume and admits
@@ -113,7 +178,7 @@ machine, for example `OPENCLAW_NOOSPHERE_API_KEY`,
 Install the Codex CLI integration independently of the core Docker installer:
 
 ```bash
-npx -y @sweetsophia/noosphere-mcp@1.14.0 install-codex
+npx -y @sweetsophia/noosphere-mcp@1.15.0 install-codex
 ```
 
 The command stores the MCP launcher, skill, and approved environment-variable

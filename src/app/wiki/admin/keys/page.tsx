@@ -10,6 +10,7 @@ import { createApiKeyAction, revokeApiKeyAction, rotateApiKeyAction, deleteApiKe
 import { AdminNav } from "@/components/wiki/AdminNav";
 import { KeyActionButtons } from "@/components/wiki/KeyActionButtons";
 import { cookies } from "next/headers";
+import { ScopePicker, ScopeBadges } from "@/components/wiki/ApiKeyScopes";
 
 export const dynamic = "force-dynamic";
 
@@ -123,7 +124,7 @@ export default async function ApiKeysPage({ searchParams }: Props) {
               Allowed Scopes <span className="text-muted">(optional)</span>
             </label>
             <p className="form-hint">
-              Leave all unchecked for unrestricted access. Scopes restrict which articles this key can read.
+              Leave all unchecked for public articles only. Concrete scopes add access to matching restricted articles. Full access (*) is a separate, explicit grant.
             </p>
             <ScopePicker scopes={scopes} selected={[]} />
           </div>
@@ -233,58 +234,6 @@ export default async function ApiKeysPage({ searchParams }: Props) {
           </div>
         )}
       </section>
-    </div>
-  );
-}
-
-function ScopePicker({
-  scopes,
-  selected,
-}: {
-  scopes: { tag: string; description: string | null; isSystem: boolean }[];
-  selected: string[];
-}) {
-  return (
-    <div className="scope-picker">
-      {scopes.length === 0 ? (
-        <p className="text-muted">No scopes defined yet. Create one at /wiki/admin/scopes.</p>
-      ) : (
-        <div className="scope-checkboxes">
-          {scopes.map((scope) => (
-            <label key={scope.tag} className="scope-checkbox-label">
-              <input
-                type="checkbox"
-                name="scopes"
-                value={scope.tag}
-                defaultChecked={selected.includes(scope.tag)}
-                className="scope-checkbox-input"
-              />
-              <span className="scope-checkbox-content">
-                <code className="scope-tag">{scope.tag}</code>
-                {scope.description && (
-                  <span className="scope-checkbox-desc">{scope.description}</span>
-                )}
-                {scope.isSystem && (
-                  <span className="scope-system-badge">system</span>
-                )}
-              </span>
-            </label>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ScopeBadges({ scopes }: { scopes: string[] }) {
-  if (!scopes || scopes.length === 0) {
-    return <span className="scope-badge scope-badge-none">Unrestricted</span>;
-  }
-  return (
-    <div className="scope-badge-row">
-      {scopes.map((s) => (
-        <code key={s} className="scope-tag">{s}</code>
-      ))}
     </div>
   );
 }

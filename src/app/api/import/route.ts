@@ -64,6 +64,7 @@ export function canChangeExistingRestrictedTags(auth: {
   // checkRouteAuth and never set `keyId`; the previous API-key-only branch
   // therefore blocked EDITOR sessions from reclassifying on overwrite even
   // though they can already read every restricted article.
+  // eslint-disable-next-line no-restricted-syntax -- Explicit ADMIN permission OR human role; API keys are not authorized by role alone.
   if (auth.permissions === Permissions.ADMIN || auth.role === "ADMIN") return true;
   return Boolean(auth.allowedScopes?.includes("*"));
 }
