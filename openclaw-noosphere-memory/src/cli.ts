@@ -13,7 +13,7 @@ import { NoosphereMemoryClient, type NoosphereStatusResponse } from "./client.js
 const PLUGIN_ID = "noosphere-memory";
 const DEFAULT_COMPOSE_FILE = "~/.noosphere/docker-compose.yml";
 const DEFAULT_LOG_TAIL = 80;
-const VERIFIED_INSTALLER_REF = "b2401da057dd90d96b28656c5e402bfd705d04d3";
+const VERIFIED_INSTALLER_REF = "1021191042b8579e474ee8b102a06909be172e0b";
 const VERIFIED_INSTALLER_SHA256 = "0afc61b23d2ff51329cd11cc7e17db215023d8a034b063e8acea9e57f432fc2a";
 const VERIFIED_BACKEND_SHA256 = "0ea396c1e523ec07c2428799f36edf0cdf3730459f8bd7f509605c8cdce0251c";
 const VERIFIED_NOOSPHERE_VERSION = "1.15.1";
