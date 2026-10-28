@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prevent in-use tag deletion from cascading concurrently committed article links
   with a restrictive foreign key; preserve conflict responses in REST/admin paths.
   Requires the new migration through the normal init/migrator deployment path.
+- Guided installer: a fresh installation keeps the full-scope bootstrap grant
+  it needs to provision integration credentials. The persisted-credential
+  lookup ran after the installer had already written its new bootstrap key to
+  the runtime file, so every fresh guided install was classified as an
+  upgrade, bootstrapped an ADMIN key with empty scopes, and failed with 403
+  from `requireGlobalKeyManagement`. The credential the runtime file held is
+  now captured before the file is written. An explicitly empty
+  `NOOSPHERE_BOOTSTRAP_FULL_ACCESS` export resolves to `false` instead of the
+  widest scope, the guided decision is logged with its provenance, and the
+  protected `.env` copy of the knob continues to govern Direct Compose only.
 
 ## [1.15.1] - 2026-10-25
 

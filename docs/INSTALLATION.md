@@ -234,6 +234,17 @@ An already unbound, active ADMIN key containing literal `"*"` can be reused
 without changing its scopes or other metadata. Direct callers that do not opt
 in can also reuse active scoped credentials unchanged.
 
+The guided installer resolves this knob from the operator's environment only.
+Its own dedicated bootstrap credential receives the full-scope grant so it can
+mint per-tool WRITE credentials; an upgrade that reuses the credential the
+installer already persisted never requests the grant, because that key must
+not be widened, and an explicitly empty export resolves to `false` instead of
+the widest scope. The `NOOSPHERE_BOOTSTRAP_FULL_ACCESS` entry in the protected
+`.env` governs Direct Compose only and is not read by the guided installer:
+the installer reports the effective value and its provenance when it renders
+the Compose file, and exporting `NOOSPHERE_BOOTSTRAP_FULL_ACCESS=true|false`
+before a guided run overrides the decision explicitly.
+
 ### Bootstrap credential file rules
 
 These rules apply to direct Compose/bootstrap operation. The guided installer
