@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   out that TTL before resuming search traffic. No privileged epoch mutation or
   hybrid feature activation is required by this source change.
 
+### Fixed
+- Serialize topic ancestor validation and mutation across REST/admin updates,
+  retry transaction conflicts with a bound, and terminate traversal on corrupt cycles.
+- Prevent in-use tag deletion from cascading concurrently committed article links
+  with a restrictive foreign key; preserve conflict responses in REST/admin paths.
+  Requires the new migration through the normal init/migrator deployment path.
+
 ## [1.15.1] - 2026-10-25
 
 Coordinated application and integration release. Artifact publication and production

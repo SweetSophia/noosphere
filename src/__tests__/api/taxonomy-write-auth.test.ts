@@ -13,6 +13,7 @@ import type { Permissions, Role, PrismaClient } from "@prisma/client";
 const lookup = async (_args: { where: { id?: string; slug?: string; keyHash?: string } }): Promise<unknown> => null;
 const mutation = async (): Promise<unknown> => null;
 const persistence = {
+  $transaction: async (fn: (tx: unknown) => unknown) => fn(persistence),
   apiKey: { findUnique: lookup, updateMany: async () => ({ count: 0 }) },
   tag: { findFirst: mutation, findUnique: lookup, create: mutation, update: mutation, delete: mutation },
   topic: { findUnique: lookup, findMany: async () => [], count: async () => 0, update: mutation, delete: mutation },
@@ -34,25 +35,27 @@ const sessionMock = mock.method(
 );
 after(() => sessionMock.mock.restore());
 
+// Scope expectations are explicit test data, not a reimplementation of the
+// route predicate; changing the production scope rule cannot change this oracle.
 const credentials = [
-  { name: "READ key", permission: "READ", level: 1, scopes: ["*"] },
-  { name: "WRITE key", permission: "WRITE", level: 2, scopes: ["*"] },
-  { name: "ADMIN key", permission: "ADMIN", level: 3, scopes: ["*"] },
-  { name: "unrestricted-only WRITE key", permission: "WRITE", level: 2, scopes: [] },
-  { name: "scoped WRITE key", permission: "WRITE", level: 2, scopes: ["team-a"] },
-  { name: "scoped ADMIN key", permission: "ADMIN", level: 3, scopes: ["team-a"] },
-  { name: "unrestricted-only ADMIN key", permission: "ADMIN", level: 3, scopes: [] },
-  { name: "WRITE key without scopes", permission: "WRITE", level: 2, scopes: undefined },
-  { name: "ADMIN key without scopes", permission: "ADMIN", level: 3, scopes: undefined },
-  { name: "mixed wildcard WRITE key", permission: "WRITE", level: 2, scopes: ["team-a", "*"] },
-  { name: "key without permission", permission: undefined, level: 0, scopes: ["*"] },
-  { name: "VIEWER session", role: "VIEWER", level: 1 },
-  { name: "EDITOR session", role: "EDITOR", level: 2 },
-  { name: "ADMIN session", role: "ADMIN", level: 3 },
-  { name: "session without role", level: 0, missingRole: true },
-  { name: "anonymous request", level: -1 },
-  { name: "unknown key", level: -1, invalidKey: true },
-  { name: "revoked ADMIN key", permission: "ADMIN", level: -1, revoked: true },
+  { name: "READ key", permission: "READ", level: 1, scopes: ["*"], expectedGlobalScope: true },
+  { name: "WRITE key", permission: "WRITE", level: 2, scopes: ["*"], expectedGlobalScope: true },
+  { name: "ADMIN key", permission: "ADMIN", level: 3, scopes: ["*"], expectedGlobalScope: true },
+  { name: "unrestricted-only WRITE key", permission: "WRITE", level: 2, scopes: [], expectedGlobalScope: false },
+  { name: "scoped WRITE key", permission: "WRITE", level: 2, scopes: ["team-a"], expectedGlobalScope: false },
+  { name: "scoped ADMIN key", permission: "ADMIN", level: 3, scopes: ["team-a"], expectedGlobalScope: false },
+  { name: "unrestricted-only ADMIN key", permission: "ADMIN", level: 3, scopes: [], expectedGlobalScope: false },
+  { name: "WRITE key without scopes", permission: "WRITE", level: 2, scopes: undefined, expectedGlobalScope: false },
+  { name: "ADMIN key without scopes", permission: "ADMIN", level: 3, scopes: undefined, expectedGlobalScope: false },
+  { name: "mixed wildcard WRITE key", permission: "WRITE", level: 2, scopes: ["team-a", "*"], expectedGlobalScope: true },
+  { name: "key without permission", permission: undefined, level: 0, scopes: ["*"], expectedGlobalScope: true },
+  { name: "VIEWER session", role: "VIEWER", level: 1, expectedGlobalScope: true },
+  { name: "EDITOR session", role: "EDITOR", level: 2, expectedGlobalScope: true },
+  { name: "ADMIN session", role: "ADMIN", level: 3, expectedGlobalScope: true },
+  { name: "session without role", level: 0, missingRole: true, expectedGlobalScope: true },
+  { name: "anonymous request", level: -1, expectedGlobalScope: false },
+  { name: "unknown key", level: -1, invalidKey: true, expectedGlobalScope: false },
+  { name: "revoked ADMIN key", permission: "ADMIN", level: -1, revoked: true, expectedGlobalScope: false },
 ] as const;
 
 const routes = [
@@ -134,7 +137,7 @@ for (const [routeIndex, route] of routes.entries()) {
         // scopes. Deny before any lookup, including keys with ADMIN permission.
         // New tag creation deliberately retains its existing WRITE policy.
         const lacksGlobalScope = route.method !== "POST" && "permission" in credential
-          && !("scopes" in credential && credential.scopes?.some((scope) => scope === "*"));
+          && !credential.expectedGlobalScope;
         const expected = credential.level < 0 ? 401
           : credential.level < route.level || lacksGlobalScope ? 403 : route.status;
         assert.equal(response.status, expected);
@@ -149,3 +152,92 @@ for (const [routeIndex, route] of routes.entries()) {
     }
   });
 }
+
+for (const [code, expected] of [["P2003", 409], ["P2025", 404]] as const) {
+  test(`tag DELETE maps a post-check ${code} race to HTTP ${expected}`, async (t) => {
+    session = { user: { id: "user-1", name: "Admin", role: "ADMIN" } };
+    t.after(() => { session = null; });
+    t.mock.method(persistence.tag, "findUnique", async () => ({ id: "tag-1", name: "Tag", slug: "tag" }));
+    t.mock.method(persistence.articleTag, "count", async () => 0);
+    t.mock.method(persistence.tag, "delete", async () => { throw Object.assign(new Error("fixture"), { code }); });
+    const { DELETE } = await import("@/app/api/tags/[id]/route");
+    const response = await DELETE(new NextRequest("http://localhost/api/tags/tag-1", {
+      method: "DELETE", headers: { "x-real-ip": "192.0.2.250" },
+    }), { params: Promise.resolve({ id: "tag-1" }) });
+    assert.equal(response.status, expected);
+  });
+}
+
+test("seed child creation and attachment are one serializable operation", async () => {
+  const { TaxonomyConflict, upsertTopicWithParentSafely } = await import("@/lib/taxonomy");
+  let attempts = 0;
+  const client = {
+    $transaction: async (fn: (tx: unknown) => unknown, options: { isolationLevel: string }) => {
+      attempts++;
+      assert.equal(options.isolationLevel, "Serializable");
+      return fn({
+        topic: {
+          findUnique: async ({ where }: { where: { id?: string; slug?: string } }) =>
+            where.id === "parent" ? { id: where.id, parentId: null } : null,
+          create: async ({ data }: { data: { parentId: string; slug: string } }) => ({
+            id: "child",
+            ...data,
+          }),
+        },
+      });
+    },
+  } as unknown as PrismaClient;
+  const child = await upsertTopicWithParentSafely({
+    name: "Child", slug: "child", description: null, parentId: "parent",
+  }, client);
+  assert.equal(child.parentId, "parent");
+  assert.equal(attempts, 1);
+
+  const missingParent = {
+    $transaction: async (fn: (tx: unknown) => unknown) => fn({
+      topic: {
+        findUnique: async () => null,
+        create: async () => { throw new Error("must not create without a parent"); },
+      },
+    }),
+  } as unknown as PrismaClient;
+  await assert.rejects(
+    upsertTopicWithParentSafely({ name: "Child", slug: "child", parentId: "missing" }, missingParent),
+    (error: unknown) => error instanceof TaxonomyConflict && error.status === 400,
+  );
+});
+
+test("topic serialization retries are bounded and do not swallow unrelated failures", async () => {
+  const { TaxonomyConflict, updateTopicSafely } = await import("@/lib/taxonomy");
+  for (const error of [
+    Object.assign(new Error("fixture"), { code: "P2034" }),
+    Object.assign(new Error("fixture"), { code: "P2010", meta: { code: "40001" } }),
+    Object.assign(new Error("fixture"), { code: "P2010", meta: { driverAdapterError: "deadlock 40P01" } }),
+    Object.assign(new Error("fixture"), {
+      code: "P2010",
+      meta: { driverAdapterError: { kind: "TransactionWriteConflict", originalCode: "40001" } },
+    }),
+    Object.assign(new Error("fixture"), {
+      code: "P2010",
+      meta: { cause: { originalCode: "40P01" } },
+    }),
+    Object.assign(new Error("database failure 40001"), { code: "P2010" }),
+    Object.assign(new Error("fixture"), { name: "DriverAdapterError", cause: { kind: "TransactionWriteConflict", originalCode: "40001" } }),
+    Object.assign(new Error("fixture"), { name: "DriverAdapterError", cause: { kind: "TransactionWriteConflict", originalCode: "40P01" } }),
+  ]) {
+    let attempts = 0;
+    const client = { $transaction: async (_fn: unknown, options: { isolationLevel: string }) => {
+      attempts++;
+      assert.equal(options.isolationLevel, "Serializable");
+      throw error;
+    } } as unknown as PrismaClient;
+    await assert.rejects(updateTopicSafely("topic", {}, client), (e: unknown) => e instanceof TaxonomyConflict && e.status === 409);
+    assert.equal(attempts, 3);
+  }
+  for (const error of [new Error("unrelated"), Object.assign(new Error("syntax 42601"), { code: "P2010", meta: { code: "42601" } }), Object.assign(new Error("bad query"), { name: "DriverAdapterError", cause: { kind: "Unknown", originalCode: "42601" } })]) {
+    let attempts = 0;
+    const client = { $transaction: async () => { attempts++; throw error; } } as unknown as PrismaClient;
+    await assert.rejects(updateTopicSafely("topic", {}, client), (e: unknown) => e === error);
+    assert.equal(attempts, 1);
+  }
+});

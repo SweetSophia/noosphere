@@ -404,6 +404,7 @@ Keep detailed recovery work in deployment/runbook docs rather than this README.
 | [docs/NOOSPHERE-SKILL.md](docs/NOOSPHERE-SKILL.md) | Agent-facing wiki skill reference |
 | [docs/OBSIDIAN-SYNC-SPEC.md](docs/OBSIDIAN-SYNC-SPEC.md) | Obsidian sync design and Markdown frontmatter contract |
 | [docs/OBSIDIAN-SYNC-REVIEW.md](docs/OBSIDIAN-SYNC-REVIEW.md) | Obsidian sync review notes |
+| [docs/TAXONOMY-CONCURRENCY.md](docs/TAXONOMY-CONCURRENCY.md) | Race-safe topic moves, in-use tag deletion and required migration |
 | [docs/SECURITY-AUDIT-2026-04-16.md](docs/SECURITY-AUDIT-2026-04-16.md) | Security audit notes |
 | [openclaw-noosphere-memory/README.md](openclaw-noosphere-memory/README.md) | OpenClaw plugin configuration and tools |
 | [hermes-noosphere-memory/README.md](hermes-noosphere-memory/README.md) | Hermes Agent provider install and verification |

@@ -124,7 +124,7 @@ model ArticleTag {
   articleId String
   article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
   tagId     String
-  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Restrict)
 
   @@id([articleId, tagId])
   @@index([articleId])
