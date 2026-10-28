@@ -362,8 +362,8 @@ exists with all six installer assets (source merge alone does not publish them):
 For an existing installation using a custom image, export `NOOSPHERE_IMAGE` explicitly
 before running this block. The version-bound default does not reuse a persisted image automatically.
 
-    # Installer commit: 2114560065aa4ea07b1f07175824eb645f4325a7
-    # Expected SHA-256: 90432d088c8d4aa4d0220685c1f1801c1ce2d609d820e4cf309eb13a46f67701
+    # Installer commit: b2401da057dd90d96b28656c5e402bfd705d04d3
+    # Expected SHA-256: 50704acb193641ffdea1239ee364f2b399adf639721585c1c57dc0ead9935f29
     (
       set -e
       installer_dir="$(mktemp -d)"
@@ -371,10 +371,10 @@ before running this block. The version-bound default does not reuse a persisted 
       installer="$installer_dir/install.sh"
       backend="$installer_dir/install-openclaw.sh"
       unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
-      curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/2114560065aa4ea07b1f07175824eb645f4325a7/install.sh -o "$installer"
-      curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/2114560065aa4ea07b1f07175824eb645f4325a7/install-openclaw.sh -o "$backend"
-      printf '%s  %s\n' '90432d088c8d4aa4d0220685c1f1801c1ce2d609d820e4cf309eb13a46f67701' "$installer" | sha256sum -c -
-      printf '%s  %s\n' '681db7ce3e08f9692bd9631160bc0d9b9f0e468a0338179ab2dd826d25400c9f' "$backend" | sha256sum -c -
+      curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/b2401da057dd90d96b28656c5e402bfd705d04d3/install.sh -o "$installer"
+      curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/b2401da057dd90d96b28656c5e402bfd705d04d3/install-openclaw.sh -o "$backend"
+      printf '%s  %s\n' '50704acb193641ffdea1239ee364f2b399adf639721585c1c57dc0ead9935f29' "$installer" | sha256sum -c -
+      printf '%s  %s\n' 'b09c34c0105190aa36d6c95c933a1aec3c48bf78965c9726f83193993b752664' "$backend" | sha256sum -c -
       NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.1}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.1}" bash "$installer" --non-interactive --with openclaw
       openclaw noosphere doctor
       openclaw noosphere status

@@ -14,10 +14,10 @@ const verifyReleaseArtifacts = process.argv.includes("--verify-release-assets");
 const verifyReleaseFiles = process.argv.includes("--verify-release-files");
 const releaseRoot = resolve(process.cwd());
 const immutableHelperRef = "9da4af0a7b2275aa91eecd102095e0e470bbb0e3";
-const guidedInstallerRef = "2114560065aa4ea07b1f07175824eb645f4325a7";
-const guidedInstallerSha256 = "90432d088c8d4aa4d0220685c1f1801c1ce2d609d820e4cf309eb13a46f67701";
-const guidedBackendRef = "2114560065aa4ea07b1f07175824eb645f4325a7";
-const guidedBackendSha256 = "681db7ce3e08f9692bd9631160bc0d9b9f0e468a0338179ab2dd826d25400c9f";
+const guidedInstallerRef = "b2401da057dd90d96b28656c5e402bfd705d04d3";
+const guidedInstallerSha256 = "50704acb193641ffdea1239ee364f2b399adf639721585c1c57dc0ead9935f29";
+const guidedBackendRef = "b2401da057dd90d96b28656c5e402bfd705d04d3";
+const guidedBackendSha256 = "b09c34c0105190aa36d6c95c933a1aec3c48bf78965c9726f83193993b752664";
 const publishedFallbackRef = "d0cef60aad8a0f5dea8ed4d2dc2e6f93629dab29";
 const publishedFallbackSha256 = "04a3cd17d75542dca48b0f4bdd7cc7cffa926629b192c0e79bea91d2e44b2952";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
@@ -709,7 +709,14 @@ const earlyControllerReconciliation = installer.indexOf(
   "\nreconcile_postgres_controller_before_configuration\n",
   installerMain,
 );
-const firstRuntimeSecretWrite = installer.indexOf("ensure_runtime_env_secret ", installerMain);
+// Runtime-secret writes go through persist_runtime_env since the guided
+// full-access fix; a direct ensure_runtime_env_secret call in main() is still
+// treated as a write site so the ordering invariant keeps covering both.
+const runtimeSecretWriteMarkers = ["$(persist_runtime_env)", "ensure_runtime_env_secret "];
+const writeOffsets = runtimeSecretWriteMarkers.map((marker) => installer.indexOf(marker, installerMain));
+const firstRuntimeSecretWrite = writeOffsets.some((at) => at === -1)
+  ? Math.max(...writeOffsets)
+  : Math.min(...writeOffsets);
 expect(
   installer.includes("assert_installer_owned_regular_file \"$POSTGRES_CONTROLLER_STATE\"") &&
     installer.includes(".guardJournalEvidence.sha256") &&
