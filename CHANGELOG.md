@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `NOOSPHERE_BOOTSTRAP_FULL_ACCESS` export resolves to `false` instead of the
   widest scope, the guided decision is logged with its provenance, and the
   protected `.env` copy of the knob continues to govern Direct Compose only.
+- Guided installer: runtime-secret persistence fails closed. A failed render
+  or Node rewrite aborts the installation instead of installing an empty or
+  partial runtime `.env` over live credentials, because failures inside the
+  persistence command substitution no longer rely on errexit. The installer
+  test fixture initializes the admin password the runtime file needs, asserts
+  that a fresh install actually persists its generated bootstrap key, and
+  covers both a failing rewrite and a capture-after-write ordering regression.
 
 ## [1.15.1] - 2026-10-25
 

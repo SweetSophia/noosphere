@@ -9,7 +9,7 @@ import { getVerifiedInstallerCommands } from "../../../openclaw-noosphere-memory
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const ref = "b2401da057dd90d96b28656c5e402bfd705d04d3";
-const backendHash = "b09c34c0105190aa36d6c95c933a1aec3c48bf78965c9726f83193993b752664";
+const backendHash = "0ea396c1e523ec07c2428799f36edf0cdf3730459f8bd7f509605c8cdce0251c";
 
 for (const tamper of [undefined, "install.sh", "install-openclaw.sh"] as const) {
   test(`verified CLI delivery ${tamper ? `rejects modified ${tamper}` : "resolves the paired backend without executing it"}`, async () => {

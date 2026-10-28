@@ -52,7 +52,7 @@ before running this block. The version-bound default does not reuse a persisted 
 
 ```bash
 # Installer commit: b2401da057dd90d96b28656c5e402bfd705d04d3
-# Expected SHA-256: 50704acb193641ffdea1239ee364f2b399adf639721585c1c57dc0ead9935f29
+# Expected SHA-256: 0afc61b23d2ff51329cd11cc7e17db215023d8a034b063e8acea9e57f432fc2a
 (
   set -e
   installer_dir="$(mktemp -d)"
@@ -62,8 +62,8 @@ before running this block. The version-bound default does not reuse a persisted 
   unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/b2401da057dd90d96b28656c5e402bfd705d04d3/install.sh -o "$installer"
   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/b2401da057dd90d96b28656c5e402bfd705d04d3/install-openclaw.sh -o "$backend"
-  printf '%s  %s\n' '50704acb193641ffdea1239ee364f2b399adf639721585c1c57dc0ead9935f29' "$installer" | sha256sum -c -
-  printf '%s  %s\n' 'b09c34c0105190aa36d6c95c933a1aec3c48bf78965c9726f83193993b752664' "$backend" | sha256sum -c -
+  printf '%s  %s\n' '0afc61b23d2ff51329cd11cc7e17db215023d8a034b063e8acea9e57f432fc2a' "$installer" | sha256sum -c -
+  printf '%s  %s\n' '0ea396c1e523ec07c2428799f36edf0cdf3730459f8bd7f509605c8cdce0251c' "$backend" | sha256sum -c -
   NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.1}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.1}" bash "$installer" --non-interactive --with openclaw
 )
 ```

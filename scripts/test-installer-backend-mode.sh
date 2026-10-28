@@ -108,7 +108,7 @@ fixture_default_vars=(
   NOOSPHERE_VERSION NOOSPHERE_IMAGE NOOSPHERE_PORT APP_URL BIND_ADDRESS
   POSTGRES_PASSWORD POSTGRES_MIGRATION_PASSWORD POSTGRES_APP_PASSWORD
   POSTGRES_HYBRID_ADMIN_PASSWORD POSTGRES_HYBRID_WORKER_PASSWORD NEXTAUTH_SECRET
-  NOOSPHERE_ADMIN_PASSWORD NOOSPHERE_ADMIN_PASSWORD_RESET NOOSPHERE_FORCE_ADMIN
+  ADMIN_PASSWORD NOOSPHERE_ADMIN_PASSWORD NOOSPHERE_ADMIN_PASSWORD_RESET NOOSPHERE_FORCE_ADMIN
   NOOSPHERE_BOOTSTRAP_SECRETS_FILE REDIS_URL PG_POOL_MAX PG_IDLE_TIMEOUT_MS
   PG_CONN_TIMEOUT_MS NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE
   NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 NOOSPHERE_HYBRID_RETRIEVAL_ENABLED
@@ -148,6 +148,11 @@ assert_bootstrap_full_access_fixture() (
       > "$fixture/out" 2> "$fixture/err"
   fi
   grep -q "^bootstrap_full_access=$expected\$" "$fixture/out"
+  if [[ -z "$persisted_key" ]]; then
+    # A fresh install must actually persist the generated bootstrap key; with
+    # only the decision checked, a capture-after-write regression stays green.
+    grep -q "^NOOSPHERE_BOOTSTRAP_API_KEY=$api_key\$" "$fixture_home/.env"
+  fi
 )
 
 # A fresh install: the runtime file does not exist yet, so the generated key is
@@ -163,6 +168,69 @@ API_KEY=noo_fixture_persisted_key \
 # An explicitly empty export grants nothing, never the widest scope.
 API_KEY=noo_fixture_fresh_key \
   assert_bootstrap_full_access_fixture "$fixture_root/fresh-empty" false noo_fixture_fresh_key '' ''
+
+
+# A failing runtime-secret rewrite must abort the install and leave the
+# existing runtime .env intact. Persistence now propagates every failure
+# explicitly: bash applies neither errexit nor nounset fatality inside a
+# command substitution, so an unguarded rewrite could otherwise install an
+# empty credentials file over live secrets while reporting success.
+p1_fixture="$fixture_root/p1-node-failure"
+p1_home="$p1_fixture/home"
+mkdir -p "$p1_home"
+printf 'NOOSPHERE_BOOTSTRAP_API_KEY=noo_p1_persisted\nPOSTGRES_MIGRATION_PASSWORD=noo_p1_old\n' > "$p1_home/.env"
+chmod 600 "$p1_home/.env"
+cp "$backend" "$p1_fixture/sabotaged.sh"
+node - "$p1_fixture/sabotaged.sh" <<'NODE'
+const fs = require("node:fs");
+const target = process.argv[2];
+const source = fs.readFileSync(target, "utf8");
+const anchor = "persist_runtime_env() {";
+if (!source.includes(anchor)) throw new Error("cannot locate persist_runtime_env");
+fs.writeFileSync(
+  target,
+  source.replace(anchor, "node() { echo 'sabotaged node rewrite' >&2; return 3; }\n" + anchor),
+);
+NODE
+if API_KEY=noo_p1_new NOOSPHERE_HOME="$p1_home" \
+  NOOSPHERE_INSTALLER_TEST_MODE=bootstrap-full-access \
+  bash -c 'set -euo pipefail; source "$1"' _ "$p1_fixture/sabotaged.sh" \
+  > "$p1_fixture/out" 2> "$p1_fixture/err"; then
+  echo 'failing runtime-secret rewrite unexpectedly passed' >&2
+  exit 1
+fi
+grep -q '^NOOSPHERE_BOOTSTRAP_API_KEY=noo_p1_persisted$' "$p1_home/.env"
+grep -q '^POSTGRES_MIGRATION_PASSWORD=noo_p1_old$' "$p1_home/.env"
+
+# The pre-write capture is the upgrade/fresh signal itself: capturing after
+# the write would make every fresh install look like an upgrade of its own
+# just-generated credential and silently withhold the guided full-scope grant.
+cap_fixture="$fixture_root/capture-after-write"
+cap_home="$cap_fixture/home"
+mkdir -p "$cap_home"
+cp "$backend" "$cap_fixture/sabotaged.sh"
+node - "$cap_fixture/sabotaged.sh" <<'NODE'
+const fs = require("node:fs");
+const target = process.argv[2];
+const source = fs.readFileSync(target, "utf8");
+const capture = 'persisted_bootstrap_key="$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_API_KEY)"';
+const report = `printf '%s' "$persisted_bootstrap_key"`;
+if (!source.includes(capture)) throw new Error("cannot locate capture line");
+const parts = source.split("persist_runtime_env() {");
+const segments = parts[1].split(report);
+if (segments.length < 2) throw new Error("cannot locate persist report");
+parts[1] = segments[0].replace(capture, ": # capture sabotaged to run after the write")
+  + capture + "\n  " + report + segments.slice(1).join(report);
+fs.writeFileSync(target, parts.join("persist_runtime_env() {"));
+NODE
+if ! API_KEY=noo_cap_fresh NOOSPHERE_HOME="$cap_home" \
+  NOOSPHERE_INSTALLER_TEST_MODE=bootstrap-full-access \
+  bash -c 'set -euo pipefail; source "$1"' _ "$cap_fixture/sabotaged.sh" \
+  > "$cap_fixture/out" 2> "$cap_fixture/err"; then
+  echo 'capture-after-write sabotage failed to run' >&2
+  exit 1
+fi
+grep -q '^bootstrap_full_access=false$' "$cap_fixture/out"
 
 assert_article_verification_floor_behavior() (
   local floor

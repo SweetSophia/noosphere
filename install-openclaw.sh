@@ -551,9 +551,9 @@ write_runtime_env() {
   local env_tmp
   env_tmp="$(mktemp "$NOOSPHERE_HOME/.env.XXXXXX")" || {
     echo "Failed to create temporary file for runtime .env" >&2
-    exit 1
+    return 1
   }
-  cat > "$env_tmp" <<ENV
+  if ! cat > "$env_tmp" <<ENV
 NOOSPHERE_VERSION=${NOOSPHERE_VERSION}
 NOOSPHERE_IMAGE=${NOOSPHERE_IMAGE}
 NOOSPHERE_PORT=${NOOSPHERE_PORT}
@@ -591,15 +591,28 @@ NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH=${NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH}
 NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS=${NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS}
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS=${NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS}
 ENV
-  chmod 600 "$env_tmp"
-  mv "$env_tmp" "$NOOSPHERE_HOME/.env"
+  then
+    rm -f "$env_tmp"
+    echo "Failed to render runtime .env contents" >&2
+    return 1
+  fi
+  chmod 600 "$env_tmp" || {
+    rm -f "$env_tmp"
+    echo "Failed to restrict runtime .env permissions" >&2
+    return 1
+  }
+  mv "$env_tmp" "$NOOSPHERE_HOME/.env" || {
+    rm -f "$env_tmp"
+    echo "Failed to install runtime .env" >&2
+    return 1
+  }
 }
 
 ensure_runtime_env_secret() {
   local key=$1 value=$2 current temp
   current="$(env_get_secret "$NOOSPHERE_HOME/.env" "$key")"
   [[ "$current" != "$value" ]] || return 0
-  temp="$(mktemp "$NOOSPHERE_HOME/.env.XXXXXX")"
+  temp="$(mktemp "$NOOSPHERE_HOME/.env.XXXXXX")" || return 1
   # Rewrite through Node so an existing final line without LF cannot merge
   # with the appended credential. Passing the value through the environment
   # also avoids embedding operator-supplied secrets in generated source text.
@@ -625,9 +638,21 @@ ensure_runtime_env_secret() {
       while (retained.at(-1) === "") retained.pop();
       retained.push(`${key}=${value}`);
       process.stdout.write(`${retained.join("\n")}\n`);
-    ' > "$temp"
-  chmod 600 "$temp"
-  mv "$temp" "$NOOSPHERE_HOME/.env"
+    ' > "$temp" || {
+      rm -f "$temp"
+      echo "Failed to rewrite $key into the runtime .env" >&2
+      return 1
+    }
+  chmod 600 "$temp" || {
+    rm -f "$temp"
+    echo "Failed to restrict runtime .env permissions" >&2
+    return 1
+  }
+  mv "$temp" "$NOOSPHERE_HOME/.env" || {
+    rm -f "$temp"
+    echo "Failed to install the rewritten runtime .env" >&2
+    return 1
+  }
 }
 
 # Persist the runtime credential file and report the bootstrap credential the
@@ -641,29 +666,35 @@ ensure_runtime_env_secret() {
 persist_runtime_env() {
   local persisted_bootstrap_key
   persisted_bootstrap_key="$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_API_KEY)"
+  # Both call sites capture this function's output in a command substitution,
+  # where bash applies neither errexit nor nounset fatality to intermediate
+  # failures. Every step below must therefore propagate an explicit nonzero
+  # return, and the closing printf may only run after all writes succeeded:
+  # otherwise a failed secret rewrite could install an empty runtime .env over
+  # an operator's live credentials while the assignment still returns status 0.
   if [[ ! -f "$NOOSPHERE_HOME/.env" ]]; then
-    write_runtime_env
+    write_runtime_env || return 1
   else
-      chmod 600 "$NOOSPHERE_HOME/.env"
-    ensure_runtime_env_secret POSTGRES_MIGRATION_PASSWORD "$POSTGRES_MIGRATION_PASSWORD"
-    ensure_runtime_env_secret POSTGRES_APP_PASSWORD "$POSTGRES_APP_PASSWORD"
-    ensure_runtime_env_secret POSTGRES_HYBRID_ADMIN_PASSWORD "$POSTGRES_HYBRID_ADMIN_PASSWORD"
-    ensure_runtime_env_secret POSTGRES_HYBRID_WORKER_PASSWORD "$POSTGRES_HYBRID_WORKER_PASSWORD"
-    ensure_runtime_env_secret NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 "$NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64"
-    ensure_runtime_env_secret NOOSPHERE_HYBRID_RETRIEVAL_ENABLED "$NOOSPHERE_HYBRID_RETRIEVAL_ENABLED"
-    ensure_runtime_env_secret NOOSPHERE_HYBRID_QUERY_PROFILE_ID "$NOOSPHERE_HYBRID_QUERY_PROFILE_ID"
-    ensure_runtime_env_secret NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION "$NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION"
-    ensure_runtime_env_secret NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64 "$NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64"
-    ensure_runtime_env_secret NOOSPHERE_HYBRID_WORKER_CONCURRENCY "$NOOSPHERE_HYBRID_WORKER_CONCURRENCY"
-    ensure_runtime_env_secret NOOSPHERE_HYBRID_LEASE_SECONDS "$NOOSPHERE_HYBRID_LEASE_SECONDS"
-    ensure_runtime_env_secret NOOSPHERE_HYBRID_MAX_ATTEMPTS "$NOOSPHERE_HYBRID_MAX_ATTEMPTS"
-    ensure_runtime_env_secret NOOSPHERE_HYBRID_WORKER_POLL_MS "$NOOSPHERE_HYBRID_WORKER_POLL_MS"
-    ensure_runtime_env_secret NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS "$NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS"
-    ensure_runtime_env_secret NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES "$NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES"
-    ensure_runtime_env_secret NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH "$NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH"
-    ensure_runtime_env_secret NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH "$NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH"
-    ensure_runtime_env_secret NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS "$NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS"
-    ensure_runtime_env_secret NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS "$NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS"
+    chmod 600 "$NOOSPHERE_HOME/.env" || return 1
+    ensure_runtime_env_secret POSTGRES_MIGRATION_PASSWORD "$POSTGRES_MIGRATION_PASSWORD" || return 1
+    ensure_runtime_env_secret POSTGRES_APP_PASSWORD "$POSTGRES_APP_PASSWORD" || return 1
+    ensure_runtime_env_secret POSTGRES_HYBRID_ADMIN_PASSWORD "$POSTGRES_HYBRID_ADMIN_PASSWORD" || return 1
+    ensure_runtime_env_secret POSTGRES_HYBRID_WORKER_PASSWORD "$POSTGRES_HYBRID_WORKER_PASSWORD" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 "$NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_RETRIEVAL_ENABLED "$NOOSPHERE_HYBRID_RETRIEVAL_ENABLED" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_QUERY_PROFILE_ID "$NOOSPHERE_HYBRID_QUERY_PROFILE_ID" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION "$NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64 "$NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_WORKER_CONCURRENCY "$NOOSPHERE_HYBRID_WORKER_CONCURRENCY" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_LEASE_SECONDS "$NOOSPHERE_HYBRID_LEASE_SECONDS" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_MAX_ATTEMPTS "$NOOSPHERE_HYBRID_MAX_ATTEMPTS" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_WORKER_POLL_MS "$NOOSPHERE_HYBRID_WORKER_POLL_MS" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS "$NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES "$NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH "$NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH "$NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS "$NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS "$NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS" || return 1
   fi
   printf '%s' "$persisted_bootstrap_key"
 }
