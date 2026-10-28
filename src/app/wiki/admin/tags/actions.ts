@@ -6,6 +6,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/wiki";
 import { invalidateSearchCache } from "@/lib/cache/search-cache";
+import { isPrismaCode } from "@/lib/taxonomy";
 
 async function requireEditor() {
   const session = await getServerSession(authOptions);
@@ -88,7 +89,14 @@ export async function deleteTagAction(formData: FormData) {
     throw new Error(`Tag "${existing.name}" is used by ${articleCount} article(s). Remove it from articles first.`);
   }
 
-  await prisma.tag.delete({ where: { id } });
+  try {
+    await prisma.tag.delete({ where: { id } });
+  } catch (error) {
+    if (isPrismaCode(error, "P2003")) {
+      throw new Error("Tag became in use. Remove it from articles before deleting it.");
+    }
+    throw error;
+  }
   await invalidateSearchCache();
   revalidatePath("/wiki");
   revalidatePath("/wiki/admin/tags");

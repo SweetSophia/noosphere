@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Serialize topic ancestor validation and mutation across REST/admin updates,
+  retry transaction conflicts with a bound, and terminate traversal on corrupt cycles.
+- Prevent in-use tag deletion from cascading concurrently committed article links
+  with a restrictive foreign key; preserve conflict responses in REST/admin paths.
+  Requires the new migration through the normal init/migrator deployment path.
+
 ### Tests
 - Run the cache, docker-free hybrid-stack and Obsidian-sync suites in CI, and
   include Obsidian sync in the local aggregate test chain. The sync suite now
