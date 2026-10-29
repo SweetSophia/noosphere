@@ -130,10 +130,10 @@ standalone downloads, while these instructions select its reviewed sibling.
   installer="$installer_dir/install.sh"
   backend="$installer_dir/install-openclaw.sh"
   unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/2114560065aa4ea07b1f07175824eb645f4325a7/install.sh -o "$installer"
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/2114560065aa4ea07b1f07175824eb645f4325a7/install-openclaw.sh -o "$backend"
-  printf '%s  %s\n' '90432d088c8d4aa4d0220685c1f1801c1ce2d609d820e4cf309eb13a46f67701' "$installer" | sha256sum -c -
-  printf '%s  %s\n' '681db7ce3e08f9692bd9631160bc0d9b9f0e468a0338179ab2dd826d25400c9f' "$backend" | sha256sum -c -
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1021191042b8579e474ee8b102a06909be172e0b/install.sh -o "$installer"
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1021191042b8579e474ee8b102a06909be172e0b/install-openclaw.sh -o "$backend"
+  printf '%s  %s\n' '0afc61b23d2ff51329cd11cc7e17db215023d8a034b063e8acea9e57f432fc2a' "$installer" | sha256sum -c -
+  printf '%s  %s\n' '0ea396c1e523ec07c2428799f36edf0cdf3730459f8bd7f509605c8cdce0251c' "$backend" | sha256sum -c -
   bash "$installer"
 )
 ```
@@ -233,6 +233,17 @@ reactivated; full-access provisioning aborts and rolls back its transaction.
 An already unbound, active ADMIN key containing literal `"*"` can be reused
 without changing its scopes or other metadata. Direct callers that do not opt
 in can also reuse active scoped credentials unchanged.
+
+The guided installer resolves this knob from the operator's environment only.
+Its own dedicated bootstrap credential receives the full-scope grant so it can
+mint per-tool WRITE credentials; an upgrade that reuses the credential the
+installer already persisted never requests the grant, because that key must
+not be widened, and an explicitly empty export resolves to `false` instead of
+the widest scope. The `NOOSPHERE_BOOTSTRAP_FULL_ACCESS` entry in the protected
+`.env` governs Direct Compose only and is not read by the guided installer:
+the installer reports the effective value and its provenance when it renders
+the Compose file, and exporting `NOOSPHERE_BOOTSTRAP_FULL_ACCESS=true|false`
+before a guided run overrides the decision explicitly.
 
 ### Bootstrap credential file rules
 
