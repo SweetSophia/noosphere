@@ -121,6 +121,49 @@ for (const relativePath of [
 }
 
 
+test("route auth lint ignores role text outside the accessed key", async () => {
+  // Regression probes for selector overreach: a "role" literal inside a type
+  // annotation union and a "role" template value in the receiver subtree must
+  // not be treated as the accessed property.
+  assert.equal((await roleDiagnostics(
+    'export function isAllowed(auth: { authorized: boolean }) {\n' +
+      '  const narrow = auth["authorized" as "authorized" | "role"];\n' +
+      '  const lookup = ({ label: `role` })["label"];\n' +
+      '  return narrow === undefined ? lookup : auth.authorized;\n' +
+      '}',
+    "src/app/api/lint-policy-probe/route.ts",
+  )).length, 0);
+});
+
+test("route auth lint ignores computed destructuring via a role-named variable", async () => {
+  // Dynamic property names stay out of scope by documented policy: the
+  // identifier key is computed, so the accessed field is the variable value.
+  assert.equal((await roleDiagnostics(
+    'export function isAllowed(auth: Record<string, boolean>) {\n' +
+      '  const role = "authorized";\n' +
+      '  const { [role]: access } = auth;\n' +
+      '  return access === true;\n' +
+      '}',
+    "src/app/api/lint-policy-probe/route.ts",
+  )).length, 0);
+});
+
+for (const [name, body] of [
+  ["template cast key", 'return auth[`role` as const] === "ADMIN";'],
+  ["template non-null key", 'return auth[(`role`)!] === "ADMIN";'],
+]) {
+  test(`route auth lint rejects ${name}`, async () => {
+    const diagnostics = await roleDiagnostics(
+      `export function canWrite(auth: { role?: string }) {
+${body}
+}`,
+      "src/app/api/lint-policy-probe/route.ts",
+    );
+    assert.ok(diagnostics.some((d) => d.line === 2),
+      "diagnostic must target the tested expression, not its parameter type");
+  });
+}
+
 test("route auth lint permits non-role static template and cast keys", async () => {
   assert.equal((await roleDiagnostics(
     'export function isAllowed(auth: { authorized: boolean }) { return auth[`authorized`] && auth["authorized" as const]; }',
