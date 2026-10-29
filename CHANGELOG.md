@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that a fresh install actually persists its generated bootstrap key, and
   covers both a failing rewrite and a capture-after-write ordering regression.
 
+### Security
+- Harden the route-auth lint guard against truthiness, unary/optional access,
+  aliases and role destructuring using an explicit conservative static-role-read
+  policy, retaining both line-scoped exceptions and shared permission helpers.
+
 ## [1.15.1] - 2026-10-25
 
 Coordinated application and integration release. Artifact publication and production
