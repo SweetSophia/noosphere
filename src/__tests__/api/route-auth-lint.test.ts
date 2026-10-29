@@ -23,12 +23,63 @@ for (const [name, expression] of [
 ]) {
   test(`route auth lint rejects ${name}`, async () => {
     const diagnostics = await roleDiagnostics(
-      `export function canWrite(auth: { role?: string }) { return ${expression}; }`,
+      `export function canWrite(auth: { role?: string }) {
+return ${expression};
+}`,
       "src/app/api/lint-policy-probe/route.ts",
     );
-    assert.ok(diagnostics.length > 0, "role-only authorization must remain rejected");
+    assert.ok(diagnostics.some((d) => d.line === 2), "diagnostic must target the role access, not its parameter type");
   });
 }
+
+// Conservative route policy: reject extracting any statically named role from
+// route-local values, rather than guessing which aliases originate in AuthResult.
+for (const [name, body] of [
+  ["truthiness", "return !!auth.role;"],
+  ["template key", 'return auth[`role`] === "ADMIN";'],
+  ["escaped static template key", 'return auth[`ro\\u006ce`] === "ADMIN";'],
+  ["cast key", 'return auth["role" as const] === "ADMIN";'],
+  ["wrapped cast key", 'return auth[("role" as const)!] === "ADMIN";'],
+  ["computed destructuring", 'const { ["role" as const]: access } = auth; return access === "ADMIN";'],
+  ["unary", "return !auth.role;"],
+  ["logical", "return auth.role && true;"],
+  ["optional access", "return auth?.role;"],
+  ["role alias", 'const level = auth.role; return level === "ADMIN";'],
+  ["auth alias", 'const caller = auth; return caller.role === "ADMIN";'],
+  ["bracket alias", 'const caller = auth; return caller["role"] === "ADMIN";'],
+  ["destructuring", 'const { role } = auth; return role === "ADMIN";'],
+  ["renamed destructuring", 'const { role: access } = auth; return access === "ADMIN";'],
+  ["literal destructuring", 'const { "role": access } = auth; return access === "ADMIN";'],
+  ["default destructuring", 'const { role = "VIEWER" } = auth; return role === "ADMIN";'],
+  ["renamed source", 'const user = auth; const { role: access } = user; return access === "ADMIN";'],
+  ["nested auth", 'const result = { auth }; return result.auth.role === "ADMIN";'],
+  ["nested destructuring", 'const wrapper = { user: auth }; const { user: { role: access } } = wrapper; return access === "ADMIN";'],
+]) {
+  test(`route auth lint rejects ${name}`, async () => {
+    const diagnostics = await roleDiagnostics(
+      `export function canWrite(auth: { role?: string }) {
+${body}
+}`,
+      "src/app/api/lint-policy-probe/route.ts",
+    );
+    assert.ok(diagnostics.some((d) => d.line === 2),
+      "diagnostic must target the tested expression, not its parameter type");
+  });
+}
+
+test("route auth lint rejects parameter destructuring", async () => {
+  assert.ok((await roleDiagnostics(
+    'export function canWrite({ role: access }: { role?: string }) { return access === "ADMIN"; }',
+    "src/app/api/lint-policy-probe/route.ts",
+  )).length > 0);
+});
+
+test("route policy does not prohibit human-session role reads outside API routes", async () => {
+  assert.equal((await roleDiagnostics(
+    'export function canEdit(session: { role?: string }) { return session.role === "ADMIN"; }',
+    "src/lib/lint-policy-probe.ts",
+  )).length, 0);
+});
 
 test("route auth lint accepts shared permission helpers", async () => {
   const diagnostics = await roleDiagnostics(
@@ -68,3 +119,62 @@ for (const relativePath of [
     );
   });
 }
+
+
+test("route auth lint ignores role text outside the accessed key", async () => {
+  // Regression probes for selector overreach: a "role" literal inside a type
+  // annotation union and a "role" template value in the receiver subtree must
+  // not be treated as the accessed property.
+  assert.equal((await roleDiagnostics(
+    'export function isAllowed(auth: { authorized: boolean }) {\n' +
+      '  const narrow = auth["authorized" as "authorized" | "role"];\n' +
+      '  const lookup = ({ label: `role` })["label"];\n' +
+      '  return narrow === undefined ? lookup : auth.authorized;\n' +
+      '}',
+    "src/app/api/lint-policy-probe/route.ts",
+  )).length, 0);
+});
+
+test("route auth lint ignores computed destructuring via a role-named variable", async () => {
+  // Dynamic property names stay out of scope by documented policy: the
+  // identifier key is computed, so the accessed field is the variable value.
+  assert.equal((await roleDiagnostics(
+    'export function isAllowed(auth: Record<string, boolean>) {\n' +
+      '  const role = "authorized";\n' +
+      '  const { [role]: access } = auth;\n' +
+      '  return access === true;\n' +
+      '}',
+    "src/app/api/lint-policy-probe/route.ts",
+  )).length, 0);
+});
+
+for (const [name, body] of [
+  ["template cast key", 'return auth[`role` as const] === "ADMIN";'],
+  ["template non-null key", 'return auth[(`role`)!] === "ADMIN";'],
+]) {
+  test(`route auth lint rejects ${name}`, async () => {
+    const diagnostics = await roleDiagnostics(
+      `export function canWrite(auth: { role?: string }) {
+${body}
+}`,
+      "src/app/api/lint-policy-probe/route.ts",
+    );
+    assert.ok(diagnostics.some((d) => d.line === 2),
+      "diagnostic must target the tested expression, not its parameter type");
+  });
+}
+
+test("route auth lint permits non-role static template and cast keys", async () => {
+  assert.equal((await roleDiagnostics(
+    'export function isAllowed(auth: { authorized: boolean }) { return auth[`authorized`] && auth["authorized" as const]; }',
+    "src/app/api/lint-policy-probe/route.ts",
+  )).length, 0);
+});
+
+
+test("route auth lint leaves a role type declaration alone", async () => {
+  assert.equal((await roleDiagnostics(
+    'export function noRoleAccess(auth: { role?: string }) { return Boolean(auth); }',
+    "src/app/api/lint-policy-probe/route.ts",
+  )).length, 0);
+});
