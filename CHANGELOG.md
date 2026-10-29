@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Use PostgreSQL English stemming consistently for article documents and strict/
+  fallback search queries (#256). Regular forms such as running/runs/run match;
+  English stop words are filtered. This deliberately changes search semantics,
+  including stop-word-only queries; it is not a multilingual language detector.
+  Per-article language remains tracked in #331.
+- Keyword and hybrid Redis ranking hints both have a 30-second TTL. For a clean
+  semantic cutover, stop/drain all old instances and in-flight writers, then wait
+  out that TTL before resuming search traffic. No privileged epoch mutation or
+  hybrid feature activation is required by this source change.
+
 ### Fixed
 - Serialize topic ancestor validation and mutation across REST/admin updates,
   retry transaction conflicts with a bound, and terminate traversal on corrupt cycles.
