@@ -1,7 +1,7 @@
 /**
  * Obsidian Shadow Sync — Unit Tests
  *
- * Run with: npx tsx src/__tests__/obsidian-sync/index.test.ts
+ * Run with: npm run test:obsidian-sync
  *
  * Tests cover:
  * 1. Path building (topic hierarchy)
@@ -13,6 +13,7 @@
  */
 
 import { createHash } from "crypto";
+import test from "node:test";
 import { writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, renameSync } from "fs";
 import { join, resolve } from "path";
 import yaml from "js-yaml";
@@ -20,19 +21,9 @@ import { spawn } from "child_process";
 
 // ─── Test helpers ────────────────────────────────────────────────────────────
 
-let testCounter = 0;
+// The native runner owns every async result. The npm script sets a finite
+// deadline as well, and Git probes honor cancellation and have their own bound.
 let tempDirCounter = 0;
-function test(name: string, fn: () => void | Promise<void>): void {
-  testCounter++;
-  const label = `[${testCounter}] ${name}`;
-  Promise.resolve()
-    .then(() => fn())
-    .then(() => console.log(`  ✓ ${label}`))
-    .catch((err: unknown) => {
-      console.error(`  ✗ ${label}: ${(err as Error).message}`);
-      process.exitCode = 1;
-    });
-}
 
 function eq<T>(got: T, want: T, msg = ""): void {
   const gotStr = JSON.stringify(got);
@@ -584,78 +575,38 @@ test("accepts valid relative paths", () => {
 
 // ── 7. Git helper ────────────────────────────────────────────────────────────
 
-test("git status returns empty for clean repo", async () => {
-  await withTempDir(async (dir) => {
-    // Init a git repo
-    await new Promise<void>((resolve, reject) => {
-      spawn("git", ["init"], { cwd: dir }).on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git init failed ${code}`))));
+function runGit(args: string[], cwd: string, signal: AbortSignal): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("git", args, { cwd, signal, timeout: 5000, killSignal: "SIGKILL" });
+    let output = "";
+    let failure: Error | undefined;
+    child.stdout.on("data", (data) => { output += String(data); });
+    child.on("error", (error) => { failure = error; });
+    // Wait for close even on abort/error: withTempDir must not remove a fixture
+    // while its Git writer is still alive.
+    child.on("close", (code) => {
+      if (failure) reject(failure);
+      else if (code !== 0) reject(new Error(`git ${args[0]} failed (${code})`));
+      else resolve(output);
     });
-    // Set identity to avoid fatal error
-    await new Promise<void>((resolve) => {
-      spawn("git", ["config", "user.email", "test@test.local"], { cwd: dir }).on("close", () => resolve());
-    });
-    await new Promise<void>((resolve) => {
-      spawn("git", ["config", "user.name", "Test"], { cwd: dir }).on("close", () => resolve());
-    });
-
-    // Write a file and commit it
-    writeFileSync(join(dir, "test.md"), "# Test");
-    await new Promise<void>((resolve, reject) => {
-      spawn("git", ["add", "."], { cwd: dir }).on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git add failed ${code}`))));
-    });
-    await new Promise<void>((resolve, reject) => {
-      spawn("git", ["commit", "-m", "initial"], { cwd: dir }).on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git commit failed ${code}`))));
-    });
-
-    // Now check status
-    const status = await new Promise<string>((resolve) => {
-      const proc = spawn("git", ["status", "--porcelain"], { cwd: dir });
-      let out = "";
-      proc.stdout.on("data", (d) => (out += d));
-      proc.on("close", () => resolve(out));
-    });
-
-    eq(status.trim(), "", "Clean repo should have empty porcelain output");
   });
-});
+}
 
-test("git status shows changes for modified file", async () => {
-  await withTempDir(async (dir) => {
-    await new Promise<void>((resolve, reject) => {
-      spawn("git", ["init"], { cwd: dir }).on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git init failed ${code}`))));
+for (const modified of [false, true]) {
+  test(`git status ${modified ? "shows changes for modified file" : "returns empty for clean repo"}`, async (t) => {
+    await withTempDir(async (dir) => {
+      await runGit(["init"], dir, t.signal);
+      await runGit(["config", "user.email", "test@test.local"], dir, t.signal);
+      await runGit(["config", "user.name", "Test"], dir, t.signal);
+      writeFileSync(join(dir, "test.md"), "# Test");
+      await runGit(["add", "."], dir, t.signal);
+      await runGit(["commit", "-m", "initial"], dir, t.signal);
+      if (modified) writeFileSync(join(dir, "test.md"), "# Modified!");
+      const status = await runGit(["status", "--porcelain"], dir, t.signal);
+      if (modified) {
+        ok(status.trim() !== "", "Modified file should appear in porcelain output");
+        ok(status.includes("test.md"), "Modified file should be listed");
+      } else eq(status.trim(), "", "Clean repo should have empty porcelain output");
     });
-    await new Promise<void>((resolve) => {
-      spawn("git", ["config", "user.email", "test@test.local"], { cwd: dir }).on("close", () => resolve());
-    });
-    await new Promise<void>((resolve) => {
-      spawn("git", ["config", "user.name", "Test"], { cwd: dir }).on("close", () => resolve());
-    });
-
-    writeFileSync(join(dir, "test.md"), "# Test");
-    await new Promise<void>((resolve, reject) => {
-      spawn("git", ["add", "."], { cwd: dir }).on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git add failed ${code}`))));
-    });
-    await new Promise<void>((resolve, reject) => {
-      spawn("git", ["commit", "-m", "initial"], { cwd: dir }).on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git commit failed ${code}`))));
-    });
-
-    // Modify file
-    writeFileSync(join(dir, "test.md"), "# Modified!");
-
-    const status = await new Promise<string>((resolve) => {
-      const proc = spawn("git", ["status", "--porcelain"], { cwd: dir });
-      let out = "";
-      proc.stdout.on("data", (d) => (out += d));
-      proc.on("close", () => resolve(out));
-    });
-
-    ok(status.trim() !== "", "Modified file should appear in porcelain output");
-    ok(status.includes("test.md"), "Modified file should be listed");
   });
-});
-
-// ─── Summary ─────────────────────────────────────────────────────────────────
-
-process.on("exit", () => {
-  console.log(`\n  ${testCounter} test(s) run\n`);
-});
+}

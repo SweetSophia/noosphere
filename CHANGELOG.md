@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   aliases and role destructuring using an explicit conservative static-role-read
   policy, retaining both line-scoped exceptions and shared permission helpers.
 
+### Tests
+- Run the cache, docker-free hybrid-stack and Obsidian-sync suites in CI, and
+  include Obsidian sync in the local aggregate test chain. The sync suite now
+  uses the native async test runner, so unfinished tests cannot silently pass.
+
 ## [1.15.1] - 2026-10-25
 
 Coordinated application and integration release. Artifact publication and production
