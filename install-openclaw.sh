@@ -384,11 +384,25 @@ reject_multiline_env_value() {
 # grant for a credential it creates; it must never demand "*" from a persisted
 # key, because widening that key is forbidden and the bootstrap transaction
 # aborts on it. An explicit operator choice always wins.
+#
+# $1 reused_persisted_key: "true" when the key in use is the credential the
+#   runtime file already held before this run wrote it.
+# $2 requested: the operator's requested value ("" when nothing was exported).
+# $3 requested_set: "true" when the operator set NOOSPHERE_BOOTSTRAP_FULL_ACCESS
+#   at all. An explicitly empty value is a set value: like the Compose
+#   templates' ${VAR:-false} resolution it grants nothing, and it must never
+#   fall through to the default grant, which is the widest scope.
 resolve_bootstrap_full_access() {
-  local reused_persisted_key=${1:-false} requested=${2:-}
-  if [[ -n "$requested" ]]; then
+  local reused_persisted_key=${1:-false} requested=${2:-} requested_set=${3:-false}
+  if [[ "$requested_set" == true ]]; then
     case "$requested" in
       true|false) printf '%s' "$requested" ;;
+      '')
+        # An empty export must not resolve to the widest scope. Compose already
+        # resolves an empty input to false, so mirror that resolution here.
+        echo 'NOOSPHERE_BOOTSTRAP_FULL_ACCESS is set but empty; treating it as false.' >&2
+        printf 'false'
+        ;;
       *)
         echo 'NOOSPHERE_BOOTSTRAP_FULL_ACCESS must be true or false.' >&2
         return 1
@@ -401,6 +415,41 @@ resolve_bootstrap_full_access() {
   else
     printf 'true'
   fi
+}
+
+# Decide the bootstrap full-scope request for this guided install and record
+# how it was reached.
+#
+# $1: the bootstrap key this run will use.
+# $2: the credential the runtime file held before this run wrote it.
+#
+# The request is read from the operator's environment only. The same knob in
+# the protected .env file governs Direct Compose; a guided install never
+# inherits it silently, so the effective value and its provenance are always
+# reported on stderr.
+resolve_guided_bootstrap_full_access() {
+  local api_key=${1:-} persisted_key=${2:-}
+  local reused_persisted_key=false requested='' requested_set=false
+  if bootstrap_key_is_persisted "$api_key" "$persisted_key"; then
+    reused_persisted_key=true
+  fi
+  if [[ "${NOOSPHERE_BOOTSTRAP_FULL_ACCESS+x}" == x ]]; then
+    requested="$NOOSPHERE_BOOTSTRAP_FULL_ACCESS"
+    requested_set=true
+  fi
+  BOOTSTRAP_FULL_ACCESS="$(resolve_bootstrap_full_access \
+    "$reused_persisted_key" "$requested" "$requested_set")" || return 1
+  if [[ "$requested_set" == true ]]; then
+    echo "Bootstrap full access: $BOOTSTRAP_FULL_ACCESS (explicit operator request)." >&2
+  elif [[ "$reused_persisted_key" == true ]]; then
+    echo "Bootstrap full access: $BOOTSTRAP_FULL_ACCESS (the existing bootstrap credential is never widened)." >&2
+  else
+    echo "Bootstrap full access: $BOOTSTRAP_FULL_ACCESS (new dedicated bootstrap credential created by this guided install)." >&2
+  fi
+  if env_has_key "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_FULL_ACCESS; then
+    echo "note: the runtime .env also sets NOOSPHERE_BOOTSTRAP_FULL_ACCESS; that copy governs Direct Compose. This guided install used $BOOTSTRAP_FULL_ACCESS. Export NOOSPHERE_BOOTSTRAP_FULL_ACCESS=true|false to override the guided decision." >&2
+  fi
+  return 0
 }
 
 # True when the key the installer will use is the one already persisted in
@@ -502,9 +551,9 @@ write_runtime_env() {
   local env_tmp
   env_tmp="$(mktemp "$NOOSPHERE_HOME/.env.XXXXXX")" || {
     echo "Failed to create temporary file for runtime .env" >&2
-    exit 1
+    return 1
   }
-  cat > "$env_tmp" <<ENV
+  if ! cat > "$env_tmp" <<ENV
 NOOSPHERE_VERSION=${NOOSPHERE_VERSION}
 NOOSPHERE_IMAGE=${NOOSPHERE_IMAGE}
 NOOSPHERE_PORT=${NOOSPHERE_PORT}
@@ -542,15 +591,28 @@ NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH=${NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH}
 NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS=${NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS}
 NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS=${NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS}
 ENV
-  chmod 600 "$env_tmp"
-  mv "$env_tmp" "$NOOSPHERE_HOME/.env"
+  then
+    rm -f "$env_tmp"
+    echo "Failed to render runtime .env contents" >&2
+    return 1
+  fi
+  chmod 600 "$env_tmp" || {
+    rm -f "$env_tmp"
+    echo "Failed to restrict runtime .env permissions" >&2
+    return 1
+  }
+  mv "$env_tmp" "$NOOSPHERE_HOME/.env" || {
+    rm -f "$env_tmp"
+    echo "Failed to install runtime .env" >&2
+    return 1
+  }
 }
 
 ensure_runtime_env_secret() {
   local key=$1 value=$2 current temp
   current="$(env_get_secret "$NOOSPHERE_HOME/.env" "$key")"
   [[ "$current" != "$value" ]] || return 0
-  temp="$(mktemp "$NOOSPHERE_HOME/.env.XXXXXX")"
+  temp="$(mktemp "$NOOSPHERE_HOME/.env.XXXXXX")" || return 1
   # Rewrite through Node so an existing final line without LF cannot merge
   # with the appended credential. Passing the value through the environment
   # also avoids embedding operator-supplied secrets in generated source text.
@@ -576,10 +638,77 @@ ensure_runtime_env_secret() {
       while (retained.at(-1) === "") retained.pop();
       retained.push(`${key}=${value}`);
       process.stdout.write(`${retained.join("\n")}\n`);
-    ' > "$temp"
-  chmod 600 "$temp"
-  mv "$temp" "$NOOSPHERE_HOME/.env"
+    ' > "$temp" || {
+      rm -f "$temp"
+      echo "Failed to rewrite $key into the runtime .env" >&2
+      return 1
+    }
+  chmod 600 "$temp" || {
+    rm -f "$temp"
+    echo "Failed to restrict runtime .env permissions" >&2
+    return 1
+  }
+  mv "$temp" "$NOOSPHERE_HOME/.env" || {
+    rm -f "$temp"
+    echo "Failed to install the rewritten runtime .env" >&2
+    return 1
+  }
 }
+
+# Persist the runtime credential file and report the bootstrap credential the
+# file held before this run wrote it.
+#
+# The pre-write value is what distinguishes an upgrade from a fresh install.
+# write_runtime_env stores the key this installer just generated, so a lookup
+# after the write would classify every fresh install as an upgrade of an
+# existing credential and withhold the full-scope grant the guided install
+# needs for its own new credential.
+persist_runtime_env() {
+  local persisted_bootstrap_key
+  persisted_bootstrap_key="$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_API_KEY)"
+  # Both call sites capture this function's output in a command substitution,
+  # where bash applies neither errexit nor nounset fatality to intermediate
+  # failures. Every step below must therefore propagate an explicit nonzero
+  # return, and the closing printf may only run after all writes succeeded:
+  # otherwise a failed secret rewrite could install an empty runtime .env over
+  # an operator's live credentials while the assignment still returns status 0.
+  if [[ ! -f "$NOOSPHERE_HOME/.env" ]]; then
+    write_runtime_env || return 1
+  else
+    chmod 600 "$NOOSPHERE_HOME/.env" || return 1
+    ensure_runtime_env_secret POSTGRES_MIGRATION_PASSWORD "$POSTGRES_MIGRATION_PASSWORD" || return 1
+    ensure_runtime_env_secret POSTGRES_APP_PASSWORD "$POSTGRES_APP_PASSWORD" || return 1
+    ensure_runtime_env_secret POSTGRES_HYBRID_ADMIN_PASSWORD "$POSTGRES_HYBRID_ADMIN_PASSWORD" || return 1
+    ensure_runtime_env_secret POSTGRES_HYBRID_WORKER_PASSWORD "$POSTGRES_HYBRID_WORKER_PASSWORD" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 "$NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_RETRIEVAL_ENABLED "$NOOSPHERE_HYBRID_RETRIEVAL_ENABLED" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_QUERY_PROFILE_ID "$NOOSPHERE_HYBRID_QUERY_PROFILE_ID" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION "$NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64 "$NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_WORKER_CONCURRENCY "$NOOSPHERE_HYBRID_WORKER_CONCURRENCY" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_LEASE_SECONDS "$NOOSPHERE_HYBRID_LEASE_SECONDS" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_MAX_ATTEMPTS "$NOOSPHERE_HYBRID_MAX_ATTEMPTS" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_WORKER_POLL_MS "$NOOSPHERE_HYBRID_WORKER_POLL_MS" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS "$NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES "$NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH "$NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH "$NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS "$NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS" || return 1
+    ensure_runtime_env_secret NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS "$NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS" || return 1
+  fi
+  printf '%s' "$persisted_bootstrap_key"
+}
+
+if [[ "${NOOSPHERE_INSTALLER_TEST_MODE:-}" == bootstrap-full-access ]]; then
+  # Regression seam: exercise the guided full-scope decision against a fixture
+  # runtime home through the same persist/decide path as a real install. The
+  # suite asserts the fresh-install and persisted-credential outcomes here so
+  # the wiring, not only the helper, stays covered.
+  persisted_bootstrap_key="$(persist_runtime_env)"
+  resolve_guided_bootstrap_full_access "${API_KEY:-}" "$persisted_bootstrap_key"
+  printf 'bootstrap_full_access=%s\n' "$BOOTSTRAP_FULL_ACCESS"
+  exit 0
+fi
 
 resolve_runtime_config() {
   local runtime_env="$NOOSPHERE_HOME/.env"
@@ -1691,31 +1820,10 @@ export NOOSPHERE_BOOTSTRAP_API_KEY="$API_KEY"
 # Persist the effective role credentials atomically. This is append-only for
 # an older file without the A3 keys, while an explicit password rotation must
 # replace the corresponding assignment so the next restart cannot fall back
-# to a stale credential.
-if [[ ! -f "$NOOSPHERE_HOME/.env" ]]; then
-  write_runtime_env
-else
-  chmod 600 "$NOOSPHERE_HOME/.env"
-  ensure_runtime_env_secret POSTGRES_MIGRATION_PASSWORD "$POSTGRES_MIGRATION_PASSWORD"
-  ensure_runtime_env_secret POSTGRES_APP_PASSWORD "$POSTGRES_APP_PASSWORD"
-  ensure_runtime_env_secret POSTGRES_HYBRID_ADMIN_PASSWORD "$POSTGRES_HYBRID_ADMIN_PASSWORD"
-  ensure_runtime_env_secret POSTGRES_HYBRID_WORKER_PASSWORD "$POSTGRES_HYBRID_WORKER_PASSWORD"
-  ensure_runtime_env_secret NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 "$NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64"
-  ensure_runtime_env_secret NOOSPHERE_HYBRID_RETRIEVAL_ENABLED "$NOOSPHERE_HYBRID_RETRIEVAL_ENABLED"
-  ensure_runtime_env_secret NOOSPHERE_HYBRID_QUERY_PROFILE_ID "$NOOSPHERE_HYBRID_QUERY_PROFILE_ID"
-  ensure_runtime_env_secret NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION "$NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION"
-  ensure_runtime_env_secret NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64 "$NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64"
-  ensure_runtime_env_secret NOOSPHERE_HYBRID_WORKER_CONCURRENCY "$NOOSPHERE_HYBRID_WORKER_CONCURRENCY"
-  ensure_runtime_env_secret NOOSPHERE_HYBRID_LEASE_SECONDS "$NOOSPHERE_HYBRID_LEASE_SECONDS"
-  ensure_runtime_env_secret NOOSPHERE_HYBRID_MAX_ATTEMPTS "$NOOSPHERE_HYBRID_MAX_ATTEMPTS"
-  ensure_runtime_env_secret NOOSPHERE_HYBRID_WORKER_POLL_MS "$NOOSPHERE_HYBRID_WORKER_POLL_MS"
-  ensure_runtime_env_secret NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS "$NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS"
-  ensure_runtime_env_secret NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES "$NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES"
-  ensure_runtime_env_secret NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH "$NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH"
-  ensure_runtime_env_secret NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH "$NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH"
-  ensure_runtime_env_secret NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS "$NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS"
-  ensure_runtime_env_secret NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS "$NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS"
-fi
+# to a stale credential. persist_runtime_env reports the bootstrap credential
+# the file held before this run wrote it: the full-scope decision depends on
+# that pre-write value, so the capture cannot be moved below the write.
+persisted_bootstrap_key="$(persist_runtime_env)"
 
 new_install_required=false
 existing_switch_required=false
@@ -1817,12 +1925,10 @@ fi
 # new credential: the persisted key must never be widened, and demanding "*"
 # from it aborts every pre-1.15.1 upgrade. An operator-supplied key that
 # differs from the persisted one is a new credential and keeps the grant.
-persisted_bootstrap_key="$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_API_KEY)"
-bootstrap_reuses_persisted_key=false
-if bootstrap_key_is_persisted "${API_KEY:-}" "$persisted_bootstrap_key"; then
-  bootstrap_reuses_persisted_key=true
-fi
-BOOTSTRAP_FULL_ACCESS="$(resolve_bootstrap_full_access "$bootstrap_reuses_persisted_key" "${NOOSPHERE_BOOTSTRAP_FULL_ACCESS:-}")"
+# persisted_bootstrap_key was captured by persist_runtime_env BEFORE this run
+# wrote the runtime file; a lookup here would read back the key a fresh install
+# just persisted and misclassify the install as an upgrade.
+resolve_guided_bootstrap_full_access "${API_KEY:-}" "$persisted_bootstrap_key"
 
 cat > "$compose_target" <<YAML
 name: noosphere

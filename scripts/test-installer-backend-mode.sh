@@ -17,6 +17,9 @@ const required = [
   'assert_no_symlink_path_components "$target" credential',
   'if [[ "$NOOSPHERE_INSTALL_OPENCLAW" == true ]]; then\n  write_credentials_json "$SECRETS_FILE" true',
   'Credentials were not printed. Read the mode-0600 file above when needed.',
+  // The decision site must stay wired through the real persist/decide path.
+  'persisted_bootstrap_key="$(persist_runtime_env)"',
+  'resolve_guided_bootstrap_full_access "${API_KEY:-}" "$persisted_bootstrap_key"',
 ];
 for (const needle of required) {
   if (!source.includes(needle)) throw new Error(`missing backend policy: ${needle}`);
@@ -51,14 +54,19 @@ source "$backend"
 assert_bootstrap_full_access_behavior() (
   local failures=0
   # A fresh guided install creates the credential and keeps the guided grant.
-  [[ "$(resolve_bootstrap_full_access false "")" == true ]] || failures=$((failures + 1))
+  [[ "$(resolve_bootstrap_full_access false "" false)" == true ]] || failures=$((failures + 1))
   # An upgrade reuses the persisted key and must not demand "*" from it.
-  [[ "$(resolve_bootstrap_full_access true "")" == false ]] || failures=$((failures + 1))
+  [[ "$(resolve_bootstrap_full_access true "" false)" == false ]] || failures=$((failures + 1))
   # An explicit operator choice always wins, in both directions.
-  [[ "$(resolve_bootstrap_full_access true true)" == true ]] || failures=$((failures + 1))
-  [[ "$(resolve_bootstrap_full_access false false)" == false ]] || failures=$((failures + 1))
+  [[ "$(resolve_bootstrap_full_access true true true)" == true ]] || failures=$((failures + 1))
+  [[ "$(resolve_bootstrap_full_access false false true)" == false ]] || failures=$((failures + 1))
+  # An explicitly empty value is a set value that grants nothing: like the
+  # Compose templates' ${VAR:-false} resolution it must never resolve to the
+  # widest scope.
+  [[ "$(resolve_bootstrap_full_access false "" true)" == false ]] || failures=$((failures + 1))
+  [[ "$(resolve_bootstrap_full_access true "" true)" == false ]] || failures=$((failures + 1))
   # A malformed explicit value is rejected instead of being coerced.
-  if resolve_bootstrap_full_access false maybe >/dev/null 2>&1; then
+  if resolve_bootstrap_full_access false maybe true >/dev/null 2>&1; then
     failures=$((failures + 1))
   fi
   # Only the key already persisted in .env counts as an existing credential.
@@ -86,6 +94,143 @@ if (
   echo 'constant bootstrap full-access sabotage unexpectedly passed' >&2
   exit 1
 fi
+
+# The decision must be wired through the real persist/decide path. A regression
+# that captures the persisted credential after the runtime file is written
+# would misclassify a fresh install as an upgrade, so the fixture subprocess
+# exercises the same hook main() uses instead of only the helper.
+fixture_root="$tmp/fixtures"
+mkdir -p "$fixture_root"
+
+# persist_runtime_env writes the whole runtime file, so the fixture needs the
+# full credential surface a real install resolves before this point.
+fixture_default_vars=(
+  NOOSPHERE_VERSION NOOSPHERE_IMAGE NOOSPHERE_PORT APP_URL BIND_ADDRESS
+  POSTGRES_PASSWORD POSTGRES_MIGRATION_PASSWORD POSTGRES_APP_PASSWORD
+  POSTGRES_HYBRID_ADMIN_PASSWORD POSTGRES_HYBRID_WORKER_PASSWORD NEXTAUTH_SECRET
+  ADMIN_PASSWORD NOOSPHERE_ADMIN_PASSWORD NOOSPHERE_ADMIN_PASSWORD_RESET NOOSPHERE_FORCE_ADMIN
+  NOOSPHERE_BOOTSTRAP_SECRETS_FILE REDIS_URL PG_POOL_MAX PG_IDLE_TIMEOUT_MS
+  PG_CONN_TIMEOUT_MS NOOSPHERE_MEMORY_RECALL_RATE_LIMIT_PER_MINUTE
+  NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 NOOSPHERE_HYBRID_RETRIEVAL_ENABLED
+  NOOSPHERE_HYBRID_QUERY_PROFILE_ID NOOSPHERE_HYBRID_CACHE_HMAC_ACTIVE_VERSION
+  NOOSPHERE_HYBRID_CACHE_HMAC_KEYS_B64 NOOSPHERE_HYBRID_WORKER_CONCURRENCY
+  NOOSPHERE_HYBRID_LEASE_SECONDS NOOSPHERE_HYBRID_MAX_ATTEMPTS
+  NOOSPHERE_HYBRID_WORKER_POLL_MS NOOSPHERE_HYBRID_REQUEST_TIMEOUT_MS
+  NOOSPHERE_HYBRID_MAX_RESPONSE_BYTES NOOSPHERE_HYBRID_QUEUE_WARNING_DEPTH
+  NOOSPHERE_HYBRID_QUEUE_CRITICAL_DEPTH NOOSPHERE_HYBRID_QUEUE_WARNING_AGE_SECONDS
+  NOOSPHERE_HYBRID_QUEUE_CRITICAL_AGE_SECONDS
+)
+for fixture_var in "${fixture_default_vars[@]}"; do
+  if [[ -z "${!fixture_var:-}" ]]; then
+    export "$fixture_var=noo_${fixture_var}_fixture"
+  fi
+done
+
+assert_bootstrap_full_access_fixture() (
+  local fixture="$1" expected="$2" api_key="$3"
+  local persisted_key="${4:-}" override="${5-unset}"
+  local fixture_home="$fixture/home"
+  mkdir -p "$fixture_home"
+  if [[ -n "$persisted_key" ]]; then
+    printf 'NOOSPHERE_BOOTSTRAP_API_KEY=%s\n' "$persisted_key" > "$fixture_home/.env"
+    chmod 600 "$fixture_home/.env"
+  fi
+  if [[ "$override" == unset ]]; then
+    API_KEY="$api_key" NOOSPHERE_HOME="$fixture_home" \
+      NOOSPHERE_INSTALLER_TEST_MODE=bootstrap-full-access \
+      bash -c 'set -euo pipefail; source "$1"' _ "$backend" \
+      > "$fixture/out" 2> "$fixture/err"
+  else
+    API_KEY="$api_key" NOOSPHERE_HOME="$fixture_home" \
+      NOOSPHERE_BOOTSTRAP_FULL_ACCESS="$override" \
+      NOOSPHERE_INSTALLER_TEST_MODE=bootstrap-full-access \
+      bash -c 'set -euo pipefail; source "$1"' _ "$backend" \
+      > "$fixture/out" 2> "$fixture/err"
+  fi
+  grep -q "^bootstrap_full_access=$expected\$" "$fixture/out"
+  if [[ -z "$persisted_key" ]]; then
+    # A fresh install must actually persist the generated bootstrap key; with
+    # only the decision checked, a capture-after-write regression stays green.
+    grep -q "^NOOSPHERE_BOOTSTRAP_API_KEY=$api_key\$" "$fixture_home/.env"
+  fi
+)
+
+# A fresh install: the runtime file does not exist yet, so the generated key is
+# a new credential and the guided grant must survive the write (the P1 case).
+API_KEY=noo_fixture_fresh_key \
+  assert_bootstrap_full_access_fixture "$fixture_root/fresh" true noo_fixture_fresh_key
+# An upgrade: the persisted key is reused and must not be widened.
+API_KEY=noo_fixture_persisted_key \
+  assert_bootstrap_full_access_fixture "$fixture_root/persisted" false noo_fixture_persisted_key noo_fixture_persisted_key
+# An explicit operator choice still wins over the persisted-credential default.
+API_KEY=noo_fixture_persisted_key \
+  assert_bootstrap_full_access_fixture "$fixture_root/persisted-explicit" true noo_fixture_persisted_key noo_fixture_persisted_key true
+# An explicitly empty export grants nothing, never the widest scope.
+API_KEY=noo_fixture_fresh_key \
+  assert_bootstrap_full_access_fixture "$fixture_root/fresh-empty" false noo_fixture_fresh_key '' ''
+
+
+# A failing runtime-secret rewrite must abort the install and leave the
+# existing runtime .env intact. Persistence now propagates every failure
+# explicitly: bash applies neither errexit nor nounset fatality inside a
+# command substitution, so an unguarded rewrite could otherwise install an
+# empty credentials file over live secrets while reporting success.
+p1_fixture="$fixture_root/p1-node-failure"
+p1_home="$p1_fixture/home"
+mkdir -p "$p1_home"
+printf 'NOOSPHERE_BOOTSTRAP_API_KEY=noo_p1_persisted\nPOSTGRES_MIGRATION_PASSWORD=noo_p1_old\n' > "$p1_home/.env"
+chmod 600 "$p1_home/.env"
+cp "$backend" "$p1_fixture/sabotaged.sh"
+node - "$p1_fixture/sabotaged.sh" <<'NODE'
+const fs = require("node:fs");
+const target = process.argv[2];
+const source = fs.readFileSync(target, "utf8");
+const anchor = "persist_runtime_env() {";
+if (!source.includes(anchor)) throw new Error("cannot locate persist_runtime_env");
+fs.writeFileSync(
+  target,
+  source.replace(anchor, "node() { echo 'sabotaged node rewrite' >&2; return 3; }\n" + anchor),
+);
+NODE
+if API_KEY=noo_p1_new NOOSPHERE_HOME="$p1_home" \
+  NOOSPHERE_INSTALLER_TEST_MODE=bootstrap-full-access \
+  bash -c 'set -euo pipefail; source "$1"' _ "$p1_fixture/sabotaged.sh" \
+  > "$p1_fixture/out" 2> "$p1_fixture/err"; then
+  echo 'failing runtime-secret rewrite unexpectedly passed' >&2
+  exit 1
+fi
+grep -q '^NOOSPHERE_BOOTSTRAP_API_KEY=noo_p1_persisted$' "$p1_home/.env"
+grep -q '^POSTGRES_MIGRATION_PASSWORD=noo_p1_old$' "$p1_home/.env"
+
+# The pre-write capture is the upgrade/fresh signal itself: capturing after
+# the write would make every fresh install look like an upgrade of its own
+# just-generated credential and silently withhold the guided full-scope grant.
+cap_fixture="$fixture_root/capture-after-write"
+cap_home="$cap_fixture/home"
+mkdir -p "$cap_home"
+cp "$backend" "$cap_fixture/sabotaged.sh"
+node - "$cap_fixture/sabotaged.sh" <<'NODE'
+const fs = require("node:fs");
+const target = process.argv[2];
+const source = fs.readFileSync(target, "utf8");
+const capture = 'persisted_bootstrap_key="$(env_get_secret "$NOOSPHERE_HOME/.env" NOOSPHERE_BOOTSTRAP_API_KEY)"';
+const report = `printf '%s' "$persisted_bootstrap_key"`;
+if (!source.includes(capture)) throw new Error("cannot locate capture line");
+const parts = source.split("persist_runtime_env() {");
+const segments = parts[1].split(report);
+if (segments.length < 2) throw new Error("cannot locate persist report");
+parts[1] = segments[0].replace(capture, ": # capture sabotaged to run after the write")
+  + capture + "\n  " + report + segments.slice(1).join(report);
+fs.writeFileSync(target, parts.join("persist_runtime_env() {"));
+NODE
+if ! API_KEY=noo_cap_fresh NOOSPHERE_HOME="$cap_home" \
+  NOOSPHERE_INSTALLER_TEST_MODE=bootstrap-full-access \
+  bash -c 'set -euo pipefail; source "$1"' _ "$cap_fixture/sabotaged.sh" \
+  > "$cap_fixture/out" 2> "$cap_fixture/err"; then
+  echo 'capture-after-write sabotage failed to run' >&2
+  exit 1
+fi
+grep -q '^bootstrap_full_access=false$' "$cap_fixture/out"
 
 assert_article_verification_floor_behavior() (
   local floor
@@ -361,4 +506,25 @@ if INSTALLER_TEST_CONTROL_CHILD=true "$0" "$tmp/sabotaged.sh" >"$tmp/guard-contr
 fi
 grep -q 'missing backend policy: if' "$tmp/guard-control.out"
 
-printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 scoped_keys=yes read_key_rejected=yes transport_rotation=blocked local_bootstrap_destination=yes article_floor=preserved proxy_bypass=yes secret_argv=clean child_env=clean credential_parent_symlink=blocked sabotage=red\n'
+# The generated Compose value must come from the resolver at the call site.
+# Replacing that call with a constant must turn the suite red.
+cp "$backend" "$tmp/full-access-sabotaged.sh"
+SABOTAGED_BACKEND="$tmp/full-access-sabotaged.sh" node <<'NODE'
+const fs = require("node:fs");
+const source = fs.readFileSync(process.env.SABOTAGED_BACKEND, "utf8");
+const guarded = 'resolve_guided_bootstrap_full_access "${API_KEY:-}" "$persisted_bootstrap_key"';
+if (!source.includes(guarded)) throw new Error("cannot locate full-access sabotage target");
+// The decision needle appears at the main call site and in the regression
+// hook; a constant must replace both so the suite fails at the policy check.
+fs.writeFileSync(
+  process.env.SABOTAGED_BACKEND,
+  source.split(guarded).join("BOOTSTRAP_FULL_ACCESS=true"),
+);
+NODE
+if INSTALLER_TEST_CONTROL_CHILD=true "$0" "$tmp/full-access-sabotaged.sh" >"$tmp/full-access-control.out" 2>&1; then
+  echo 'constant guided full-access call-site sabotage unexpectedly passed' >&2
+  exit 1
+fi
+grep -qF 'missing backend policy: resolve_guided_bootstrap_full_access "${API_KEY:-}" "$persisted_bootstrap_key"' "$tmp/full-access-control.out"
+
+printf 'installer_backend_tests=GREEN core_mode_guard=yes credential_modes=0700/0600 scoped_keys=yes read_key_rejected=yes transport_rotation=blocked local_bootstrap_destination=yes article_floor=preserved proxy_bypass=yes secret_argv=clean child_env=clean credential_parent_symlink=blocked full_access_fixture=yes call_site_sabotage=red sabotage=red\n'
