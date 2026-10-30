@@ -105,14 +105,18 @@ machine.
 
 ### Install
 
-This launcher is coupled to the coordinated `v1.15.2` image, packages, and
-Hermes archive. Before running it, confirm that the
+The published `v1.15.2` release assets are coupled to the coordinated
+`v1.15.2` image, packages, and Hermes archive. Before running the installer,
+confirm that the
 [`v1.15.2` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.2)
 exists with all six installer assets; a merged commit alone is not a release.
 
 Use the [verified two-file download](docs/INSTALLATION.md#auditable-download)
 to run the guided installer. It downloads the launcher and its reviewed backend
 from an immutable commit, verifies both checksums, then runs them together.
+Its version-bound command selects the `v1.15.2` image and OpenClaw package;
+the Hermes archive and the OpenCode and Kilo Code packages still come from the
+launcher's published fallback pair.
 
 The installer:
 
