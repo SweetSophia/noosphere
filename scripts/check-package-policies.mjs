@@ -458,6 +458,8 @@ const installerPackager = readText("scripts/package-installer.sh");
 const installerBackendTest = readText("scripts/test-installer-backend-mode.sh");
 const installerUxTest = readText("scripts/test-installer-ux.sh");
 const installerPackageTest = readText("scripts/test-installer-package.sh");
+const npmIntegrityVerifier = readText("scripts/verify-npm-publication-integrity.sh");
+const npmIntegrityVerifierTest = readText("scripts/test-npm-publication-integrity.sh");
 const postgresImagePolicy = readText("scripts/check-postgres-image-policy.mjs");
 const versionSyncScript = readText("scripts/sync-version.mjs");
 const releaseVersion = readText("VERSION").trim();
@@ -672,6 +674,20 @@ expect(
     npmPublishWorkflow.includes("dist.integrity") &&
     npmPublishWorkflow.includes('npm publish "$TARBALL" --access public --provenance'),
   "The v-openclaw publication must publish or exact-integrity-verify the helper before OpenClaw without adding an independent dispatch input.",
+);
+expect(
+  npmPublishHelperJob.includes(
+    'bash "$GITHUB_WORKSPACE/scripts/verify-npm-publication-integrity.sh"',
+  ) &&
+    npmPublishHelperJob.includes('"$LOCAL_INTEGRITY"') &&
+    !npmPublishHelperJob.includes("for attempt in {1..10}") &&
+    npmIntegrityVerifier.includes("dist.integrity") &&
+    npmIntegrityVerifier.includes("exit 1") &&
+    npmIntegrityVerifier.includes("exit 2") &&
+    npmIntegrityVerifier.includes("Re-run the publish workflow") &&
+    npmIntegrityVerifierTest.includes("propagation delay") &&
+    npmIntegrityVerifierTest.includes("integrity mismatch"),
+  "The coordinated helper publication must verify the registry readback through the shared bounded verifier so a slow registry cannot abort a healthy release.",
 );
 expect(
   unpinnedActionUses(npmPublishWorkflowLines).length === 0,
