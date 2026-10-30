@@ -19,9 +19,9 @@ The installer checks its prerequisites before changing the machine.
 
 ### Run the installer
 
-The launcher is coupled to the coordinated `v1.15.0` image, packages, and
+The launcher is coupled to the coordinated `v1.15.2` image, packages, and
 Hermes archive. Before running it, confirm that the
-[`v1.15.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.0)
+[`v1.15.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.2)
 exists with all six installer assets. Merging the installer source does not by
 itself publish those artifacts.
 
@@ -182,14 +182,14 @@ Noosphere into another deployment system. It is intentionally more detailed
 than the guided Quick Start.
 
 ```bash
-git clone --branch v1.15.0 --depth 1 https://github.com/SweetSophia/noosphere.git
+git clone --branch v1.15.2 --depth 1 https://github.com/SweetSophia/noosphere.git
 cd noosphere
 cp noosphere.env.example .env
 ```
 
 Edit `.env` and set at least:
 
-- `NOOSPHERE_VERSION=1.15.0`
+- `NOOSPHERE_VERSION=1.15.2`
 - distinct `POSTGRES_PASSWORD`, `POSTGRES_MIGRATION_PASSWORD`, and
   `POSTGRES_APP_PASSWORD` values
 - `NEXTAUTH_SECRET`

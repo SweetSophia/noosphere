@@ -61,17 +61,17 @@ the installer runtime:
 https://github.com/SweetSophia/noosphere/blob/master/docs/HERMES-INSTALLER-HYBRID.md
 (the standalone Hermes tarball does not include `docs/`).
 
-## Install the 1.15.0 Release Bundle
+## Install the 1.15.2 Release Bundle
 
 The coordinated Noosphere release attaches a deterministic Hermes provider
 bundle and checksum to the main GitHub release:
 
 ```bash
-curl -fsSLO https://github.com/SweetSophia/noosphere/releases/download/v1.15.0/hermes-noosphere-memory-1.15.0.tar.gz
-curl -fsSLO https://github.com/SweetSophia/noosphere/releases/download/v1.15.0/hermes-noosphere-memory-1.15.0.tar.gz.sha256
-sha256sum --check hermes-noosphere-memory-1.15.0.tar.gz.sha256
-tar -xzf hermes-noosphere-memory-1.15.0.tar.gz
-cd hermes-noosphere-memory-1.15.0
+curl -fsSLO https://github.com/SweetSophia/noosphere/releases/download/v1.15.2/hermes-noosphere-memory-1.15.2.tar.gz
+curl -fsSLO https://github.com/SweetSophia/noosphere/releases/download/v1.15.2/hermes-noosphere-memory-1.15.2.tar.gz.sha256
+sha256sum --check hermes-noosphere-memory-1.15.2.tar.gz.sha256
+tar -xzf hermes-noosphere-memory-1.15.2.tar.gz
+cd hermes-noosphere-memory-1.15.2
 ./install-hermes.sh
 ```
 
@@ -81,7 +81,7 @@ Use this path to clone the Noosphere repository and run the helper script that
 copies the Hermes plugin and setup skill into the active Hermes profile:
 
 ```bash
-git clone --branch v-hermes-1.15.0 --depth 1 https://github.com/SweetSophia/noosphere.git
+git clone --branch v-hermes-1.15.2 --depth 1 https://github.com/SweetSophia/noosphere.git
 cd noosphere/hermes-noosphere-memory
 ./install-hermes.sh
 ```

@@ -1,6 +1,6 @@
 # OpenClaw Official Plugin Development Plan
 
-> **1.15.1 release candidate — not published.** Version-bound commands below
+> **1.15.2 release candidate — not published.** Version-bound commands below
 > are for the candidate and must not run until the coordinated public release
 > and all six installer assets exist. Merge/publication/production remain on hold.
 
@@ -28,7 +28,7 @@ openclaw noosphere setup
 ```
 
 or, after confirming the coordinated
-[`v1.15.1` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.1)
+[`v1.15.2` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.2)
 exists with all six installer assets (source merge alone does not publish them):
 
 For an existing installation using a custom image, export `NOOSPHERE_IMAGE` explicitly
@@ -48,7 +48,7 @@ before running this block. The version-bound default does not reuse a persisted 
   curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1021191042b8579e474ee8b102a06909be172e0b/install-openclaw.sh -o "$backend"
   printf '%s  %s\n' '0afc61b23d2ff51329cd11cc7e17db215023d8a034b063e8acea9e57f432fc2a' "$installer" | sha256sum -c -
   printf '%s  %s\n' '0ea396c1e523ec07c2428799f36edf0cdf3730459f8bd7f509605c8cdce0251c' "$backend" | sha256sum -c -
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.1}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.1}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.1}" bash "$installer" --non-interactive --with openclaw
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.2}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.2}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.2}" bash "$installer" --non-interactive --with openclaw
 )
 ```
 
@@ -408,7 +408,7 @@ docker compose up -d
 7. Script installs plugin:
 
 ```bash
-openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.15.1
+openclaw plugins install npm:@sweetsophia/openclaw-noosphere-memory@1.15.2
 ```
 
 8. Script patches OpenClaw config using safe config mechanisms where possible.
