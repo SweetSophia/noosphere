@@ -30,13 +30,13 @@ SDK pins. A local MCP floor repair is verified; two revised SDK artifacts still
 need compatibility qualification and separately approved publication before the
 adapter aliases can be activated. No adapter release is available yet.
 
-This branch prepares coordinated **1.15.1** by combining the reviewed dependency
-repair and explicit bootstrap-scope provisioning. It is **not published**; 1.15.0
+This branch prepares coordinated **1.15.2** by combining the reviewed dependency
+repair and explicit bootstrap-scope provisioning. It is **not published**; 1.15.1
 remains the public release below. Merge, publication and production deployment
 remain on hold pending review and approval. The source launcher's immutable remote
 fallback still identifies the previous release; the packaging helper binds the
 candidate launcher/backend/Hermes set together. Do not use a source checkout as
-proof that a 1.15.1 image or registry adapter exists.
+proof that a 1.15.2 image or registry adapter exists.
 
 ### Root application dependency remediation
 
@@ -105,14 +105,20 @@ machine.
 
 ### Install
 
-This launcher is coupled to the coordinated `v1.15.0` image, packages, and
-Hermes archive. Before running it, confirm that the
-[`v1.15.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.0)
+The published `v1.15.2` release assets are coupled to the coordinated
+`v1.15.2` image, packages, and Hermes archive. Before running the installer,
+confirm that the
+[`v1.15.2` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.2)
 exists with all six installer assets; a merged commit alone is not a release.
 
 Use the [verified two-file download](docs/INSTALLATION.md#auditable-download)
 to run the guided installer. It downloads the launcher and its reviewed backend
 from an immutable commit, verifies both checksums, then runs them together.
+Its version-bound command selects the `v1.15.2` image and OpenClaw package;
+the Hermes archive and the OpenCode and Kilo Code packages still install
+**1.15.0**, from the source launcher's embedded pins. This is a mixed-version
+source-download path, not the fully coordinated release installer. Use the
+packaged launcher from the `v1.15.2` release assets for a coordinated install.
 
 The installer:
 
@@ -178,7 +184,7 @@ machine, for example `OPENCLAW_NOOSPHERE_API_KEY`,
 Install the Codex CLI integration independently of the core Docker installer:
 
 ```bash
-npx -y @sweetsophia/noosphere-mcp@1.15.0 install-codex
+npx -y @sweetsophia/noosphere-mcp@1.15.2 install-codex
 ```
 
 The command stores the MCP launcher, skill, and approved environment-variable

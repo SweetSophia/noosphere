@@ -141,6 +141,60 @@ jobs:
           architecture=$(docker image inspect noosphere:pr-${{ matrix.slug }} --format '{{.Architecture}}')
           test "$architecture" = '${{ matrix.slug }}'
 
+      - name: Smoke-test application health on the native architecture
+        env:
+          SMOKE_IMAGE: noosphere:pr-${{ matrix.slug }}
+          SMOKE_RUN: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.slug }}
+        run: |
+          set -euo pipefail
+          prefix="noosphere-runtime-${SMOKE_RUN}"
+          env_file=$(mktemp)
+          chmod 0600 "$env_file"
+          # Unique disposable resources; no host ports or production credentials.
+          test -z "$(docker ps -aq --filter "name=^/${prefix}-db$")"
+          test -z "$(docker ps -aq --filter "name=^/${prefix}-app$")"
+          docker network create "$prefix" >/dev/null
+          cleanup() {
+            docker rm -fv "${prefix}-app" "${prefix}-db" >/dev/null 2>&1 || true
+            docker network rm "$prefix" >/dev/null 2>&1 || true
+            rm -f "$env_file"
+          }
+          trap cleanup EXIT
+          password=$(cat /proc/sys/kernel/random/uuid)
+          printf 'POSTGRES_PASSWORD=%s\n' "$password" > "$env_file"
+          docker run -d --name "${prefix}-db" --network "$prefix" \
+            --network-alias db --env-file "$env_file" postgres:16-alpine >/dev/null
+          ready=false
+          for attempt in $(seq 1 60); do
+            if docker exec "${prefix}-db" pg_isready -U postgres >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = true
+          printf 'DATABASE_URL=postgresql://postgres:%s@db:5432/postgres\n' "$password" > "$env_file"
+          printf 'NEXTAUTH_SECRET=%s\nSKIP_MIGRATION=1\nOBSIDIAN_SYNC_ENABLED=false\nNOOSPHERE_HYBRID_RETRIEVAL_ENABLED=false\n' \
+            "$(cat /proc/sys/kernel/random/uuid)" >> "$env_file"
+          # Migration/bootstrap coverage belongs to the separate installer gate.
+          # This verifies the native image starts and Prisma can query a DB.
+          docker run -d --name "${prefix}-app" --network "$prefix" \
+            --env-file "$env_file" "$SMOKE_IMAGE" >/dev/null
+          docker exec "${prefix}-app" node -e '
+            (async () => {
+              for (let i = 0; i < 60; i++) {
+                try {
+                  const r = await fetch("http://127.0.0.1:3000/api/health", {signal: AbortSignal.timeout(2000)});
+                  if (r.ok && (await r.json()).status === "ok") {
+                    console.log("Native application and database health smoke passed");
+                    return;
+                  }
+                } catch {}
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+              process.exit(1);
+            })();'
+
   publish-platform:
     name: docker-publish-platform (${{ matrix.slug }})
     if: ${{ github.ref_type == 'tag' && !startsWith(github.ref, 'refs/tags/v-openclaw-') && !startsWith(github.ref, 'refs/tags/v-opencode-') && !startsWith(github.ref, 'refs/tags/v-kilocode-') && !startsWith(github.ref, 'refs/tags/v-hermes-') && !startsWith(github.ref, 'refs/tags/v-mcp-') }}

@@ -1,6 +1,6 @@
 # Noosphere Memory for Kilo Code
 
-> **1.15.1 release candidate — not published.** Version-bound commands below
+> **1.15.2 release candidate — not published.** Version-bound commands below
 > are for the candidate and must not run until the coordinated public release
 > and all six installer assets exist. Merge/publication/production remain on hold.
 
@@ -11,7 +11,7 @@ save draft memories with explicit tools, and optionally enable idle auto-save.
 
 You need a running Noosphere instance and a dedicated Kilo Code WRITE key. For a
 new local setup, select Kilo Code in the [guided installer](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#guided-installation)
-after confirming the [v1.15.1 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.1)
+after confirming the [v1.15.2 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.2)
 has all six installer assets. The [auditable download](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#auditable-download)
 explains checksum verification.
 
@@ -23,7 +23,7 @@ for remote setup and configuration details.
 ## Install
 
 ```bash
-npm install -g @sweetsophia/kilocode-noosphere-memory@1.15.1
+npm install -g @sweetsophia/kilocode-noosphere-memory@1.15.2
 ```
 
 Add it to `~/.config/kilo/kilo.json`:
@@ -31,7 +31,7 @@ Add it to `~/.config/kilo/kilo.json`:
 ```json
 {
   "plugin": [
-    "@sweetsophia/kilocode-noosphere-memory@1.15.1"
+    "@sweetsophia/kilocode-noosphere-memory@1.15.2"
   ]
 }
 ```
@@ -39,7 +39,7 @@ Add it to `~/.config/kilo/kilo.json`:
 You can also install it with Kilo's plugin command:
 
 ```bash
-kilo plugin @sweetsophia/kilocode-noosphere-memory@1.15.1 --global
+kilo plugin @sweetsophia/kilocode-noosphere-memory@1.15.2 --global
 ```
 
 Or configure it with explicit options:
@@ -48,7 +48,7 @@ Or configure it with explicit options:
 {
   "plugin": [
     [
-      "@sweetsophia/kilocode-noosphere-memory@1.15.1",
+      "@sweetsophia/kilocode-noosphere-memory@1.15.2",
       {
         "baseUrl": "http://127.0.0.1:6578",
         "autoRecall": true,
@@ -157,14 +157,20 @@ Use this for stable project facts, decisions, runbooks, and recurring fixes. Do 
 
 ## Verified guided install
 
-For a new local setup, first confirm the [v1.15.1 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.1)
+For a new local setup, first confirm the [v1.15.2 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.2)
 has all six installer assets. This pinned launcher verifies its SHA-256 before
 execution; see the [GitHub installation guide](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md)
 for upgrade behavior and other installation paths.
 
+The source-pinned command below installs the **1.15.0 application and kilocode package**,
+not 1.15.2: both follow the source launcher's embedded release version. To
+install the coordinated 1.15.2 set, use the packaged launcher from the 1.15.2
+release assets; the explicit npm command earlier on this page selects the
+1.15.2 adapter when only the adapter needs installing.
+
 ```bash
-# Installer commit: 1021191042b8579e474ee8b102a06909be172e0b
-# Expected SHA-256: 0afc61b23d2ff51329cd11cc7e17db215023d8a034b063e8acea9e57f432fc2a
+# Installer commit: b054f4b50374dd444434c9d17501a18ecb07adc1
+# Expected SHA-256: ce9f6de9f096e4946084eb33be886947693e000a2461a0955d29a5e467549c23
 (
   set -e
   installer_dir="$(mktemp -d)"
@@ -172,10 +178,10 @@ for upgrade behavior and other installation paths.
   installer="$installer_dir/install.sh"
   backend="$installer_dir/install-openclaw.sh"
   unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1021191042b8579e474ee8b102a06909be172e0b/install.sh -o "$installer"
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1021191042b8579e474ee8b102a06909be172e0b/install-openclaw.sh -o "$backend"
-  printf '%s  %s\n' '0afc61b23d2ff51329cd11cc7e17db215023d8a034b063e8acea9e57f432fc2a' "$installer" | sha256sum -c -
-  printf '%s  %s\n' '0ea396c1e523ec07c2428799f36edf0cdf3730459f8bd7f509605c8cdce0251c' "$backend" | sha256sum -c -
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/b054f4b50374dd444434c9d17501a18ecb07adc1/install.sh -o "$installer"
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/b054f4b50374dd444434c9d17501a18ecb07adc1/install-openclaw.sh -o "$backend"
+  printf '%s  %s\n' 'ce9f6de9f096e4946084eb33be886947693e000a2461a0955d29a5e467549c23' "$installer" | sha256sum -c -
+  printf '%s  %s\n' '7758cc2aab51da3af18551ad138eb08a8c2d50e546955c498840933cbef63c7c' "$backend" | sha256sum -c -
   bash "$installer" --non-interactive --with kilocode
 )
 ```

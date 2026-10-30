@@ -19,11 +19,19 @@ The installer checks its prerequisites before changing the machine.
 
 ### Run the installer
 
-The launcher is coupled to the coordinated `v1.15.0` image, packages, and
-Hermes archive. Before running it, confirm that the
-[`v1.15.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.0)
+The published `v1.15.2` release assets are coupled to the coordinated
+`v1.15.2` image, packages, and Hermes archive. Before running the installer,
+confirm that the
+[`v1.15.2` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.2)
 exists with all six installer assets. Merging the installer source does not by
 itself publish those artifacts.
+
+The audited two-file download below runs the launcher from an immutable commit.
+Its version-bound command selects the `v1.15.2` image and OpenClaw package.
+The Hermes archive and the OpenCode and Kilo Code packages still install
+**1.15.0**, from the source launcher's embedded pins. This is a mixed-version
+source-download path, not the fully coordinated release installer. Use the
+packaged launcher from the `v1.15.2` release assets for a coordinated install.
 
 Use the [verified two-file download](#auditable-download) below. Both files
 come from an immutable commit, never a moving `master` or `main` branch.
@@ -122,6 +130,8 @@ check both SHA-256 values before execution. Keeping the sibling filename is
 essential: this source launcher retains an older published fallback for
 standalone downloads, while these instructions select its reviewed sibling.
 
+For an existing installation using a custom image, export `NOOSPHERE_IMAGE` explicitly before running this block. The version-bound default does not reuse a persisted image automatically.
+
 ```bash
 (
   set -e
@@ -130,11 +140,11 @@ standalone downloads, while these instructions select its reviewed sibling.
   installer="$installer_dir/install.sh"
   backend="$installer_dir/install-openclaw.sh"
   unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1021191042b8579e474ee8b102a06909be172e0b/install.sh -o "$installer"
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1021191042b8579e474ee8b102a06909be172e0b/install-openclaw.sh -o "$backend"
-  printf '%s  %s\n' '0afc61b23d2ff51329cd11cc7e17db215023d8a034b063e8acea9e57f432fc2a' "$installer" | sha256sum -c -
-  printf '%s  %s\n' '0ea396c1e523ec07c2428799f36edf0cdf3730459f8bd7f509605c8cdce0251c' "$backend" | sha256sum -c -
-  bash "$installer"
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/b054f4b50374dd444434c9d17501a18ecb07adc1/install.sh -o "$installer"
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/b054f4b50374dd444434c9d17501a18ecb07adc1/install-openclaw.sh -o "$backend"
+  printf '%s  %s\n' 'ce9f6de9f096e4946084eb33be886947693e000a2461a0955d29a5e467549c23' "$installer" | sha256sum -c -
+  printf '%s  %s\n' '7758cc2aab51da3af18551ad138eb08a8c2d50e546955c498840933cbef63c7c' "$backend" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.2}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.2}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.2}" bash "$installer"
 )
 ```
 
@@ -182,14 +192,14 @@ Noosphere into another deployment system. It is intentionally more detailed
 than the guided Quick Start.
 
 ```bash
-git clone --branch v1.15.0 --depth 1 https://github.com/SweetSophia/noosphere.git
+git clone --branch v1.15.2 --depth 1 https://github.com/SweetSophia/noosphere.git
 cd noosphere
 cp noosphere.env.example .env
 ```
 
 Edit `.env` and set at least:
 
-- `NOOSPHERE_VERSION=1.15.0`
+- `NOOSPHERE_VERSION=1.15.2`
 - distinct `POSTGRES_PASSWORD`, `POSTGRES_MIGRATION_PASSWORD`, and
   `POSTGRES_APP_PASSWORD` values
 - `NEXTAUTH_SECRET`

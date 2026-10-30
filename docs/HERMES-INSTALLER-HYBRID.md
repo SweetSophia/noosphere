@@ -70,6 +70,8 @@ not copy another host's Tailscale URL.
 Checksum the launcher and its sibling backend, then run it with no flags. It prompts for each agent
 CLI it finds (`[Y/n]`, empty enter = Yes):
 
+For an existing installation using a custom image, export `NOOSPHERE_IMAGE` explicitly before running this block. The version-bound default does not reuse a persisted image automatically.
+
 ```bash
 (
   set -e
@@ -78,11 +80,11 @@ CLI it finds (`[Y/n]`, empty enter = Yes):
   installer="$installer_dir/install.sh"
   backend="$installer_dir/install-openclaw.sh"
   unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1021191042b8579e474ee8b102a06909be172e0b/install.sh -o "$installer"
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/1021191042b8579e474ee8b102a06909be172e0b/install-openclaw.sh -o "$backend"
-  printf '%s  %s\n' '0afc61b23d2ff51329cd11cc7e17db215023d8a034b063e8acea9e57f432fc2a' "$installer" | sha256sum -c -
-  printf '%s  %s\n' '0ea396c1e523ec07c2428799f36edf0cdf3730459f8bd7f509605c8cdce0251c' "$backend" | sha256sum -c -
-  bash "$installer"
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/b054f4b50374dd444434c9d17501a18ecb07adc1/install.sh -o "$installer"
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/b054f4b50374dd444434c9d17501a18ecb07adc1/install-openclaw.sh -o "$backend"
+  printf '%s  %s\n' 'ce9f6de9f096e4946084eb33be886947693e000a2461a0955d29a5e467549c23' "$installer" | sha256sum -c -
+  printf '%s  %s\n' '7758cc2aab51da3af18551ad138eb08a8c2d50e546955c498840933cbef63c7c' "$backend" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.2}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.2}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.2}" bash "$installer"
 )
 ```
 
@@ -93,8 +95,15 @@ Say Yes to Hermes. Say No to any other detected CLI you do not want mutated.
 Same checksum block, last line:
 
 ```bash
-bash "$installer" --non-interactive --with hermes
+NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.2}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.2}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.2}" bash "$installer" --non-interactive --with hermes
 ```
+
+The audited source download deliberately installs the **1.15.0 Hermes provider**
+(and 1.15.0 OpenCode/Kilo Code packages if selected), despite selecting the
+1.15.2 application image. For the coordinated 1.15.2 provider, use
+[`install-hermes.sh` from the verified 1.15.2 bundle](../hermes-noosphere-memory/README.md#install-the-1152-release-bundle)
+after provisioning the runtime, or use the packaged launcher from the 1.15.2
+release assets. The source-download command does not fetch that release launcher.
 
 `--non-interactive` without `--with` or `--core-only` exits 2. No TTY and no
 `--with`/`--core-only` also exits 2.
@@ -228,13 +237,13 @@ Never `docker compose` from a git clone. Never re-run `init`.
 ### 4.1 Scripts checkout (not the runtime)
 
 ```bash
-git clone --branch v1.15.0 --depth 1 https://github.com/SweetSophia/noosphere.git ~/src/noosphere-scripts
+git clone --branch v1.15.2 --depth 1 https://github.com/SweetSophia/noosphere.git ~/src/noosphere-scripts
 cd ~/src/noosphere-scripts
-test "$(git describe --tags --exact-match)" = v1.15.0
+test "$(git describe --tags --exact-match)" = v1.15.2
 npm ci
 ```
 
-That commit is tag `v1.15.0`. `npm ci` is for activators only. Do not run
+That commit is tag `v1.15.2`. `npm ci` is for activators only. Do not run
 Compose from this clone.
 
 ### 4.2 Snapshot
