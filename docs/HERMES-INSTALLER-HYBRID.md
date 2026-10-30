@@ -230,7 +230,7 @@ Never `docker compose` from a git clone. Never re-run `init`.
 ```bash
 git clone --branch v1.15.2 --depth 1 https://github.com/SweetSophia/noosphere.git ~/src/noosphere-scripts
 cd ~/src/noosphere-scripts
-test "$(git describe --tags --exact-match)" = v1.15.0
+test "$(git describe --tags --exact-match)" = v1.15.2
 npm ci
 ```
 

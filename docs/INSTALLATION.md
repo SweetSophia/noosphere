@@ -21,7 +21,7 @@ The installer checks its prerequisites before changing the machine.
 
 The launcher is coupled to the coordinated `v1.15.2` image, packages, and
 Hermes archive. Before running it, confirm that the
-[`v1.15.0` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.2)
+[`v1.15.2` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.2)
 exists with all six installer assets. Merging the installer source does not by
 itself publish those artifacts.
 
