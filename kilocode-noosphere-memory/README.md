@@ -162,6 +162,12 @@ has all six installer assets. This pinned launcher verifies its SHA-256 before
 execution; see the [GitHub installation guide](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md)
 for upgrade behavior and other installation paths.
 
+The source-pinned command below installs the **1.15.0 application and kilocode package**,
+not 1.15.2: both follow the source launcher's embedded release version. To
+install the coordinated 1.15.2 set, use the packaged launcher from the 1.15.2
+release assets; the explicit npm command earlier on this page selects the
+1.15.2 adapter when only the adapter needs installing.
+
 ```bash
 # Installer commit: b054f4b50374dd444434c9d17501a18ecb07adc1
 # Expected SHA-256: ce9f6de9f096e4946084eb33be886947693e000a2461a0955d29a5e467549c23

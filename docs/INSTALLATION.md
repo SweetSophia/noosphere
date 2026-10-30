@@ -28,8 +28,10 @@ itself publish those artifacts.
 
 The audited two-file download below runs the launcher from an immutable commit.
 Its version-bound command selects the `v1.15.2` image and OpenClaw package.
-The Hermes archive and the OpenCode and Kilo Code packages still come from the
-launcher's published fallback pair.
+The Hermes archive and the OpenCode and Kilo Code packages still install
+**1.15.0**, from the source launcher's embedded pins. This is a mixed-version
+source-download path, not the fully coordinated release installer. Use the
+packaged launcher from the `v1.15.2` release assets for a coordinated install.
 
 Use the [verified two-file download](#auditable-download) below. Both files
 come from an immutable commit, never a moving `master` or `main` branch.
@@ -127,6 +129,8 @@ Download the launcher and its reviewed backend into one private directory and
 check both SHA-256 values before execution. Keeping the sibling filename is
 essential: this source launcher retains an older published fallback for
 standalone downloads, while these instructions select its reviewed sibling.
+
+For an existing installation using a custom image, export `NOOSPHERE_IMAGE` explicitly before running this block. The version-bound default does not reuse a persisted image automatically.
 
 ```bash
 (

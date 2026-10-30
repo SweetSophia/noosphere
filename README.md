@@ -115,8 +115,10 @@ Use the [verified two-file download](docs/INSTALLATION.md#auditable-download)
 to run the guided installer. It downloads the launcher and its reviewed backend
 from an immutable commit, verifies both checksums, then runs them together.
 Its version-bound command selects the `v1.15.2` image and OpenClaw package;
-the Hermes archive and the OpenCode and Kilo Code packages still come from the
-launcher's published fallback pair.
+the Hermes archive and the OpenCode and Kilo Code packages still install
+**1.15.0**, from the source launcher's embedded pins. This is a mixed-version
+source-download path, not the fully coordinated release installer. Use the
+packaged launcher from the `v1.15.2` release assets for a coordinated install.
 
 The installer:
 

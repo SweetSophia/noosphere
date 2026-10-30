@@ -70,6 +70,8 @@ not copy another host's Tailscale URL.
 Checksum the launcher and its sibling backend, then run it with no flags. It prompts for each agent
 CLI it finds (`[Y/n]`, empty enter = Yes):
 
+For an existing installation using a custom image, export `NOOSPHERE_IMAGE` explicitly before running this block. The version-bound default does not reuse a persisted image automatically.
+
 ```bash
 (
   set -e
@@ -96,10 +98,12 @@ Same checksum block, last line:
 NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.2}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.2}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.2}" bash "$installer" --non-interactive --with hermes
 ```
 
-The audited download keeps the launcher's published fallback pair for the
-Hermes archive and the OpenCode and Kilo Code packages. Its version-bound
-command selects the `v1.15.2` image and OpenClaw package; the coordinated
-`v1.15.2` Hermes archive ships with the release assets.
+The audited source download deliberately installs the **1.15.0 Hermes provider**
+(and 1.15.0 OpenCode/Kilo Code packages if selected), despite selecting the
+1.15.2 application image. For the coordinated 1.15.2 provider, use
+[`install-hermes.sh` from the verified 1.15.2 bundle](../hermes-noosphere-memory/README.md#install-the-1152-release-bundle)
+after provisioning the runtime, or use the packaged launcher from the 1.15.2
+release assets. The source-download command does not fetch that release launcher.
 
 `--non-interactive` without `--with` or `--core-only` exits 2. No TTY and no
 `--with`/`--core-only` also exits 2.
