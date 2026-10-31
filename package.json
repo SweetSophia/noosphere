@@ -28,6 +28,7 @@
     "db:studio": "prisma studio",
     "package-policy:check": "node --test scripts/katex-override-policy.test.mjs && node scripts/check-package-policies.mjs",
     "postgres-image:check": "node scripts/check-postgres-image-policy.mjs",
+    "npm-publish:check": "scripts/test-npm-publication-integrity.sh",
     "installer:check": "node --test scripts/installer-key-diagnostics.test.mjs && scripts/test-installer-backend-mode.sh && scripts/test-installer-ux.sh && scripts/test-installer-package.sh",
     "hybrid-storage:activate": "bash scripts/activate-hybrid-storage.sh",
     "hybrid-worker:activate": "bash scripts/activate-hybrid-worker.sh",

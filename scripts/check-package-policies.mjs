@@ -57,6 +57,16 @@ function readJson(relativePath) {
   }
 }
 
+// Drops comment-only lines so a policy assertion cannot be satisfied by a
+// commented-out invocation or by prose in a header comment. YAML and shell
+// comments both start a line with "#", which is exactly what is dropped here.
+function codeLines(text) {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n");
+}
+
 function expect(condition, message) {
   if (!condition) {
     failures.push(message);
@@ -458,6 +468,8 @@ const installerPackager = readText("scripts/package-installer.sh");
 const installerBackendTest = readText("scripts/test-installer-backend-mode.sh");
 const installerUxTest = readText("scripts/test-installer-ux.sh");
 const installerPackageTest = readText("scripts/test-installer-package.sh");
+const npmIntegrityVerifier = readText("scripts/verify-npm-publication-integrity.sh");
+const npmIntegrityVerifierTest = readText("scripts/test-npm-publication-integrity.sh");
 const postgresImagePolicy = readText("scripts/check-postgres-image-policy.mjs");
 const versionSyncScript = readText("scripts/sync-version.mjs");
 const releaseVersion = readText("VERSION").trim();
@@ -672,6 +684,26 @@ expect(
     npmPublishWorkflow.includes("dist.integrity") &&
     npmPublishWorkflow.includes('npm publish "$TARBALL" --access public --provenance'),
   "The v-openclaw publication must publish or exact-integrity-verify the helper before OpenClaw without adding an independent dispatch input.",
+);
+expect(
+  codeLines(npmPublishHelperJob).includes(
+    'bash "$GITHUB_WORKSPACE/scripts/verify-npm-publication-integrity.sh"',
+  ) &&
+    codeLines(npmPublishHelperJob).includes('"$LOCAL_INTEGRITY"') &&
+    !codeLines(npmPublishHelperJob).includes("for attempt in {1..10}") &&
+    codeLines(npmIntegrityVerifier).includes("dist.integrity") &&
+    // The exit codes are the contract the release depends on: a mismatch is
+    // fatal, a still-propagating version is retried, a usage error and a
+    // registry failure are distinct from both. Assert the real statements,
+    // not the header comment that documents them.
+    /^\s*exit 1$/m.test(codeLines(npmIntegrityVerifier)) &&
+    /^\s*exit 2$/m.test(codeLines(npmIntegrityVerifier)) &&
+    /^\s*exit 3$/m.test(codeLines(npmIntegrityVerifier)) &&
+    /^\s*exit 4$/m.test(codeLines(npmIntegrityVerifier)) &&
+    codeLines(npmIntegrityVerifier).includes("Re-run the publish workflow") &&
+    codeLines(npmIntegrityVerifierTest).includes("propagation delay") &&
+    codeLines(npmIntegrityVerifierTest).includes("integrity mismatch"),
+  "The coordinated helper publication must verify the registry readback through the shared bounded verifier so a slow registry cannot abort a healthy release.",
 );
 expect(
   unpinnedActionUses(npmPublishWorkflowLines).length === 0,

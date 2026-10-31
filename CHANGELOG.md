@@ -8,7 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No changes yet.
+### Fixed
+- Coordinated npm publication: the registry readback after publishing a package
+  now uses a shared, bounded verifier instead of a fixed 10-poll/30-second
+  window. npm serves a freshly published version asynchronously and can need
+  minutes to become visible, so the 1.15.2 helper publication was published
+  successfully but its readback gave up first, failing the job and skipping the
+  dependent OpenClaw publication. A genuine integrity mismatch stays fatal, a
+  version that is still propagating is retried within the deadline, and the
+  verifier tells the operator to re-run the workflow rather than republish.
+  Covered by `scripts/test-npm-publication-integrity.sh` and enforced by the
+  package publishing policy check.
 
 ## [1.15.2] - 2026-10-30
 
