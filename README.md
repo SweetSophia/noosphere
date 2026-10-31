@@ -32,10 +32,11 @@ six installer assets, the `ghcr.io/sweetsophia/noosphere:1.15.2` image for
 OpenClaw, OpenCode and Kilo Code adapters resolve their maintained SDK aliases
 from the registry, so a fresh install no longer waits on a candidate.
 
-Use the [packaged launcher](#packaged-launcher) from the release assets for a
-fully coordinated install; the [verified two-file download](docs/INSTALLATION.md#auditable-download)
-from the source commit is the auditable alternative and still installs the
-OpenCode, Kilo Code and Hermes surfaces at their previous **1.15.0** pins.
+Use the [packaged launcher](#install) from the release assets for a fully
+coordinated install; the
+[verified two-file download](docs/INSTALLATION.md#auditable-download) from the
+source commit is the auditable alternative and still installs the OpenCode,
+Kilo Code and Hermes surfaces at their previous **1.15.0** pins.
 
 ### Root application dependency remediation
 
@@ -111,21 +112,11 @@ confirm that the
 [`v1.15.2` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.2)
 exists with all six installer assets; a merged commit alone is not a release.
 
-Use the [verified two-file download](docs/INSTALLATION.md#auditable-download)
-to run the guided installer. It downloads the launcher and its reviewed backend
-from an immutable commit, verifies both checksums, then runs them together.
-Its version-bound command selects the `v1.15.2` image and OpenClaw package;
-the Hermes archive and the OpenCode and Kilo Code packages still install
-**1.15.0**, from the source launcher's embedded pins. This is a mixed-version
-source-download path, not the fully coordinated release installer. Use the
-packaged launcher from the `v1.15.2` release assets for a coordinated install.
-
-### Packaged launcher
-
-The release assets are the coordinated path: the launcher, its backend and the
-Hermes bundle all carry the same `1.15.2` pins, so every integration surface
-lands on one version. Download both files from the release and verify both
-checksums before running them.
+**Packaged launcher (recommended).** The release assets are the coordinated
+path: the launcher, its backend and the Hermes archive all carry the same
+`1.15.2` pins, so every surface the launcher installs lands on one version.
+Download both files from the release and verify both checksums before running
+them.
 
 ```bash
 (
@@ -134,17 +125,34 @@ checksums before running them.
   trap 'rm -rf "$installer_dir"' EXIT
   installer="$installer_dir/install.sh"
   backend="$installer_dir/install-openclaw.sh"
+  unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
   curl -fsSL https://github.com/SweetSophia/noosphere/releases/download/v1.15.2/install.sh -o "$installer"
   curl -fsSL https://github.com/SweetSophia/noosphere/releases/download/v1.15.2/install-openclaw.sh -o "$backend"
   printf '%s  %s\n' 'fa38522104b10991cc85774fade4dffc559090e64838827cffeb74d200d547e0' "$installer" | sha256sum -c -
   printf '%s  %s\n' '7758cc2aab51da3af18551ad138eb08a8c2d50e546955c498840933cbef63c7c' "$backend" | sha256sum -c -
-  NOOSPHERE_VERSION=1.15.2 NOOSPHERE_IMAGE=ghcr.io/sweetsophia/noosphere:1.15.2 NOOSPHERE_PLUGIN_SPEC=npm:@sweetsophia/openclaw-noosphere-memory@1.15.2 bash "$installer"
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.2}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.2}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.2}" bash "$installer" --non-interactive --with openclaw
 )
 ```
+
+The command is non-interactive and selects its integrations explicitly; it
+never guesses which agent configuration to mutate. Add `hermes`, `opencode` or
+`kilocode` to the `--with` list to configure those surfaces as well - the
+packaged launcher resolves the Hermes archive and the OpenCode and Kilo Code
+packages to `1.15.2` too. Each setting is only a default, so an operator who
+exported `NOOSPHERE_IMAGE`, `NOOSPHERE_VERSION` or `NOOSPHERE_PLUGIN_SPEC`
+keeps their own value.
 
 The launcher detects an existing installation, preserves the named PostgreSQL
 volume and its configuration, and uses the guarded stateful upgrade path. It
 never treats the database as disposable.
+
+**Audited source download (alternative).** The
+[verified two-file download](docs/INSTALLATION.md#auditable-download) runs the
+launcher from an immutable commit instead of the release assets. Its
+version-bound command selects the `1.15.2` image and OpenClaw package, but
+that launcher's embedded pins still install the Hermes archive and the OpenCode
+and Kilo Code packages at **1.15.0**. That is a mixed-version path; use the
+packaged launcher for a coordinated install.
 
 The installer:
 

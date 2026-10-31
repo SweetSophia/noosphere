@@ -965,8 +965,66 @@ for (const relativePath of [
   );
 }
 
+/**
+ * Extract the packaged-launcher release reference a document advertises.
+ *
+ * The recommended install path points at the published release assets, whose
+ * bytes are immutable. Documentation drift there breaks every download for
+ * users, so the reference is parsed out of the document and cross-checked
+ * against the other documents and, during release verification, against the
+ * actual published files.
+ */
+function extractDocumentedPackagedLauncher(relativePath) {
+  const text = read(relativePath);
+  const urlMatch = text.match(
+    /https:\/\/github\.com\/SweetSophia\/noosphere\/releases\/download\/(v[0-9][^/\s]*)\/install\.sh/,
+  );
+  if (!urlMatch) {
+    failures.push(`${relativePath} must document the packaged launcher release download`);
+    return null;
+  }
+  // Only the block after the release URL is authoritative: an audited source
+  // download in the same document pins different, unrelated digests.
+  const block = text.slice(text.indexOf(urlMatch[0]));
+  const installerMatch = block.match(/printf '%s  %s\\n' '([a-f0-9]{64})' "\$installer" \| sha256sum -c -/);
+  const backendMatch = block.match(/printf '%s  %s\\n' '([a-f0-9]{64})' "\$backend" \| sha256sum -c -/);
+  if (!installerMatch || !backendMatch) {
+    failures.push(`${relativePath} must verify both packaged launcher checksums`);
+    return null;
+  }
+  return {
+    version: urlMatch[1],
+    installerSha256: installerMatch[1],
+    backendSha256: backendMatch[1],
+  };
+}
+
 const readme = read("README.md");
 const installationGuide = read("docs/INSTALLATION.md");
+
+const documentedPackagedLaunchers = ["README.md", "docs/INSTALLATION.md"].map((relativePath) => ({
+  relativePath,
+  reference: extractDocumentedPackagedLauncher(relativePath),
+}));
+const documentedLauncherReferences = documentedPackagedLaunchers
+  .map((entry) => entry.reference)
+  .filter(Boolean);
+expect(
+  documentedLauncherReferences.length === documentedPackagedLaunchers.length,
+  "README.md and docs/INSTALLATION.md must both document the packaged launcher release download",
+);
+for (const entry of documentedPackagedLaunchers) {
+  if (!entry.reference) continue;
+  for (const other of documentedPackagedLaunchers) {
+    if (other === entry || !other.reference) continue;
+    expect(
+      other.reference.version === entry.reference.version &&
+        other.reference.installerSha256 === entry.reference.installerSha256 &&
+        other.reference.backendSha256 === entry.reference.backendSha256,
+      `${entry.relativePath} and ${other.relativePath} must document the same packaged launcher release and digests`,
+    );
+  }
+}
 const guidedLauncherDocs = [
   "README.md",
   "docs/INSTALLATION.md",
@@ -1756,6 +1814,21 @@ if (verifyReleaseFiles) {
     releaseBackendUrl === `${expectedReleaseBase}${releaseBackendName}`,
     "release launcher backend URL must target its coordinated release asset",
   );
+  for (const entry of documentedPackagedLaunchers) {
+    if (!entry.reference) continue;
+    expect(
+      entry.reference.version === `v${releaseVersion}`,
+      `${entry.relativePath} must document the release that is being verified (v${releaseVersion})`,
+    );
+    expect(
+      entry.reference.installerSha256 === releaseLauncherSha,
+      `${entry.relativePath} must document the published install.sh digest ${releaseLauncherSha}`,
+    );
+    expect(
+      entry.reference.backendSha256 === releaseBackendSha,
+      `${entry.relativePath} must document the published install-openclaw.sh digest ${releaseBackendSha}`,
+    );
+  }
   expect(
     releaseHermesUrl === `${expectedReleaseBase}${hermesName}`,
     "release launcher Hermes URL must target its coordinated release asset",
