@@ -138,9 +138,15 @@ The command is non-interactive and selects its integrations explicitly; it
 never guesses which agent configuration to mutate. Add `hermes`, `opencode` or
 `kilocode` to the `--with` list to configure those surfaces as well - the
 packaged launcher resolves the Hermes archive and the OpenCode and Kilo Code
-packages to `1.15.2` too. Each setting is only a default, so an operator who
-exported `NOOSPHERE_IMAGE`, `NOOSPHERE_VERSION` or `NOOSPHERE_PLUGIN_SPEC`
-keeps their own value.
+packages to `1.15.2` too.
+
+Each setting is a default that the launcher applies when the environment does
+not already carry one, so an operator who exported `NOOSPHERE_IMAGE`,
+`NOOSPHERE_VERSION` or `NOOSPHERE_PLUGIN_SPEC` keeps their own value. One
+caveat carries over from the audited block: for an existing installation using
+a custom image, export `NOOSPHERE_IMAGE` explicitly before running this block.
+The version-bound default does not reuse a persisted image automatically, so
+without that export the stock `1.15.2` image replaces it.
 
 The launcher detects an existing installation, preserves the named PostgreSQL
 volume and its configuration, and uses the guarded stateful upgrade path. It
@@ -148,17 +154,18 @@ never treats the database as disposable.
 
 **Audited source download (alternative).** The
 [verified two-file download](docs/INSTALLATION.md#auditable-download) runs the
-launcher from an immutable commit instead of the release assets. Its
-version-bound command selects the `1.15.2` image and OpenClaw package, but
-that launcher's embedded pins still install the Hermes archive and the OpenCode
-and Kilo Code packages at **1.15.0**. That is a mixed-version path; use the
-packaged launcher for a coordinated install.
+launcher from an immutable commit instead of the release assets. It prompts for
+which integrations to configure, so it needs a terminal, and it is a
+mixed-version path: that launcher's embedded pins still install the Hermes
+archive and the OpenCode and Kilo Code packages at **1.15.0**. Use the
+packaged launcher for a coordinated, non-interactive install.
 
 The installer:
 
 - shows its plan and detects fresh-install, interrupted-run, or upgrade state;
-- offers OpenClaw, Hermes Agent, OpenCode, and Kilo Code integrations found on
-  the machine;
+- when run interactively, offers the OpenClaw, Hermes Agent, OpenCode, and
+  Kilo Code integrations it finds on the machine; the documented commands above
+  skip that prompt and select explicitly;
 - generates distinct runtime credentials without printing them;
 - preserves the named PostgreSQL volume and uses the guarded stateful upgrade
   path when an existing installation is present;

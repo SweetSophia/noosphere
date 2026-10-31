@@ -179,9 +179,15 @@ command is non-interactive and selects its integrations explicitly; it never
 guesses which agent configuration to mutate. Add `hermes`, `opencode` or
 `kilocode` to the `--with` list to configure those surfaces as well - the
 packaged launcher resolves the Hermes archive and the OpenCode and Kilo Code
-packages to `1.15.2` too. Each setting is only a default, so an operator who
-exported `NOOSPHERE_IMAGE`, `NOOSPHERE_VERSION` or `NOOSPHERE_PLUGIN_SPEC`
-keeps their own value.
+packages to `1.15.2` too.
+
+Each setting is a default that the launcher applies when the environment does
+not already carry one, so an operator who exported `NOOSPHERE_IMAGE`,
+`NOOSPHERE_VERSION` or `NOOSPHERE_PLUGIN_SPEC` keeps their own value. The
+custom-image caveat from the audited block applies here too: for an existing
+installation using a custom image, export `NOOSPHERE_IMAGE` explicitly before
+running this block. The version-bound default does not reuse a persisted image
+automatically, so without that export the stock `1.15.2` image replaces it.
 
 ## Fresh install versus upgrade
 

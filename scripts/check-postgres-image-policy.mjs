@@ -966,36 +966,65 @@ for (const relativePath of [
 }
 
 /**
- * Extract the packaged-launcher release reference a document advertises.
+ * Parse the packaged-launcher install block a document advertises.
  *
  * The recommended install path points at the published release assets, whose
- * bytes are immutable. Documentation drift there breaks every download for
- * users, so the reference is parsed out of the document and cross-checked
- * against the other documents and, during release verification, against the
- * actual published files.
+ * bytes are immutable. A mistake in that block breaks every download, so the
+ * block is parsed out of the document and asserted directly: the two release
+ * URLs must carry the same release tag, both digests must be verified before
+ * execution, the environment must not be able to substitute an unverified
+ * backend, and the invocation must select its integrations explicitly.
  */
 function extractDocumentedPackagedLauncher(relativePath) {
   const text = read(relativePath);
-  const urlMatch = text.match(
-    /https:\/\/github\.com\/SweetSophia\/noosphere\/releases\/download\/(v[0-9][^/\s]*)\/install\.sh/,
-  );
-  if (!urlMatch) {
-    failures.push(`${relativePath} must document the packaged launcher release download`);
+  const blocks = [...text.matchAll(/```bash\n([\s\S]*?)```/g)]
+    .map((match) => match[1])
+    .filter((block) => block.includes("/releases/download/v"));
+  if (blocks.length !== 1) {
+    failures.push(
+      `${relativePath} must contain exactly one packaged launcher install block (found ${blocks.length})`,
+    );
     return null;
   }
-  // Only the block after the release URL is authoritative: an audited source
-  // download in the same document pins different, unrelated digests.
-  const block = text.slice(text.indexOf(urlMatch[0]));
-  const installerMatch = block.match(/printf '%s  %s\\n' '([a-f0-9]{64})' "\$installer" \| sha256sum -c -/);
-  const backendMatch = block.match(/printf '%s  %s\\n' '([a-f0-9]{64})' "\$backend" \| sha256sum -c -/);
-  if (!installerMatch || !backendMatch) {
+  const block = blocks[0];
+  const installerUrl = block.match(/releases\/download\/(v[0-9][^/\s]*)\/install\.sh/);
+  const backendUrl = block.match(/releases\/download\/(v[0-9][^/\s]*)\/install-openclaw\.sh/);
+  if (!installerUrl || !backendUrl) {
+    failures.push(
+      `${relativePath} must download both the release launcher and its backend from the same release`,
+    );
+    return null;
+  }
+  if (installerUrl[1] !== backendUrl[1]) {
+    failures.push(
+      `${relativePath} must download the launcher and the backend from the same release tag`,
+    );
+  }
+  const installerDigest = block.match(/printf '%s  %s\\n' '([a-f0-9]{64})' "\$installer" \| sha256sum -c -/);
+  const backendDigest = block.match(/printf '%s  %s\\n' '([a-f0-9]{64})' "\$backend" \| sha256sum -c -/);
+  if (!installerDigest || !backendDigest) {
     failures.push(`${relativePath} must verify both packaged launcher checksums`);
     return null;
   }
+  expect(
+    block.includes("unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256"),
+    `${relativePath} must unset the backend override so the checksum-verified sibling backend is the one that runs`,
+  );
+  for (const setting of ["NOOSPHERE_VERSION", "NOOSPHERE_IMAGE", "NOOSPHERE_PLUGIN_SPEC"]) {
+    expect(
+      block.includes(`${setting}="\${${setting}:-`),
+      `${relativePath} must default ${setting} instead of overriding an operator export`,
+    );
+  }
+  const invocation = block.match(/bash "\$installer"[^\n]*/);
+  expect(
+    invocation !== null && invocation[0].includes("--non-interactive --with "),
+    `${relativePath} must invoke the launcher non-interactively with an explicit integration selection`,
+  );
   return {
-    version: urlMatch[1],
-    installerSha256: installerMatch[1],
-    backendSha256: backendMatch[1],
+    version: installerUrl[1],
+    installerSha256: installerDigest[1],
+    backendSha256: backendDigest[1],
   };
 }
 
@@ -1025,6 +1054,13 @@ for (const entry of documentedPackagedLaunchers) {
     );
   }
 }
+const documentedReleaseVersions = [
+  ...new Set(
+    documentedPackagedLaunchers
+      .map((entry) => entry.reference?.version)
+      .filter(Boolean),
+  ),
+];
 const guidedLauncherDocs = [
   "README.md",
   "docs/INSTALLATION.md",
@@ -1693,6 +1729,29 @@ expect(
 );
 
 if (verifyRemoteArtifacts) {
+  // The documented install block promises the digests of an immutable published
+  // release, so the check compares them against the published bytes. A local
+  // rebuild is not a valid substitute: it changes with every installer commit
+  // while the published asset does not.
+  for (const version of documentedReleaseVersions) {
+    const releaseBase = `https://github.com/SweetSophia/noosphere/releases/download/${version}/`;
+    const documented = documentedPackagedLaunchers.find(
+      (entry) => entry.reference?.version === version,
+    );
+    if (!documented?.reference) continue;
+    await verifyRemoteArtifact(
+      `published release launcher ${version}`,
+      `${releaseBase}install.sh`,
+      documented.reference.installerSha256,
+      { followRedirects: true },
+    );
+    await verifyRemoteArtifact(
+      `published release backend ${version}`,
+      `${releaseBase}install-openclaw.sh`,
+      documented.reference.backendSha256,
+      { followRedirects: true },
+    );
+  }
   await verifyRemoteArtifact(
     "guided installer",
     `${rawRepositoryUrl}/${guidedInstallerRef}/install.sh`,
@@ -1814,21 +1873,6 @@ if (verifyReleaseFiles) {
     releaseBackendUrl === `${expectedReleaseBase}${releaseBackendName}`,
     "release launcher backend URL must target its coordinated release asset",
   );
-  for (const entry of documentedPackagedLaunchers) {
-    if (!entry.reference) continue;
-    expect(
-      entry.reference.version === `v${releaseVersion}`,
-      `${entry.relativePath} must document the release that is being verified (v${releaseVersion})`,
-    );
-    expect(
-      entry.reference.installerSha256 === releaseLauncherSha,
-      `${entry.relativePath} must document the published install.sh digest ${releaseLauncherSha}`,
-    );
-    expect(
-      entry.reference.backendSha256 === releaseBackendSha,
-      `${entry.relativePath} must document the published install-openclaw.sh digest ${releaseBackendSha}`,
-    );
-  }
   expect(
     releaseHermesUrl === `${expectedReleaseBase}${hermesName}`,
     "release launcher Hermes URL must target its coordinated release asset",
