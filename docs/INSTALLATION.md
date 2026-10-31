@@ -151,6 +151,32 @@ For an existing installation using a custom image, export `NOOSPHERE_IMAGE` expl
 The launcher independently verifies the sibling backend and optional Hermes
 bundle before using them. The temporary directory is removed on exit.
 
+### Packaged launcher
+
+The release assets are the coordinated path: the launcher, its backend and the
+Hermes bundle all carry the same `1.15.2` pins, so every integration surface
+lands on one version. Download both files from the release, verify both
+checksums, and run them.
+
+```bash
+(
+  set -e
+  installer_dir="$(mktemp -d)"
+  trap 'rm -rf "$installer_dir"' EXIT
+  installer="$installer_dir/install.sh"
+  backend="$installer_dir/install-openclaw.sh"
+  curl -fsSL https://github.com/SweetSophia/noosphere/releases/download/v1.15.2/install.sh -o "$installer"
+  curl -fsSL https://github.com/SweetSophia/noosphere/releases/download/v1.15.2/install-openclaw.sh -o "$backend"
+  printf '%s  %s\n' 'fa38522104b10991cc85774fade4dffc559090e64838827cffeb74d200d547e0' "$installer" | sha256sum -c -
+  printf '%s  %s\n' '7758cc2aab51da3af18551ad138eb08a8c2d50e546955c498840933cbef63c7c' "$backend" | sha256sum -c -
+  NOOSPHERE_VERSION=1.15.2 NOOSPHERE_IMAGE=ghcr.io/sweetsophia/noosphere:1.15.2 NOOSPHERE_PLUGIN_SPEC=npm:@sweetsophia/openclaw-noosphere-memory@1.15.2 bash "$installer"
+)
+```
+
+The published `.sha256` assets next to each file carry the same digests. This
+path installs the `1.15.2` Hermes archive and the `1.15.2` OpenCode and Kilo
+Code packages, unlike the audited source download above.
+
 ## Fresh install versus upgrade
 
 The same entry point handles both lifecycle paths, but they are not equivalent.

@@ -1,8 +1,12 @@
 # OpenClaw Noosphere Official Plugin Setup
 
-> **1.15.2 release candidate — not published.** Version-bound commands below
-> are for the candidate and must not run until the coordinated public release
-> and all six installer assets exist. Merge/publication/production remain on hold.
+> **1.15.2 is published.** The coordinated release exists at
+> [`v1.15.2`](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.2)
+> with all six installer assets, the `ghcr.io/sweetsophia/noosphere:1.15.2`
+> image (`linux/amd64` and `linux/arm64`), and the five `1.15.2` npm packages.
+> The version-bound commands below are release-bound and may run now. Use the
+> [packaged launcher](INSTALLATION.md#packaged-launcher) from the release
+> assets for a fully coordinated install.
 
 This guide documents the official OpenClaw-facing Noosphere install path: a local Noosphere Docker Compose runtime plus the `noosphere-memory` OpenClaw plugin.
 
