@@ -21,10 +21,31 @@ const guidedBackendSha256 = "7758cc2aab51da3af18551ad138eb08a8c2d50e546955c49884
 const publishedFallbackRef = "d0cef60aad8a0f5dea8ed4d2dc2e6f93629dab29";
 const publishedFallbackSha256 = "04a3cd17d75542dca48b0f4bdd7cc7cffa926629b192c0e79bea91d2e44b2952";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
+// The release the installation documentation points at. Its published bytes are
+// immutable, so its digests are pinned here and checked against published assets
+// rather than against a rebuild of the working tree.
+const documentedReleaseVersion = "1.15.2";
+const documentedReleaseInstallerSha256 =
+  "fa38522104b10991cc85774fade4dffc559090e64838827cffeb74d200d547e0";
+const documentedReleaseBackendSha256 =
+  "7758cc2aab51da3af18551ad138eb08a8c2d50e546955c498840933cbef63c7c";
+// Test-only override for packaged-launcher blocks. All other policy assertions
+// intentionally read the repository copy; this is not a general document root.
+const packagedDocumentsOption = "--packaged-launcher-documents-root";
+const packagedDocumentsIndex = process.argv.indexOf(packagedDocumentsOption);
+let packagedDocumentsRoot = root;
+if (packagedDocumentsIndex >= 0) {
+  const value = process.argv[packagedDocumentsIndex + 1];
+  if (!value || value.startsWith("--")) {
+    console.error(`Usage: ${packagedDocumentsOption} requires a directory argument`);
+    process.exit(2);
+  }
+  packagedDocumentsRoot = resolve(value);
+}
 
-function read(relativePath) {
+function read(relativePath, base = root) {
   try {
-    return readFileSync(resolve(root, relativePath), "utf8");
+    return readFileSync(resolve(base, relativePath), "utf8");
   } catch (error) {
     failures.push(`Failed to read ${relativePath}: ${error.message}`);
     return "";
@@ -156,7 +177,7 @@ async function verifyRemoteArtifact(
   label,
   url,
   expectedSha256,
-  { followRedirects = false } = {},
+  { followRedirects = false, documentation = null } = {},
 ) {
   try {
     const response = await fetch(url, {
@@ -164,7 +185,13 @@ async function verifyRemoteArtifact(
       signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) {
-      failures.push(`${label} returned HTTP ${response.status}: ${url}`);
+      if (response.status === 404 && documentation) {
+        failures.push(
+          `${documentation}: documented release v${documentedReleaseVersion} is not published or unavailable (HTTP 404): ${url}; keep these documents on the last published release and update them only after publication`,
+        );
+      } else {
+        failures.push(`${label} returned HTTP ${response.status}: ${url}`);
+      }
       return;
     }
 
@@ -182,7 +209,9 @@ async function verifyRemoteArtifact(
     const actualSha256 = createHash("sha256").update(bytes).digest("hex");
     expect(
       actualSha256 === expectedSha256,
-      `${label} at its immutable ref must match ${expectedSha256}, got ${actualSha256}`,
+      documentation
+        ? `${documentation}: published asset digest mismatch for ${label}; expected ${expectedSha256}, got ${actualSha256}: ${url}`
+        : `${label} at its immutable ref must match ${expectedSha256}, got ${actualSha256}`,
     );
   } catch (error) {
     failures.push(`${label} could not be verified at its immutable ref: ${error.message}`);
@@ -965,8 +994,124 @@ for (const relativePath of [
   );
 }
 
+/**
+ * Compare two release versions numerically. Missing components count as zero, so
+ * "1.15" and "1.15.0" compare equal.
+ */
+function compareReleaseVersions(left, right) {
+  const parse = (value) =>
+    String(value)
+      .split(".")
+      .map((part) => Number.parseInt(part, 10) || 0);
+  const a = parse(left);
+  const b = parse(right);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const difference = (a[index] ?? 0) - (b[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+/**
+ * Parse the packaged-launcher install blocks a document advertises.
+ *
+ * The recommended install path points at the published release assets, whose
+ * bytes are immutable. A mistake in that block breaks every download, so every
+ * candidate block is parsed out of the document and asserted directly: the two
+ * release URLs must carry the same release tag, both digests must be verified
+ * before execution, the environment must not be able to substitute an
+ * unverified backend, and the invocation must select its integrations
+ * explicitly.
+ */
+function extractDocumentedPackagedLaunchers(relativePath) {
+  const text = read(relativePath, packagedDocumentsRoot);
+  const blocks = [...text.matchAll(/```[a-zA-Z0-9]*\n([\s\S]*?)```/g)]
+    .map((match) => match[1])
+    .filter((block) => block.includes("/releases/download/v"));
+  if (blocks.length === 0) {
+    failures.push(`${relativePath} must contain a packaged launcher install block`);
+    return [];
+  }
+  const references = [];
+  blocks.forEach((block, index) => {
+    const installerUrl = block.match(/releases\/download\/(v[0-9][^/\s]*)\/install\.sh/);
+    const backendUrl = block.match(/releases\/download\/(v[0-9][^/\s]*)\/install-openclaw\.sh/);
+    if (!installerUrl || !backendUrl) {
+      failures.push(
+        `${relativePath} packaged launcher block ${index + 1} must download both the release launcher and its backend`,
+      );
+      return;
+    }
+    if (installerUrl[1] !== backendUrl[1]) {
+      failures.push(
+        `${relativePath} packaged launcher block ${index + 1} must download the launcher and the backend from the same release tag`,
+      );
+    }
+    const installerDigest = block.match(/printf '%s  %s\\n' '([a-f0-9]{64})' "\$installer" \| sha256sum -c -/);
+    const backendDigest = block.match(/printf '%s  %s\\n' '([a-f0-9]{64})' "\$backend" \| sha256sum -c -/);
+    if (!installerDigest || !backendDigest) {
+      failures.push(`${relativePath} packaged launcher block ${index + 1} must verify both checksums`);
+      return;
+    }
+    expect(
+      block.includes("unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256"),
+      `${relativePath} packaged launcher block ${index + 1} must unset the backend override so the checksum-verified sibling backend is the one that runs`,
+    );
+    for (const setting of ["NOOSPHERE_VERSION", "NOOSPHERE_IMAGE", "NOOSPHERE_PLUGIN_SPEC"]) {
+      expect(
+        block.includes(`${setting}="\${${setting}:-`),
+        `${relativePath} packaged launcher block ${index + 1} must default ${setting} instead of overriding an operator export`,
+      );
+    }
+    const invocations = [...block.matchAll(/bash "\$installer"[^\n]*/g)];
+    expect(
+      invocations.length > 0 &&
+        invocations.every((invocation) => invocation[0].includes("--non-interactive --with ")),
+      `${relativePath} packaged launcher block ${index + 1} must invoke the launcher non-interactively with an explicit integration selection`,
+    );
+    // Check both complete verification commands, not just the first checksum
+    // token. Every invocation must follow them, including duplicate invocations.
+    const verificationEnd = Math.max(
+      installerDigest.index + installerDigest[0].length,
+      backendDigest.index + backendDigest[0].length,
+    );
+    expect(
+      invocations.length > 0 &&
+        invocations.every((invocation) => invocation.index > verificationEnd),
+      `${relativePath} packaged launcher block ${index + 1} must verify both checksums before invoking the launcher`,
+    );
+    references.push({
+      version: installerUrl[1],
+      installerSha256: installerDigest[1],
+      backendSha256: backendDigest[1],
+    });
+  });
+  return references;
+}
+
 const readme = read("README.md");
 const installationGuide = read("docs/INSTALLATION.md");
+
+const documentedPackagedLaunchers = ["README.md", "docs/INSTALLATION.md"].map((relativePath) => ({
+  relativePath,
+  references: extractDocumentedPackagedLaunchers(relativePath),
+}));
+for (const entry of documentedPackagedLaunchers) {
+  for (const reference of entry.references) {
+    expect(
+      reference.version === `v${documentedReleaseVersion}`,
+      `${entry.relativePath} must document the published release v${documentedReleaseVersion}, not ${reference.version}`,
+    );
+    expect(
+      reference.installerSha256 === documentedReleaseInstallerSha256,
+      `${entry.relativePath} must document the published install.sh digest ${documentedReleaseInstallerSha256}`,
+    );
+    expect(
+      reference.backendSha256 === documentedReleaseBackendSha256,
+      `${entry.relativePath} must document the published install-openclaw.sh digest ${documentedReleaseBackendSha256}`,
+    );
+  }
+}
 const guidedLauncherDocs = [
   "README.md",
   "docs/INSTALLATION.md",
@@ -1635,6 +1780,23 @@ expect(
 );
 
 if (verifyRemoteArtifacts) {
+  // The documented install block promises the digests of an immutable published
+  // release, so the check compares them against the published bytes. A local
+  // rebuild is not a valid substitute: it changes with every installer commit
+  // while the published asset does not.
+  const documentedReleaseBase = `https://github.com/SweetSophia/noosphere/releases/download/v${documentedReleaseVersion}/`;
+  await verifyRemoteArtifact(
+    `published release launcher v${documentedReleaseVersion}`,
+    `${documentedReleaseBase}install.sh`,
+    documentedReleaseInstallerSha256,
+    { followRedirects: true, documentation: "README.md and docs/INSTALLATION.md" },
+  );
+  await verifyRemoteArtifact(
+    `published release backend v${documentedReleaseVersion}`,
+    `${documentedReleaseBase}install-openclaw.sh`,
+    documentedReleaseBackendSha256,
+    { followRedirects: true, documentation: "README.md and docs/INSTALLATION.md" },
+  );
   await verifyRemoteArtifact(
     "guided installer",
     `${rawRepositoryUrl}/${guidedInstallerRef}/install.sh`,
@@ -1759,6 +1921,14 @@ if (verifyReleaseFiles) {
   expect(
     releaseHermesUrl === `${expectedReleaseBase}${hermesName}`,
     "release launcher Hermes URL must target its coordinated release asset",
+  );
+  // The directory under verification may hold a local rebuild rather than the
+  // published bytes, so its digests are not compared here. The release may be
+  // newer than the documented one - the documentation follows publication - but
+  // a release older than the one users are told to install is a rollback.
+  expect(
+    compareReleaseVersions(releaseVersion, documentedReleaseVersion) >= 0,
+    `the release under verification is v${releaseVersion}, which is older than the v${documentedReleaseVersion} the installation documentation advertises`,
   );
 }
 
