@@ -164,8 +164,9 @@ The installer:
 
 - shows its plan and detects fresh-install, interrupted-run, or upgrade state;
 - when run interactively, offers the OpenClaw, Hermes Agent, OpenCode, and
-  Kilo Code integrations it finds on the machine; the documented commands above
-  skip that prompt and select explicitly;
+  Kilo Code integrations it finds on the machine; the packaged-launcher command
+  above skips that prompt and selects explicitly, while the audited download
+  prompts for the integrations it finds;
 - generates distinct runtime credentials without printing them;
 - preserves the named PostgreSQL volume and uses the guarded stateful upgrade
   path when an existing installation is present;

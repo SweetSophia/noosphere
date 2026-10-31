@@ -40,6 +40,22 @@ This step is release preparation, not authorization to create tags or publish.
 7. Re-fetch `origin/master`; bind the exact merge commit and tree in the release
    receipt. A later commit invalidates the gate.
 
+## Documentation follows publication
+
+`README.md` and `docs/INSTALLATION.md` advertise one published release: the
+`vX.Y.Z` launcher and its backend, with both SHA-256 digests. The policy
+check `npm run postgres-image:check` asserts that the documented release and its
+digests match the published assets, and that the documented install block keeps
+its guards (the backend override unset, the three settings as defaults, and an
+explicit non-interactive integration selection).
+
+Because the documented digests are the published bytes, the documentation may
+only advertise a release that already exists. A release therefore updates the
+documentation **after** its assets are published, in a follow-up change: the
+release PR itself must not point the documentation at the release it is about
+to cut, because the advertised asset does not exist yet and the check reports
+that as a missing published asset rather than as a documentation defect.
+
 ## Publication order
 
 Default-branch and pull-request Docker runs build both architectures but do not

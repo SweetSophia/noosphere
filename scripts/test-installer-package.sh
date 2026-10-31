@@ -282,4 +282,73 @@ if (cd "$tmp/aligned-hermes-release" && node "$root/scripts/check-postgres-image
 fi
 grep -q 'release launcher must pin the downloaded Hermes bundle bytes' "$tmp/aligned-hermes-release.out"
 
-printf 'installer_package_tests=GREEN assets=6 deterministic=yes source_mode_matrix=3 canonical_modes=0644/0755 piped_entrypoint=yes sibling_checksum_sensitive=yes remote_checksum_sensitive=yes release_set_verified=yes release_public_fixture_verified=yes release_negative_controls=7\n'
+# Documentation negative controls: the policy check must reject a documented
+# install block that drifts from the published release or loses a guard.
+doc_fixture="$tmp/doc-fixture"
+mkdir -p "$doc_fixture/docs"
+cp "$root/README.md" "$doc_fixture/README.md"
+cp "$root/docs/INSTALLATION.md" "$doc_fixture/docs/INSTALLATION.md"
+
+assert_doc_gate_rejects() {
+  local label="$1" expected="$2"
+  shift 2
+  "$@"
+  if node "$root/scripts/check-postgres-image-policy.mjs" --documents-root "$doc_fixture" \
+    > "$tmp/doc-$label.out" 2>&1; then
+    echo "documented $label unexpectedly passed" >&2
+    exit 1
+  fi
+  if ! grep -q "$expected" "$tmp/doc-$label.out"; then
+    echo "documented $label failed for the wrong reason" >&2
+    cat "$tmp/doc-$label.out" >&2
+    exit 1
+  fi
+  cp "$root/README.md" "$doc_fixture/README.md"
+  cp "$root/docs/INSTALLATION.md" "$doc_fixture/docs/INSTALLATION.md"
+}
+
+assert_doc_gate_rejects \
+  'drifted digest' \
+  'must document the published install.sh digest' \
+  sed -i 's/fa38522104b10991cc85774fade4dffc559090e64838827cffeb74d200d547e0/0000000000000000000000000000000000000000000000000000000000000000/' \
+    "$doc_fixture/README.md"
+
+assert_doc_gate_rejects \
+  'hard-pinned image' \
+  'must default NOOSPHERE_IMAGE instead of overriding an operator export' \
+  sed -i 's|NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.2}"|NOOSPHERE_IMAGE=ghcr.io/sweetsophia/noosphere:1.15.2|' \
+    "$doc_fixture/README.md"
+
+assert_doc_gate_rejects \
+  'missing backend unset' \
+  'must unset the backend override so the checksum-verified sibling backend is the one that runs' \
+  sed -i '/unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256/d' \
+    "$doc_fixture/README.md"
+
+assert_doc_gate_rejects \
+  'missing explicit selection' \
+  'must invoke the launcher non-interactively with an explicit integration selection' \
+  sed -i 's|bash "\$installer" --non-interactive --with openclaw|bash "\$installer"|' \
+    "$doc_fixture/README.md"
+
+assert_doc_gate_rejects \
+  'single verified digest' \
+  'must verify both checksums' \
+  sed -i '/sha256sum -c -/!b;n;/\$backend/d' \
+    "$doc_fixture/README.md"
+
+assert_doc_gate_rejects \
+  'wrong release tag' \
+  'must document the published release v' \
+  sed -i 's|releases/download/v1.15.2/|releases/download/v9.9.9/|' \
+    "$doc_fixture/README.md"
+
+# A document that still carries a valid block must pass.
+if ! node "$root/scripts/check-postgres-image-policy.mjs" --documents-root "$doc_fixture" \
+  > "$tmp/doc-baseline.out" 2>&1; then
+  echo 'unchanged documentation unexpectedly failed the policy check' >&2
+  cat "$tmp/doc-baseline.out" >&2
+  exit 1
+fi
+
+printf 'installer_package_tests=GREEN assets=6 deterministic=yes source_mode_matrix=3 canonical_modes=0644/0755 piped_entrypoint=yes sibling_checksum_sensitive=yes remote_checksum_sensitive=yes release_set_verified=yes release_public_fixture_verified=yes release_negative_controls=7 doc_negative_controls=6 doc_baseline=pass\n'
