@@ -9,8 +9,6 @@ trap 'rm -rf "$tmp"' EXIT
   exit 2
 }
 
-node --test "$root/scripts/packaged-launcher-documents.test.mjs"
-
 # Exercise the checked-in launcher without the UX fixture's backend override.
 # Resolution mode exits before the backend can execute or load runtime config.
 source_backend_sha=$(sha256sum "$root/install-openclaw.sh" | awk '{print $1}')
@@ -167,6 +165,9 @@ if [[ "${1:-}" == --backend-resolution-only ]]; then
   printf 'installer_backend_resolution_tests=GREEN source_sibling=yes source_tamper_rejected=yes package_deterministic=yes packaged_sibling=yes remote_stub=yes piped_stub=yes tamper_rejected=yes backend_execution=no\n'
   exit 0
 fi
+
+# Document-policy regression coverage for the packaged-launcher install blocks.
+node --test "$root/scripts/packaged-launcher-documents.test.mjs"
 
 (
   cd "$first"

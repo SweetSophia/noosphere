@@ -95,7 +95,9 @@ for (const document of ["README.md", "docs/INSTALLATION.md"]) {
             let changed = 0;
             text = text.replace(/```[^\n]*\n([\s\S]*?)```/g, (fence, block) => {
               if (!block.includes("/releases/download/v")) return fence;
-              const lines = block.trimEnd().split("\n");
+              // Preserve shell dollar sequences literally when rebuilding the fixture.
+              const literalDollars = "# literal dollar sequences: $$ $& $` $'";
+              const lines = [...block.trimEnd().split("\n"), literalDollars];
               const invocationIndex = lines.findIndex((line) => line.includes('bash "$installer"'));
               assert.ok(invocationIndex >= 0);
               const invocation = lines[invocationIndex];
@@ -108,7 +110,9 @@ for (const document of ["README.md", "docs/INSTALLATION.md"]) {
                 lines.splice(checksums[scenario === "between checksums" ? 1 : 0], 0, invocation);
               }
               changed += 1;
-              return fence.replace(block, lines.join("\n") + "\n");
+              const mutated = fence.replace(block, () => lines.join("\n") + "\n");
+              assert.ok(mutated.includes(literalDollars), "fixture must preserve literal dollar sequences");
+              return mutated;
             });
             assert.ok(changed > 0);
           }

@@ -46,8 +46,10 @@ This step is release preparation, not authorization to create tags or publish.
 `vX.Y.Z` launcher and its backend, with both SHA-256 digests.
 `npm run postgres-image:check` checks these documents against the release and
 digests pinned in the policy script, and checks the install block's guards
-(the backend override unset, the three settings as defaults, and an explicit
-non-interactive integration selection).
+(the backend override unset, the three settings as defaults, explicit
+non-interactive integration selection for every invocation, both release URLs
+present on the same release tag, and both checksums verified before any launcher
+invocation).
 `npm run postgres-image:check -- --verify-remote` additionally downloads the
 published release assets and compares their bytes against those pinned digests.
 An HTTP 404 identifies the documents and reports that their advertised release
