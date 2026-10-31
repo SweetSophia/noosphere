@@ -973,6 +973,8 @@ expect(
     installerUxTest.includes("child_env=clean") &&
     installerUxTest.includes("bootstrap_tool_config=absent") &&
     installerUxTest.includes("secret_argv=clean") &&
+    installerPackageTest.includes('node --test "$root/scripts/packaged-launcher-documents.test.mjs"') &&
+    installerPackageTest.includes("doc_negative_controls=9") &&
     installerPackageTest.includes("tampered backend unexpectedly passed") &&
     installerPackageTest.includes("tampered sibling backend unexpectedly passed") &&
     installerPackageTest.includes("sibling_checksum_sensitive=yes") &&
