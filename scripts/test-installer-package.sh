@@ -9,6 +9,8 @@ trap 'rm -rf "$tmp"' EXIT
   exit 2
 }
 
+node --test "$root/scripts/packaged-launcher-documents.test.mjs"
+
 # Exercise the checked-in launcher without the UX fixture's backend override.
 # Resolution mode exits before the backend can execute or load runtime config.
 source_backend_sha=$(sha256sum "$root/install-openclaw.sh" | awk '{print $1}')
@@ -293,7 +295,7 @@ assert_doc_gate_rejects() {
   local label="$1" expected="$2"
   shift 2
   "$@"
-  if node "$root/scripts/check-postgres-image-policy.mjs" --documents-root "$doc_fixture" \
+  if node "$root/scripts/check-postgres-image-policy.mjs" --packaged-launcher-documents-root "$doc_fixture" \
     > "$tmp/doc-$label.out" 2>&1; then
     echo "documented $label unexpectedly passed" >&2
     exit 1
@@ -317,6 +319,24 @@ assert_doc_gate_rejects \
   'hard-pinned image' \
   'must default NOOSPHERE_IMAGE instead of overriding an operator export' \
   sed -i 's|NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.2}"|NOOSPHERE_IMAGE=ghcr.io/sweetsophia/noosphere:1.15.2|' \
+    "$doc_fixture/README.md"
+
+assert_doc_gate_rejects \
+  'hard-pinned version' \
+  'must default NOOSPHERE_VERSION instead of overriding an operator export' \
+  sed -i 's|NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-1.15.2}"|NOOSPHERE_VERSION=1.15.2|' \
+    "$doc_fixture/README.md"
+
+assert_doc_gate_rejects \
+  'hard-pinned plugin' \
+  'must default NOOSPHERE_PLUGIN_SPEC instead of overriding an operator export' \
+  sed -i 's|NOOSPHERE_PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.2}"|NOOSPHERE_PLUGIN_SPEC=npm:@sweetsophia/openclaw-noosphere-memory@1.15.2|' \
+    "$doc_fixture/README.md"
+
+assert_doc_gate_rejects \
+  'mismatched backend tag' \
+  'must download the launcher and the backend from the same release tag' \
+  sed -i 's|releases/download/v1.15.2/install-openclaw.sh|releases/download/v1.15.1/install-openclaw.sh|' \
     "$doc_fixture/README.md"
 
 assert_doc_gate_rejects \
@@ -344,11 +364,11 @@ assert_doc_gate_rejects \
     "$doc_fixture/README.md"
 
 # A document that still carries a valid block must pass.
-if ! node "$root/scripts/check-postgres-image-policy.mjs" --documents-root "$doc_fixture" \
+if ! node "$root/scripts/check-postgres-image-policy.mjs" --packaged-launcher-documents-root "$doc_fixture" \
   > "$tmp/doc-baseline.out" 2>&1; then
   echo 'unchanged documentation unexpectedly failed the policy check' >&2
   cat "$tmp/doc-baseline.out" >&2
   exit 1
 fi
 
-printf 'installer_package_tests=GREEN assets=6 deterministic=yes source_mode_matrix=3 canonical_modes=0644/0755 piped_entrypoint=yes sibling_checksum_sensitive=yes remote_checksum_sensitive=yes release_set_verified=yes release_public_fixture_verified=yes release_negative_controls=7 doc_negative_controls=6 doc_baseline=pass\n'
+printf 'installer_package_tests=GREEN assets=6 deterministic=yes source_mode_matrix=3 canonical_modes=0644/0755 piped_entrypoint=yes sibling_checksum_sensitive=yes remote_checksum_sensitive=yes release_set_verified=yes release_public_fixture_verified=yes release_negative_controls=7 doc_negative_controls=9 doc_baseline=pass\n'

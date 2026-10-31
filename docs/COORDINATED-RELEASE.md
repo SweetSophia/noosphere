@@ -43,18 +43,29 @@ This step is release preparation, not authorization to create tags or publish.
 ## Documentation follows publication
 
 `README.md` and `docs/INSTALLATION.md` advertise one published release: the
-`vX.Y.Z` launcher and its backend, with both SHA-256 digests. The policy
-check `npm run postgres-image:check` asserts that the documented release and its
-digests match the published assets, and that the documented install block keeps
-its guards (the backend override unset, the three settings as defaults, and an
-explicit non-interactive integration selection).
+`vX.Y.Z` launcher and its backend, with both SHA-256 digests.
+`npm run postgres-image:check` checks these documents against the release and
+digests pinned in the policy script, and checks the install block's guards
+(the backend override unset, the three settings as defaults, and an explicit
+non-interactive integration selection).
+`npm run postgres-image:check -- --verify-remote` additionally downloads the
+published release assets and compares their bytes against those pinned digests.
+An HTTP 404 identifies the documents and reports that their advertised release
+is not published or unavailable; a digest mismatch is reported separately.
 
-Because the documented digests are the published bytes, the documentation may
-only advertise a release that already exists. A release therefore updates the
-documentation **after** its assets are published, in a follow-up change: the
-release PR itself must not point the documentation at the release it is about
-to cut, because the advertised asset does not exist yet and the check reports
-that as a missing published asset rather than as a documentation defect.
+Only the **release-asset download blocks in `README.md` and
+`docs/INSTALLATION.md`** must wait until publication. The release PR must keep
+those blocks and the policy script's `documentedReleaseVersion`,
+`documentedReleaseInstallerSha256`, and `documentedReleaseBackendSha256` pins on
+the last published release. After the new assets are published and read back,
+update the two blocks and all three pins together in a follow-up change, then
+run both policy modes above. The docs may therefore lag the release being built;
+`--verify-release-files` rejects a release older than the advertised one, but
+does not compare a local rebuild's digests with immutable published digests.
+
+The guided immutable-commit download documents are different: their
+`versionBoundInstallerCommand` is bound to `VERSION`, so the release PR updates
+those commands as usual. They are not subject to the release-asset URL rule.
 
 ## Publication order
 

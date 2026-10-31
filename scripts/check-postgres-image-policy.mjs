@@ -22,20 +22,30 @@ const publishedFallbackRef = "d0cef60aad8a0f5dea8ed4d2dc2e6f93629dab29";
 const publishedFallbackSha256 = "04a3cd17d75542dca48b0f4bdd7cc7cffa926629b192c0e79bea91d2e44b2952";
 const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noosphere";
 // The release the installation documentation points at. Its published bytes are
-// immutable, so its digests are pinned here and checked against the registry
+// immutable, so its digests are pinned here and checked against published assets
 // rather than against a rebuild of the working tree.
 const documentedReleaseVersion = "1.15.2";
 const documentedReleaseInstallerSha256 =
   "fa38522104b10991cc85774fade4dffc559090e64838827cffeb74d200d547e0";
 const documentedReleaseBackendSha256 =
   "7758cc2aab51da3af18551ad138eb08a8c2d50e546955c498840933cbef63c7c";
-const documentsRoot = process.argv.includes("--documents-root")
-  ? resolve(process.argv[process.argv.indexOf("--documents-root") + 1])
-  : root;
+// Test-only override for packaged-launcher blocks. All other policy assertions
+// intentionally read the repository copy; this is not a general document root.
+const packagedDocumentsOption = "--packaged-launcher-documents-root";
+const packagedDocumentsIndex = process.argv.indexOf(packagedDocumentsOption);
+let packagedDocumentsRoot = root;
+if (packagedDocumentsIndex >= 0) {
+  const value = process.argv[packagedDocumentsIndex + 1];
+  if (!value || value.startsWith("--")) {
+    console.error(`Usage: ${packagedDocumentsOption} requires a directory argument`);
+    process.exit(2);
+  }
+  packagedDocumentsRoot = resolve(value);
+}
 
-function read(relativePath) {
+function read(relativePath, base = root) {
   try {
-    return readFileSync(resolve(root, relativePath), "utf8");
+    return readFileSync(resolve(base, relativePath), "utf8");
   } catch (error) {
     failures.push(`Failed to read ${relativePath}: ${error.message}`);
     return "";
@@ -167,7 +177,7 @@ async function verifyRemoteArtifact(
   label,
   url,
   expectedSha256,
-  { followRedirects = false } = {},
+  { followRedirects = false, documentation = null } = {},
 ) {
   try {
     const response = await fetch(url, {
@@ -175,7 +185,13 @@ async function verifyRemoteArtifact(
       signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) {
-      failures.push(`${label} returned HTTP ${response.status}: ${url}`);
+      if (response.status === 404 && documentation) {
+        failures.push(
+          `${documentation}: documented release v${documentedReleaseVersion} is not published or unavailable (HTTP 404): ${url}; keep these documents on the last published release and update them only after publication`,
+        );
+      } else {
+        failures.push(`${label} returned HTTP ${response.status}: ${url}`);
+      }
       return;
     }
 
@@ -193,7 +209,9 @@ async function verifyRemoteArtifact(
     const actualSha256 = createHash("sha256").update(bytes).digest("hex");
     expect(
       actualSha256 === expectedSha256,
-      `${label} at its immutable ref must match ${expectedSha256}, got ${actualSha256}`,
+      documentation
+        ? `${documentation}: published asset digest mismatch for ${label}; expected ${expectedSha256}, got ${actualSha256}: ${url}`
+        : `${label} at its immutable ref must match ${expectedSha256}, got ${actualSha256}`,
     );
   } catch (error) {
     failures.push(`${label} could not be verified at its immutable ref: ${error.message}`);
@@ -1006,7 +1024,7 @@ function compareReleaseVersions(left, right) {
  * explicitly.
  */
 function extractDocumentedPackagedLaunchers(relativePath) {
-  const text = readFileSync(resolve(documentsRoot, relativePath), "utf8");
+  const text = read(relativePath, packagedDocumentsRoot);
   const blocks = [...text.matchAll(/```[a-zA-Z0-9]*\n([\s\S]*?)```/g)]
     .map((match) => match[1])
     .filter((block) => block.includes("/releases/download/v"));
@@ -1080,21 +1098,6 @@ for (const entry of documentedPackagedLaunchers) {
       reference.backendSha256 === documentedReleaseBackendSha256,
       `${entry.relativePath} must document the published install-openclaw.sh digest ${documentedReleaseBackendSha256}`,
     );
-  }
-}
-for (const entry of documentedPackagedLaunchers) {
-  for (const other of documentedPackagedLaunchers) {
-    if (other === entry) continue;
-    for (const reference of entry.references) {
-      for (const otherReference of other.references) {
-        expect(
-          otherReference.version === reference.version &&
-            otherReference.installerSha256 === reference.installerSha256 &&
-            otherReference.backendSha256 === reference.backendSha256,
-          `${entry.relativePath} and ${other.relativePath} must document the same packaged launcher release and digests`,
-        );
-      }
-    }
   }
 }
 const guidedLauncherDocs = [
@@ -1774,13 +1777,13 @@ if (verifyRemoteArtifacts) {
     `published release launcher v${documentedReleaseVersion}`,
     `${documentedReleaseBase}install.sh`,
     documentedReleaseInstallerSha256,
-    { followRedirects: true },
+    { followRedirects: true, documentation: "README.md and docs/INSTALLATION.md" },
   );
   await verifyRemoteArtifact(
     `published release backend v${documentedReleaseVersion}`,
     `${documentedReleaseBase}install-openclaw.sh`,
     documentedReleaseBackendSha256,
-    { followRedirects: true },
+    { followRedirects: true, documentation: "README.md and docs/INSTALLATION.md" },
   );
   await verifyRemoteArtifact(
     "guided installer",
