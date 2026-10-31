@@ -1063,10 +1063,22 @@ function extractDocumentedPackagedLaunchers(relativePath) {
         `${relativePath} packaged launcher block ${index + 1} must default ${setting} instead of overriding an operator export`,
       );
     }
-    const invocation = block.match(/bash "\$installer"[^\n]*/);
+    const invocations = [...block.matchAll(/bash "\$installer"[^\n]*/g)];
     expect(
-      invocation !== null && invocation[0].includes("--non-interactive --with "),
+      invocations.length > 0 &&
+        invocations.every((invocation) => invocation[0].includes("--non-interactive --with ")),
       `${relativePath} packaged launcher block ${index + 1} must invoke the launcher non-interactively with an explicit integration selection`,
+    );
+    // Check both complete verification commands, not just the first checksum
+    // token. Every invocation must follow them, including duplicate invocations.
+    const verificationEnd = Math.max(
+      installerDigest.index + installerDigest[0].length,
+      backendDigest.index + backendDigest[0].length,
+    );
+    expect(
+      invocations.length > 0 &&
+        invocations.every((invocation) => invocation.index > verificationEnd),
+      `${relativePath} packaged launcher block ${index + 1} must verify both checksums before invoking the launcher`,
     );
     references.push({
       version: installerUrl[1],

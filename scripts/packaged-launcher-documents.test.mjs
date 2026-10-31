@@ -82,3 +82,47 @@ for (const status of [404, 200]) {
     }
   });
 }
+
+for (const document of ["README.md", "docs/INSTALLATION.md"]) {
+  for (const scenario of ["before both checksums", "between checksums", "extra early invocation", "extra interactive invocation"]) {
+    test(`${document}: rejects launcher ${scenario}`, () => {
+      const fixture = mkdtempSync(resolve(tmpdir(), "noosphere-documents-order-"));
+      try {
+        mkdirSync(resolve(fixture, "docs"));
+        for (const path of ["README.md", "docs/INSTALLATION.md"]) {
+          let text = readFileSync(resolve(root, path), "utf8");
+          if (path === document) {
+            let changed = 0;
+            text = text.replace(/```[^\n]*\n([\s\S]*?)```/g, (fence, block) => {
+              if (!block.includes("/releases/download/v")) return fence;
+              const lines = block.trimEnd().split("\n");
+              const invocationIndex = lines.findIndex((line) => line.includes('bash "$installer"'));
+              assert.ok(invocationIndex >= 0);
+              const invocation = lines[invocationIndex];
+              if (scenario === "extra interactive invocation") {
+                lines.splice(invocationIndex + 1, 0, '  bash "$installer"');
+              } else {
+                if (scenario !== "extra early invocation") lines.splice(invocationIndex, 1);
+                const checksums = lines.flatMap((line, index) => line.includes("sha256sum -c -") ? [index] : []);
+                assert.equal(checksums.length, 2);
+                lines.splice(checksums[scenario === "between checksums" ? 1 : 0], 0, invocation);
+              }
+              changed += 1;
+              return fence.replace(block, lines.join("\n") + "\n");
+            });
+            assert.ok(changed > 0);
+          }
+          writeFileSync(resolve(fixture, path), text);
+        }
+        const result = check([option, fixture]);
+        assert.equal(result.status, 1, result.output);
+        assert.ok(result.output.includes(`${document} packaged launcher block`), result.output);
+        assert.match(result.output, scenario === "extra interactive invocation"
+          ? /must invoke the launcher non-interactively with an explicit integration selection/
+          : /must verify both checksums before invoking the launcher/);
+      } finally {
+        rmSync(fixture, { recursive: true, force: true });
+      }
+    });
+  }
+}
