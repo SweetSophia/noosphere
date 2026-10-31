@@ -696,10 +696,10 @@ expect(
     // fatal, a still-propagating version is retried, a usage error and a
     // registry failure are distinct from both. Assert the real statements,
     // not the header comment that documents them.
-    /^exit 1$/m.test(codeLines(npmIntegrityVerifier)) &&
-    /^exit 2$/m.test(codeLines(npmIntegrityVerifier)) &&
-    /^exit 3$/m.test(codeLines(npmIntegrityVerifier)) &&
-    /^exit 4$/m.test(codeLines(npmIntegrityVerifier)) &&
+    /^\s*exit 1$/m.test(codeLines(npmIntegrityVerifier)) &&
+    /^\s*exit 2$/m.test(codeLines(npmIntegrityVerifier)) &&
+    /^\s*exit 3$/m.test(codeLines(npmIntegrityVerifier)) &&
+    /^\s*exit 4$/m.test(codeLines(npmIntegrityVerifier)) &&
     codeLines(npmIntegrityVerifier).includes("Re-run the publish workflow") &&
     codeLines(npmIntegrityVerifierTest).includes("propagation delay") &&
     codeLines(npmIntegrityVerifierTest).includes("integrity mismatch"),
