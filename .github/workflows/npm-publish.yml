@@ -7,6 +7,8 @@ on:
       - "VERSION"
       - "scripts/check-package-policies.mjs"
       - "scripts/sync-version.mjs"
+      - "scripts/verify-npm-publication-integrity.sh"
+      - "scripts/test-npm-publication-integrity.sh"
       - "vendor/toml5-candidate/pack-adapter.mjs"
       - "vendor/toml5-candidate/public-consumers.mjs"
       - "vendor/toml5-candidate/consumer-fixtures/**"
@@ -214,22 +216,21 @@ jobs:
             fi
             printf '%s@%s is already published with matching integrity; continuing.\n' "$package" "$version"
           else
-            npm publish "$TARBALL" --access public --provenance
+            # npm serves a freshly published version asynchronously, so a previous
+            # attempt of this workflow can still be invisible to `npm view` and
+            # npm rejects the duplicate publish. Do not fail on that race here:
+            # the exact-integrity readback below is the authority on what the
+            # registry actually holds.
+            if ! npm publish "$TARBALL" --access public --provenance; then
+              printf 'npm publish did not report success for %s@%s; the exact-integrity readback decides whether the version is published.\n' "$package" "$version" >&2
+            fi
           fi
-          published_integrity=
-          for attempt in {1..10}; do
-            published_json=$(npm view "${package}@${version}" dist.integrity --json 2>/dev/null || true)
-            published_integrity=$(node -e 'try { const value=JSON.parse(process.argv[1]); if (typeof value === "string") process.stdout.write(value); } catch {}' "$published_json")
-            if [[ "$published_integrity" == "$LOCAL_INTEGRITY" ]]; then
-              break
-            fi
-            if [[ -n "$published_integrity" ]]; then
-              printf 'Readback integrity for %s@%s does not match this release artifact.\n' "$package" "$version" >&2
-              exit 1
-            fi
-            sleep 3
-          done
-          test "$published_integrity" = "$LOCAL_INTEGRITY"
+          # npm needs minutes, not seconds, to serve a newly published version.
+          # The bounded readback distinguishes a genuine integrity mismatch
+          # (fatal) from a version that is still propagating (retry, then a
+          # safe re-run hint) instead of failing a healthy release.
+          bash "$GITHUB_WORKSPACE/scripts/verify-npm-publication-integrity.sh" \
+            "${package}@${version}" "$LOCAL_INTEGRITY" 600 15
 
   publish_openclaw:
     needs: [package-check, publish_helper]
