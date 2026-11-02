@@ -12,10 +12,14 @@ import {
   providerConfigJsonFromEnv,
   readBoundedInteger,
   requestEmbedding,
-  sanitizeErrorCode,
   validateLeaseWindow,
   vectorSqlLiteral,
 } from "./hybrid-provider.mjs";
+import {
+  sanitizeErrorMessage,
+  workerErrorCode as errorCode,
+  workerErrorKind as errorKind,
+} from "./hybrid-worker-errors.mjs";
 
 const { Pool } = pg;
 const settings = readSettings(process.env);
@@ -63,8 +67,22 @@ try {
     await abortableDelay(settings.pollMs, shutdown.signal);
   } while (!stopping);
 } catch (error) {
-  log("error", "worker_fatal", { code: errorCode(error) });
-  await writeHealth({ status: "failed", failedAt: new Date().toISOString(), code: errorCode(error) }).catch(() => {});
+  // A fatal stop must be diagnosable after the fact. The code alone collapses
+  // every distinct cause (readiness assertion, pool timeout, TypeError,
+  // abort) into one opaque value, so the message and the error kind are
+  // logged too. Both are sanitized: the raw message may carry a connection
+  // string or a host name.
+  log("error", "worker_fatal", {
+    code: errorCode(error),
+    kind: errorKind(error),
+    message: sanitizeErrorMessage(error?.message),
+  });
+  await writeHealth({
+    status: "failed",
+    failedAt: new Date().toISOString(),
+    code: errorCode(error),
+    kind: errorKind(error),
+  }).catch(() => {});
   process.exitCode = 1;
 } finally {
   shutdown.abort();
@@ -249,10 +267,4 @@ function log(level, event, fields = {}) {
   process.stdout.write(`${JSON.stringify({ timestamp: new Date().toISOString(), level, event, ...fields })}\n`);
 }
 
-function errorCode(error) {
-  if (error instanceof HybridProviderError) return sanitizeErrorCode(error.code);
-  if (error && typeof error === "object" && typeof error.code === "string") {
-    return sanitizeErrorCode(`database_${error.code}`);
-  }
-  return "worker_internal";
-}
+export { errorCode, errorKind, sanitizeErrorMessage };
