@@ -4,9 +4,11 @@ import { HybridProviderError, sanitizeErrorCode } from "./hybrid-provider.mjs";
 
 // Classification must not depend on the human-facing wording of an assertion.
 export class HybridWorkerReadinessError extends Error {}
+export class HybridWorkerConfigError extends Error {}
 
 /** Keep existing codes stable, including the historical database_ prefix. */
 export function workerErrorCode(error) {
+  if (error instanceof HybridWorkerConfigError) return workerErrorCode(error.cause);
   if (error instanceof HybridProviderError) return sanitizeErrorCode(error.code);
   if (error && typeof error === "object" && typeof error.code === "string") {
     return sanitizeErrorCode(`database_${error.code}`);
@@ -18,6 +20,7 @@ const FILESYSTEM_CODES = new Set(["ENOENT", "EACCES", "EPERM", "ENOSPC", "EROFS"
 const FILESYSTEM_SYSCALL = /^(?:mkdir|open|write|writeFile|rename|stat|lstat|unlink|fsync)$/;
 
 export function workerErrorKind(error) {
+  if (error instanceof HybridWorkerConfigError) return "configuration";
   if (error instanceof HybridProviderError) return "provider";
   if (error instanceof HybridWorkerReadinessError) return "readiness";
   if (error?.name === "AggregateError") return "pool_aggregate";

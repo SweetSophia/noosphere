@@ -236,6 +236,7 @@ test("configuration errors use the fatal handler before opening a database", asy
   const payload = JSON.parse(result.stdout.trim());
   assert.equal(payload.event, "worker_fatal");
   assert.equal(payload.code, "worker_internal");
+  assert.equal(payload.kind, "configuration");
   assert.equal(payload.message, "NOOSPHERE_HYBRID_WORKER_DATABASE_URL is required");
 });
 
@@ -259,4 +260,46 @@ test("scheme-less userinfo and a spaced URL tail are redacted", () => {
   assert.equal(sanitizeErrorMessage("failed user:PLACEHOLDER@db.internal.example.com:5432/prod"), "failed <redacted-endpoint>");
   assert.equal(sanitizeErrorMessage("failed user:PLACEHOLDER@db:5432/prod"), "failed <redacted-endpoint>");
   assert.equal(sanitizeErrorMessage("http://user:PLACEHOLDER ONE@db:5432/wiki"), "http://<redacted-url> <redacted-endpoint>");
+});
+
+for (const [name, overrides, expected] of [
+  ["invalid database URL", { NOOSPHERE_HYBRID_WORKER_DATABASE_URL: "not-a-url" }, "NOOSPHERE_HYBRID_WORKER_DATABASE_URL is invalid"],
+  ["invalid bound", { NOOSPHERE_HYBRID_WORKER_CONCURRENCY: "0" }, "NOOSPHERE_HYBRID_WORKER_CONCURRENCY must be an integer between 1 and 16"],
+  ["invalid provider JSON", { NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON: "not-json" }, "NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON must be valid JSON"],
+  ["invalid provider base64", { NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64: "!" }, "NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 must be canonical base64"],
+]) test(`configuration kind before DB startup: ${name}`, async () => {
+  const { spawnSync } = await import("node:child_process");
+  const { mkdtemp, rm, access } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const temporary = await mkdtemp(join(tmpdir(), "worker-config-"));
+  const healthFile = join(temporary, "health.json");
+  try {
+    const result = spawnSync(process.execPath, ["scripts/hybrid-worker.mjs", "--once"], {
+      cwd: new URL("../", import.meta.url),
+      env: { PATH: process.env.PATH,
+        NOOSPHERE_HYBRID_WORKER_DATABASE_URL: "postgresql://noosphere_hybrid_worker_login@127.0.0.1:1/fixture",
+        NOOSPHERE_HYBRID_WORKER_HEALTH_FILE: healthFile, ...overrides },
+      encoding: "utf8", timeout: 5000,
+    });
+    assert.equal(result.status, 1);
+    assert.equal(result.stderr, "");
+    const fatal = JSON.parse(result.stdout.trim());
+    assert.equal(fatal.event, "worker_fatal");
+    assert.equal(fatal.kind, "configuration");
+    assert.equal(fatal.code, "worker_internal");
+    assert.equal(fatal.message, expected);
+    // Invalid configuration never reaches pool creation or health-file writes.
+    await assert.rejects(access(healthFile), { code: "ENOENT" });
+  } finally { await rm(temporary, { recursive: true, force: true }); }
+});
+
+test("typed configuration failures retain their original error code", async () => {
+  const { HybridWorkerConfigError } = await import("./hybrid-worker-errors.mjs");
+  assert.equal(typeof HybridWorkerConfigError, "function");
+  for (const cause of [new Error("invalid config"), new HybridProviderError("provider_config_mismatch", "invalid provider")]) {
+    const error = new HybridWorkerConfigError(cause.message, { cause });
+    assert.equal(workerErrorKind(error), "configuration");
+    assert.equal(workerErrorCode(error), workerErrorCode(cause));
+  }
 });

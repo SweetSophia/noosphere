@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Make hybrid-worker fatal stops diagnosable with classified failure kinds and
   bounded, redacted messages (including AggregateError children), without changing
-  existing error codes. Include configuration failures in the safe fatal handler.
+  existing error codes. Classify configuration failures explicitly in the safe
+  fatal handler before creating a pool or writing health state.
 - Ship the worker error helper in production images, run its regression suite in
   root CI, and smoke-test worker startup in both native architecture images.
 

@@ -118,6 +118,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
 
@@ -158,6 +163,7 @@ jobs:
           const fatal = JSON.parse(result.stdout.trim());
           assert.equal(fatal.event, "worker_fatal");
           assert.equal(fatal.code, "worker_internal");
+          assert.equal(fatal.kind, "configuration");
           assert.equal(fatal.message, "NOOSPHERE_HYBRID_WORKER_DATABASE_URL is required");
           console.log("Native worker import graph and safe startup failure passed");
           JS

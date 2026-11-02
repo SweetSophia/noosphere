@@ -17,6 +17,7 @@ import {
 } from "./hybrid-provider.mjs";
 import {
   HybridWorkerReadinessError,
+  HybridWorkerConfigError,
   workerErrorMessage,
   workerErrorCode as errorCode,
   workerErrorKind as errorKind,
@@ -39,8 +40,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 try {
-  settings = readSettings(process.env);
-  providers = parseProviderConfigs(providerConfigJsonFromEnv(process.env));
+  ({ settings, providers } = readConfiguration(process.env));
   pool = new Pool({
     connectionString: settings.databaseUrl,
     max: settings.concurrency + 2,
@@ -183,6 +183,19 @@ async function acknowledgeFailure(job, error, terminal = true, client = pool) {
     terminal,
     code,
   });
+}
+
+function readConfiguration(env) {
+  try {
+    return {
+      settings: readSettings(env),
+      providers: parseProviderConfigs(providerConfigJsonFromEnv(env)),
+    };
+  } catch (cause) {
+    // Only configuration parsing is wrapped: pool/runtime failures keep their
+    // own classification. Assign settings only after the whole config succeeds.
+    throw new HybridWorkerConfigError(cause.message, { cause });
+  }
 }
 
 export function readSettings(env) {
