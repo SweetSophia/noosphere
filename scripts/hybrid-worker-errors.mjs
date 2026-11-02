@@ -1,21 +1,11 @@
-// Classification and redaction helpers for fatal worker errors.
-//
-// The worker logs a fatal stop as a single "code". That code alone collapses
-// every distinct cause into one opaque value, so an operator reading the log
-// after a crash cannot tell a readiness assertion from a pool timeout from a
-// programming error. These helpers keep the code stable (so existing
-// alerting keeps matching) while adding the kind and a redacted message that
-// actually make the fault diagnosable.
-//
-// This module is deliberately free of side effects so it can be unit tested
-// without a database.
-
+// Side-effect-free classification and redaction for fatal worker diagnostics.
+import { isIP } from "node:net";
 import { HybridProviderError, sanitizeErrorCode } from "./hybrid-provider.mjs";
 
-/**
- * Stable error code. Existing values are unchanged; new values are only added
- * for failure modes that previously collapsed into "worker_internal".
- */
+// Classification must not depend on the human-facing wording of an assertion.
+export class HybridWorkerReadinessError extends Error {}
+
+/** Keep existing codes stable, including the historical database_ prefix. */
 export function workerErrorCode(error) {
   if (error instanceof HybridProviderError) return sanitizeErrorCode(error.code);
   if (error && typeof error === "object" && typeof error.code === "string") {
@@ -24,90 +14,93 @@ export function workerErrorCode(error) {
   return "worker_internal";
 }
 
-/**
- * The error kind separates failure modes that share a code. This is what
- * tells an operator where to look after a fatal stop.
- */
+const FILESYSTEM_CODES = new Set(["ENOENT", "EACCES", "EPERM", "ENOSPC", "EROFS", "EISDIR", "ENOTDIR", "EMFILE", "ENFILE"]);
+const FILESYSTEM_SYSCALL = /^(?:mkdir|open|write|writeFile|rename|stat|lstat|unlink|fsync)$/;
+
 export function workerErrorKind(error) {
   if (error instanceof HybridProviderError) return "provider";
+  if (error instanceof HybridWorkerReadinessError) return "readiness";
   if (error?.name === "AggregateError") return "pool_aggregate";
   if (error?.name === "AbortError") return "aborted";
   if (error?.name === "TypeError" || error?.name === "RangeError") return "programming";
+  if (FILESYSTEM_CODES.has(error?.code) || (typeof error?.path === "string" && FILESYSTEM_SYSCALL.test(error?.syscall ?? ""))) return "filesystem";
   if (error && typeof error === "object" && typeof error.code === "string") return "database";
-  const message = typeof error?.message === "string" ? error.message : "";
-  if (message.includes("readiness check failed")) return "readiness";
-  if (message.includes("must have a provider configuration")) return "readiness";
   return "internal";
 }
 
-// A dotted name: at least one label separator, every label alphanumeric or
-// dash separated. Matching whole tokens rather than substrings is what keeps
-// a host from being half redacted.
+/** Include at most four direct AggregateError children; never recurse into cycles. */
+export function workerErrorMessage(error) {
+  const messages = [];
+  if (typeof error?.message === "string" && error.message) messages.push(error.message);
+  if (error?.name === "AggregateError" && Array.isArray(error.errors)) {
+    for (const child of error.errors.slice(0, 4)) {
+      const code = typeof child?.code === "string" ? sanitizeErrorCode(child.code).toUpperCase() : "";
+      const message = typeof child?.message === "string" ? child.message : "";
+      if (code || message) messages.push(`${code}${code && message ? ": " : ""}${message}`);
+    }
+  }
+  // Sanitize each message separately: an unterminated credential in one child
+  // must not use a quote in the next child to close its value.
+  return messages.map(sanitizeErrorMessage).filter(Boolean).join("; ").slice(0, 300) || null;
+}
+
 const HOST_LIKE = /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?)+$/i;
-const IP_LIKE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
-const PORT_SUFFIX = /:\d{1,5}$/;
-// Trailing punctuation belongs to the sentence, not to the token.
-const TRAILING_PUNCTUATION = /[.,;:!?)\]}"']+$/;
-const CREDENTIAL_KEY = /^(?:[a-z0-9_-]*(?:password|passwd|api[_-]?key|token|secret|authorization)[a-z0-9_-]*)$/i;
+const PORT_OR_PATH = /(?::\d{1,5})?(?:\/\S*)?$/;
+const LEADING_PUNCTUATION = /^[({["']+/;
+const TRAILING_PUNCTUATION = /[.,;!?)\]}"']+$/;
+// Quoted values may contain spaces and escapes. An unclosed quote consumes the
+// remainder instead of exposing the tail of a malformed credential. Digest's
+// comma-separated parameters are conservatively removed to end of line.
+const CREDENTIAL = /(\b[a-z0-9_-]*(?:password|passwd|api[_-]?key|token|secret|authorization)[a-z0-9_-]*["']?\s*[=:]\s*)(?:"(?:\\.|[^"\\])*(?:"|$)|'(?:\\.|[^'\\])*(?:'|$)|(?:Bearer|Basic|Negotiate)\s+[^\s,;}]+|Digest[^\r\n]*|[^\s,;}]+)/giu;
 
 /**
- * Redacts anything that could carry a credential, a connection string, a host
- * name or an IP address, so a fatal message can be logged without leaking
- * secrets.
- *
- * Two passes, because the two kinds of secret sit at different granularities:
- *
- * 1. Credentials and URLs are matched across the whole message, since a
- *    credential can be introduced by a key and completed by a later token
- *    ("authorization: Bearer <token>").
- * 2. Hosts and addresses are matched token by token, and a host token is
- *    replaced in full. Removing a host as a substring would leave the
- *    remainder of the name behind, so "internal.example.com" could still
- *    surface as "internal.example.".
+ * Redact common structured credentials and network endpoint forms before
+ * truncation. This is not a general-purpose detector of arbitrary secrets in
+ * prose: callers must not log raw configuration or other sensitive payloads.
+ * Ambiguous dotted words (including filenames) remain conservatively redacted;
+ * a TLD allowlist or file-extension exception would also allow real hosts.
  */
 export function sanitizeErrorMessage(message) {
   if (typeof message !== "string" || message.length === 0) return null;
-  const withoutSecrets = message
-    // Keep the scheme so the log still records what kind of URL failed.
-    .replace(/postgres(?:ql)?:\/\/[^\s"']+/giu, "postgres://<redacted>")
-    .replace(/\b([a-z][a-z0-9+.-]*):\/\/[^\s"']+/giu, "$1://<redacted-url>")
-    .replace(
-      /(\b(?:password|passwd|api[_-]?key|token|secret|authorization)\b\s*[=:]\s*)(?:Bearer\s+)?\S+/giu,
-      "$1<redacted>",
-    );
-  const redacted = withoutSecrets
-    .split(/(\s+)/)
-    .map((token) => (token.trim().length === 0 ? token : redactToken(token)))
-    .join("");
-  return redacted.slice(0, 300);
+  const withoutSecrets = message.slice(0, 8192)
+    // A quoted connection URI can include spaces in its password. Consume its
+    // complete quoted value before handling ordinary non-whitespace URLs.
+    .replace(/"([a-z][a-z0-9+.-]*):\/\/(?:\\.|[^"\\])*(?:"|$)/giu, (_, scheme) => `"${/^postgres(?:ql)?$/i.test(scheme) ? "postgres" : scheme}://<redacted-url>"`)
+    .replace(/'([a-z][a-z0-9+.-]*):\/\/(?:\\.|[^'\\])*(?:'|$)/giu, (_, scheme) => `'${/^postgres(?:ql)?$/i.test(scheme) ? "postgres" : scheme}://<redacted-url>'`)
+    .replace(/\b([a-z][a-z0-9+.-]*):\/\/(?!<redacted-url>)[^\s]+/giu, (_, scheme) => `${/^postgres(?:ql)?$/i.test(scheme) ? "postgres" : scheme}://<redacted-url>`)
+    .replace(CREDENTIAL, "$1<redacted>")
+    // PostgreSQL also prints quoted single-label hosts outside DNS errors.
+    .replace(/(\bserver at\s+)(["'])([a-z0-9_-]+)\2/giu, "$1$2<redacted-endpoint>$2")
+    // Endpoint operands have a known position even for single-label hosts.
+    .replace(/\b(getaddrinfo\s+\S+\s+)(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu, "$1<redacted-endpoint>")
+    .replace(/\b(connect\s+E[A-Z0-9_]+\s+)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gu, "$1<redacted-endpoint>");
+  return withoutSecrets.split(/(\s+)/)
+    .map((token) => token.trim() ? redactToken(token) : token)
+    .join("").slice(0, 300);
 }
 
 function redactToken(token) {
-  const trailing = TRAILING_PUNCTUATION.exec(token)?.[0] ?? "";
-  const core = trailing.length > 0 ? token.slice(0, -trailing.length) : token;
-  if (core.length === 0) return token;
+  const leading = LEADING_PUNCTUATION.exec(token)?.[0] ?? "";
+  const remainder = token.slice(leading.length);
+  const trailing = TRAILING_PUNCTUATION.exec(remainder)?.[0] ?? "";
+  const core = trailing ? remainder.slice(0, -trailing.length) : remainder;
+  if (!core) return token;
 
-  // A URL: keep the scheme so the log still records what kind of URL failed.
-  const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(core);
-  if (scheme) return `${scheme[1]}://<redacted-url>${trailing}`;
-
-  // key=value and key: value credentials, including "authorization: Bearer x".
-  const credential = /^([a-z0-9_-]+)(\s*[=:]\s*)(.*)$/i.exec(core);
-  if (credential && CREDENTIAL_KEY.test(credential[1])) {
-    return `${credential[1]}${credential[2]}<redacted>${trailing}`;
+  // Remove the entire endpoint, port and path consistently. Bracketed IPv6
+  // may retain a closing bracket in core when followed by a port.
+  const ipv6Core = core.replace(/\](?::\d{1,5})?(?:\/\S*)?$/, "");
+  if (isIP(ipv6Core)) return `${leading}<redacted-ip>${core.includes("]") ? "]" : ""}${trailing}`;
+  // Scheme-less userinfo and malformed URL tails can still carry credentials.
+  // A network-looking authority after @ is enough to discard the whole token.
+  const authority = core.slice(core.lastIndexOf("@") + 1).replace(PORT_OR_PATH, "");
+  if (core.includes("@") && (HOST_LIKE.test(authority) || isIP(authority) || /^[a-z0-9][a-z0-9_-]*$/i.test(authority))) {
+    return `${leading}<redacted-endpoint>${trailing}`;
   }
-
-
-  // A host with an optional port, or a bare service name with a port.
-  const withoutPort = PORT_SUFFIX.exec(core);
-  const hostPart = withoutPort ? core.slice(0, withoutPort.index) : core;
-  const portPart = withoutPort ? withoutPort[0] : "";
-
-  if (IP_LIKE.test(hostPart)) return `<redacted-ip>${portPart}${trailing}`;
-  if (HOST_LIKE.test(hostPart)) return `<redacted-host>${portPart}${trailing}`;
-  if (withoutPort && /^[a-z0-9][a-z0-9_-]*$/i.test(hostPart)) {
-    return `<redacted-endpoint>${trailing}`;
-  }
-
+  const endpoint = core.replace(PORT_OR_PATH, "");
+  if (isIP(endpoint)) return `${leading}<redacted-ip>${trailing}`;
+  // Numeric diagnostics and versions aren't DNS names; do not erase them.
+  if (/^v?\d+(?:\.\d+)+$/i.test(core) || /^(?:e\.g|i\.e)$/i.test(core)) return token;
+  if (HOST_LIKE.test(endpoint)) return `${leading}<redacted-host>${trailing}`;
+  if (endpoint !== core && /^[a-z0-9][a-z0-9_-]*$/i.test(endpoint)) return `${leading}<redacted-endpoint>${trailing}`;
   return token;
 }

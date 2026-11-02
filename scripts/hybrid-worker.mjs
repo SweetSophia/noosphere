@@ -16,21 +16,16 @@ import {
   vectorSqlLiteral,
 } from "./hybrid-provider.mjs";
 import {
-  sanitizeErrorMessage,
+  HybridWorkerReadinessError,
+  workerErrorMessage,
   workerErrorCode as errorCode,
   workerErrorKind as errorKind,
 } from "./hybrid-worker-errors.mjs";
 
 const { Pool } = pg;
-const settings = readSettings(process.env);
-const providers = parseProviderConfigs(providerConfigJsonFromEnv(process.env));
-const pool = new Pool({
-  connectionString: settings.databaseUrl,
-  max: settings.concurrency + 2,
-  idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 5_000,
-  application_name: "noosphere-hybrid-worker",
-});
+let settings;
+let providers;
+let pool;
 const shutdown = new AbortController();
 let stopping = false;
 
@@ -44,6 +39,15 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 try {
+  settings = readSettings(process.env);
+  providers = parseProviderConfigs(providerConfigJsonFromEnv(process.env));
+  pool = new Pool({
+    connectionString: settings.databaseUrl,
+    max: settings.concurrency + 2,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000,
+    application_name: "noosphere-hybrid-worker",
+  });
   await assertReadiness(pool, providers);
   log("info", "worker_ready", {
     configuredProfiles: providers.size,
@@ -71,22 +75,20 @@ try {
   // every distinct cause (readiness assertion, pool timeout, TypeError,
   // abort) into one opaque value, so the message and the error kind are
   // logged too. Both are sanitized: the raw message may carry a connection
-  // string or a host name.
-  log("error", "worker_fatal", {
-    code: errorCode(error),
-    kind: errorKind(error),
-    message: sanitizeErrorMessage(error?.message),
-  });
-  await writeHealth({
+  // string or a host name. Configuration failures use this same path.
+  const code = errorCode(error);
+  const kind = errorKind(error);
+  log("error", "worker_fatal", { code, kind, message: workerErrorMessage(error) });
+  if (settings) await writeHealth({
     status: "failed",
     failedAt: new Date().toISOString(),
-    code: errorCode(error),
-    kind: errorKind(error),
+    code,
+    kind,
   }).catch(() => {});
   process.exitCode = 1;
 } finally {
   shutdown.abort();
-  await pool.end().catch(() => {});
+  await pool?.end().catch(() => {});
 }
 
 async function runBatch() {
@@ -229,11 +231,11 @@ async function assertReadiness(clientPool, configuredProviders) {
   );
   const row = result.rows[0];
   if (!row || row.current_user !== "noosphere_hybrid_worker_login" || row.feature_version !== 2) {
-    throw new Error("Hybrid Phase B database readiness check failed");
+    throw new HybridWorkerReadinessError("Hybrid Phase B database readiness check failed");
   }
   const activeProfileIds = Array.isArray(row.active_profile_ids) ? row.active_profile_ids : [];
   if (activeProfileIds.length !== Number(row.active_profiles) || activeProfileIds.some((profileId) => !configuredProviders.has(profileId))) {
-    throw new Error("Every active embedding profile must have a provider configuration");
+    throw new HybridWorkerReadinessError("Every active embedding profile must have a provider configuration");
   }
 }
 
@@ -266,5 +268,3 @@ async function writeHealth(payload) {
 function log(level, event, fields = {}) {
   process.stdout.write(`${JSON.stringify({ timestamp: new Date().toISOString(), level, event, ...fields })}\n`);
 }
-
-export { errorCode, errorKind, sanitizeErrorMessage };
