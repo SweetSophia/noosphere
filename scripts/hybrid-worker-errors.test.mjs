@@ -46,14 +46,37 @@ test("workerErrorKind does not throw on non-error input", () => {
   }
 });
 
-test("sanitizeErrorMessage redacts connection strings and credentials", () => {
+test("sanitizeErrorMessage redacts a connection string whole", () => {
   const sanitized = sanitizeErrorMessage(
-    "connect ECONNREFUSED postgresql://worker_login:placeholder@db:5432/noosphere password=placeholder",
+    "postgresql://worker_login:PLACEHOLDERSECRET@db:5432/noosphere",
   );
   assert.ok(sanitized);
-  assert.ok(!sanitized.includes("placeholder"), "password from a connection string must not survive");
-  assert.ok(!sanitized.includes("hunter2"), "password= value must not survive");
-  assert.ok(!sanitized.includes("db:5432"), "host:port must not survive");
+  assert.ok(!sanitized.includes("s3cr3t-placeholder"), "the password must not survive");
+  assert.ok(!sanitized.includes("db:5432"), "the host and port must not survive");
+});
+
+test("sanitizeErrorMessage redacts a URL whole but keeps the scheme", () => {
+  const sanitized = sanitizeErrorMessage("connect failed against http://example.invalid/path");
+  assert.ok(sanitized.includes("http://"));
+  assert.ok(!sanitized.includes("example.invalid"));
+});
+
+test("sanitizeErrorMessage redacts a host without leaving a partial host behind", () => {
+  // A substring redaction would leave "internal.example." behind, which is
+  // still most of the host name.
+  const sanitized = sanitizeErrorMessage("failure talking to internal.example.com");
+  assert.equal(sanitized, "failure talking to <redacted-host>");
+  assert.ok(!sanitized.includes("internal.example"));
+});
+
+test("sanitizeErrorMessage redacts a host that carries a port", () => {
+  const sanitized = sanitizeErrorMessage("host internal.example.com:8080");
+  assert.ok(!sanitized.includes("internal.example"));
+});
+
+test("sanitizeErrorMessage redacts a bare service name with a port", () => {
+  const sanitized = sanitizeErrorMessage("connect ECONNREFUSED db:5432");
+  assert.ok(!sanitized.includes("db:5432"));
 });
 
 test("sanitizeErrorMessage redacts host names and IP addresses", () => {
@@ -64,8 +87,9 @@ test("sanitizeErrorMessage redacts host names and IP addresses", () => {
 });
 
 test("sanitizeErrorMessage redacts bearer tokens and api keys", () => {
-  assert.ok(!sanitizeErrorMessage("authorization: Bearer abc123def456").includes("abc123def456"));
-  assert.ok(!sanitizeErrorMessage("api_key=sk-live-abcdef123456").includes("sk-live-abcdef123456"));
+  assert.ok(!sanitizeErrorMessage("authorization: Bearer PLACEHOLDERSECRET").includes("PLACEHOLDERSECRET"));
+  assert.ok(!sanitizeErrorMessage("api_key=s3cr3t-placeholder").includes("s3cr3t-placeholder"));
+  assert.ok(!sanitizeErrorMessage("password=s3cr3t-placeholder").includes("s3cr3t-placeholder"));
 });
 
 test("sanitizeErrorMessage keeps a useful plain message intact", () => {

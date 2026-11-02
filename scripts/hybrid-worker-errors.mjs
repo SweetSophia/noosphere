@@ -40,18 +40,74 @@ export function workerErrorKind(error) {
   return "internal";
 }
 
+// A dotted name: at least one label separator, every label alphanumeric or
+// dash separated. Matching whole tokens rather than substrings is what keeps
+// a host from being half redacted.
+const HOST_LIKE = /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?)+$/i;
+const IP_LIKE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+const PORT_SUFFIX = /:\d{1,5}$/;
+// Trailing punctuation belongs to the sentence, not to the token.
+const TRAILING_PUNCTUATION = /[.,;:!?)\]}"']+$/;
+const CREDENTIAL_KEY = /^(?:[a-z0-9_-]*(?:password|passwd|api[_-]?key|token|secret|authorization)[a-z0-9_-]*)$/i;
+
 /**
  * Redacts anything that could carry a credential, a connection string, a host
  * name or an IP address, so a fatal message can be logged without leaking
  * secrets.
+ *
+ * Two passes, because the two kinds of secret sit at different granularities:
+ *
+ * 1. Credentials and URLs are matched across the whole message, since a
+ *    credential can be introduced by a key and completed by a later token
+ *    ("authorization: Bearer <token>").
+ * 2. Hosts and addresses are matched token by token, and a host token is
+ *    replaced in full. Removing a host as a substring would leave the
+ *    remainder of the name behind, so "internal.example.com" could still
+ *    surface as "internal.example.".
  */
 export function sanitizeErrorMessage(message) {
   if (typeof message !== "string" || message.length === 0) return null;
-  return message
+  const withoutSecrets = message
+    // Keep the scheme so the log still records what kind of URL failed.
     .replace(/postgres(?:ql)?:\/\/[^\s"']+/giu, "postgres://<redacted>")
-    .replace(/\b[a-z0-9_-]{2,}:\/\/[^\s"']+/giu, "<redacted-url>")
-    .replace(/(\b(?:password|api[_-]?key|token|secret|authorization)\b\s*[=:]\s*)(?:Bearer\s+)?\S+/giu, "$1<redacted>")
-    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/gu, "<redacted-ip>")
-    .replace(/[a-z0-9.-]+\.(?:internal|local|com|net|org|io)\b/giu, "<redacted-host>")
-    .slice(0, 300);
+    .replace(/\b([a-z][a-z0-9+.-]*):\/\/[^\s"']+/giu, "$1://<redacted-url>")
+    .replace(
+      /(\b(?:password|passwd|api[_-]?key|token|secret|authorization)\b\s*[=:]\s*)(?:Bearer\s+)?\S+/giu,
+      "$1<redacted>",
+    );
+  const redacted = withoutSecrets
+    .split(/(\s+)/)
+    .map((token) => (token.trim().length === 0 ? token : redactToken(token)))
+    .join("");
+  return redacted.slice(0, 300);
+}
+
+function redactToken(token) {
+  const trailing = TRAILING_PUNCTUATION.exec(token)?.[0] ?? "";
+  const core = trailing.length > 0 ? token.slice(0, -trailing.length) : token;
+  if (core.length === 0) return token;
+
+  // A URL: keep the scheme so the log still records what kind of URL failed.
+  const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(core);
+  if (scheme) return `${scheme[1]}://<redacted-url>${trailing}`;
+
+  // key=value and key: value credentials, including "authorization: Bearer x".
+  const credential = /^([a-z0-9_-]+)(\s*[=:]\s*)(.*)$/i.exec(core);
+  if (credential && CREDENTIAL_KEY.test(credential[1])) {
+    return `${credential[1]}${credential[2]}<redacted>${trailing}`;
+  }
+
+
+  // A host with an optional port, or a bare service name with a port.
+  const withoutPort = PORT_SUFFIX.exec(core);
+  const hostPart = withoutPort ? core.slice(0, withoutPort.index) : core;
+  const portPart = withoutPort ? withoutPort[0] : "";
+
+  if (IP_LIKE.test(hostPart)) return `<redacted-ip>${portPart}${trailing}`;
+  if (HOST_LIKE.test(hostPart)) return `<redacted-host>${portPart}${trailing}`;
+  if (withoutPort && /^[a-z0-9][a-z0-9_-]*$/i.test(hostPart)) {
+    return `<redacted-endpoint>${trailing}`;
+  }
+
+  return token;
 }
