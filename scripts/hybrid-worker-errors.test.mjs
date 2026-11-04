@@ -265,6 +265,7 @@ test("scheme-less userinfo and a spaced URL tail are redacted", () => {
 
 for (const [name, overrides, expected] of [
   ["invalid database URL", { NOOSPHERE_HYBRID_WORKER_DATABASE_URL: "not-a-url" }, "NOOSPHERE_HYBRID_WORKER_DATABASE_URL is invalid"],
+  ["malformed username encoding", { NOOSPHERE_HYBRID_WORKER_DATABASE_URL: "postgresql://%ZZ@127.0.0.1:1/fixture" }, "URI malformed"],
   ["invalid bound", { NOOSPHERE_HYBRID_WORKER_CONCURRENCY: "0" }, "NOOSPHERE_HYBRID_WORKER_CONCURRENCY must be an integer between 1 and 16"],
   ["invalid provider JSON", { NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON: "not-json" }, "NOOSPHERE_HYBRID_PROVIDER_CONFIG_JSON must be valid JSON"],
   ["invalid provider base64", { NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64: "!" }, "NOOSPHERE_HYBRID_PROVIDER_CONFIG_B64 must be canonical base64"],
@@ -298,7 +299,7 @@ for (const [name, overrides, expected] of [
 test("typed configuration failures preserve the existing configuration code", async () => {
   const { HybridWorkerConfigError } = await import("./hybrid-worker-errors.mjs");
   assert.equal(typeof HybridWorkerConfigError, "function");
-  for (const cause of [new Error("invalid config"), null, "invalid config"]) {
+  for (const cause of [new Error("invalid config"), new HybridProviderError("provider_config_mismatch", "invalid config"), Object.assign(new Error("invalid config"), { code: "EINVAL" }), null, "invalid config"]) {
     const error = new HybridWorkerConfigError(cause?.message, { cause });
     assert.equal(workerErrorKind(error), "configuration");
     assert.equal(workerErrorCode(error), "worker_internal");
@@ -326,6 +327,15 @@ test("parser programming failures retain their programming kind", async () => {
   }
 });
 
+test("URI and syntax failures at the configuration boundary are configuration faults", async () => {
+  const { HybridWorkerConfigError } = await import("./hybrid-worker-errors.mjs");
+  for (const cause of [new URIError("invalid encoding"), new SyntaxError("invalid JSON")]) {
+    const error = new HybridWorkerConfigError(cause.message, { cause });
+    assert.equal(workerErrorKind(error), "configuration");
+    assert.equal(workerErrorCode(error), "worker_internal");
+  }
+});
+
 test("configuration wrapper tolerates non-Error thrown values without serializing raw objects", async () => {
   const { HybridWorkerConfigError } = await import("./hybrid-worker-errors.mjs");
   for (const cause of [null, undefined, "invalid config", { toString() { throw new Error("unsafe coercion"); } }]) {
@@ -334,32 +344,55 @@ test("configuration wrapper tolerates non-Error thrown values without serializin
   }
 });
 
-test("valid configuration leaves connection failures classified as database", async () => {
+test("valid configuration leaves database startup failures classified as database", async () => {
   const { createServer } = await import("node:net");
-  const { spawnSync } = await import("node:child_process");
+  const { execFile } = await import("node:child_process");
   const { mkdtemp, rm, readFile } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  const server = createServer();
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const port = server.address().port;
-  await new Promise(resolve => server.close(resolve));
+  // Retain ownership of the port throughout the child lifetime. A minimal
+  // PostgreSQL ErrorResponse makes failure deterministic without OS errnos or
+  // a bind/close/rebind race. The fixture only speaks to the local child.
+  const sockets = new Set();
+  const server = createServer(socket => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+    socket.on("error", () => {});
+    socket.once("data", () => {
+      const fields = Buffer.from("SFATAL\0C08006\0Mfixture database unavailable\0\0");
+      const header = Buffer.alloc(5);
+      header[0] = 0x45; // PostgreSQL ErrorResponse
+      header.writeInt32BE(fields.length + 4, 1);
+      socket.end(Buffer.concat([header, fields]));
+    });
+  });
   const temporary = await mkdtemp(join(tmpdir(), "worker-runtime-"));
   try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const port = server.address().port;
     const healthFile = join(temporary, "health.json");
-    const result = spawnSync(process.execPath, ["scripts/hybrid-worker.mjs", "--once"], {
+    // Asynchronous execution lets the parent serve the protocol fixture.
+    const result = await new Promise(resolve => execFile(process.execPath, ["scripts/hybrid-worker.mjs", "--once"], {
       cwd: new URL("../", import.meta.url),
       env: { PATH: process.env.PATH,
         NOOSPHERE_HYBRID_WORKER_DATABASE_URL: `postgresql://noosphere_hybrid_worker_login@127.0.0.1:${port}/fixture`,
         NOOSPHERE_HYBRID_WORKER_HEALTH_FILE: healthFile },
       encoding: "utf8", timeout: 10000,
-    });
+    }, (error, stdout, stderr) => resolve({ status: error?.code ?? 0, stdout, stderr })));
     assert.equal(result.status, 1, result.stderr);
     assert.equal(result.stderr, "");
     const fatal = JSON.parse(result.stdout.trim());
     assert.equal(fatal.kind, "database");
-    assert.equal(fatal.code, "database_econnrefused");
+    assert.equal(fatal.code, "database_08006");
     const health = JSON.parse(await readFile(healthFile, "utf8"));
     assert.equal(health.kind, "database");
-  } finally { await rm(temporary, { recursive: true, force: true }); }
+    assert.equal(health.code, fatal.code);
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    await new Promise(resolve => server.close(resolve));
+    await rm(temporary, { recursive: true, force: true });
+  }
 });
