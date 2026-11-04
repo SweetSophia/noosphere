@@ -5,6 +5,7 @@ import {
   HybridWorkerReadinessError,
   sanitizeErrorMessage,
   workerErrorCode,
+  workerErrorMessage,
   workerErrorKind,
 } from "./hybrid-worker-errors.mjs";
 
@@ -294,12 +295,71 @@ for (const [name, overrides, expected] of [
   } finally { await rm(temporary, { recursive: true, force: true }); }
 });
 
-test("typed configuration failures retain their original error code", async () => {
+test("typed configuration failures preserve the existing configuration code", async () => {
   const { HybridWorkerConfigError } = await import("./hybrid-worker-errors.mjs");
   assert.equal(typeof HybridWorkerConfigError, "function");
-  for (const cause of [new Error("invalid config"), new HybridProviderError("provider_config_mismatch", "invalid provider")]) {
-    const error = new HybridWorkerConfigError(cause.message, { cause });
+  for (const cause of [new Error("invalid config"), null, "invalid config"]) {
+    const error = new HybridWorkerConfigError(cause?.message, { cause });
     assert.equal(workerErrorKind(error), "configuration");
-    assert.equal(workerErrorCode(error), workerErrorCode(cause));
+    assert.equal(workerErrorCode(error), "worker_internal");
   }
+});
+
+
+test("configuration code lookup is bounded even for cyclic causes", async () => {
+  const { HybridWorkerConfigError } = await import("./hybrid-worker-errors.mjs");
+  const error = new HybridWorkerConfigError("invalid config");
+  error.cause = error;
+  assert.equal(workerErrorCode(error), "worker_internal");
+});
+
+test("typed worker errors have diagnostic names", async () => {
+  const { HybridWorkerConfigError } = await import("./hybrid-worker-errors.mjs");
+  assert.equal(new HybridWorkerConfigError("invalid").name, "HybridWorkerConfigError");
+  assert.equal(new HybridWorkerReadinessError("not ready").name, "HybridWorkerReadinessError");
+});
+
+test("parser programming failures retain their programming kind", async () => {
+  const { HybridWorkerConfigError } = await import("./hybrid-worker-errors.mjs");
+  for (const cause of [new TypeError("parser failed"), new RangeError("parser failed")]) {
+    assert.equal(workerErrorKind(new HybridWorkerConfigError(cause.message, { cause })), "programming");
+  }
+});
+
+test("configuration wrapper tolerates non-Error thrown values without serializing raw objects", async () => {
+  const { HybridWorkerConfigError } = await import("./hybrid-worker-errors.mjs");
+  for (const cause of [null, undefined, "invalid config", { toString() { throw new Error("unsafe coercion"); } }]) {
+    const error = new HybridWorkerConfigError(undefined, { cause });
+    assert.equal(workerErrorMessage(error), "Hybrid worker configuration parsing failed");
+  }
+});
+
+test("valid configuration leaves connection failures classified as database", async () => {
+  const { createServer } = await import("node:net");
+  const { spawnSync } = await import("node:child_process");
+  const { mkdtemp, rm, readFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const server = createServer();
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  await new Promise(resolve => server.close(resolve));
+  const temporary = await mkdtemp(join(tmpdir(), "worker-runtime-"));
+  try {
+    const healthFile = join(temporary, "health.json");
+    const result = spawnSync(process.execPath, ["scripts/hybrid-worker.mjs", "--once"], {
+      cwd: new URL("../", import.meta.url),
+      env: { PATH: process.env.PATH,
+        NOOSPHERE_HYBRID_WORKER_DATABASE_URL: `postgresql://noosphere_hybrid_worker_login@127.0.0.1:${port}/fixture`,
+        NOOSPHERE_HYBRID_WORKER_HEALTH_FILE: healthFile },
+      encoding: "utf8", timeout: 10000,
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stderr, "");
+    const fatal = JSON.parse(result.stdout.trim());
+    assert.equal(fatal.kind, "database");
+    assert.equal(fatal.code, "database_econnrefused");
+    const health = JSON.parse(await readFile(healthFile, "utf8"));
+    assert.equal(health.kind, "database");
+  } finally { await rm(temporary, { recursive: true, force: true }); }
 });

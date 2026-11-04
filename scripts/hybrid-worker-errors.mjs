@@ -3,12 +3,25 @@ import { isIP } from "node:net";
 import { HybridProviderError, sanitizeErrorCode } from "./hybrid-provider.mjs";
 
 // Classification must not depend on the human-facing wording of an assertion.
-export class HybridWorkerReadinessError extends Error {}
-export class HybridWorkerConfigError extends Error {}
+export class HybridWorkerReadinessError extends Error {
+  constructor(message, options) {
+    super(message, options);
+    this.name = "HybridWorkerReadinessError";
+  }
+}
+export class HybridWorkerConfigError extends Error {
+  constructor(message, options) {
+    // Do not stringify arbitrary thrown objects or configuration payloads.
+    super(typeof message === "string" && message ? message : "Hybrid worker configuration parsing failed", options);
+    this.name = "HybridWorkerConfigError";
+  }
+}
 
 /** Keep existing codes stable, including the historical database_ prefix. */
 export function workerErrorCode(error) {
-  if (error instanceof HybridWorkerConfigError) return workerErrorCode(error.cause);
+  // Config validators historically throw uncoded Errors. Keep that public code
+  // without following a potentially cyclic cause chain.
+  if (error instanceof HybridWorkerConfigError) return "worker_internal";
   if (error instanceof HybridProviderError) return sanitizeErrorCode(error.code);
   if (error && typeof error === "object" && typeof error.code === "string") {
     return sanitizeErrorCode(`database_${error.code}`);
@@ -20,7 +33,10 @@ const FILESYSTEM_CODES = new Set(["ENOENT", "EACCES", "EPERM", "ENOSPC", "EROFS"
 const FILESYSTEM_SYSCALL = /^(?:mkdir|open|write|writeFile|rename|stat|lstat|unlink|fsync)$/;
 
 export function workerErrorKind(error) {
-  if (error instanceof HybridWorkerConfigError) return "configuration";
+  if (error instanceof HybridWorkerConfigError) {
+    const name = error.cause?.name;
+    return name === "TypeError" || name === "RangeError" ? "programming" : "configuration";
+  }
   if (error instanceof HybridProviderError) return "provider";
   if (error instanceof HybridWorkerReadinessError) return "readiness";
   if (error?.name === "AggregateError") return "pool_aggregate";

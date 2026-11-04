@@ -194,7 +194,7 @@ function readConfiguration(env) {
   } catch (cause) {
     // Only configuration parsing is wrapped: pool/runtime failures keep their
     // own classification. Assign settings only after the whole config succeeds.
-    throw new HybridWorkerConfigError(cause.message, { cause });
+    throw new HybridWorkerConfigError(typeof cause?.message === "string" ? cause.message : undefined, { cause });
   }
 }
 
