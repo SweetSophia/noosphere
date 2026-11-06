@@ -230,7 +230,7 @@ test("configuration errors use the fatal handler before opening a database", asy
   const result = spawnSync(process.execPath, ["scripts/hybrid-worker.mjs", "--once"], {
     cwd: new URL("../", import.meta.url),
     env: { PATH: process.env.PATH, NOOSPHERE_HYBRID_WORKER_DATABASE_URL: "" },
-    encoding: "utf8", timeout: 5000,
+    encoding: "utf8", timeout: 5000, killSignal: "SIGKILL",
   });
   assert.equal(result.status, 1);
   assert.equal(result.stderr, "");
@@ -282,7 +282,7 @@ for (const [name, overrides, expected] of [
       env: { PATH: process.env.PATH,
         NOOSPHERE_HYBRID_WORKER_DATABASE_URL: "postgresql://noosphere_hybrid_worker_login@127.0.0.1:1/fixture",
         NOOSPHERE_HYBRID_WORKER_HEALTH_FILE: healthFile, ...overrides },
-      encoding: "utf8", timeout: 5000,
+      encoding: "utf8", timeout: 5000, killSignal: "SIGKILL",
     });
     assert.equal(result.status, 1);
     assert.equal(result.stderr, "");
@@ -352,7 +352,8 @@ test("valid configuration leaves database startup failures classified as databas
   const { join } = await import("node:path");
   // Retain ownership of the port throughout the child lifetime. A minimal
   // PostgreSQL ErrorResponse makes failure deterministic without OS errnos or
-  // a bind/close/rebind race. The fixture only speaks to the local child.
+  // a bind/close/rebind race. The fixture only speaks plaintext to the local
+  // child, whose isolated URL explicitly disables TLS below.
   const sockets = new Set();
   const server = createServer(socket => {
     sockets.add(socket);
@@ -378,11 +379,14 @@ test("valid configuration leaves database startup failures classified as databas
     const result = await new Promise(resolve => execFile(process.execPath, ["scripts/hybrid-worker.mjs", "--once"], {
       cwd: new URL("../", import.meta.url),
       env: { PATH: process.env.PATH,
-        NOOSPHERE_HYBRID_WORKER_DATABASE_URL: `postgresql://noosphere_hybrid_worker_login@127.0.0.1:${port}/fixture`,
+        NOOSPHERE_HYBRID_WORKER_DATABASE_URL: `postgresql://noosphere_hybrid_worker_login@127.0.0.1:${port}/fixture?sslmode=disable`,
         NOOSPHERE_HYBRID_WORKER_HEALTH_FILE: healthFile },
-      encoding: "utf8", timeout: 10000,
-    }, (error, stdout, stderr) => resolve({ status: error?.code ?? 0, stdout, stderr })));
-    assert.equal(result.status, 1, result.stderr);
+      encoding: "utf8", timeout: 10000, killSignal: "SIGKILL",
+    }, (error, stdout, stderr) => resolve({
+      status: error ? error.code : 0, signal: error?.signal,
+      killed: error?.killed ?? false, stdout, stderr,
+    })));
+    assert.equal(result.status, 1, JSON.stringify(result));
     assert.equal(result.stderr, "");
     const fatal = JSON.parse(result.stdout.trim());
     assert.equal(fatal.kind, "database");
