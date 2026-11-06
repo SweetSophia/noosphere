@@ -118,6 +118,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
 
@@ -140,6 +145,28 @@ jobs:
         run: |
           architecture=$(docker image inspect noosphere:pr-${{ matrix.slug }} --format '{{.Architecture}}')
           test "$architecture" = '${{ matrix.slug }}'
+
+      - name: Verify worker startup and diagnostics in the native image
+        env:
+          SMOKE_IMAGE: noosphere:pr-${{ matrix.slug }}
+        run: |
+          # No network, credentials, database, migration, or persistent resources.
+          # Missing configuration must reach the worker handler, not fail an import.
+          node --input-type=module <<'JS'
+          import assert from "node:assert/strict";
+          import { spawnSync } from "node:child_process";
+          const result = spawnSync("docker", ["run", "--rm", "--network", "none",
+            "--entrypoint", "node", process.env.SMOKE_IMAGE,
+            "scripts/hybrid-worker.mjs", "--once"], { encoding: "utf8", timeout: 30000 });
+          assert.equal(result.status, 1, result.stderr);
+          assert.equal(result.stderr, "");
+          const fatal = JSON.parse(result.stdout.trim());
+          assert.equal(fatal.event, "worker_fatal");
+          assert.equal(fatal.code, "worker_internal");
+          assert.equal(fatal.kind, "configuration");
+          assert.equal(fatal.message, "NOOSPHERE_HYBRID_WORKER_DATABASE_URL is required");
+          console.log("Native worker import graph and safe startup failure passed");
+          JS
 
       - name: Smoke-test application health on the native architecture
         env:

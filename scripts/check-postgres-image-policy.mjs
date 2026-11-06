@@ -574,6 +574,7 @@ const applicationDockerfile = read("Dockerfile");
 expect(
   applicationDockerfile.includes("/app/scripts/hybrid-provider.mjs ./scripts/hybrid-provider.mjs") &&
     applicationDockerfile.includes("/app/scripts/hybrid-worker.mjs ./scripts/hybrid-worker.mjs") &&
+    applicationDockerfile.includes("/app/scripts/hybrid-worker-errors.mjs ./scripts/hybrid-worker-errors.mjs") &&
     applicationDockerfile.includes("/app/scripts/check-hybrid-worker-health.mjs ./scripts/check-hybrid-worker-health.mjs") &&
     !applicationDockerfile.includes("/app/scripts ./scripts"),
   "the production image must carry only the Phase B worker runtime scripts, not the repository script tree",

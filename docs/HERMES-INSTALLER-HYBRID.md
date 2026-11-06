@@ -41,7 +41,8 @@ It will look for `noosphere-db` and `127.0.0.1:5433`. Do not run it against
 an installer install.
 
 The published image does **not** ship the A/B/C **activator scripts** (only
-`hybrid-provider.mjs`, `hybrid-worker.mjs`, `check-hybrid-worker-health.mjs`).
+`hybrid-provider.mjs`, `hybrid-worker.mjs`, `hybrid-worker-errors.mjs`, and
+`check-hybrid-worker-health.mjs`).
 The `docker/hybrid-storage/*.sql` DDL **is** in the image, but the
 authoritative SQL + privilege SSOT stays in `docker/hybrid-storage/README.md`
 in the repo — keep the shallow scripts checkout for that plus the activator
