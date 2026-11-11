@@ -21,12 +21,17 @@ if npm publish "$tarball" --access public --provenance >"$output" 2>&1; then
   printf 'npm accepted publication of %s; verifying registry integrity.\n' "$target"
 else
   status=$?
-  if grep -qE 'code (E403|EPUBLISHCONFLICT)([^A-Z0-9]|$)' "$output" &&
-    grep -qiF 'cannot publish over the previously published versions' "$output"; then
+  code=$(grep -oE 'code E[A-Z0-9]+' "$output" | head -n 1 || true)
+  code=${code#code }
+  # npm can reject an already-visible version locally without assigning an
+  # error code. Accept only its exact version-bound message in that case;
+  # a coded auth/server error must not be hidden by a similar phrase.
+  if { [[ "$code" == E403 || "$code" == EPUBLISHCONFLICT ]] &&
+       grep -qiF 'cannot publish over the previously published versions' "$output"; } ||
+     { [[ -z "$code" ]] &&
+       grep -qxF "npm error You cannot publish over the previously published versions: ${target##*@}." "$output"; }; then
     printf 'npm reports an existing version of %s; exact-integrity readback decides.\n' "$target"
   else
-    code=$(grep -oE 'code E[A-Z0-9]+' "$output" | head -n 1 || true)
-    code=${code#code }
     # Do not echo arbitrary npm/registry output that may contain credentials.
     printf 'npm publish failed for %s (status %s, code %s). Publication is not confirmed; check npm credentials, package access and registry availability.\n' "$target" "$status" "${code:-UNKNOWN}" >&2
     exit 5

@@ -16,6 +16,7 @@ case "$1" in
     [[ "$3" == --access && "$4" == public && "$5" == --provenance ]] || exit 99
     case "$MODE" in
       success|mismatch) exit 0 ;;
+      clientduplicate) printf 'npm error You cannot publish over the previously published versions: 1.0.0.\n' >&2 ;;
       duplicate) printf 'npm error code E403\ncannot publish over the previously published versions\n' >&2 ;;
       auth) printf 'npm error code E401\nfixture-sensitive-token\n' >&2 ;;
       server) printf 'npm error code E500\nfixture-sensitive-token\n' >&2 ;;
@@ -28,12 +29,12 @@ case "$1" in
 esac
 STUB
 chmod +x "$work/bin/npm"
-for mode in success duplicate auth server misleading mismatch; do
+for mode in success duplicate clientduplicate auth server misleading mismatch; do
   : > "$CALLS"
   status=0
   MODE="$mode" PATH="$work/bin:$PATH" bash "$root/scripts/publish-npm-artifact.sh" "$work/artifact.tgz" fixture@1.0.0 "$EXPECTED" >"$work/output" 2>&1 || status=$?
   case "$mode" in
-    success|duplicate) expected=0 ;;
+    success|duplicate|clientduplicate) expected=0 ;;
     mismatch) expected=1 ;;
     *) expected=5 ;;
   esac
