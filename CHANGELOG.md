@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Resolve the TypeScript-ESLint-only minimatch dependency to patched 11.0.8
+  for GHSA-g3hv-75wg-m249. Keep unrelated matcher copies unchanged; exercise
+  the actual consumer resolution and ordinary project glob APIs in CI.
 - Make hybrid-worker fatal stops diagnosable with classified failure kinds and
   bounded, redacted messages (including AggregateError children), without changing
   existing error codes. Classify configuration failures explicitly in the safe

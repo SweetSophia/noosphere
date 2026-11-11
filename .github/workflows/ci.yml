@@ -39,6 +39,9 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
+      - name: Verify lint dependency compatibility
+        run: npm run test:lint-dependencies
+
       - name: Lint
         run: npm run lint
 

@@ -20,6 +20,7 @@
     "test:api": "node --import tsx --test 'src/__tests__/api/**/*.test.ts'",
     "test:security": "node --env-file=.env.test --import tsx --test src/__tests__/security/uploads.test.ts src/__tests__/security/proxy.test.ts src/__tests__/security/articles-update.test.ts src/__tests__/security/markdown-sanitize.test.ts src/__tests__/security/yaml-resource-limits.test.ts src/__tests__/security/openclaw-secret-ref-boundary.test.ts src/__tests__/security/dependency-security.test.ts",
     "lint": "eslint",
+    "test:lint-dependencies": "node --test scripts/minimatch-security.test.mjs",
     "typecheck": "tsc --noEmit",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
@@ -103,6 +104,9 @@
     },
     "micromark-extension-math": {
       "katex": "$katex"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.8"
     }
   }
 }
