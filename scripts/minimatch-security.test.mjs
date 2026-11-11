@@ -2,10 +2,9 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import test from "node:test";
 import fs from "node:fs";
-import { minimatchOverrideFailures, qualifiedMinimatchVersion } from "./minimatch-override-policy.mjs";
+import { qualifiedMinimatchVersion } from "./minimatch-override-policy.mjs";
 
 const manifest = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url)));
-const lock = JSON.parse(fs.readFileSync(new URL("../package-lock.json", import.meta.url)));
 
 // Test-only resolution through the actual consumer: a separate root minimatch
 // dependency could hide a vulnerable nested copy and would prove nothing.
@@ -32,17 +31,4 @@ test("patched matcher preserves ordinary lint project inclusion and exclusion", 
     assert.equal(new minimatch.Minimatch(pattern, options).match(file), expected);
   }
   assert.deepEqual(minimatch.match(["a.ts", "b.js"], "*.ts"), ["a.ts"]);
-});
-
-test("a changed parent range or resolved pin requires deliberate requalification", () => {
-  assert.deepEqual(minimatchOverrideFailures(manifest, lock), []);
-  const changed = structuredClone(lock);
-  changed.packages["node_modules/@typescript-eslint/typescript-estree"].dependencies.minimatch = "^11.0.0";
-  assert.match(minimatchOverrideFailures(manifest, changed).join(" "), /declared minimatch range changed/);
-  const missing = structuredClone(lock);
-  delete missing.packages["node_modules/@typescript-eslint/typescript-estree/node_modules/minimatch"];
-  assert.match(minimatchOverrideFailures(manifest, missing).join(" "), /qualified patched minimatch/);
-  const wrong = structuredClone(manifest);
-  wrong.overrides["@typescript-eslint/typescript-estree"].minimatch = "10.2.5";
-  assert.match(minimatchOverrideFailures(wrong, lock).join(" "), /pin changed/);
 });

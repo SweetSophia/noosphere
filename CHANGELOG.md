@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   This deliberately exceeds the parent's `^10.2.2`; a changed parent range,
   pin, or nested resolution requires re-qualification through the policy gate.
   Root 3.1.5 is outside this advisory's affected `>=7.0.0 <11.0.1` range.
-  The lint-only edge requires Node 20 or >=22 (qualified on Node 22/24);
+  The lint-only edge requires Node 20 or >=22 (qualified locally on Node 22/24; root CI uses Node 22);
   the root and all five integration lockfile audits report zero vulnerabilities.
 - Make hybrid-worker fatal stops diagnosable with classified failure kinds and
   bounded, redacted messages (including AggregateError children), without changing
