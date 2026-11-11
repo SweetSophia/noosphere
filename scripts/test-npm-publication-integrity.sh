@@ -21,6 +21,7 @@ set -euo pipefail
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 script="$repo_root/scripts/verify-npm-publication-integrity.sh"
+[[ -r "$script" ]] || { printf "missing verifier: %s\n" "$script" >&2; exit 1; }
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
 
@@ -59,6 +60,7 @@ for arg in "$@"; do
     *@*) requested="$arg"; break ;;
   esac
 done
+[[ "$1" == view && "$3" == dist.integrity && "$4" == --json ]] || exit 91
 printf '%s\n' "$requested" >> "${FAKE_NPM_REQUEST_LOG:?}"
 count=0
 [[ -f "$counter_file" ]] && count=$(cat "$counter_file")
@@ -113,9 +115,24 @@ serve() {
       printf 'npm error code E404\n' >&2
       exit 1
       ;;
+    secretcode)
+      printf '{"error":{"code":"fixture-sensitive-token","summary":"fixture"}}\n'
+      exit 1
+      ;;
     auth)
       printf 'npm error code E401\nnpm error 401 Unauthorized - bad credentials\n' >&2
       exit 1
+      ;;
+    hang)
+      exec sleep 30
+      ;;
+    null|object|malformed|badstring)
+      case "$FAKE_NPM_STATE" in
+        null) printf 'null\n' ;;
+        object) printf '{}\n' ;;
+        malformed) printf '<html>unavailable</html>\n' ;;
+        badstring) printf '"invalid-digest"\n' ;;
+      esac
       ;;
     unknown)
       printf 'something went sideways\n' >&2
@@ -397,6 +414,45 @@ else
     fail "expected status 3 for a missing argument, saw ${status}"
   fi
 fi
+
+# Review regressions: only a valid sha512 response may be called a mismatch;
+# registry failures must not masquerade as propagation or wait out the budget.
+for state in auth unknown null object malformed badstring secretcode hang; do
+  rm -f "$work_dir/counter" "$work_dir/requests.log"
+  started=$SECONDS
+  status=0
+  run_script FAKE_NPM_STATE="$state" -- "$target" "$expected_integrity" 2 1 >"$work_dir/regression.out" 2>&1 || status=$?
+  if (( status == 4 )); then pass "$state is a verification failure, not mismatch/propagation"; else fail "$state expected4 got$status"; fi
+  if (( $(poll_count) == 1 )); then pass "$state does not repeatedly query a broken registry"; else fail "$state retried unexpectedly"; fi
+  if [[ "$state" == auth ]]; then
+    if grep -q E401 "$work_dir/regression.out" && ! grep -q 'Inspect the npm error output' "$work_dir/regression.out"; then
+      pass "auth failure names E401 and gives self-contained recovery guidance"
+    else fail "auth diagnostics lost E401 or refer to discarded evidence"; fi
+  fi
+  if [[ "$state" == secretcode ]]; then
+    if ! grep -q fixture-sensitive-token "$work_dir/regression.out"; then pass "untrusted registry error code is not logged"; else fail "registry error code leaked raw response"; fi
+  fi
+  if [[ "$state" == hang ]]; then
+    if (( SECONDS - started <= 4 )) && grep -q TIMEOUT "$work_dir/regression.out"; then
+      pass "hung request is bounded and explicitly reported as TIMEOUT"
+    else fail "hung request exceeded its budget or lost the timeout diagnosis"; fi
+  fi
+done
+
+# A failed local parser must never escape as the integrity-mismatch status1.
+printf '#!/usr/bin/env bash\nexit 1\n' > "$work_dir/bin/node"
+chmod +x "$work_dir/bin/node"
+status=0
+run_script FAKE_NPM_STATE=match -- "$target" "$expected_integrity" 2 1 >"$work_dir/parser.out" 2>&1 || status=$?
+if (( status == 4 )); then pass "parser process failure maps to verification failure"; else fail "parser failure escaped as$status"; fi
+rm "$work_dir/bin/node"
+
+printf '#!/usr/bin/env bash\nexit 1\n' > "$work_dir/bin/mktemp"
+chmod +x "$work_dir/bin/mktemp"
+status=0
+run_script FAKE_NPM_STATE=match -- "$target" "$expected_integrity" 2 1 >"$work_dir/temp.out" 2>&1 || status=$?
+if (( status == 4 )); then pass "temporary file failure maps to verification failure"; else fail "temporary file failure escaped as$status"; fi
+rm "$work_dir/bin/mktemp"
 
 printf '\n%s passed, %s failed\n' "$passed" "$failures"
 (( failures == 0 ))

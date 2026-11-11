@@ -122,14 +122,12 @@ process.stdin.on("end", () => {
   try {
     value = JSON.parse(raw);
   } catch {
-    if (/E404|404 Not Found/i.test(raw)) {
-      process.stdout.write("ABSENT");
-    } else {
-      process.stdout.write("ERROR:UNPARSEABLE");
-    }
+    process.stdout.write("ERROR:UNPARSEABLE");
     return;
-  }  if (typeof value === "string") {
-    process.stdout.write("OK:" + value);
+  }
+  const integrity = (text) => /^sha512-[A-Za-z0-9+/]{86}==$/.test(text);
+  if (typeof value === "string") {
+    process.stdout.write(integrity(value) ? "OK:" + value : "ERROR:INVALID_INTEGRITY");
     return;
   }
   if (Array.isArray(value)) {
@@ -138,18 +136,18 @@ process.stdin.on("end", () => {
       return;
     }
     if (value.length === 1 && typeof value[0] === "string") {
-      process.stdout.write("OK:" + value[0]);
+      process.stdout.write(integrity(value[0]) ? "OK:" + value[0] : "ERROR:INVALID_INTEGRITY");
       return;
     }
     process.stdout.write("ERROR:AMBIGUOUS");
     return;
   }
   if (value && typeof value === "object" && value.error) {
-    const code = String(value.error.code || "UNKNOWN");
+    const code = typeof value.error.code === "string" && /^E[A-Z0-9]{1,31}$/.test(value.error.code) ? value.error.code : "UNKNOWN";
     process.stdout.write(code === "E404" ? "ABSENT" : "ERROR:" + code);
     return;
   }
-  process.stdout.write("ABSENT");
+  process.stdout.write("ERROR:INVALID_RESPONSE");
 });
 '
 }
@@ -169,9 +167,11 @@ while :; do
   # A single registry request must never outlive the readback deadline, so
   # bound each request by the time that is actually left.
   request_timeout=$(( remaining < 60 ? remaining : 60 ))
-  stdout_file=$(mktemp)
-  stderr_file=$(mktemp)
-  if timeout --kill-after=5 "$request_timeout" \
+  stdout_file=$(mktemp) || { printf 'Cannot create registry response file.\n' >&2; exit 4; }
+  stderr_file=$(mktemp) || { rm -f "$stdout_file"; printf 'Cannot create registry error file.\n' >&2; exit 4; }
+  # SIGKILL bounds even a client that traps SIGTERM; no grace period beyond
+  # the release readback deadline is permitted.
+  if timeout --signal=KILL "$request_timeout" \
     npm view "$target" dist.integrity --json \
       --fetch-retries=0 --fetch-timeout="$(( request_timeout * 1000 ))" \
       >"$stdout_file" 2>"$stderr_file"; then
@@ -180,18 +180,20 @@ while :; do
     npm_status=$?
   fi
 
-  if (( npm_status == 0 )); then
-    token=$(parse_registry_response <"$stdout_file")
-    if [[ "$token" == "EMPTY" ]]; then
-      token="ABSENT"
-    fi
+  if (( npm_status == 124 || npm_status == 137 )); then
+    # A timeout is not evidence that a version is absent. Keep it distinct
+    # from propagation so the operator knows verification never got an answer.
+    token="ERROR:TIMEOUT"
+  elif (( npm_status == 0 )); then
+    token=$(parse_registry_response <"$stdout_file") || token="ERROR:PARSE"
+    [[ "$token" != "EMPTY" ]] || token="ERROR:MISSING_INTEGRITY"
   else
     # A failed request is either "not published yet" or a real registry
     # problem. npm 10 reports the missing version as E404 on stderr; npm 12
     # writes an E404 error object to stdout instead. Both must read as
     # "not visible yet" and never as a credential or server failure. An
     # empty response with a failing status is neither, so it stays an error.
-    stdout_token=$(parse_registry_response <"$stdout_file")
+    stdout_token=$(parse_registry_response <"$stdout_file") || stdout_token="ERROR:PARSE"
     if [[ "$stdout_token" == "ABSENT" ]] || grep -qiE 'E404|404 Not Found' "$stderr_file"; then
       token="ABSENT"
     elif [[ "$stdout_token" == ERROR:* ]]; then
@@ -199,7 +201,8 @@ while :; do
     else
       # Authentication, network and server failures are not propagation. Keep
       # the code so the deadline message can name the real cause.
-      error_code=$(grep -oiE 'E[A-Z]{3,6}' "$stderr_file" | head -n 1 || true)
+      error_code=$(grep -oE 'code E[A-Z0-9]+' "$stderr_file" | head -n 1 || true)
+      error_code=${error_code#code }
       token="ERROR:${error_code:-UNKNOWN}"
     fi
   fi
@@ -221,9 +224,20 @@ while :; do
       ;;
     ERROR:*)
       last_error=${token#ERROR:}
+      printf 'Could not verify %s: registry/readback failure %s (npm status %s); not a propagation delay.\n' "$target" "$last_error" "$npm_status" >&2
+      case "$last_error" in
+        E401|E403) printf 'Check the npm credential and package access before re-running the workflow.\n' >&2 ;;
+        TIMEOUT) printf 'Registry request exceeded its budget; check connectivity and re-run verification.\n' >&2 ;;
+        *) printf 'Check registry availability and the local npm/Node tools before re-running verification.\n' >&2 ;;
+      esac
+      # Do not print arbitrary npm output: registry/proxy responses can contain
+      # credential-bearing URLs. The allowlisted code and fixed guidance above
+      # are the safe diagnostic contract, not a pointer to deleted raw output.
+      exit 4
       ;;
     *)
-      last_error="UNKNOWN"
+      printf 'Unknown local verification result; cannot establish registry integrity.\n' >&2
+      exit 4
       ;;
   esac
 
@@ -235,13 +249,6 @@ while :; do
   sleep_for=$(( interval < remaining ? interval : remaining ))
   sleep "$sleep_for"
 done
-
-if [[ -n "$last_error" ]]; then
-  printf 'Could not verify %s within %ss: the registry answered with %s instead of serving the version.\n' \
-    "$target" "$deadline" "$last_error" >&2
-  printf 'This is a registry or credential problem, not a propagation delay. Inspect the npm error output before re-running.\n' >&2
-  exit 4
-fi
 
 printf 'Timed out after %ss waiting for %s to become visible on the registry.\n' "$deadline" "$target" >&2
 printf 'The version may still be propagating. Re-run the publish workflow instead of publishing again.\n' >&2

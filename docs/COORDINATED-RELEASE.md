@@ -40,6 +40,35 @@ This step is release preparation, not authorization to create tags or publish.
 7. Re-fetch `origin/master`; bind the exact merge commit and tree in the release
    receipt. A later commit invalidates the gate.
 
+## Documentation follows publication
+
+`README.md` and `docs/INSTALLATION.md` advertise one published release: the
+`vX.Y.Z` launcher and its backend, with both SHA-256 digests.
+`npm run postgres-image:check` checks these documents against the release and
+digests pinned in the policy script, and checks the install block's guards
+(the backend override unset, the three settings as defaults, explicit
+non-interactive integration selection for every invocation, both release URLs
+present on the same release tag, and both checksums verified before any launcher
+invocation).
+`npm run postgres-image:check -- --verify-remote` additionally downloads the
+published release assets and compares their bytes against those pinned digests.
+An HTTP 404 identifies the documents and reports that their advertised release
+is not published or unavailable; a digest mismatch is reported separately.
+
+Only the **release-asset download blocks in `README.md` and
+`docs/INSTALLATION.md`** must wait until publication. The release PR must keep
+those blocks and the policy script's `documentedReleaseVersion`,
+`documentedReleaseInstallerSha256`, and `documentedReleaseBackendSha256` pins on
+the last published release. After the new assets are published and read back,
+update the two blocks and all three pins together in a follow-up change, then
+run both policy modes above. The docs may therefore lag the release being built;
+`--verify-release-files` rejects a release older than the advertised one, but
+does not compare a local rebuild's digests with immutable published digests.
+
+The guided immutable-commit download documents are different: their
+`versionBoundInstallerCommand` is bound to `VERSION`, so the release PR updates
+those commands as usual. They are not subject to the release-asset URL rule.
+
 ## Publication order
 
 Default-branch and pull-request Docker runs build both architectures but do not

@@ -18,7 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version that is still propagating is retried within the deadline, and the
   verifier tells the operator to re-run the workflow rather than republish.
   Covered by `scripts/test-npm-publication-integrity.sh` and enforced by the
-  package publishing policy check.
+  package publishing policy check. Both helper and OpenClaw publish packed
+  artifacts through duplicate-only retry tolerance. Registry/local-tool failures
+  are distinct from propagation and fail promptly with safe error codes.
+- Make hybrid-worker fatal stops diagnosable with classified failure kinds and
+  bounded, redacted messages (including AggregateError children), without changing
+  existing error codes. Classify configuration failures explicitly in the safe
+  fatal handler before creating a pool or writing health state.
+- Ship the worker error helper in production images, run its regression suite in
+  root CI, and smoke-test worker startup in both native architecture images.
 
 ## [1.15.2] - 2026-10-30
 

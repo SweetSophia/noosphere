@@ -151,6 +151,44 @@ For an existing installation using a custom image, export `NOOSPHERE_IMAGE` expl
 The launcher independently verifies the sibling backend and optional Hermes
 bundle before using them. The temporary directory is removed on exit.
 
+### Packaged launcher
+
+The release assets are the coordinated path: the launcher, its backend and the
+Hermes archive all carry the same `1.15.2` pins, so every surface the launcher
+installs lands on one version. Download both files from the release, verify
+both checksums, and run them.
+
+```bash
+(
+  set -e
+  installer_dir="$(mktemp -d)"
+  trap 'rm -rf "$installer_dir"' EXIT
+  installer="$installer_dir/install.sh"
+  backend="$installer_dir/install-openclaw.sh"
+  unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
+  curl -fsSL https://github.com/SweetSophia/noosphere/releases/download/v1.15.2/install.sh -o "$installer"
+  curl -fsSL https://github.com/SweetSophia/noosphere/releases/download/v1.15.2/install-openclaw.sh -o "$backend"
+  printf '%s  %s\n' 'fa38522104b10991cc85774fade4dffc559090e64838827cffeb74d200d547e0' "$installer" | sha256sum -c -
+  printf '%s  %s\n' '7758cc2aab51da3af18551ad138eb08a8c2d50e546955c498840933cbef63c7c' "$backend" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.2}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.2}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.2}" bash "$installer" --non-interactive --with openclaw
+)
+```
+
+The published `.sha256` assets next to each file carry the same digests. The
+command is non-interactive and selects its integrations explicitly; it never
+guesses which agent configuration to mutate. Add `hermes`, `opencode` or
+`kilocode` to the `--with` list to configure those surfaces as well - the
+packaged launcher resolves the Hermes archive and the OpenCode and Kilo Code
+packages to `1.15.2` too.
+
+Each setting is a default that the launcher applies when the environment does
+not already carry one, so an operator who exported `NOOSPHERE_IMAGE`,
+`NOOSPHERE_VERSION` or `NOOSPHERE_PLUGIN_SPEC` keeps their own value. The
+custom-image caveat from the audited block applies here too: for an existing
+installation using a custom image, export `NOOSPHERE_IMAGE` explicitly before
+running this block. The version-bound default does not reuse a persisted image
+automatically, so without that export the stock `1.15.2` image replaces it.
+
 ## Fresh install versus upgrade
 
 The same entry point handles both lifecycle paths, but they are not equivalent.

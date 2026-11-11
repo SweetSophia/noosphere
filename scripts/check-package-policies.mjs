@@ -681,16 +681,22 @@ expect(
       npmPublishWorkflow.indexOf("\n  publish_openclaw:\n") &&
     npmPublishWorkflow.includes("needs: [package-check, publish_helper]") &&
     npmPublishWorkflow.includes("npm pack --json") &&
-    npmPublishWorkflow.includes("dist.integrity") &&
-    npmPublishWorkflow.includes('npm publish "$TARBALL" --access public --provenance'),
+    npmIntegrityVerifier.includes("dist.integrity") &&
+    npmPublishWorkflow.includes('scripts/publish-npm-artifact.sh'),
   "The v-openclaw publication must publish or exact-integrity-verify the helper before OpenClaw without adding an independent dispatch input.",
 );
 expect(
   codeLines(npmPublishHelperJob).includes(
-    'bash "$GITHUB_WORKSPACE/scripts/verify-npm-publication-integrity.sh"',
+    'bash "$GITHUB_WORKSPACE/scripts/publish-npm-artifact.sh"',
   ) &&
     codeLines(npmPublishHelperJob).includes('"$LOCAL_INTEGRITY"') &&
+    codeLines(yamlNamedBlock(npmPublishWorkflow, "publish_openclaw", 2)).includes(
+      'bash "$GITHUB_WORKSPACE/scripts/publish-npm-artifact.sh"',
+    ) &&
     !codeLines(npmPublishHelperJob).includes("for attempt in {1..10}") &&
+    codeLines(readText("scripts/publish-npm-artifact.sh")).includes(
+      '"$target" "$integrity" 600 15',
+    ) &&
     codeLines(npmIntegrityVerifier).includes("dist.integrity") &&
     // The exit codes are the contract the release depends on: a mismatch is
     // fatal, a still-propagating version is retried, a usage error and a
@@ -701,8 +707,9 @@ expect(
     /^\s*exit 3$/m.test(codeLines(npmIntegrityVerifier)) &&
     /^\s*exit 4$/m.test(codeLines(npmIntegrityVerifier)) &&
     codeLines(npmIntegrityVerifier).includes("Re-run the publish workflow") &&
-    codeLines(npmIntegrityVerifierTest).includes("propagation delay") &&
-    codeLines(npmIntegrityVerifierTest).includes("integrity mismatch"),
+    codeLines(npmIntegrityVerifierTest).includes("run_script FAKE_NPM_STATE=delay") &&
+    codeLines(npmIntegrityVerifierTest).includes("run_script FAKE_NPM_STATE=mismatch") &&
+    codeLines(npmIntegrityVerifierTest).includes("status == 2"),
   "The coordinated helper publication must verify the registry readback through the shared bounded verifier so a slow registry cannot abort a healthy release.",
 );
 expect(
@@ -1005,6 +1012,8 @@ expect(
     installerUxTest.includes("child_env=clean") &&
     installerUxTest.includes("bootstrap_tool_config=absent") &&
     installerUxTest.includes("secret_argv=clean") &&
+    installerPackageTest.includes('node --test "$root/scripts/packaged-launcher-documents.test.mjs"') &&
+    installerPackageTest.includes("doc_negative_controls=9") &&
     installerPackageTest.includes("tampered backend unexpectedly passed") &&
     installerPackageTest.includes("tampered sibling backend unexpectedly passed") &&
     installerPackageTest.includes("sibling_checksum_sensitive=yes") &&
