@@ -303,13 +303,19 @@ test("scope deletion cannot be undone by a queued unbound key create", async () 
   const scopeTag = `${prefix}-create-delete-private`;
   await prisma.restrictedScope.create({ data: { tag: scopeTag } });
 
+  const lineage = await prisma.memoryLineageState.create({
+    data: { kind: "SCOPE", subjectHash: `scope:${scopeTag}` },
+  });
   const blocker = await pool.connect();
   try {
     await blocker.query("BEGIN");
     await blocker.query(
-      'SELECT tag FROM "RestrictedScope" WHERE tag = $1 FOR UPDATE',
-      [scopeTag],
+      'SELECT id FROM "MemoryLineageState" WHERE id = $1 FOR UPDATE',
+      [lineage.id],
     );
+    // Block deletion AFTER it owns the scope row. Blocking that same scope
+    // before deletion starts does not establish a winner: an SSI retry can
+    // let key creation commit first, a valid order this fixture must not assume.
     const deletion = deleteMemoryRestrictedScope(scopeTag);
     await waitForLockWaiters(blocker, 1);
     const creation = createApiKeyRecord({
@@ -346,13 +352,19 @@ test("scope deletion cannot be undone by a queued key scope update", async () =>
     allowedScopes: [scopeTag],
   });
 
+  const lineage = await prisma.memoryLineageState.create({
+    data: { kind: "SCOPE", subjectHash: `scope:${scopeTag}` },
+  });
   const blocker = await pool.connect();
   try {
     await blocker.query("BEGIN");
     await blocker.query(
-      'SELECT tag FROM "RestrictedScope" WHERE tag = $1 FOR UPDATE',
-      [scopeTag],
+      'SELECT id FROM "MemoryLineageState" WHERE id = $1 FOR UPDATE',
+      [lineage.id],
     );
+    // Block deletion AFTER it owns the scope row. Blocking that same scope
+    // before deletion starts does not establish a winner: an SSI retry can
+    // let key creation commit first, a valid order this fixture must not assume.
     const deletion = deleteMemoryRestrictedScope(scopeTag);
     await waitForLockWaiters(blocker, 1);
     const update = updateApiKeyRecord(credential.key.id, {
