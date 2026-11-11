@@ -415,8 +415,8 @@ For an existing installation using a custom image, export `NOOSPHERE_IMAGE` expl
 before running this block. The version-bound default does not reuse a persisted image automatically.
 
 ```bash
-# Installer commit: b054f4b50374dd444434c9d17501a18ecb07adc1
-# Expected SHA-256: ce9f6de9f096e4946084eb33be886947693e000a2461a0955d29a5e467549c23
+# Installer commit: 824464d1936be2aa97cf4bbd574f5f32cdf165ae
+# Expected SHA-256: 9aa72c134bf739bebd6451e06884057a48fd2f0351176860a2703cc93743baa3
 (
   set -e
   installer_dir="$(mktemp -d)"
@@ -424,11 +424,11 @@ before running this block. The version-bound default does not reuse a persisted 
   installer="$installer_dir/install.sh"
   backend="$installer_dir/install-openclaw.sh"
   unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/b054f4b50374dd444434c9d17501a18ecb07adc1/install.sh -o "$installer"
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/b054f4b50374dd444434c9d17501a18ecb07adc1/install-openclaw.sh -o "$backend"
-  printf '%s  %s\n' 'ce9f6de9f096e4946084eb33be886947693e000a2461a0955d29a5e467549c23' "$installer" | sha256sum -c -
-  printf '%s  %s\n' '7758cc2aab51da3af18551ad138eb08a8c2d50e546955c498840933cbef63c7c' "$backend" | sha256sum -c -
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.2}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.2}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.2}" bash "$installer" --non-interactive --with openclaw
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/824464d1936be2aa97cf4bbd574f5f32cdf165ae/install.sh -o "$installer"
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/824464d1936be2aa97cf4bbd574f5f32cdf165ae/install-openclaw.sh -o "$backend"
+  printf '%s  %s\n' '9aa72c134bf739bebd6451e06884057a48fd2f0351176860a2703cc93743baa3' "$installer" | sha256sum -c -
+  printf '%s  %s\n' '5269de0467b812a48a229afa23dde1d837078d0fd9937e11bb82a8d1d1675bb1' "$backend" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.3}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.3}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.3}" bash "$installer" --non-interactive --with openclaw
   openclaw noosphere doctor
   openclaw noosphere status
 )
@@ -598,7 +598,7 @@ scoped npm plugins from this config:
 ```json
 {
   "plugin": [
-    "@sweetsophia/opencode-noosphere-memory@1.15.2"
+    "@sweetsophia/opencode-noosphere-memory@1.15.3"
   ]
 }
 ```
@@ -606,7 +606,7 @@ scoped npm plugins from this config:
 Optional explicit global install:
 
 ```bash
-npm install -g @sweetsophia/opencode-noosphere-memory@1.15.2
+npm install -g @sweetsophia/opencode-noosphere-memory@1.15.3
 export OPENCODE_NOOSPHERE_API_KEY="noo_..."
 ```
 
@@ -617,7 +617,7 @@ install it normally and keep both Opencode plugins registered:
 {
   "plugin": [
     "oh-my-opencode-slim",
-    "@sweetsophia/opencode-noosphere-memory@1.15.2"
+    "@sweetsophia/opencode-noosphere-memory@1.15.3"
   ]
 }
 ```
@@ -648,7 +648,7 @@ Noosphere ships a Kilo Code plugin at `kilocode-noosphere-memory/`.
 ### Quick install
 
 ```bash
-npm install -g @sweetsophia/kilocode-noosphere-memory@1.15.2
+npm install -g @sweetsophia/kilocode-noosphere-memory@1.15.3
 export KILOCODE_NOOSPHERE_API_KEY="noo_..."
 ```
 
@@ -657,7 +657,7 @@ Add the package to `~/.config/kilo/kilo.json`:
 ```json
 {
   "plugin": [
-    "@sweetsophia/kilocode-noosphere-memory@1.15.2"
+    "@sweetsophia/kilocode-noosphere-memory@1.15.3"
   ]
 }
 ```
@@ -665,7 +665,7 @@ Add the package to `~/.config/kilo/kilo.json`:
 Or install it through Kilo:
 
 ```bash
-kilo plugin @sweetsophia/kilocode-noosphere-memory@1.15.2 --global
+kilo plugin @sweetsophia/kilocode-noosphere-memory@1.15.3 --global
 ```
 
 ### Kilo Code capabilities
