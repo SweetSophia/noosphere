@@ -593,7 +593,7 @@ expect(
     "npm run build",
     trackedDistCheck,
     untrackedDistCheck,
-    'npm pack --json > "$RUNNER_TEMP/injected-pack.json"',
+    'npm pack --json --ignore-scripts > "$RUNNER_TEMP/injected-pack.json"',
   ]),
   "The bundled-helper publish job must verify tracked and untracked dist immediately before packing.",
 );
