@@ -7,6 +7,11 @@ on:
       - "VERSION"
       - "scripts/check-package-policies.mjs"
       - "scripts/sync-version.mjs"
+      - "scripts/verify-npm-publication-integrity.sh"
+      - "scripts/test-npm-publication-integrity.sh"
+      - "scripts/publish-npm-artifact.sh"
+      - "scripts/test-npm-artifact-publication.sh"
+      - "scripts/npm-publication-workflow.test.mjs"
       - "vendor/toml5-candidate/pack-adapter.mjs"
       - "vendor/toml5-candidate/public-consumers.mjs"
       - "vendor/toml5-candidate/consumer-fixtures/**"
@@ -205,31 +210,8 @@ jobs:
         run: |
           package=$(node -p 'require("./package.json").name')
           version=$(node -p 'require("./package.json").version')
-          remote_json=$(npm view "${package}@${version}" dist.integrity --json 2>/dev/null || true)
-          remote_integrity=$(node -e 'try { const value=JSON.parse(process.argv[1]); if (typeof value === "string") process.stdout.write(value); } catch {}' "$remote_json")
-          if [[ -n "$remote_integrity" ]]; then
-            if [[ "$remote_integrity" != "$LOCAL_INTEGRITY" ]]; then
-              printf 'Existing %s@%s integrity does not match this release artifact.\n' "$package" "$version" >&2
-              exit 1
-            fi
-            printf '%s@%s is already published with matching integrity; continuing.\n' "$package" "$version"
-          else
-            npm publish "$TARBALL" --access public --provenance
-          fi
-          published_integrity=
-          for attempt in {1..10}; do
-            published_json=$(npm view "${package}@${version}" dist.integrity --json 2>/dev/null || true)
-            published_integrity=$(node -e 'try { const value=JSON.parse(process.argv[1]); if (typeof value === "string") process.stdout.write(value); } catch {}' "$published_json")
-            if [[ "$published_integrity" == "$LOCAL_INTEGRITY" ]]; then
-              break
-            fi
-            if [[ -n "$published_integrity" ]]; then
-              printf 'Readback integrity for %s@%s does not match this release artifact.\n' "$package" "$version" >&2
-              exit 1
-            fi
-            sleep 3
-          done
-          test "$published_integrity" = "$LOCAL_INTEGRITY"
+          bash "$GITHUB_WORKSPACE/scripts/publish-npm-artifact.sh" \
+            "$TARBALL" "${package}@${version}" "$LOCAL_INTEGRITY"
 
   publish_openclaw:
     needs: [package-check, publish_helper]
@@ -300,10 +282,26 @@ jobs:
           git diff --exit-code -- dist
           test -z "$(git ls-files --others --exclude-standard -- dist)"
 
-      - name: Publish to npm
+      - name: Pack exact OpenClaw artifact
+        id: pack
+        run: |
+          npm pack --json > "$RUNNER_TEMP/openclaw-pack.json"
+          filename=$(node -e 'const p=require(process.argv[1]); process.stdout.write(p[0].filename)' "$RUNNER_TEMP/openclaw-pack.json")
+          integrity=$(node -e 'const p=require(process.argv[1]); process.stdout.write(p[0].integrity)' "$RUNNER_TEMP/openclaw-pack.json")
+          test -f "$filename"
+          echo "filename=$filename" >> "$GITHUB_OUTPUT"
+          echo "integrity=$integrity" >> "$GITHUB_OUTPUT"
+
+      - name: Publish OpenClaw or verify exact prior publication
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance
+          LOCAL_INTEGRITY: ${{ steps.pack.outputs.integrity }}
+          TARBALL: ${{ steps.pack.outputs.filename }}
+        run: |
+          package=$(node -p 'require("./package.json").name')
+          version=$(node -p 'require("./package.json").version')
+          bash "$GITHUB_WORKSPACE/scripts/publish-npm-artifact.sh" \
+            "$TARBALL" "${package}@${version}" "$LOCAL_INTEGRITY"
 
   publish_opencode:
     needs: package-check

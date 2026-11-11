@@ -17,6 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Root 3.1.5 is outside this advisory's affected `>=7.0.0 <11.0.1` range.
   The lint-only edge requires Node 20 or >=22 (qualified on Node 22/24);
   the root and all five integration lockfile audits report zero vulnerabilities.
+- Coordinated npm publication: the registry readback after publishing a package
+  now uses a shared, bounded verifier instead of a fixed 10-poll/30-second
+  window. npm serves a freshly published version asynchronously and can need
+  minutes to become visible, so the 1.15.2 helper publication was published
+  successfully but its readback gave up first, failing the job and skipping the
+  dependent OpenClaw publication. A genuine integrity mismatch stays fatal, a
+  version that is still propagating is retried within the deadline, and the
+  verifier tells the operator to re-run the workflow rather than republish.
+  Covered by `scripts/test-npm-publication-integrity.sh` and enforced by the
+  package publishing policy check. Both helper and OpenClaw publish packed
+  artifacts through duplicate-only retry tolerance. Registry/local-tool failures
+  are distinct from propagation and fail promptly with safe error codes.
 - Make hybrid-worker fatal stops diagnosable with classified failure kinds and
   bounded, redacted messages (including AggregateError children), without changing
   existing error codes. Classify configuration failures explicitly in the safe
