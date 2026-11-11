@@ -195,7 +195,7 @@ jobs:
           npm run build
           git diff --exit-code -- dist
           test -z "$(git ls-files --others --exclude-standard -- dist)"
-          npm pack --json > "$RUNNER_TEMP/injected-pack.json"
+          npm pack --json --ignore-scripts > "$RUNNER_TEMP/injected-pack.json"
           filename=$(node -e 'const p=require(process.argv[1]); process.stdout.write(p[0].filename)' "$RUNNER_TEMP/injected-pack.json")
           integrity=$(node -e 'const p=require(process.argv[1]); process.stdout.write(p[0].integrity)' "$RUNNER_TEMP/injected-pack.json")
           test -f "$filename"
@@ -285,7 +285,7 @@ jobs:
       - name: Pack exact OpenClaw artifact
         id: pack
         run: |
-          npm pack --json > "$RUNNER_TEMP/openclaw-pack.json"
+          npm pack --json --ignore-scripts > "$RUNNER_TEMP/openclaw-pack.json"
           filename=$(node -e 'const p=require(process.argv[1]); process.stdout.write(p[0].filename)' "$RUNNER_TEMP/openclaw-pack.json")
           integrity=$(node -e 'const p=require(process.argv[1]); process.stdout.write(p[0].integrity)' "$RUNNER_TEMP/openclaw-pack.json")
           test -f "$filename"
@@ -570,7 +570,7 @@ jobs:
       - name: Pack exact MCP artifact
         id: pack
         run: |
-          npm pack --json > "$RUNNER_TEMP/mcp-pack.json"
+          npm pack --json --ignore-scripts > "$RUNNER_TEMP/mcp-pack.json"
           filename=$(node -e 'const p=require(process.argv[1]); process.stdout.write((Array.isArray(p) ? p[0] : Object.values(p)[0]).filename)' "$RUNNER_TEMP/mcp-pack.json")
           integrity=$(node -e 'const p=require(process.argv[1]); process.stdout.write((Array.isArray(p) ? p[0] : Object.values(p)[0]).integrity)' "$RUNNER_TEMP/mcp-pack.json")
           test -f "$filename"
