@@ -19,7 +19,7 @@ test("a changed parent range or resolved pin requires deliberate requalification
 });
 
 const nested = "node_modules/@typescript-eslint/typescript-estree/node_modules/minimatch";
-for (const [entry, version] of [[nested, "10.2.2"], ["node_modules/new-consumer/node_modules/minimatch", "9.0.5"], ["node_modules/minimatch", "7.0.0"]]) {
+for (const [entry, version] of [[nested, "10.2.2"], ["node_modules/@scope/pkg/node_modules/minimatch", "10.0.1"], ["node_modules/new-consumer/node_modules/minimatch", "9.0.5"], ["node_modules/minimatch", "7.0.0"]]) {
   test(`rejects unqualified resolution ${entry}@${version} with actionable diagnostics`, () => {
     const changed = structuredClone(lock);
     changed.packages[entry] = { version };
@@ -32,4 +32,15 @@ test("rejects an unparseable minimatch resolution", () => {
   const changed = structuredClone(lock);
   changed.packages["node_modules/minimatch"].version = "not-a-version";
   assert.match(minimatchOverrideFailures(manifest, changed).join(" "), /node_modules\/minimatch.*not-a-version/);
+});
+
+test("null lock metadata produces a policy diagnostic, not a TypeError", () => {
+  const changed = structuredClone(lock);
+  changed.packages["node_modules/minimatch"] = null;
+  assert.match(minimatchOverrideFailures(manifest, changed).join(" "), /node_modules\/minimatch.*undefined/);
+});
+test("type declarations are not minimatch runtime copies", () => {
+  const changed = structuredClone(lock);
+  changed.packages["node_modules/@types/minimatch"] = { version: "6.0.0" };
+  assert.deepEqual(minimatchOverrideFailures(manifest, changed), []);
 });
