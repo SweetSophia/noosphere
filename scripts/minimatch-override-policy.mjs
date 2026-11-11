@@ -1,4 +1,4 @@
-// This is a deliberately out-of-range lint-only edge, qualified on Node22/24
+// This is a deliberately out-of-range lint-only edge, qualified locally on Node22/24 (root CI uses Node22)
 // with the consumer matcher API, full lint/typecheck and production build.
 // A parent range or pin change requires re-qualification, not a silent override.
 export const qualifiedMinimatchVersion = "11.0.8";
@@ -19,8 +19,8 @@ export function minimatchOverrideFailures(manifest, lock) {
   // advisory, and 11.0.8 is the tested override. New copies require review.
   for (const [entry, metadata] of Object.entries(lock.packages ?? {})) {
     if (/(?:^|\/)node_modules\/minimatch$/.test(entry) &&
-        !["3.1.5", qualifiedMinimatchVersion].includes(metadata.version)) {
-      failures.push(`${entry}: found ${String(metadata.version)}; unqualified minimatch resolution requires re-qualification.`);
+        !["3.1.5", qualifiedMinimatchVersion].includes(metadata?.version)) {
+      failures.push(`${entry}: found ${String(metadata?.version)}; unqualified minimatch resolution requires re-qualification.`);
     }
   }
   return failures;
