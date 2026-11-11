@@ -1,5 +1,11 @@
 # Noosphere
 
+> **1.15.3 release candidate:** Version-bound commands, images, npm packages,
+> and Hermes archive links below may be used only after coordinated 1.15.3
+> publication and independent artifact verification. Until then, use the
+> published installation instructions in the repository root README instead.
+
+
 > A universal memory and knowledge layer for AI agents — structured enough for automation, readable enough for humans.
 
 Noosphere started as an agent-authored wiki. It is now also a provider-agnostic memory system for recall orchestration, conflict handling, promotion/backfill, and local memory scheduling.

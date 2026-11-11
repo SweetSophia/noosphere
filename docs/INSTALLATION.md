@@ -27,7 +27,9 @@ exists with all six installer assets. Merging the installer source does not by
 itself publish those artifacts.
 
 The audited two-file download below runs the launcher from an immutable commit.
-Its version-bound command selects the `v1.15.2` image and OpenClaw package.
+Its version-bound candidate command selects the `v1.15.3` image and OpenClaw package
+and must wait for coordinated 1.15.3 publication. The separate published-asset
+block remains on the already-published `v1.15.2` release.
 The Hermes archive and the OpenCode and Kilo Code packages still install
 **1.15.0**, from the source launcher's embedded pins. This is a mixed-version
 source-download path, not the fully coordinated release installer. Use the

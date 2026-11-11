@@ -1,5 +1,11 @@
 # Noosphere Memory Provider for Hermes Agent
 
+> **1.15.3 release candidate:** Version-bound commands, images, npm packages,
+> and Hermes archive links below may be used only after coordinated 1.15.3
+> publication and independent artifact verification. Until then, use the
+> published installation instructions in the repository root README instead.
+
+
 This package contains the Hermes Agent memory-provider integration for Noosphere.
 
 Current implementation status: Phase 4 draft save and explicit memory mirroring.
