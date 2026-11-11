@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { minimatchOverrideFailures } from "./minimatch-override-policy.mjs";
 
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -338,6 +339,7 @@ function hasForbiddenHelperTag(lines, forbiddenSignals) {
 const rootPackage = readJson("package.json");
 const rootLock = readJson("package-lock.json");
 failures.push(...katexOverrideFailures(rootPackage, rootLock));
+failures.push(...minimatchOverrideFailures(rootPackage, rootLock));
 const injectedPackage = readJson(`${policy.helper.dir}/package.json`);
 const injectedLock = readJson(`${policy.helper.dir}/package-lock.json`);
 const openclawPackage = readJson(`${policy.openclaw.dir}/package.json`);
