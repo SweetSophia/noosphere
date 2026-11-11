@@ -112,7 +112,6 @@ serve() {
       ;;
     stdout404)
       printf '{\n  "error": {\n    "code": "E404",\n    "summary": "No match found for version"\n  }\n}\n'
-      printf 'npm error code E404\n' >&2
       exit 1
       ;;
     secretcode)

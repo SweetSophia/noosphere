@@ -373,17 +373,28 @@ jobs:
           test -z "$(git ls-files --others --exclude-standard -- dist)"
 
       - name: Pack adapter with the bundled private client
-        run: node ../vendor/toml5-candidate/pack-adapter.mjs "$PWD" "$RUNNER_TEMP/opencode-package" > "$RUNNER_TEMP/opencode-pack.json"
+        id: pack
+        run: |
+          node ../vendor/toml5-candidate/pack-adapter.mjs "$PWD" "$RUNNER_TEMP/opencode-package" > "$RUNNER_TEMP/opencode-pack.json"
+          filename=$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).archive' "$RUNNER_TEMP/opencode-pack.json")
+          integrity=$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).integrity' "$RUNNER_TEMP/opencode-pack.json")
+          test -f "$filename"
+          echo "filename=$filename" >> "$GITHUB_OUTPUT"
+          echo "integrity=$integrity" >> "$GITHUB_OUTPUT"
 
       - name: Qualify the exact tarball to publish
         run: node ../vendor/toml5-candidate/public-consumers.mjs "$RUNNER_TEMP/opencode-package" "$RUNNER_TEMP/opencode-consumers" opencode-noosphere-memory
 
-      - name: Publish to npm
+      - name: Publish packed artifact or verify exact prior publication
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          LOCAL_INTEGRITY: ${{ steps.pack.outputs.integrity }}
+          TARBALL: ${{ steps.pack.outputs.filename }}
         run: |
-          TARBALL=$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).archive' "$RUNNER_TEMP/opencode-pack.json")
-          npm publish "$TARBALL" --access public --provenance
+          package=$(node -p 'require("./package.json").name')
+          version=$(node -p 'require("./package.json").version')
+          bash "$GITHUB_WORKSPACE/scripts/publish-npm-artifact.sh" \
+            "$TARBALL" "${package}@${version}" "$LOCAL_INTEGRITY"
 
   publish_kilocode:
     needs: package-check
@@ -455,17 +466,28 @@ jobs:
           test -z "$(git ls-files --others --exclude-standard -- dist)"
 
       - name: Pack adapter with the bundled private client
-        run: node ../vendor/toml5-candidate/pack-adapter.mjs "$PWD" "$RUNNER_TEMP/kilocode-package" > "$RUNNER_TEMP/kilocode-pack.json"
+        id: pack
+        run: |
+          node ../vendor/toml5-candidate/pack-adapter.mjs "$PWD" "$RUNNER_TEMP/kilocode-package" > "$RUNNER_TEMP/kilocode-pack.json"
+          filename=$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).archive' "$RUNNER_TEMP/kilocode-pack.json")
+          integrity=$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).integrity' "$RUNNER_TEMP/kilocode-pack.json")
+          test -f "$filename"
+          echo "filename=$filename" >> "$GITHUB_OUTPUT"
+          echo "integrity=$integrity" >> "$GITHUB_OUTPUT"
 
       - name: Qualify the exact tarball to publish
         run: node ../vendor/toml5-candidate/public-consumers.mjs "$RUNNER_TEMP/kilocode-package" "$RUNNER_TEMP/kilocode-consumers" kilocode-noosphere-memory
 
-      - name: Publish to npm
+      - name: Publish packed artifact or verify exact prior publication
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          LOCAL_INTEGRITY: ${{ steps.pack.outputs.integrity }}
+          TARBALL: ${{ steps.pack.outputs.filename }}
         run: |
-          TARBALL=$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).archive' "$RUNNER_TEMP/kilocode-pack.json")
-          npm publish "$TARBALL" --access public --provenance
+          package=$(node -p 'require("./package.json").name')
+          version=$(node -p 'require("./package.json").version')
+          bash "$GITHUB_WORKSPACE/scripts/publish-npm-artifact.sh" \
+            "$TARBALL" "${package}@${version}" "$LOCAL_INTEGRITY"
 
   publish_mcp:
     needs: package-check
@@ -545,7 +567,23 @@ jobs:
           git diff --exit-code -- dist
           test -z "$(git ls-files --others --exclude-standard -- dist)"
 
-      - name: Publish to npm
+      - name: Pack exact MCP artifact
+        id: pack
+        run: |
+          npm pack --json > "$RUNNER_TEMP/mcp-pack.json"
+          filename=$(node -e 'const p=require(process.argv[1]); process.stdout.write((Array.isArray(p) ? p[0] : Object.values(p)[0]).filename)' "$RUNNER_TEMP/mcp-pack.json")
+          integrity=$(node -e 'const p=require(process.argv[1]); process.stdout.write((Array.isArray(p) ? p[0] : Object.values(p)[0]).integrity)' "$RUNNER_TEMP/mcp-pack.json")
+          test -f "$filename"
+          echo "filename=$filename" >> "$GITHUB_OUTPUT"
+          echo "integrity=$integrity" >> "$GITHUB_OUTPUT"
+
+      - name: Publish packed artifact or verify exact prior publication
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance
+          LOCAL_INTEGRITY: ${{ steps.pack.outputs.integrity }}
+          TARBALL: ${{ steps.pack.outputs.filename }}
+        run: |
+          package=$(node -p 'require("./package.json").name')
+          version=$(node -p 'require("./package.json").version')
+          bash "$GITHUB_WORKSPACE/scripts/publish-npm-artifact.sh" \
+            "$TARBALL" "${package}@${version}" "$LOCAL_INTEGRITY"
