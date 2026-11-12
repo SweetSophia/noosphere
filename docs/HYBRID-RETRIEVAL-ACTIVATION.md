@@ -235,16 +235,21 @@ An individual oversized record can briefly exceed `max-size`, so read the
 result as approximately 30 MiB of retained Docker log files, not an exact
 limit.
 
-That is a **byte** bound, not a retention window: how much history survives
-depends on that deployment's log volume. Measure it before activation and
-preserve a snapshot if the history matters.
+That is a **byte** bound, not a retention window. The worker logs one
+`worker_batch` line per poll at the default 1s poll and adds a
+`worker_job_failed` line per failed attempt, so 30 MiB is on the order of a
+day of quiet operation and considerably less during a failure burst. Measure
+the deployment's actual log rate before activation and archive or ship
+off-box any evidence older than the implied window first: rotation is not a
+replacement for incident evidence.
 
 Scope: `docker-compose.yml` and `docker-compose.noosphere.yml` carry the cap.
 The Compose template embedded in `install-openclaw.sh` does not - that file is
 a digest-pinned published artifact, so changing it requires the coordinated
 release digest cascade and is deliberately out of scope here. A deployment
 whose worker still runs from an installer-generated Compose file stays
-uncapped until that release lands.
+uncapped until that release lands; `docs/HERMES-INSTALLER-HYBRID.md` covers
+that stack's compose invocation.
 
 Activation belongs to the next approved worker deployment unless disk pressure
 requires separately approved immediate action. Before recreating the worker:
@@ -252,24 +257,29 @@ requires separately approved immediate action. Before recreating the worker:
 1. Preserve a timestamp-bounded `docker logs --timestamps --until` snapshot in a
    private archive (directory mode 0700, file mode 0600); verify decompression and
    record its SHA-256, cutoff and container ID. An empty snapshot decompresses and
-   checksums cleanly, so also record the decoded byte count and line count and
-   require both to be non-zero: a zero-line archive proves nothing and counts as a
-   failed capture. Logs may contain sensitive data: keep the archive outside Git.
-   Never truncate Docker's active log file.
+   checksums cleanly, so also record the decoded byte count and the line count,
+   and require both to be non-zero and the newest captured timestamp to be at or
+   after the cutoff: a zero-line archive, or one that stops before the cutoff,
+   proves nothing and counts as a failed capture. A mistyped cutoff, a wrong
+   container name or a cutoff in the wrong zone all produce a valid, empty
+   archive, so name the target container explicitly for the stack in use
+   (`noosphere-hybrid-worker` for the source stack,
+   `noosphere-openclaw-hybrid-worker` for the installer stack). Logs may contain
+   sensitive data: keep the archive outside Git. Never truncate Docker's active
+   log file.
 2. Verify the effective Compose project/files, intended image and writer
    authorization markers. Preserve the deployed image pin and provider mapping;
    this retention change does not authorize an application upgrade or rerun init.
    Record the worker's current log driver and options
    (`docker inspect --format '{{json .HostConfig.LogConfig}}' <container>`) and the
    daemon's default driver (`docker info --format '{{.LoggingDriver}}'`) so the
-   pre-change state is on record next to the post-change check in step 4. The
+   pre-change state is on record next to the post-change check in step 5. The
    Compose template pins `json-file` for this service so the cap applies even
    when the daemon default differs; pinning one service does not change the
    daemon default or any other service.
-3. Under that deployment approval, recreate **only** the worker. Derive the
-   Compose invocation from the running container's own Compose labels so that a
-   copy-paste from a checkout cannot resolve to a different project, file or
-   image:
+3. Derive the Compose invocation from the running container's own Compose labels
+   so that a copy-paste from a checkout cannot resolve to a different project,
+   file or image:
 
    ```bash
    container=noosphere-hybrid-worker
@@ -279,7 +289,6 @@ requires separately approved immediate action. Before recreating the worker:
    IFS=',' read -ra files <<< "$config_files"
    compose=(docker compose --project-name "$project" --project-directory "$working_dir")
    for file in "${files[@]}"; do compose+=(-f "$file"); done
-   "${compose[@]}" --profile hybrid up -d --no-deps --no-build --pull never --force-recreate hybrid-worker
    ```
 
    Never run `docker compose` from a git clone or a template checkout: the
@@ -288,7 +297,29 @@ requires separately approved immediate action. Before recreating the worker:
    deployed project while applying the clone's service definition, image tag and
    environment. `docs/HERMES-INSTALLER-HYBRID.md` states the same rule for the
    installer stack.
-4. Verify worker health and inspect its `HostConfig.LogConfig` for `json-file`,
+4. Stop the worker and capture a final snapshot immediately before recreating
+   it. With the pinned invocation from step 3:
+
+   ```bash
+   "${compose[@]}" --profile hybrid stop hybrid-worker
+   docker logs --timestamps "$container" > "$archive/final-worker.log"
+   ```
+
+   The recreation in step 5 removes the old container and its Docker log file,
+   so every line the worker wrote after the step-1 cutoff - including its
+   shutdown message - is lost unless it is captured here. Verify the final
+   snapshot as in step 1 (non-zero byte and line counts) and keep it in the
+   same private archive.
+5. Recreate **only** the worker with the same pinned invocation:
+
+   ```bash
+   "${compose[@]}" --profile hybrid up -d --no-deps --no-build --pull never --force-recreate hybrid-worker
+   ```
+
+   This step does not authorize an application upgrade: `--no-build --pull never`
+   reuses the deployed image, and the pinned project, files and working
+   directory keep the deployed environment.
+6. Verify worker health and inspect its `HostConfig.LogConfig` for `json-file`,
    `max-size=10m`, `max-file=3`. Confirm app/database container IDs and start times
    are unchanged and no init service ran. Retain the diagnostic archive; rotation
    is not a replacement for incident evidence.
