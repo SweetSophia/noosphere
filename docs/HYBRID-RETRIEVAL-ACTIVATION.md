@@ -264,11 +264,13 @@ requires separately approved immediate action. Before recreating the worker:
    after the cutoff: a zero-line archive, or one that stops before the cutoff,
    proves nothing and counts as a failed capture. A mistyped cutoff, a wrong
    container name or a cutoff in the wrong zone all produce a valid, empty
-   archive, so name the target container explicitly for the stack in use
-   (`noosphere-hybrid-worker` for the source stack,
-   `noosphere-openclaw-hybrid-worker` for the installer stack). Logs may contain
-   sensitive data: keep the archive outside Git. Never truncate Docker's active
-   log file.
+   archive, so discover the worker container by its Compose service label (the
+   discovery block in step 3) rather than by a hardcoded name: the same
+   `hybrid-worker` service key runs under different container names on the
+   source and installer stacks, so a hardcoded name either aborts the discovery
+   calls or, with both stacks running, selects the wrong worker. Logs may
+   contain sensitive data: keep the archive outside Git. Never truncate
+   Docker's active log file.
 2. Verify the effective Compose project/files, intended image and writer
    authorization markers. Preserve the deployed image pin and provider mapping;
    this retention change does not authorize an application upgrade or rerun init.
@@ -284,7 +286,18 @@ requires separately approved immediate action. Before recreating the worker:
    file or image:
 
    ```bash
-   container=noosphere-hybrid-worker
+   # Discover the worker by its Compose service label. The container name
+   # differs between the source and installer stacks, so a hardcoded name
+   # aborts these inspect calls on an openclaw-only host and, with both stacks
+   # running, can select the wrong worker. Abort unless exactly one worker
+   # matches, so an ambiguous host never gets a guess.
+   mapfile -t workers < <(docker ps --filter label=com.docker.compose.service=hybrid-worker --format '{{.Names}}')
+   if [ "${#workers[@]}" -ne 1 ]; then
+     printf 'expected exactly 1 hybrid-worker container, found %d:\n' "${#workers[@]}" >&2
+     printf '  %s\n' "${workers[@]}" >&2
+     exit 1
+   fi
+   container=${workers[0]}
    project=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$container")
    config_files=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$container")
    working_dir=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$container")
@@ -292,6 +305,9 @@ requires separately approved immediate action. Before recreating the worker:
    compose=(docker compose --project-name "$project" --project-directory "$working_dir")
    for file in "${files[@]}"; do compose+=(-f "$file"); done
    ```
+
+   The discovery above runs before every subsequent step and aborts on an
+   ambiguous host; run it once and reuse `$container`.
 
    Never run `docker compose` from a git clone or a template checkout: the
    repository Compose files declare the same project name, so a plain
