@@ -685,6 +685,19 @@ expect(
     npmPublishWorkflow.includes('scripts/publish-npm-artifact.sh'),
   "The v-openclaw publication must publish or exact-integrity-verify the helper before OpenClaw without adding an independent dispatch input.",
 );
+// The tag-time gate must cover every surface, not just the helper dependency.
+for (const job of ["publish_helper", "publish_openclaw", "publish_opencode", "publish_kilocode", "publish_mcp"]) {
+  const code = codeLines(yamlNamedBlock(npmPublishWorkflow, job, 2));
+  expect(
+    code.includes('bash "$GITHUB_WORKSPACE/scripts/publish-npm-artifact.sh"') &&
+      code.includes('"$LOCAL_INTEGRITY"'),
+    `The ${job} publication must use the shared exact-artifact publisher.`,
+  );
+}
+expect(
+  !/\bnpm\s+publish\b/.test(codeLines(npmPublishWorkflow)),
+  "The release workflow must not bypass the shared artifact publisher with direct npm publish.",
+);
 expect(
   codeLines(npmPublishHelperJob).includes(
     'bash "$GITHUB_WORKSPACE/scripts/publish-npm-artifact.sh"',

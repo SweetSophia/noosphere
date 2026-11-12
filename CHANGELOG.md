@@ -18,8 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version that is still propagating is retried within the deadline, and the
   verifier tells the operator to re-run the workflow rather than republish.
   Covered by `scripts/test-npm-publication-integrity.sh` and enforced by the
-  package publishing policy check. Both helper and OpenClaw publish packed
-  artifacts through duplicate-only retry tolerance. Registry/local-tool failures
+  package publishing policy check. All five publishers use packed artifacts
+  through duplicate-only retry tolerance, verifying local SHA-512 integrity and
+  package name/version before any registry write (local artifact failures exit 6).
+  Tag-time policy and publication tests guard every publisher, with receipt-shape
+  coverage and lifecycle-output negative controls. Registry/local-tool failures
   are distinct from propagation and fail promptly with safe error codes.
 - Make hybrid-worker fatal stops diagnosable with classified failure kinds and
   bounded, redacted messages (including AggregateError children), without changing

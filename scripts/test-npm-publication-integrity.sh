@@ -122,6 +122,11 @@ serve() {
       printf 'npm error code E401\nnpm error 401 Unauthorized - bad credentials\n' >&2
       exit 1
       ;;
+    server|network)
+      if [[ "$FAKE_NPM_STATE" == server ]]; then code=E500; else code=ECONNRESET; fi
+      printf 'npm error code %s\n' "$code" >&2
+      exit 1
+      ;;
     hang)
       exec sleep 30
       ;;
@@ -416,7 +421,7 @@ fi
 
 # Review regressions: only a valid sha512 response may be called a mismatch;
 # registry failures must not masquerade as propagation or wait out the budget.
-for state in auth unknown null object malformed badstring secretcode hang; do
+for state in auth server network unknown null object malformed badstring secretcode hang; do
   rm -f "$work_dir/counter" "$work_dir/requests.log"
   started=$SECONDS
   status=0
