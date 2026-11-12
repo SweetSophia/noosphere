@@ -3,6 +3,7 @@ import fs from "node:fs";
 import test from "node:test";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 const workflow = fs.readFileSync(new URL("../.github/workflows/npm-publish.yml", import.meta.url), "utf8");
@@ -71,7 +72,7 @@ test("the release workflow runs the complete publication contract in package-che
 // Exercise the actual tag-time policy against each drift, not a second copy of
 // its predicate. Symlink unchanged inputs; only the policy and workflow are local.
 test("tag-time policy rejects bypassing any of the five publishers", () => {
-  const root = path.resolve(new URL("..", import.meta.url).pathname);
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "noosphere-publication-policy-"));
   try {
     for (const name of fs.readdirSync(root)) {
@@ -94,11 +95,17 @@ test("tag-time policy rejects bypassing any of the five publishers", () => {
       const start = workflow.indexOf(`\n  ${job}:\n`);
       const endOffset = workflow.slice(start + 1).search(/\n  [a-z_]+:\n/);
       const end = endOffset < 0 ? workflow.length : start + 1 + endOffset;
-      const block = workflow.slice(start, end).replace('bash "$GITHUB_WORKSPACE/scripts/publish-npm-artifact.sh"', 'npm publish');
+      const block = workflow.slice(start, end).replace('bash "$GITHUB_WORKSPACE/scripts/publish-npm-artifact.sh"', 'echo artifact-not-published');
       fs.writeFileSync(workflowPath, workflow.slice(0, start) + block + workflow.slice(end));
-      assert.throws(() => execFileSync(process.execPath, [policyPath], { stdio: "pipe" }), `${job} must not bypass shared publisher`);
+      assert.throws(() => execFileSync(process.execPath, [policyPath], { stdio: "pipe" }), (error) => {
+        assert.ok(error.stderr.toString().includes(`The ${job} publication must use the shared exact-artifact publisher.`));
+        return true;
+      });
     }
     fs.writeFileSync(workflowPath, workflow + "\n  bypass:\n    steps:\n      - run: npm publish fixture.tgz\n");
-    assert.throws(() => execFileSync(process.execPath, [policyPath], { stdio: "pipe" }), "a newly added job must not publish directly");
+    assert.throws(() => execFileSync(process.execPath, [policyPath], { stdio: "pipe" }), (error) => {
+      assert.ok(error.stderr.toString().includes("must not bypass the shared artifact publisher with direct npm publish"));
+      return true;
+    });
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

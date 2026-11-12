@@ -433,6 +433,10 @@ for state in auth server network unknown null object malformed badstring secretc
       pass "auth failure names E401 and gives self-contained recovery guidance"
     else fail "auth diagnostics lost E401 or refer to discarded evidence"; fi
   fi
+  if [[ "$state" == server || "$state" == network ]]; then
+    if [[ "$state" == server ]]; then code=E500; else code=ECONNRESET; fi
+    if grep -q "$code" "$work_dir/regression.out"; then pass "$state diagnostics preserve $code"; else fail "$state lost $code"; fi
+  fi
   if [[ "$state" == secretcode ]]; then
     if ! grep -q fixture-sensitive-token "$work_dir/regression.out"; then pass "untrusted registry error code is not logged"; else fail "registry error code leaked raw response"; fi
   fi

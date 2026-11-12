@@ -74,8 +74,37 @@ for invalid in digest identity version malformed; do
   MODE=success PATH="$work/bin:$PATH" bash "$root/scripts/publish-npm-artifact.sh" "$artifact" fixture@1.0.0 "$integrity" > "$work/output" 2>&1 || status=$?
   [[ "$status" == 6 ]] || { printf 'FAIL local %s: expected6 got%s\n' "$invalid" "$status"; exit 1; }
   [[ ! -s "$CALLS" ]] || { printf 'FAIL: local artifact failure reached npm\n'; exit 1; }
+  case "$invalid" in
+    digest) reason=DIGEST_MISMATCH ;; identity) reason=NAME_MISMATCH ;;
+    version) reason=VERSION_MISMATCH ;; malformed) reason=ARCHIVE_UNREADABLE ;;
+  esac
+  grep -q "$reason" "$work/output" || { printf 'FAIL: local %s lost fixed reason\n' "$invalid"; exit 1; }
   printf 'ok: local %s rejected before any npm call (status6)\n' "$invalid"
 done
+
+# Missing tools and bounded extraction timeouts are environment failures, not
+# evidence that the archive bytes or identity differ. Simulate timeout inertly.
+node_path=$(command -v node)
+bash_path=$(command -v bash)
+mkdir "$work/tool-bin"
+ln -s "$node_path" "$work/tool-bin/node"
+: > "$CALLS"
+status=0
+MODE=success PATH="$work/tool-bin" "$bash_path" "$root/scripts/publish-npm-artifact.sh" "$PUBLISHED_TARBALL" fixture@1.0.0 "$EXPECTED" > "$work/output" 2>&1 || status=$?
+[[ "$status" == 4 ]] && grep -q 'TOOL_UNAVAILABLE' "$work/output" && [[ ! -s "$CALLS" ]] || { printf 'FAIL: missing tar must be tooling4 with no npm call\n'; exit 1; }
+printf 'ok: missing tar classified as tooling4\n'
+cat > "$work/timeout.cjs" <<'PRELOAD'
+const cp = require('node:child_process');
+const original = cp.execFileSync;
+cp.execFileSync = function(command, ...args) {
+  if (command === 'tar') { const error = new Error('fixture-sensitive-token'); error.code = 'ETIMEDOUT'; throw error; }
+  return original.call(this, command, ...args);
+};
+PRELOAD
+status=0
+MODE=success NODE_OPTIONS="--require=$work/timeout.cjs" PATH="$work/bin:$PATH" bash "$root/scripts/publish-npm-artifact.sh" "$PUBLISHED_TARBALL" fixture@1.0.0 "$EXPECTED" > "$work/output" 2>&1 || status=$?
+[[ "$status" == 4 ]] && grep -q 'TOOL_TIMEOUT' "$work/output" && ! grep -q fixture-sensitive-token "$work/output" && [[ ! -s "$CALLS" ]] || { printf 'FAIL: timeout must be tooling4 without raw output/npm call\n'; exit 1; }
+printf 'ok: extraction timeout classified as tooling4 without leaking raw errors\n'
 
 # An inert local mutant proves the stub detects publishing a different operand.
 mkdir "$work/mutant"
