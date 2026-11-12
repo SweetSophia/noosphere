@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Bound the hybrid worker's retained Docker diagnostics in the repository Compose
+  templates (`docker-compose.yml` and `docker-compose.noosphere.yml`) with a
+  per-service `json-file` cap of 10 MiB x 3 files, without changing Docker's
+  daemon-wide defaults. The Compose template embedded in `install-openclaw.sh`
+  stays uncapped until the coordinated release can republish its pinned digest.
+- Guard the worker log cap with a repository policy check so it cannot silently
+  disappear from a Compose template again, and record the pre-change log driver
+  and daemon default in the activation runbook.
+
 ### Fixed
 - Make hybrid-worker fatal stops diagnosable with classified failure kinds and
   bounded, redacted messages (including AggregateError children), without changing

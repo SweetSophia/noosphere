@@ -227,29 +227,67 @@ container with `--add-host host.docker.internal:host-gateway` against
 
 ## Worker diagnostic log retention (separate from release publication)
 
-The Compose `hybrid-worker` service caps Docker's `json-file` diagnostics with
-`max-size: "10m"` and `max-file: "3"`. This bounds the worker's retained Docker
-log files to approximately 30 MiB (individual oversized records/rotation can
-briefly exceed this); it does not change application logging or other services.
-Changing Compose alone does **not** retrofit the running container's log driver.
+The repository Compose templates cap the `hybrid-worker` service's Docker
+diagnostics with `max-size: "10m"` and `max-file: "3"`, and pin the
+`json-file` driver so the cap applies even when the daemon default differs.
+The driver is pinned per service; Docker's daemon-wide default is untouched.
+An individual oversized record can briefly exceed `max-size`, so read the
+result as approximately 30 MiB of retained Docker log files, not an exact
+limit.
+
+That is a **byte** bound, not a retention window: how much history survives
+depends on that deployment's log volume. Measure it before activation and
+preserve a snapshot if the history matters.
+
+Scope: `docker-compose.yml` and `docker-compose.noosphere.yml` carry the cap.
+The Compose template embedded in `install-openclaw.sh` does not - that file is
+a digest-pinned published artifact, so changing it requires the coordinated
+release digest cascade and is deliberately out of scope here. A deployment
+whose worker still runs from an installer-generated Compose file stays
+uncapped until that release lands.
 
 Activation belongs to the next approved worker deployment unless disk pressure
 requires separately approved immediate action. Before recreating the worker:
 
 1. Preserve a timestamp-bounded `docker logs --timestamps --until` snapshot in a
    private archive (directory mode 0700, file mode 0600); verify decompression and
-   record its SHA-256, cutoff and container ID. Logs may contain sensitive data:
-   keep the archive outside Git. Never truncate Docker's active log file.
+   record its SHA-256, cutoff and container ID. An empty snapshot decompresses and
+   checksums cleanly, so also record the decoded byte count and line count and
+   require both to be non-zero: a zero-line archive proves nothing and counts as a
+   failed capture. Logs may contain sensitive data: keep the archive outside Git.
+   Never truncate Docker's active log file.
 2. Verify the effective Compose project/files, intended image and writer
    authorization markers. Preserve the deployed image pin and provider mapping;
    this retention change does not authorize an application upgrade or rerun init.
-3. Under that deployment approval, recreate **only** the worker using the exact
-   deployed Compose project/files and environment:
+   Record the worker's current log driver and options
+   (`docker inspect --format '{{json .HostConfig.LogConfig}}' <container>`) and the
+   daemon's default driver (`docker info --format '{{.LoggingDriver}}'`) so the
+   pre-change state is on record next to the post-change check in step 4. The
+   Compose template pins `json-file` for this service so the cap applies even
+   when the daemon default differs; pinning one service does not change the
+   daemon default or any other service.
+3. Under that deployment approval, recreate **only** the worker. Derive the
+   Compose invocation from the running container's own Compose labels so that a
+   copy-paste from a checkout cannot resolve to a different project, file or
+   image:
 
    ```bash
-   docker compose --profile hybrid up -d --no-deps --no-build --pull never --force-recreate hybrid-worker
+   container=noosphere-hybrid-worker
+   project=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$container")
+   config_files=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$container")
+   working_dir=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$container")
+   IFS=',' read -ra files <<< "$config_files"
+   compose=(docker compose --project-name "$project" --project-directory "$working_dir")
+   for file in "${files[@]}"; do compose+=(-f "$file"); done
+   "${compose[@]}" --profile hybrid up -d --no-deps --no-build --pull never --force-recreate hybrid-worker
    ```
 
+   Never run `docker compose` from a git clone or a template checkout: the
+   repository Compose files declare the same project name, so a plain
+   `docker compose ... hybrid-worker` executed in a clone resolves to the
+   deployed project while applying the clone's service definition, image tag and
+   environment. `docs/HERMES-INSTALLER-HYBRID.md` states the same rule for the
+   installer stack.
 4. Verify worker health and inspect its `HostConfig.LogConfig` for `json-file`,
    `max-size=10m`, `max-file=3`. Confirm app/database container IDs and start times
    are unchanged and no init service ran. Retain the diagnostic archive; rotation

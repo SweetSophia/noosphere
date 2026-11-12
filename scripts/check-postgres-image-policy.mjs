@@ -43,6 +43,19 @@ if (packagedDocumentsIndex >= 0) {
   packagedDocumentsRoot = resolve(value);
 }
 
+// Extract one service block from a Compose file so a policy assertion can
+// target that service instead of matching anywhere in the document.
+function composeServiceBlock(composeText, service) {
+  const lines = composeText.split("\n");
+  const start = lines.findIndex((line) => line === "  " + service + ":");
+  if (start === -1) {
+    return "";
+  }
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => /^  [a-zA-Z0-9_-]+:\s*$/.test(line));
+  return (end === -1 ? rest : rest.slice(0, end)).join("\n");
+}
+
 function read(relativePath, base = root) {
   try {
     return readFileSync(resolve(base, relativePath), "utf8");
@@ -581,6 +594,14 @@ expect(
 );
 for (const composePath of ["docker-compose.yml", "docker-compose.noosphere.yml"]) {
   const compose = read(composePath);
+  const workerBlock = composeServiceBlock(compose, "hybrid-worker");
+  expect(
+    workerBlock.includes("logging:") &&
+      workerBlock.includes("driver: json-file") &&
+      workerBlock.includes('max-size: "10m"') &&
+      workerBlock.includes('max-file: "3"'),
+    composePath + " must cap the hybrid worker's json-file diagnostics",
+  );
   expect(
     compose.includes("hybrid-worker:") &&
       compose.includes('profiles: ["hybrid"]') &&
