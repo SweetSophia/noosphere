@@ -224,3 +224,36 @@ curl -fsS http://172.17.0.1:8741/v1/embeddings \
 Expect `model` = `nomic-embed-text` and 768 finite floats. Repeat from a
 container with `--add-host host.docker.internal:host-gateway` against
 `http://host.docker.internal:8741/v1/embeddings` before starting the worker.
+
+## Worker diagnostic log retention (separate from release publication)
+
+The Compose `hybrid-worker` service caps Docker's `json-file` diagnostics with
+`max-size: "10m"` and `max-file: "3"`. This bounds the worker's retained Docker
+log files to approximately 30 MiB (individual oversized records/rotation can
+briefly exceed this); it does not change application logging or other services.
+Changing Compose alone does **not** retrofit the running container's log driver.
+
+Activation belongs to the next approved worker deployment unless disk pressure
+requires separately approved immediate action. Before recreating the worker:
+
+1. Preserve a timestamp-bounded `docker logs --timestamps --until` snapshot in a
+   private archive (directory mode 0700, file mode 0600); verify decompression and
+   record its SHA-256, cutoff and container ID. Logs may contain sensitive data:
+   keep the archive outside Git. Never truncate Docker's active log file.
+2. Verify the effective Compose project/files, intended image and writer
+   authorization markers. Preserve the deployed image pin and provider mapping;
+   this retention change does not authorize an application upgrade or rerun init.
+3. Under that deployment approval, recreate **only** the worker using the exact
+   deployed Compose project/files and environment:
+
+   ```bash
+   docker compose --profile hybrid up -d --no-deps --no-build --pull never --force-recreate hybrid-worker
+   ```
+
+4. Verify worker health and inspect its `HostConfig.LogConfig` for `json-file`,
+   `max-size=10m`, `max-file=3`. Confirm app/database container IDs and start times
+   are unchanged and no init service ran. Retain the diagnostic archive; rotation
+   is not a replacement for incident evidence.
+
+Do not use a broad `docker compose up`, restart the app/database, change Docker's
+system-wide defaults, or activate this cap merely to finish a release PR.

@@ -136,6 +136,12 @@ services:
     command: ["node", "scripts/hybrid-worker.mjs"]
     container_name: noosphere-hybrid-worker
     restart: unless-stopped
+    # Bound worker polling diagnostics without changing daemon-wide defaults.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
