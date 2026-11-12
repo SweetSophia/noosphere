@@ -256,7 +256,9 @@ requires separately approved immediate action. Before recreating the worker:
 
 1. Preserve a timestamp-bounded `docker logs --timestamps --until` snapshot in a
    private archive (directory mode 0700, file mode 0600); verify decompression and
-   record its SHA-256, cutoff and container ID. An empty snapshot decompresses and
+   record its SHA-256, cutoff and container ID. Name the archive directory once
+   (`archive=/path/to/private/archive`, created with mode 0700) and reuse it in
+   step 4. An empty snapshot decompresses and
    checksums cleanly, so also record the decoded byte count and the line count,
    and require both to be non-zero and the newest captured timestamp to be at or
    after the cutoff: a zero-line archive, or one that stops before the cutoff,
@@ -304,6 +306,8 @@ requires separately approved immediate action. Before recreating the worker:
    "${compose[@]}" --profile hybrid stop hybrid-worker
    docker logs --timestamps "$container" > "$archive/final-worker.log"
    ```
+
+   The archive directory from step 1 holds both snapshots; keep it out of Git.
 
    The recreation in step 5 removes the old container and its Docker log file,
    so every line the worker wrote after the step-1 cutoff - including its
