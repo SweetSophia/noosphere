@@ -14,11 +14,13 @@
 #  40  local artifact validation failed (nothing was published)
 #  41  local tooling unavailable, timed out, or faulted (nothing was published)
 #
-# The two local classes use a private range so Node's own reserved exit codes
-# (3 parse error, 4 internal evaluation failure, 6 invalid argument) can never
-# be mistaken for a deliberate decision of this script, and so a caller can
-# always tell "nothing was published" (40/41) from "published, but the readback
-# failed" (1/2/4).
+# The two local classes use a private range so a caller can always tell
+# "nothing was published" (40/41) from "published, but the readback failed"
+# (1/2/4). The protection against Node's own reserved codes (3 parse error, 4
+# internal evaluation failure, 6 invalid argument) comes from the remap below,
+# not from the range: a Node exit status is honoured only when it is 40 or 41
+# and every other status is reported as a tooling failure, so a Node fault can
+# never surface as one of this script's own verdicts (1/2/3/4/5).
 set -euo pipefail
 if (( $# != 3 )); then
   printf 'Usage: %s <tarball> <package@version> <sha512-integrity>\n' "${0##*/}" >&2
@@ -62,7 +64,13 @@ try {
   });
 } catch (error) {
   if (error.code === "ENOENT" || error.code === "EACCES") fail("TOOL_UNAVAILABLE", 41);
-  if (error.code === "ETIMEDOUT") fail("TOOL_TIMEOUT", 41);
+  // A killed extraction is a tooling timeout, never a statement about the
+  // artifact bytes. Node reports its own timeout as ETIMEDOUT, but a child
+  // killed by a signal can also arrive with only "killed"/"signal" set and a
+  // null status, so classify the kill itself instead of trusting one field.
+  // Getting this wrong reports a hung tar as "your tarball is the wrong bytes"
+  // (exit 40) - a verdict about the artifact rather than the environment.
+  if (error.code === "ETIMEDOUT" || error.killed === true || error.signal) fail("TOOL_TIMEOUT", 41);
   fail("ARCHIVE_UNREADABLE");
 }
 let manifest;
@@ -84,9 +92,23 @@ else
   printf 'Local validation failed: TOOL_FAILURE (node exited %s). Check Node.js installation.\n' "$status" >&2
   exit 41
 fi
-script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# Guard dirname separately: nesting it inside cd can hide its failure behind
+# a successful cd to an empty path. No registry call may follow failed setup.
+script_dir=$(dirname -- "${BASH_SOURCE[0]}") || {
+  printf 'Local validation failed: SCRIPT_DIR_UNAVAILABLE. Check coreutils availability.\n' >&2
+  exit 41
+}
+script_dir=$(cd -- "$script_dir" && pwd) || {
+  printf 'Local validation failed: SCRIPT_DIR_UNAVAILABLE. Check script directory access.\n' >&2
+  exit 41
+}
 output=$(mktemp) || exit 41
 trap 'rm -f "$output"' EXIT
+# Missing npm is a local tooling fault, not a registry/authentication failure.
+if ! command -v npm >/dev/null 2>&1; then
+  printf 'Local validation failed: NPM_UNAVAILABLE. Check the npm installation.\n' >&2
+  exit 41
+fi
 if npm publish "$tarball" --access public --provenance >"$output" 2>&1; then
   printf 'npm accepted publication of %s; verifying registry integrity.\n' "$target"
 else

@@ -102,18 +102,38 @@ status=0
 MODE=success PATH="$work/no-node-bin" "$bash_path" "$root/scripts/publish-npm-artifact.sh" "$PUBLISHED_TARBALL" fixture@1.0.0 "$EXPECTED" >"$work/output" 2>&1 || status=$?
 [[ "$status" == 41 ]] && grep -q 'NODE_UNAVAILABLE' "$work/output" && ! grep -q 'TOOL_UNAVAILABLE' "$work/output" && [[ ! -s "$CALLS" ]] || { printf 'FAIL: missing node must be tooling41 with its own reason code\n'; exit 1; }
 printf 'ok: missing node classified as tooling41 with a distinct reason code\n'
-cat > "$work/timeout.cjs" <<'PRELOAD'
-const cp = require('node:child_process');
-const original = cp.execFileSync;
-cp.execFileSync = function(command, ...args) {
-  if (command === 'tar') { const error = new Error('fixture-sensitive-token'); error.code = 'ETIMEDOUT'; throw error; }
-  return original.call(this, command, ...args);
-};
-PRELOAD
+# Drive Node's actual timeout against a uniquely owned direct child. exec
+# ensures no grandchild sleep survives when Node kills tar at its 10s ceiling.
+mkdir "$work/hang-bin"
+printf '#!%s\nexec %q 30\n' "$bash_path" "$(command -v sleep)" > "$work/hang-bin/tar"
+chmod +x "$work/hang-bin/tar"
 status=0
-MODE=success NODE_OPTIONS="--require=$work/timeout.cjs" PATH="$work/bin:$PATH" bash "$root/scripts/publish-npm-artifact.sh" "$PUBLISHED_TARBALL" fixture@1.0.0 "$EXPECTED" > "$work/output" 2>&1 || status=$?
-[[ "$status" == 41 ]] && grep -q 'TOOL_TIMEOUT' "$work/output" && ! grep -q fixture-sensitive-token "$work/output" && [[ ! -s "$CALLS" ]] || { printf 'FAIL: timeout must be tooling41 without raw output/npm call\n'; exit 1; }
-printf 'ok: extraction timeout classified as tooling41 without leaking raw errors\n'
+started=$SECONDS
+MODE=success PATH="$work/hang-bin:$work/bin:$PATH" bash "$root/scripts/publish-npm-artifact.sh" "$PUBLISHED_TARBALL" fixture@1.0.0 "$EXPECTED" > "$work/output" 2>&1 || status=$?
+[[ "$status" == 41 ]] && grep -q 'TOOL_TIMEOUT' "$work/output" && (( SECONDS - started < 20 )) && [[ ! -s "$CALLS" ]] || { printf 'FAIL: real tar timeout must be bounded tooling41 with no npm call\n'; exit 1; }
+printf 'ok: actual Node extraction timeout classified as tooling41\n'
+# Real tool faults before any registry call must never escape as registry1/5.
+for scenario in dirname npm; do
+  mkdir "$work/no-$scenario-bin"
+  for tool in node tar gzip dirname mktemp rm; do
+    [[ "$tool" == "$scenario" ]] || ln -s "$(command -v "$tool")" "$work/no-$scenario-bin/$tool"
+  done
+  : > "$CALLS"
+  status=0
+  MODE=success PATH="$work/no-$scenario-bin" "$bash_path" "$root/scripts/publish-npm-artifact.sh" "$PUBLISHED_TARBALL" fixture@1.0.0 "$EXPECTED" > "$work/output" 2>&1 || status=$?
+  if [[ "$scenario" == dirname ]]; then reason=SCRIPT_DIR_UNAVAILABLE; else reason=NPM_UNAVAILABLE; fi
+  [[ "$status" == 41 ]] && grep -q "$reason" "$work/output" && [[ ! -s "$CALLS" ]] || { printf 'FAIL: missing %s must be tooling41 with no npm call\n' "$scenario"; exit 1; }
+  printf 'ok: missing %s classified as tooling41\n' "$scenario"
+done
+for scenario in missing-argument bad-digest; do
+  : > "$CALLS"
+  status=0
+  args=("$PUBLISHED_TARBALL" fixture@1.0.0)
+  [[ "$scenario" == missing-argument ]] || args+=(invalid-digest)
+  MODE=success PATH="$work/bin:$PATH" bash "$root/scripts/publish-npm-artifact.sh" "${args[@]}" > "$work/output" 2>&1 || status=$?
+  [[ "$status" == 3 && ! -s "$CALLS" ]] || { printf 'FAIL: usage %s expected3/no npm call got%s\n' "$scenario" "$status"; exit 1; }
+  printf 'ok: publisher usage %s classified as3\n' "$scenario"
+done
 # A manifest that is not valid JSON is an artifact failure, distinct from a
 # tooling failure, and it must be reported before any registry write.
 mkdir -p "$work/bad-manifest/package"
