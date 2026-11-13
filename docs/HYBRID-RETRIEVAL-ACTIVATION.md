@@ -271,19 +271,27 @@ requires separately approved immediate action. Before recreating the worker:
    the snapshot:
 
    ```bash
+   capture_initial_worker_logs() {
+     : "${archive:?set archive to a private path}"
+     : "${container:?run the step 3 discovery block first}"
+     install -d -m 0700 "$archive" || return 1
+     umask 077
+     # Set start to the incident start; cutoff is the capture instant.
+     start=2026-01-01T00:00:00Z
+     cutoff=$(date -u +%Y-%m-%dT%H:%M:%SZ) || return 1
+     docker logs --timestamps --since "$start" --until "$cutoff" "$container" \
+       > "$archive/worker-before.log" 2>&1 || {
+       printf 'initial log capture failed; retain partial evidence and do not continue\n' >&2
+       return 1
+     }
+   }
    archive=/path/to/private/archive
-   install -d -m 0700 "$archive"
-   umask 077
-   # Both bounds are required. $start is the earliest instant the archive must
-   # cover (the incident start) - replace it with the instant this deployment
-   # needs. $cutoff is the moment of the capture.
-   start=2026-01-01T00:00:00Z
-   cutoff=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-   docker logs --timestamps --since "$start" --until "$cutoff" "$container" \
-     > "$archive/worker-before.log"
+   capture_initial_worker_logs
    ```
 
-   An empty snapshot decompresses and
+   Both stdout and stderr are archived. A non-zero capture status is a hard
+   stop, even if the file contains records: retain the partial file and do not
+   recreate the worker. An empty snapshot decompresses and
    checksums cleanly, so also record the decoded byte count and the line count,
    and require both to be non-zero. Bound the capture window on both ends and
    require the newest captured timestamp to fall inside it: at or after
@@ -328,6 +336,9 @@ requires separately approved immediate action. Before recreating the worker:
    # `$container`, `$compose` and `$archive` values the later steps need.
    # `return 1` aborts the discovery and leaves the session intact.
    discover_worker() {
+     # Clear stale success values before any discovery that may fail.
+     unset container project config_files working_dir
+     compose=()
      # `-a` so a stopped or crashed worker is still discoverable - this
      # procedure exists to service exactly that worker. The oneoff filter keeps
      # `docker compose run` leftovers out of the count.
@@ -395,11 +406,17 @@ requires separately approved immediate action. Before recreating the worker:
    it. With the pinned invocation from step 3:
 
    ```bash
-   : "${archive:?set archive to a private path}"
-   : "${container:?run the step 3 discovery block first}"
-   umask 077
-   "${compose[@]}" --profile hybrid stop hybrid-worker
-   docker logs --timestamps "$container" > "$archive/final-worker.log"
+   capture_final_worker_logs() {
+     : "${archive:?set archive to a private path}"
+     : "${container:?run the step 3 discovery block first}"
+     umask 077
+     "${compose[@]}" --profile hybrid stop hybrid-worker || return 1
+     docker logs --timestamps "$container" > "$archive/final-worker.log" 2>&1 || {
+       printf 'final log capture failed; retain old container and do not recreate\n' >&2
+       return 1
+     }
+   }
+   capture_final_worker_logs
    ```
 
    The archive directory from step 1 holds both snapshots; keep it out of Git.
