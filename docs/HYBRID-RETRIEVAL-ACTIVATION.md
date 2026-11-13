@@ -251,18 +251,49 @@ whose worker still runs from an installer-generated Compose file stays
 uncapped until that release lands; `docs/HERMES-INSTALLER-HYBRID.md` covers
 that stack's compose invocation.
 
+This procedure applies only where the worker's own Compose file actually
+declares the cap. Before step 1, resolve the worker's Compose file (the
+discovery block in step 3 records it) and confirm it declares the `logging:`
+block with `max-size: "10m"` and `max-file: "3"` for `hybrid-worker`. A
+worker still running from an installer-generated Compose file has nothing to
+activate here: the cap arrives with the release that changes that template, so
+wait for that release instead of running this procedure. On such a stack the
+step 6 `LogConfig` check can never pass, and this runbook does not ask the
+operator to fake it.
+
 Activation belongs to the next approved worker deployment unless disk pressure
 requires separately approved immediate action. Before recreating the worker:
 
-1. Preserve a timestamp-bounded `docker logs --timestamps --until` snapshot in a
+1. Preserve a timestamp-bounded `docker logs --timestamps` snapshot in a
    private archive (directory mode 0700, file mode 0600); verify decompression and
-   record its SHA-256, cutoff and container ID. Name the archive directory once
-   (`archive=/path/to/private/archive`, created with mode 0700) and reuse it in
-   step 4. An empty snapshot decompresses and
+   record its SHA-256, window bounds and container ID. Run the discovery block
+   in step 3 first to resolve `$container`, then create the archive and capture
+   the snapshot:
+
+   ```bash
+   archive=/path/to/private/archive
+   install -d -m 0700 "$archive"
+   umask 077
+   # Both bounds are required. $start is the earliest instant the archive must
+   # cover (the incident start) - replace it with the instant this deployment
+   # needs. $cutoff is the moment of the capture.
+   start=2026-01-01T00:00:00Z
+   cutoff=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+   docker logs --timestamps --since "$start" --until "$cutoff" "$container" \
+     > "$archive/worker-before.log"
+   ```
+
+   An empty snapshot decompresses and
    checksums cleanly, so also record the decoded byte count and the line count,
-   and require both to be non-zero and the newest captured timestamp to be at or
-   after the cutoff: a zero-line archive, or one that stops before the cutoff,
-   proves nothing and counts as a failed capture. A mistyped cutoff, a wrong
+   and require both to be non-zero. Bound the capture window on both ends and
+   require the newest captured timestamp to fall inside it: at or after
+   `$start` and at or before `$cutoff`. A zero-line archive, or one whose
+   newest record predates `$start`, proves nothing and counts as a failed
+   capture. An upper bound alone cannot express "the capture reaches the
+   cutoff", because `--until` returns the records *before* the cutoff by
+   construction, so a check for a newest record at or after the cutoff rejects
+   every healthy capture and only trains operators to wave it through. A
+   mistyped cutoff, a wrong
    container name or a cutoff in the wrong zone all produce a valid, empty
    archive, so discover the worker container by its Compose service label (the
    discovery block in step 3) rather than by a hardcoded name: the same
@@ -277,7 +308,7 @@ requires separately approved immediate action. Before recreating the worker:
    Record the worker's current log driver and options
    (`docker inspect --format '{{json .HostConfig.LogConfig}}' <container>`) and the
    daemon's default driver (`docker info --format '{{.LoggingDriver}}'`) so the
-   pre-change state is on record next to the post-change check in step 5. The
+   pre-change state is on record next to the post-change check in step 6. The
    Compose template pins `json-file` for this service so the cap applies even
    when the daemon default differs; pinning one service does not change the
    daemon default or any other service.
@@ -291,19 +322,46 @@ requires separately approved immediate action. Before recreating the worker:
    # aborts these inspect calls on an openclaw-only host and, with both stacks
    # running, can select the wrong worker. Abort unless exactly one worker
    # matches, so an ambiguous host never gets a guess.
-   mapfile -t workers < <(docker ps --filter label=com.docker.compose.service=hybrid-worker --format '{{.Names}}')
-   if [ "${#workers[@]}" -ne 1 ]; then
-     printf 'expected exactly 1 hybrid-worker container, found %d:\n' "${#workers[@]}" >&2
-     printf '  %s\n' "${workers[@]}" >&2
-     exit 1
-   fi
-   container=${workers[0]}
-   project=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$container")
-   config_files=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$container")
-   working_dir=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$container")
-   IFS=',' read -ra files <<< "$config_files"
-   compose=(docker compose --project-name "$project" --project-directory "$working_dir")
-   for file in "${files[@]}"; do compose+=(-f "$file"); done
+   #
+   # This is a function, not a bare snippet: `exit 1` in a block an operator
+   # pastes into an interactive shell closes that shell - and with it the
+   # `$container`, `$compose` and `$archive` values the later steps need.
+   # `return 1` aborts the discovery and leaves the session intact.
+   discover_worker() {
+     # `-a` so a stopped or crashed worker is still discoverable - this
+     # procedure exists to service exactly that worker. The oneoff filter keeps
+     # `docker compose run` leftovers out of the count.
+     mapfile -t workers < <(docker ps -a --filter label=com.docker.compose.service=hybrid-worker --filter label=com.docker.compose.oneoff=False --format '{{.Names}}')
+     if [ "${#workers[@]}" -ne 1 ]; then
+       printf 'expected exactly 1 hybrid-worker container, found %d:\n' "${#workers[@]}" >&2
+       printf '  %s\n' "${workers[@]}" >&2
+       return 1
+     fi
+     container=${workers[0]}
+     project=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$container")
+     config_files=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$container")
+     working_dir=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$container")
+     IFS=',' read -ra files <<< "$config_files"
+     compose=(docker compose --project-name "$project" --project-directory "$working_dir")
+     for file in "${files[@]}"; do compose+=(-f "$file"); done
+     # Pin the environment the way install-openclaw.sh does. Shell variables
+     # beat .env in Compose interpolation, so an ambient NOOSPHERE_VERSION,
+     # NOOSPHERE_IMAGE or POSTGRES_PASSWORD silently changes what the
+     # recreated worker is; COMPOSE_FILE and friends change what Compose loads
+     # at all. install-openclaw.sh:872-890 scrubs the same names, and
+     # install-openclaw.sh:1211-1213 always passes --env-file.
+     local docker_host="${DOCKER_HOST:-}"
+     while IFS= read -r ambient_name; do
+       case "$ambient_name" in
+         DOCKER_*|COMPOSE_*) unset "$ambient_name" ;;
+       esac
+     done < <(compgen -v)
+     if [ -n "$docker_host" ]; then export DOCKER_HOST="$docker_host"; fi
+     if [ -f "$working_dir/.env" ]; then
+       compose+=(--env-file "$working_dir/.env")
+     fi
+   }
+   discover_worker || printf 'worker discovery failed; not continuing\n' >&2
    ```
 
    The discovery above runs before every subsequent step and aborts on an
@@ -319,6 +377,9 @@ requires separately approved immediate action. Before recreating the worker:
    it. With the pinned invocation from step 3:
 
    ```bash
+   : "${archive:?set archive to a private path}"
+   : "${container:?run the step 3 discovery block first}"
+   umask 077
    "${compose[@]}" --profile hybrid stop hybrid-worker
    docker logs --timestamps "$container" > "$archive/final-worker.log"
    ```
@@ -337,10 +398,13 @@ requires separately approved immediate action. Before recreating the worker:
    ```
 
    This step does not authorize an application upgrade: `--no-build --pull never`
-   reuses the deployed image, and the pinned project, files and working
-   directory keep the deployed environment.
+   reuses the deployed image, and the pinned project, files, working directory
+   and environment (step 3) keep the deployed environment.
 6. Verify worker health and inspect its `HostConfig.LogConfig` for `json-file`,
-   `max-size=10m`, `max-file=3`. Confirm app/database container IDs and start times
+   `max-size=10m`, `max-file=3`. This assertion applies only to a deployment
+   that carried the cap before the change; a deployment that never declared it
+   is out of scope for this procedure and has no `LogConfig` expectation to
+   meet. Confirm app/database container IDs and start times
    are unchanged and no init service ran. Retain the diagnostic archive; rotation
    is not a replacement for incident evidence.
 
