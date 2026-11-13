@@ -40,13 +40,19 @@ independently of source merge; production activation remains separate.
   package publishing policy check. All five publishers use packed artifacts
   through duplicate-only retry tolerance, verifying local SHA-512 integrity and
   package name/version before any registry write (local artifact failures exit
-  40; missing tooling, bounded extraction timeouts and node faults exit 41 with
-  fixed reason codes). The private 40/41 range keeps node's own reserved exit
+  40; missing tooling, bounded extraction timeouts, signal-terminated extractions
+  and node faults exit 41 with fixed reason codes). The private 40/41 range keeps node's own reserved exit
   codes from being read as decisions of the publisher, and keeps "nothing was
   published" distinct from "published, but the readback failed".
   Tag-time policy and publication tests guard every publisher, with receipt-shape
   coverage and lifecycle-output negative controls. Registry/local-tool failures
   are distinct from propagation and fail promptly with safe error codes.
+  Publisher-local reasons are `ARCHIVE_UNREADABLE`, `DIGEST_MISMATCH`,
+  `MANIFEST_INVALID`, `NAME_MISMATCH`, `VERSION_MISMATCH` (exit 40), and
+  `NODE_UNAVAILABLE`, `TOOL_UNAVAILABLE`, `TOOL_TIMEOUT`, `TOOL_TERMINATED`,
+  `TOOL_FAILURE`, `SCRIPT_DIR_UNAVAILABLE`, `NPM_UNAVAILABLE` (exit 41).
+  `TOOL_TERMINATED` records a child signal without guessing its cause;
+  only an explicit timeout error is classified as `TOOL_TIMEOUT`.
 - Make hybrid-worker fatal stops diagnosable with classified failure kinds and
   bounded, redacted messages (including AggregateError children), without changing
   existing error codes. Classify configuration failures explicitly in the safe
