@@ -72,14 +72,14 @@ for invalid in digest identity version malformed; do
   : > "$CALLS"
   status=0
   MODE=success PATH="$work/bin:$PATH" bash "$root/scripts/publish-npm-artifact.sh" "$artifact" fixture@1.0.0 "$integrity" > "$work/output" 2>&1 || status=$?
-  [[ "$status" == 6 ]] || { printf 'FAIL local %s: expected6 got%s\n' "$invalid" "$status"; exit 1; }
+  [[ "$status" == 40 ]] || { printf 'FAIL local %s: expected40 got%s\n' "$invalid" "$status"; exit 1; }
   [[ ! -s "$CALLS" ]] || { printf 'FAIL: local artifact failure reached npm\n'; exit 1; }
   case "$invalid" in
     digest) reason=DIGEST_MISMATCH ;; identity) reason=NAME_MISMATCH ;;
     version) reason=VERSION_MISMATCH ;; malformed) reason=ARCHIVE_UNREADABLE ;;
   esac
   grep -q "$reason" "$work/output" || { printf 'FAIL: local %s lost fixed reason\n' "$invalid"; exit 1; }
-  printf 'ok: local %s rejected before any npm call (status6)\n' "$invalid"
+  printf 'ok: local %s rejected before any npm call (status40)\n' "$invalid"
 done
 
 # Missing tools and bounded extraction timeouts are environment failures, not
@@ -91,8 +91,17 @@ ln -s "$node_path" "$work/tool-bin/node"
 : > "$CALLS"
 status=0
 MODE=success PATH="$work/tool-bin" "$bash_path" "$root/scripts/publish-npm-artifact.sh" "$PUBLISHED_TARBALL" fixture@1.0.0 "$EXPECTED" > "$work/output" 2>&1 || status=$?
-[[ "$status" == 4 ]] && grep -q 'TOOL_UNAVAILABLE' "$work/output" && [[ ! -s "$CALLS" ]] || { printf 'FAIL: missing tar must be tooling4 with no npm call\n'; exit 1; }
-printf 'ok: missing tar classified as tooling4\n'
+[[ "$status" == 41 ]] && grep -q 'local validation TOOL_UNAVAILABLE' "$work/output" && [[ ! -s "$CALLS" ]] || { printf 'FAIL: missing tar must be tooling41 with no npm call\n'; exit 1; }
+printf 'ok: missing tar classified as tooling41\n'
+# The mirror case: a node that cannot be found at all. Its reason code has to
+# differ from the missing-tar one, otherwise a missing toolchain and a missing
+# tool stay indistinguishable to the caller.
+mkdir "$work/no-node-bin"
+: > "$CALLS"
+status=0
+MODE=success PATH="$work/no-node-bin" "$bash_path" "$root/scripts/publish-npm-artifact.sh" "$PUBLISHED_TARBALL" fixture@1.0.0 "$EXPECTED" >"$work/output" 2>&1 || status=$?
+[[ "$status" == 41 ]] && grep -q 'NODE_UNAVAILABLE' "$work/output" && ! grep -q 'TOOL_UNAVAILABLE' "$work/output" && [[ ! -s "$CALLS" ]] || { printf 'FAIL: missing node must be tooling41 with its own reason code\n'; exit 1; }
+printf 'ok: missing node classified as tooling41 with a distinct reason code\n'
 cat > "$work/timeout.cjs" <<'PRELOAD'
 const cp = require('node:child_process');
 const original = cp.execFileSync;
@@ -103,8 +112,30 @@ cp.execFileSync = function(command, ...args) {
 PRELOAD
 status=0
 MODE=success NODE_OPTIONS="--require=$work/timeout.cjs" PATH="$work/bin:$PATH" bash "$root/scripts/publish-npm-artifact.sh" "$PUBLISHED_TARBALL" fixture@1.0.0 "$EXPECTED" > "$work/output" 2>&1 || status=$?
-[[ "$status" == 4 ]] && grep -q 'TOOL_TIMEOUT' "$work/output" && ! grep -q fixture-sensitive-token "$work/output" && [[ ! -s "$CALLS" ]] || { printf 'FAIL: timeout must be tooling4 without raw output/npm call\n'; exit 1; }
-printf 'ok: extraction timeout classified as tooling4 without leaking raw errors\n'
+[[ "$status" == 41 ]] && grep -q 'TOOL_TIMEOUT' "$work/output" && ! grep -q fixture-sensitive-token "$work/output" && [[ ! -s "$CALLS" ]] || { printf 'FAIL: timeout must be tooling41 without raw output/npm call\n'; exit 1; }
+printf 'ok: extraction timeout classified as tooling41 without leaking raw errors\n'
+# A manifest that is not valid JSON is an artifact failure, distinct from a
+# tooling failure, and it must be reported before any registry write.
+mkdir -p "$work/bad-manifest/package"
+printf 'this is not json\n' > "$work/bad-manifest/package/package.json"
+tar -czf "$work/bad-manifest.tgz" -C "$work/bad-manifest" package
+bad_manifest_integrity="sha512-$(node -e 'process.stdout.write(require("node:crypto").createHash("sha512").update(require("node:fs").readFileSync(process.argv[1])).digest("base64"))' "$work/bad-manifest.tgz")"
+: > "$CALLS"
+status=0
+MODE=success PATH="$work/bin:$PATH" bash "$root/scripts/publish-npm-artifact.sh" "$work/bad-manifest.tgz" fixture@1.0.0 "$bad_manifest_integrity" >"$work/output" 2>&1 || status=$?
+[[ "$status" == 40 ]] && grep -q 'MANIFEST_INVALID' "$work/output" && [[ ! -s "$CALLS" ]] || { printf 'FAIL: invalid manifest must be artifact40 with no npm call\n'; exit 1; }
+printf 'ok: invalid manifest classified as artifact40\n'
+# A node that faults wearing an exit code the publisher reserves for its own
+# decisions must not be reported as an artifact or registry verdict, and the
+# observed status has to survive into the message.
+mkdir "$work/fault-node-bin"
+printf '#!/bin/sh\nexit 4\n' > "$work/fault-node-bin/node"
+chmod +x "$work/fault-node-bin/node"
+: > "$CALLS"
+status=0
+MODE=success PATH="$work/fault-node-bin" "$bash_path" "$root/scripts/publish-npm-artifact.sh" "$PUBLISHED_TARBALL" fixture@1.0.0 "$EXPECTED" >"$work/output" 2>&1 || status=$?
+[[ "$status" == 41 ]] && grep -q 'TOOL_FAILURE (node exited 4)' "$work/output" && [[ ! -s "$CALLS" ]] || { printf 'FAIL: node fault must be tooling41 with the observed status\n'; exit 1; }
+printf 'ok: node fault classified as tooling41 with the observed status\n'
 
 # An inert local mutant proves the stub detects publishing a different operand.
 mkdir "$work/mutant"

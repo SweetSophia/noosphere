@@ -2,6 +2,23 @@
 # Publish an already packed artifact, then verify exact registry bytes.
 # Only npm's explicit duplicate-version error may fall through after failure.
 # Other publish errors are not evidence of eventual registry propagation.
+#
+# Exit contract (the verifier's codes propagate unchanged because the
+# verifier is this script's last command):
+#   0  published and verified byte-identical
+#   1  integrity mismatch: the registry serves a DIFFERENT artifact (fatal)
+#   2  not visible within the deadline: still propagating, re-run the workflow
+#   3  usage error
+#   4  registry answered with errors (authentication, network, server)
+#   5  npm publish failed for a reason other than an existing version
+#  40  local artifact validation failed (nothing was published)
+#  41  local tooling unavailable, timed out, or faulted (nothing was published)
+#
+# The two local classes use a private range so Node's own reserved exit codes
+# (3 parse error, 4 internal evaluation failure, 6 invalid argument) can never
+# be mistaken for a deliberate decision of this script, and so a caller can
+# always tell "nothing was published" (40/41) from "published, but the readback
+# failed" (1/2/4).
 set -euo pipefail
 if (( $# != 3 )); then
   printf 'Usage: %s <tarball> <package@version> <sha512-integrity>\n' "${0##*/}" >&2
@@ -14,18 +31,21 @@ if [[ ! -f "$tarball" || ! -r "$tarball" || ! "$target" =~ ^(@[A-Za-z0-9._~-]+/)
   printf 'Invalid packed artifact, exact package version or sha512 integrity.\n' >&2
   exit 3
 fi
-# Validate before any registry write. Local artifact failures are exit 6;
-# unavailable tools/timeouts are exit 4. Report only fixed reason codes.
+# Validate before any registry write. Local artifact failures are exit 40;
+# unavailable tools/timeouts are exit 41. Report only fixed reason codes.
 if ! command -v node >/dev/null 2>&1; then
-  printf 'Local validation failed: TOOL_UNAVAILABLE. Check Node.js installation.\n' >&2
-  exit 4
+  printf 'Local validation failed: NODE_UNAVAILABLE. Check Node.js installation.\n' >&2
+  exit 41
 fi
 if node - "$tarball" "$target" "$integrity" <<'NODE'
 const fs = require("node:fs");
 const crypto = require("node:crypto");
 const { execFileSync } = require("node:child_process");
-function fail(reason, status = 6) {
-  console.error(`Refusing publication: local validation ${reason}.`);
+function fail(reason, status = 40) {
+  // Write the reason synchronously. process.exit() can discard an asynchronous
+  // stderr write where pipes are asynchronous (macOS), which would drop the
+  // only explanation of why the publication was refused.
+  fs.writeSync(2, `Refusing publication: local validation ${reason}.\n`);
   process.exit(status);
 }
 const [archive, target, expected] = process.argv.slice(2);
@@ -41,8 +61,8 @@ try {
     stdio: ["ignore", "pipe", "pipe"],
   });
 } catch (error) {
-  if (error.code === "ENOENT" || error.code === "EACCES") fail("TOOL_UNAVAILABLE", 4);
-  if (error.code === "ETIMEDOUT") fail("TOOL_TIMEOUT", 4);
+  if (error.code === "ENOENT" || error.code === "EACCES") fail("TOOL_UNAVAILABLE", 41);
+  if (error.code === "ETIMEDOUT") fail("TOOL_TIMEOUT", 41);
   fail("ARCHIVE_UNREADABLE");
 }
 let manifest;
@@ -55,13 +75,17 @@ then
   :
 else
   status=$?
-  # Unexpected Node failures are tooling failures, never registry mismatches.
-  if [[ "$status" == 6 || "$status" == 4 ]]; then exit "$status"; fi
-  printf 'Local validation failed: TOOL_FAILURE. Check Node.js installation.\n' >&2
-  exit 4
+  # Only the private local range is a decision this script made. Any other
+  # status is Node faulting on its own terms (a parse error, an internal
+  # evaluation failure, an uncaught throw), so it is a tooling failure and
+  # never an artifact or registry verdict. Report the observed status instead
+  # of swallowing it.
+  if [[ "$status" == 40 || "$status" == 41 ]]; then exit "$status"; fi
+  printf 'Local validation failed: TOOL_FAILURE (node exited %s). Check Node.js installation.\n' "$status" >&2
+  exit 41
 fi
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-output=$(mktemp) || exit 4
+output=$(mktemp) || exit 41
 trap 'rm -f "$output"' EXIT
 if npm publish "$tarball" --access public --provenance >"$output" 2>&1; then
   printf 'npm accepted publication of %s; verifying registry integrity.\n' "$target"

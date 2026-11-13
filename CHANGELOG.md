@@ -20,8 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Covered by `scripts/test-npm-publication-integrity.sh` and enforced by the
   package publishing policy check. All five publishers use packed artifacts
   through duplicate-only retry tolerance, verifying local SHA-512 integrity and
-  package name/version before any registry write (local artifact failures exit 6;
-  missing tooling and bounded extraction timeouts exit 4 with fixed reason codes).
+  package name/version before any registry write (local artifact failures exit
+  40; missing tooling, bounded extraction timeouts and node faults exit 41 with
+  fixed reason codes). The private 40/41 range keeps node's own reserved exit
+  codes from being read as decisions of the publisher, and keeps "nothing was
+  published" distinct from "published, but the readback failed".
   Tag-time policy and publication tests guard every publisher, with receipt-shape
   coverage and lifecycle-output negative controls. Registry/local-tool failures
   are distinct from propagation and fail promptly with safe error codes.
