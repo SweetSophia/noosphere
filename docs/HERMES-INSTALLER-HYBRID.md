@@ -243,6 +243,7 @@ Never `docker compose` from a git clone. Never re-run `init`.
 ### 4.1 Scripts checkout (not the runtime)
 
 ```bash
+set -e
 git clone --branch v1.15.3 --depth 1 https://github.com/SweetSophia/noosphere.git ~/src/noosphere-scripts
 cd ~/src/noosphere-scripts
 test "$(git rev-parse v1.15.3^{commit})" = "$(git rev-parse HEAD)"

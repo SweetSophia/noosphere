@@ -317,7 +317,9 @@ test("scope deletion cannot be undone by a queued unbound key create", async () 
     // before deletion starts does not establish a winner: an SSI retry can
     // let key creation commit first, a valid order this fixture must not assume.
     const deletion = deleteMemoryRestrictedScope(scopeTag);
-    const [deletionPid] = await waitForLockWaiters(blocker, 1);
+    const deletionPids = await waitForLockWaiters(blocker, 1);
+    assert.equal(deletionPids.length, 1, "expected exactly one deletion backend");
+    const [deletionPid] = deletionPids;
     const creation = createApiKeyRecord({
       name: `${prefix} queued create key`,
       permissions: Permissions.WRITE,
@@ -371,7 +373,9 @@ test("scope deletion cannot be undone by a queued key scope update", async () =>
     // before deletion starts does not establish a winner: an SSI retry can
     // let key creation commit first, a valid order this fixture must not assume.
     const deletion = deleteMemoryRestrictedScope(scopeTag);
-    const [deletionPid] = await waitForLockWaiters(blocker, 1);
+    const deletionPids = await waitForLockWaiters(blocker, 1);
+    assert.equal(deletionPids.length, 1, "expected exactly one deletion backend");
+    const [deletionPid] = deletionPids;
     const update = updateApiKeyRecord(credential.key.id, {
       allowedScopes: [scopeTag],
     }).then(
@@ -428,7 +432,7 @@ async function waitForLockWaiters(
     if (result.rows.length >= minimum) return result.rows.map(({ pid }) => pid);
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  throw new Error(`Timed out waiting for ${minimum} database lock waiter(s)`);
+  throw new Error(`Timed out waiting for ${minimum} database lock waiter(s) blocked by PID ${pid}`);
 }
 
 async function waitForPrincipalBoundaryWaiters(
