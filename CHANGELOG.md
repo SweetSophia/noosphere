@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Dependencies: raise the `@sweetsophia/noosphere-mcp` overrides to the patched
+  `@hono/node-server` 2.1.8 and `hono` 4.13.18. The previously pinned 2.1.5 and
+  4.13.13 fall inside the advisory ranges published for an unhandled `ECONNRESET`
+  during a WebSocket upgrade, a backslash request-path bypass, and several
+  `hono` routing and middleware escapes, so `npm audit --audit-level=low`
+  failed the package check on every branch.
+- Coordinated npm publication: the registry readback after publishing a package
+  now uses a shared, bounded verifier instead of a fixed 10-poll/30-second
+  window. npm serves a freshly published version asynchronously and can need
+  minutes to become visible, so the 1.15.2 helper publication was published
+  successfully but its readback gave up first, failing the job and skipping the
+  dependent OpenClaw publication. A genuine integrity mismatch stays fatal, a
+  version that is still propagating is retried within the deadline, and the
+  verifier tells the operator to re-run the workflow rather than republish.
+  Covered by `scripts/test-npm-publication-integrity.sh` and enforced by the
+  package publishing policy check. All five publishers use packed artifacts
+  through duplicate-only retry tolerance, verifying local SHA-512 integrity and
+  package name/version before any registry write (local artifact failures exit
+  40; missing tooling, bounded extraction timeouts, signal-terminated extractions
+  and node faults exit 41 with fixed reason codes). A Node status is honoured
+  only when it is 40 or 41; other statuses are remapped to tooling failure,
+  so Node's reserved codes cannot become publisher verdicts. The private range
+  distinguishes "nothing was published" from "published, but readback failed".
+  Tag-time policy and publication tests guard every publisher, with receipt-shape
+  coverage and lifecycle-output negative controls. Registry/local-tool failures
+  are distinct from propagation and fail promptly with safe error codes.
+  Publisher-local reasons are `ARCHIVE_UNREADABLE`, `DIGEST_MISMATCH`,
+  `MANIFEST_INVALID`, `NAME_MISMATCH`, `VERSION_MISMATCH` (exit 40), and
+  `NODE_UNAVAILABLE`, `TOOL_UNAVAILABLE`, `TOOL_TIMEOUT`, `TOOL_TERMINATED`,
+  `TOOL_FAILURE`, `SCRIPT_DIR_UNAVAILABLE`, `NPM_UNAVAILABLE` (exit 41).
+  `TOOL_TERMINATED` records a child signal without guessing its cause;
+  only an explicit timeout error is classified as `TOOL_TIMEOUT`.
 - Make hybrid-worker fatal stops diagnosable with classified failure kinds and
   bounded, redacted messages (including AggregateError children), without changing
   existing error codes. Classify configuration failures explicitly in the safe
