@@ -122,6 +122,11 @@ serve() {
       printf 'npm error code E401\nnpm error 401 Unauthorized - bad credentials\n' >&2
       exit 1
       ;;
+    server|network)
+      if [[ "$FAKE_NPM_STATE" == server ]]; then code=E500; else code=ECONNRESET; fi
+      printf 'npm error code %s\n' "$code" >&2
+      exit 1
+      ;;
     hang)
       exec sleep 30
       ;;
@@ -416,7 +421,7 @@ fi
 
 # Review regressions: only a valid sha512 response may be called a mismatch;
 # registry failures must not masquerade as propagation or wait out the budget.
-for state in auth unknown null object malformed badstring secretcode hang; do
+for state in auth server network unknown null object malformed badstring secretcode hang; do
   rm -f "$work_dir/counter" "$work_dir/requests.log"
   started=$SECONDS
   status=0
@@ -427,6 +432,10 @@ for state in auth unknown null object malformed badstring secretcode hang; do
     if grep -q E401 "$work_dir/regression.out" && ! grep -q 'Inspect the npm error output' "$work_dir/regression.out"; then
       pass "auth failure names E401 and gives self-contained recovery guidance"
     else fail "auth diagnostics lost E401 or refer to discarded evidence"; fi
+  fi
+  if [[ "$state" == server || "$state" == network ]]; then
+    if [[ "$state" == server ]]; then code=E500; else code=ECONNRESET; fi
+    if grep -q "$code" "$work_dir/regression.out"; then pass "$state diagnostics preserve $code"; else fail "$state lost $code"; fi
   fi
   if [[ "$state" == secretcode ]]; then
     if ! grep -q fixture-sensitive-token "$work_dir/regression.out"; then pass "untrusted registry error code is not logged"; else fail "registry error code leaked raw response"; fi

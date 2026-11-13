@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.15.3] - 2026-11-11
+## [1.15.3] - 2026-11-13
 
 Coordinated application and integration release. Publication is verified
 independently of source merge; production activation remains separate.
@@ -22,6 +22,12 @@ independently of source merge; production activation remains separate.
   Root 3.1.5 is outside this advisory's affected `>=7.0.0 <11.0.1` range.
   The lint-only edge requires Node 20 or >=22 (qualified locally on Node 22/24; root CI uses Node 22);
   the root and all five integration lockfile audits report zero vulnerabilities.
+- Dependencies: raise the `@sweetsophia/noosphere-mcp` overrides to the patched
+  `@hono/node-server` 2.1.8 and `hono` 4.13.18. The previously pinned 2.1.5 and
+  4.13.13 fall inside the advisory ranges published for an unhandled `ECONNRESET`
+  during a WebSocket upgrade, a backslash request-path bypass, and several
+  `hono` routing and middleware escapes, so `npm audit --audit-level=low`
+  failed the package check on every branch.
 - Coordinated npm publication: the registry readback after publishing a package
   now uses a shared, bounded verifier instead of a fixed 10-poll/30-second
   window. npm serves a freshly published version asynchronously and can need
@@ -31,8 +37,15 @@ independently of source merge; production activation remains separate.
   version that is still propagating is retried within the deadline, and the
   verifier tells the operator to re-run the workflow rather than republish.
   Covered by `scripts/test-npm-publication-integrity.sh` and enforced by the
-  package publishing policy check. Both helper and OpenClaw publish packed
-  artifacts through duplicate-only retry tolerance. Registry/local-tool failures
+  package publishing policy check. All five publishers use packed artifacts
+  through duplicate-only retry tolerance, verifying local SHA-512 integrity and
+  package name/version before any registry write (local artifact failures exit
+  40; missing tooling, bounded extraction timeouts and node faults exit 41 with
+  fixed reason codes). The private 40/41 range keeps node's own reserved exit
+  codes from being read as decisions of the publisher, and keeps "nothing was
+  published" distinct from "published, but the readback failed".
+  Tag-time policy and publication tests guard every publisher, with receipt-shape
+  coverage and lifecycle-output negative controls. Registry/local-tool failures
   are distinct from propagation and fail promptly with safe error codes.
 - Make hybrid-worker fatal stops diagnosable with classified failure kinds and
   bounded, redacted messages (including AggregateError children), without changing
