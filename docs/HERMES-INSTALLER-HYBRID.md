@@ -1,5 +1,10 @@
 # Work VM: Hermes + installer runtime + llama.cpp hybrid
 
+> **1.15.3 release candidate — not published.** Do not run these version-bound
+> commands until the coordinated public release and all six installer assets
+> exist. Publication waits for the coordinated verification gate; production
+> activation remains separate.
+
 This is the path for a **fresh machine** (work VM) where Hermes is already
 installed and you want Noosphere memory, then hybrid retrieval, without using
 the source-development Compose file.
@@ -240,11 +245,11 @@ Never `docker compose` from a git clone. Never re-run `init`.
 ```bash
 git clone --branch v1.15.3 --depth 1 https://github.com/SweetSophia/noosphere.git ~/src/noosphere-scripts
 cd ~/src/noosphere-scripts
-test "$(git describe --tags --exact-match)" = v1.15.3
+test "$(git rev-parse v1.15.3^{commit})" = "$(git rev-parse HEAD)"
 npm ci
 ```
 
-That commit is tag `v1.15.3`. `npm ci` is for activators only. Do not run
+That commit is the release commit for `v1.15.3`. `npm ci` is for activators only. Do not run
 Compose from this clone.
 
 ### 4.2 Snapshot

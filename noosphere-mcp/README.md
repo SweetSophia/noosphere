@@ -1,5 +1,9 @@
 # Noosphere MCP
 
+> **1.15.3 release candidate — not published.** Use the version-bound commands
+> and client configuration below only after the coordinated public release
+> exists. Production activation remains separate.
+
 Connect Codex CLI or another MCP client to a self-hosted Noosphere memory and
 wiki. This stdio server includes a guided Codex CLI installer and skill.
 
@@ -9,7 +13,7 @@ You need Node.js 22 or newer, a trusted Codex CLI with MCP support on your
 `PATH`, a running Noosphere instance, and a permission-scoped API key. New to
 Noosphere? Start with the [guided installation on GitHub](https://github.com/SweetSophia/noosphere/blob/master/docs/INSTALLATION.md#guided-installation).
 Check that the coordinated [v1.15.3 release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.3)
-exists before using this version-pinned command.
+exists before using any version-pinned command or client configuration below.
 
 Install the MCP launcher and user-level Codex skill from a trusted shell:
 
