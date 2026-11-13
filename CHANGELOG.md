@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.3] - 2026-11-13
+
+Coordinated application and integration release. Publication is verified
+independently of source merge; production activation remains separate.
+
 ### Fixed
 - Resolve the TypeScript-ESLint-only minimatch dependency to patched 11.0.8
   for GHSA-g3hv-75wg-m249. Keep unrelated matcher copies unchanged; exercise
@@ -722,7 +727,8 @@ changes.
   backfill pipeline, and the memory provider refactor. Refer to the commit
   history (`git log v1.8.0..v1.9.0`) for the full set of changes.
 
-[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.15.2...HEAD
+[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.15.3...HEAD
+[1.15.3]: https://github.com/SweetSophia/noosphere/compare/v1.15.2...v1.15.3
 [1.15.2]: https://github.com/SweetSophia/noosphere/compare/v1.15.1...v1.15.2
 [1.15.1]: https://github.com/SweetSophia/noosphere/compare/v1.15.0...v1.15.1
 [1.15.0]: https://github.com/SweetSophia/noosphere/compare/v1.14.1...v1.15.0

@@ -15,7 +15,7 @@ import {
   revokeMemoryAgentPrincipal,
   revokeMemorySession,
 } from "@/lib/memory/capture/lifecycle";
-import { PrismaMemoryCaptureRepository } from "@/lib/memory/capture/repository";
+import { MemoryCaptureError, PrismaMemoryCaptureRepository } from "@/lib/memory/capture/repository";
 import { NoosphereProvider } from "@/lib/memory/noosphere";
 
 const prefix = `phase-a-race-${crypto.randomUUID()}`;
@@ -303,15 +303,23 @@ test("scope deletion cannot be undone by a queued unbound key create", async () 
   const scopeTag = `${prefix}-create-delete-private`;
   await prisma.restrictedScope.create({ data: { tag: scopeTag } });
 
+  const lineage = await prisma.memoryLineageState.create({
+    data: { kind: "SCOPE", subjectHash: `scope:${scopeTag}` },
+  });
   const blocker = await pool.connect();
   try {
     await blocker.query("BEGIN");
     await blocker.query(
-      'SELECT tag FROM "RestrictedScope" WHERE tag = $1 FOR UPDATE',
-      [scopeTag],
+      'SELECT id FROM "MemoryLineageState" WHERE id = $1 FOR UPDATE',
+      [lineage.id],
     );
+    // Block deletion AFTER it owns the scope row. Blocking that same scope
+    // before deletion starts does not establish a winner: an SSI retry can
+    // let key creation commit first, a valid order this fixture must not assume.
     const deletion = deleteMemoryRestrictedScope(scopeTag);
-    await waitForLockWaiters(blocker, 1);
+    const deletionPids = await waitForLockWaiters(blocker, 1);
+    assert.equal(deletionPids.length, 1, "expected exactly one deletion backend");
+    const [deletionPid] = deletionPids;
     const creation = createApiKeyRecord({
       name: `${prefix} queued create key`,
       permissions: Permissions.WRITE,
@@ -320,12 +328,17 @@ test("scope deletion cannot be undone by a queued unbound key create", async () 
       (value) => ({ value }),
       (error: unknown) => ({ error }),
     );
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Prove the key transaction reached the scope lock owned by deletion.
+    // A single event-loop tick can pass without any queued mutation at all.
+    await waitForLockWaiters(blocker, 1, 5_000, deletionPid);
 
     await blocker.query("COMMIT");
     await deletion;
     const result = await creation;
     assert.ok("error" in result, "key creation must fail after scope deletion wins");
+    assert.ok(result.error instanceof MemoryCaptureError);
+    assert.equal(result.error.status, 400);
+    assert.equal(result.error.message, `Unknown scope(s): ${scopeTag}`);
     assert.equal(
       await prisma.apiKey.count({ where: { name: `${prefix} queued create key` } }),
       0,
@@ -346,27 +359,40 @@ test("scope deletion cannot be undone by a queued key scope update", async () =>
     allowedScopes: [scopeTag],
   });
 
+  const lineage = await prisma.memoryLineageState.create({
+    data: { kind: "SCOPE", subjectHash: `scope:${scopeTag}` },
+  });
   const blocker = await pool.connect();
   try {
     await blocker.query("BEGIN");
     await blocker.query(
-      'SELECT tag FROM "RestrictedScope" WHERE tag = $1 FOR UPDATE',
-      [scopeTag],
+      'SELECT id FROM "MemoryLineageState" WHERE id = $1 FOR UPDATE',
+      [lineage.id],
     );
+    // Block deletion AFTER it owns the scope row. Blocking that same scope
+    // before deletion starts does not establish a winner: an SSI retry can
+    // let key creation commit first, a valid order this fixture must not assume.
     const deletion = deleteMemoryRestrictedScope(scopeTag);
-    await waitForLockWaiters(blocker, 1);
+    const deletionPids = await waitForLockWaiters(blocker, 1);
+    assert.equal(deletionPids.length, 1, "expected exactly one deletion backend");
+    const [deletionPid] = deletionPids;
     const update = updateApiKeyRecord(credential.key.id, {
       allowedScopes: [scopeTag],
     }).then(
       (value) => ({ value }),
       (error: unknown) => ({ error }),
     );
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Prove the key transaction reached the scope lock owned by deletion.
+    // A single event-loop tick can pass without any queued mutation at all.
+    await waitForLockWaiters(blocker, 1, 5_000, deletionPid);
 
     await blocker.query("COMMIT");
     await deletion;
     const result = await update;
     assert.ok("error" in result, "key update must fail after scope deletion wins");
+    assert.ok(result.error instanceof MemoryCaptureError);
+    assert.equal(result.error.status, 400);
+    assert.equal(result.error.message, `Unknown scope(s): ${scopeTag}`);
     assert.deepEqual(
       (await prisma.apiKey.findUniqueOrThrow({ where: { id: credential.key.id } }))
         .allowedScopes,
@@ -383,17 +409,18 @@ async function waitForLockWaiters(
   observer: PoolClient,
   minimum: number,
   timeoutMs = 5_000,
-): Promise<void> {
+  blockingPid?: number,
+): Promise<number[]> {
   const blockerPid = await observer.query<{ pid: number }>(
     "SELECT pg_backend_pid()::int AS pid",
   );
-  const pid = blockerPid.rows[0]!.pid;
+  const pid = blockingPid ?? blockerPid.rows[0]!.pid;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await observer.query("SELECT pg_stat_clear_snapshot()");
-    const result = await observer.query<{ count: number }>(
+    const result = await observer.query<{ pid: number }>(
       `
-        SELECT count(*)::int AS count
+        SELECT pid
         FROM pg_stat_activity
         WHERE datname = current_database()
           AND pid <> pg_backend_pid()
@@ -402,10 +429,10 @@ async function waitForLockWaiters(
       `,
       [pid],
     );
-    if ((result.rows[0]?.count ?? 0) >= minimum) return;
+    if (result.rows.length >= minimum) return result.rows.map(({ pid }) => pid);
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  throw new Error(`Timed out waiting for ${minimum} database lock waiter(s)`);
+  throw new Error(`Timed out waiting for ${minimum} database lock waiter(s) blocked by PID ${pid}`);
 }
 
 async function waitForPrincipalBoundaryWaiters(

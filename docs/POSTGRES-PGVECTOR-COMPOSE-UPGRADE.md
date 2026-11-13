@@ -1,12 +1,8 @@
 # PostgreSQL pgvector Compose upgrade
 
-> **1.15.2 is published.** The coordinated release exists at
-> [`v1.15.2`](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.2)
-> with all six installer assets, the `ghcr.io/sweetsophia/noosphere:1.15.2`
-> image (`linux/amd64` and `linux/arm64`), and the five `1.15.2` npm packages.
-> The version-bound commands below are release-bound and may run now. Use the
-> [packaged launcher](INSTALLATION.md#packaged-launcher) from the release
-> assets for a fully coordinated install.
+> **1.15.3 release candidate — not published.** Do not run these version-bound
+> commands until the coordinated public release and all six installer assets
+> exist. Production activation requires separate authorization.
 
 This runbook covers Noosphere Phase A2b: switching an existing PostgreSQL 16.14 Alpine volume to Noosphere's rehearsed PostgreSQL + pgvector image. It changes only the database image. It does **not** run `CREATE EXTENSION vector`, change the application schema, or enable hybrid retrieval.
 
@@ -48,15 +44,15 @@ Docker administrator access is an explicit trust boundary. The lock serializes t
 ## OpenClaw installer deployments
 
 Install and upgrade through the same command, but only after the coordinated
-[`v1.15.2` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.2)
+[`v1.15.3` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.3)
 exists with all six installer assets. Source merge alone does not publish them:
 
 For an existing installation using a custom image, export `NOOSPHERE_IMAGE` explicitly
 before running this block. The version-bound default does not reuse a persisted image automatically.
 
 ```bash
-# Installer commit: b054f4b50374dd444434c9d17501a18ecb07adc1
-# Expected SHA-256: ce9f6de9f096e4946084eb33be886947693e000a2461a0955d29a5e467549c23
+# Installer commit: 824464d1936be2aa97cf4bbd574f5f32cdf165ae
+# Expected SHA-256: 9aa72c134bf739bebd6451e06884057a48fd2f0351176860a2703cc93743baa3
 (
   set -e
   installer_dir="$(mktemp -d)"
@@ -64,11 +60,11 @@ before running this block. The version-bound default does not reuse a persisted 
   installer="$installer_dir/install.sh"
   backend="$installer_dir/install-openclaw.sh"
   unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/b054f4b50374dd444434c9d17501a18ecb07adc1/install.sh -o "$installer"
-  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/b054f4b50374dd444434c9d17501a18ecb07adc1/install-openclaw.sh -o "$backend"
-  printf '%s  %s\n' 'ce9f6de9f096e4946084eb33be886947693e000a2461a0955d29a5e467549c23' "$installer" | sha256sum -c -
-  printf '%s  %s\n' '7758cc2aab51da3af18551ad138eb08a8c2d50e546955c498840933cbef63c7c' "$backend" | sha256sum -c -
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.2}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.2}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.2}" bash "$installer" --non-interactive --with openclaw
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/824464d1936be2aa97cf4bbd574f5f32cdf165ae/install.sh -o "$installer"
+  curl -fsSL https://raw.githubusercontent.com/SweetSophia/noosphere/824464d1936be2aa97cf4bbd574f5f32cdf165ae/install-openclaw.sh -o "$backend"
+  printf '%s  %s\n' '9aa72c134bf739bebd6451e06884057a48fd2f0351176860a2703cc93743baa3' "$installer" | sha256sum -c -
+  printf '%s  %s\n' '5269de0467b812a48a229afa23dde1d837078d0fd9937e11bb82a8d1d1675bb1' "$backend" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.3}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.3}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.3}" bash "$installer" --non-interactive --with openclaw
 )
 ```
 
