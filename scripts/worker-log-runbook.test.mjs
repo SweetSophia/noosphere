@@ -108,3 +108,23 @@ if recreate_verified_worker; then exit 30; fi
 [ ! -f "$FIXTURE/recreated" ]
 `);
 });
+
+test('npm forwards remote-verification arguments to the image policy checker', () => {
+  const scripts = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).scripts;
+  const dir = mkdtempSync(join(tmpdir(), 'worker-policy-args-'));
+  try {
+    const marker = join(dir, 'policy-called');
+    const script = `node() {
+      if [ "$1" = scripts/check-postgres-image-policy.mjs ]; then
+        [ "\${2:-}" = --verify-remote ] || return 41
+        printf verified > ${JSON.stringify(marker)}
+      elif [ "\${*: -1}" = --verify-remote ]; then
+        return 42
+      fi
+    }
+    ${scripts['postgres-image:check']} --verify-remote`;
+    const result = spawnSync('bash', ['-c', script], { encoding: 'utf8', timeout: 10000 });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readFileSync(marker, 'utf8'), 'verified');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
