@@ -348,12 +348,30 @@ requires separately approved immediate action. Before recreating the worker:
      # beat .env in Compose interpolation, so an ambient NOOSPHERE_VERSION,
      # NOOSPHERE_IMAGE or POSTGRES_PASSWORD silently changes what the
      # recreated worker is; COMPOSE_FILE and friends change what Compose loads
-     # at all. install-openclaw.sh:872-890 scrubs the same names, and
-     # install-openclaw.sh:1211-1213 always passes --env-file.
-     local docker_host="${DOCKER_HOST:-}"
+     # at all. install-openclaw.sh:872-890 scrubs the Docker/Compose names,
+     # install-openclaw.sh:1211-1213 always passes --env-file, and this
+     # function additionally clears the application namespace (NOOSPHERE_*,
+     # POSTGRES_*) so the deployment's .env - not the operator's shell -
+     # defines the worker. This redefines the session for the rest of the
+     # procedure; later steps rely on it.
+     #
+     # Resolve the endpoint FIRST, while DOCKER_CONTEXT/DOCKER_HOST still
+     # point at the daemon discovery read: after the scrub only DOCKER_HOST
+     # is re-exported (same precedence as resolve_local_docker_endpoint in
+     # install-openclaw.sh:798), so a DOCKER_CONTEXT-selected daemon cannot
+     # silently change between discovery and the stop/recreate steps.
+     local docker_host docker_context
+     if [ -n "${DOCKER_CONTEXT:-}" ]; then
+       docker_host=$(docker context inspect "$DOCKER_CONTEXT" --format '{{(index .Endpoints "docker").Host}}') || return 1
+     elif [ -n "${DOCKER_HOST:-}" ]; then
+       docker_host=$DOCKER_HOST
+     else
+       docker_context=$(docker context show) || return 1
+       docker_host=$(docker context inspect "$docker_context" --format '{{(index .Endpoints "docker").Host}}') || return 1
+     fi
      while IFS= read -r ambient_name; do
        case "$ambient_name" in
-         DOCKER_*|COMPOSE_*) unset "$ambient_name" ;;
+         DOCKER_*|COMPOSE_*|NOOSPHERE_*|POSTGRES_*) unset "$ambient_name" ;;
        esac
      done < <(compgen -v)
      if [ -n "$docker_host" ]; then export DOCKER_HOST="$docker_host"; fi
