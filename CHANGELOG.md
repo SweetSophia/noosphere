@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Dependencies: raise the `@sweetsophia/noosphere-mcp` overrides to the patched
+  `@hono/node-server` 2.1.8 and `hono` 4.13.18. The previously pinned 2.1.5 and
+  4.13.13 fall inside the advisory ranges published for an unhandled `ECONNRESET`
+  during a WebSocket upgrade, a backslash request-path bypass, and several
+  `hono` routing and middleware escapes, so `npm audit --audit-level=low`
+  failed the package check on every branch.
 - Coordinated npm publication: the registry readback after publishing a package
   now uses a shared, bounded verifier instead of a fixed 10-poll/30-second
   window. npm serves a freshly published version asynchronously and can need
