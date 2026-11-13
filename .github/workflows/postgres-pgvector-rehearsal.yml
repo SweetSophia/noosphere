@@ -143,8 +143,7 @@ jobs:
 
   test-transition-controller:
     runs-on: ubuntu-latest
-    # Full fixtures take 23–26 minutes on hosted runners; retain a bounded
-    # budget with room for setup, the installer fixture and cleanup.
+    # Keep setup/cleanup headroom above the 35 + 10 minute step budgets.
     timeout-minutes: 60
     steps:
       - name: Checkout

@@ -30,6 +30,9 @@ jobs:
       - name: Check PostgreSQL image distribution policy
         run: npm run postgres-image:check -- --verify-remote
 
+      - name: Test npm publication integrity readback
+        run: npm run npm-publish:check
+
       - name: Install dependencies
         run: npm ci
 
