@@ -41,9 +41,10 @@ independently of source merge; production activation remains separate.
   through duplicate-only retry tolerance, verifying local SHA-512 integrity and
   package name/version before any registry write (local artifact failures exit
   40; missing tooling, bounded extraction timeouts, signal-terminated extractions
-  and node faults exit 41 with fixed reason codes). The private 40/41 range keeps node's own reserved exit
-  codes from being read as decisions of the publisher, and keeps "nothing was
-  published" distinct from "published, but the readback failed".
+  and node faults exit 41 with fixed reason codes). A Node status is honoured
+  only when it is 40 or 41; other statuses are remapped to tooling failure,
+  so Node's reserved codes cannot become publisher verdicts. The private range
+  distinguishes "nothing was published" from "published, but readback failed".
   Tag-time policy and publication tests guard every publisher, with receipt-shape
   coverage and lifecycle-output negative controls. Registry/local-tool failures
   are distinct from propagation and fail promptly with safe error codes.
