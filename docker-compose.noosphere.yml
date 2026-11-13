@@ -131,6 +131,14 @@ services:
     command: ["node", "scripts/hybrid-worker.mjs"]
     container_name: noosphere-openclaw-hybrid-worker
     restart: unless-stopped
+    # Bound worker polling diagnostics without changing daemon-wide defaults.
+    # The driver is pinned per service so the cap applies even when the daemon
+    # default differs; daemon-wide defaults are untouched.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
