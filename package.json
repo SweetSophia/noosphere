@@ -20,6 +20,7 @@
     "test:api": "node --import tsx --test 'src/__tests__/api/**/*.test.ts'",
     "test:security": "node --env-file=.env.test --import tsx --test src/__tests__/security/uploads.test.ts src/__tests__/security/proxy.test.ts src/__tests__/security/articles-update.test.ts src/__tests__/security/markdown-sanitize.test.ts src/__tests__/security/yaml-resource-limits.test.ts src/__tests__/security/openclaw-secret-ref-boundary.test.ts src/__tests__/security/dependency-security.test.ts",
     "lint": "eslint",
+    "test:lint-dependencies": "node --test scripts/minimatch-security.test.mjs",
     "typecheck": "tsc --noEmit",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
@@ -27,7 +28,7 @@
     "deploy:verify": "bash scripts/verify-deploy.sh",
     "memory:scheduler": "tsx scripts/memory-scheduler.ts",
     "db:studio": "prisma studio",
-    "package-policy:check": "node --test scripts/katex-override-policy.test.mjs && node scripts/check-package-policies.mjs",
+    "package-policy:check": "node --test scripts/katex-override-policy.test.mjs scripts/minimatch-override-policy.test.mjs && node scripts/check-package-policies.mjs",
     "postgres-image:check": "node scripts/check-postgres-image-policy.mjs",
     "npm-publish:check": "bash scripts/test-npm-publication-integrity.sh && bash scripts/test-npm-artifact-publication.sh && node --test scripts/npm-publication-workflow.test.mjs",
     "installer:check": "node --test scripts/installer-key-diagnostics.test.mjs && scripts/test-installer-backend-mode.sh && scripts/test-installer-ux.sh && scripts/test-installer-package.sh",
@@ -104,6 +105,9 @@
     },
     "micromark-extension-math": {
       "katex": "$katex"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.8"
     }
   }
 }

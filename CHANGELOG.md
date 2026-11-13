@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Resolve the TypeScript-ESLint-only minimatch dependency to patched 11.0.8
+  for GHSA-g3hv-75wg-m249. Keep unrelated matcher copies unchanged; exercise
+  the actual consumer resolution and ordinary project glob APIs in CI.
+  This deliberately exceeds the parent's `^10.2.2`; a changed parent range,
+  pin, or nested resolution requires re-qualification through the policy gate.
+  Root 3.1.5 is outside this advisory's affected `>=7.0.0 <11.0.1` range.
+  The lint-only edge requires Node 20 or >=22 (qualified locally on Node 22/24; root CI uses Node 22);
+  the root and all five integration lockfile audits report zero vulnerabilities.
 - Dependencies: raise the `@sweetsophia/noosphere-mcp` overrides to the patched
   `@hono/node-server` 2.1.8 and `hono` 4.13.18. The previously pinned 2.1.5 and
   4.13.13 fall inside the advisory ranges published for an unhandled `ECONNRESET`
