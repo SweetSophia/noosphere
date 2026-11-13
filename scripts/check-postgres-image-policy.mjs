@@ -24,11 +24,11 @@ const rawRepositoryUrl = "https://raw.githubusercontent.com/SweetSophia/noospher
 // The release the installation documentation points at. Its published bytes are
 // immutable, so its digests are pinned here and checked against published assets
 // rather than against a rebuild of the working tree.
-const documentedReleaseVersion = "1.15.2";
+const documentedReleaseVersion = "1.15.3";
 const documentedReleaseInstallerSha256 =
-  "fa38522104b10991cc85774fade4dffc559090e64838827cffeb74d200d547e0";
+  "0b5aedae3a35867c2f8f5adc4d701b69b12ce2133ca6b568be9c88899d94be3e";
 const documentedReleaseBackendSha256 =
-  "7758cc2aab51da3af18551ad138eb08a8c2d50e546955c498840933cbef63c7c";
+  "5269de0467b812a48a229afa23dde1d837078d0fd9937e11bb82a8d1d1675bb1";
 // Test-only override for packaged-launcher blocks. All other policy assertions
 // intentionally read the repository copy; this is not a general document root.
 const packagedDocumentsOption = "--packaged-launcher-documents-root";
