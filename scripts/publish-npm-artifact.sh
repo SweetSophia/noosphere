@@ -64,13 +64,10 @@ try {
   });
 } catch (error) {
   if (error.code === "ENOENT" || error.code === "EACCES") fail("TOOL_UNAVAILABLE", 41);
-  // A killed extraction is a tooling timeout, never a statement about the
-  // artifact bytes. Node reports its own timeout as ETIMEDOUT, but a child
-  // killed by a signal can also arrive with only "killed"/"signal" set and a
-  // null status, so classify the kill itself instead of trusting one field.
-  // Getting this wrong reports a hung tar as "your tarball is the wrong bytes"
-  // (exit 40) - a verdict about the artifact rather than the environment.
-  if (error.code === "ETIMEDOUT" || error.killed === true || error.signal) fail("TOOL_TIMEOUT", 41);
+  // An explicit timeout names the cause. Signal death alone does not: OOM
+  // or an external kill must remain a tooling fault without guessing why.
+  if (error.code === "ETIMEDOUT") fail("TOOL_TIMEOUT", 41);
+  if (error.killed === true || error.signal) fail("TOOL_TERMINATED", 41);
   fail("ARCHIVE_UNREADABLE");
 }
 let manifest;

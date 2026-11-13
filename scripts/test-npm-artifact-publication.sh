@@ -83,7 +83,7 @@ for invalid in digest identity version malformed; do
 done
 
 # Missing tools and bounded extraction timeouts are environment failures, not
-# evidence that the archive bytes or identity differ. Simulate timeout inertly.
+# evidence that the archive bytes or identity differ. Exercise the timeout for real.
 node_path=$(command -v node)
 bash_path=$(command -v bash)
 mkdir "$work/tool-bin"
@@ -134,6 +134,16 @@ for scenario in missing-argument bad-digest; do
   [[ "$status" == 3 && ! -s "$CALLS" ]] || { printf 'FAIL: usage %s expected3/no npm call got%s\n' "$scenario" "$status"; exit 1; }
   printf 'ok: publisher usage %s classified as3\n' "$scenario"
 done
+# A non-timeout signal must not acquire a fabricated timeout diagnosis.
+mkdir "$work/signal-bin"
+printf '#!%s\nkill -TERM "$$"\n' "$bash_path" > "$work/signal-bin/tar"
+chmod +x "$work/signal-bin/tar"
+: > "$CALLS"
+status=0
+MODE=success PATH="$work/signal-bin:$work/bin:$PATH" bash "$root/scripts/publish-npm-artifact.sh" "$PUBLISHED_TARBALL" fixture@1.0.0 "$EXPECTED" > "$work/output" 2>&1 || status=$?
+[[ "$status" == 41 ]] && grep -q 'TOOL_TERMINATED' "$work/output" && ! grep -q 'TOOL_TIMEOUT' "$work/output" && [[ ! -s "$CALLS" ]] || { printf 'FAIL: signalled tar must be tooling41 without a guessed timeout\n'; exit 1; }
+printf 'ok: independently signalled tar classified as tooling41/TOOL_TERMINATED\n'
+
 # A manifest that is not valid JSON is an artifact failure, distinct from a
 # tooling failure, and it must be reported before any registry write.
 mkdir -p "$work/bad-manifest/package"
