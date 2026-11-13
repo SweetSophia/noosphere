@@ -400,25 +400,29 @@ PYVERIFY
    }
    verify_worker_model() {
      [ "${worker_ready:-}" = yes ] || return 1
-     local evidence rc=0
+     local evidence image_ref rc=0
      evidence=$(mktemp -d) || return 1
      chmod 0700 "$evidence" || return 1
      # Never print the resolved environment: it can include credentials.
      (umask 077
        docker inspect "$container" > "$evidence/container.json" &&
        "${compose[@]}" --profile hybrid config --format json > "$evidence/model.json" &&
-       python3 - "$evidence/container.json" "$evidence/model.json" <<'PYMODEL'
+       image_ref=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["services"]["hybrid-worker"]["image"])' "$evidence/model.json") &&
+       docker image inspect "$image_ref" > "$evidence/image.json" &&
+       python3 - "$evidence/container.json" "$evidence/model.json" "$evidence/image.json" <<'PYMODEL'
 import json, sys
-live = json.load(open(sys.argv[1]))[0]["Config"]
+deployed = json.load(open(sys.argv[1]))[0]
+live = deployed["Config"]
 worker = json.load(open(sys.argv[2]))["services"]["hybrid-worker"]
 env = dict(item.split("=", 1) for item in live["Env"])
 expected = worker.get("environment", {})
-assert worker["image"] == live["Image"], "worker image differs; abort"
+assert worker["image"] == live["Image"], "worker image reference differs; abort"
+assert json.load(open(sys.argv[3]))[0]["Id"] == deployed["Image"], "local image ID differs from deployed worker; abort"
 assert all(str(value) == env.get(key) for key, value in expected.items()), "worker environment differs; abort"
 assert all(key in expected for key in env if key.startswith("NOOSPHERE_")), "worker provider/configuration omitted; abort"
 PYMODEL
      ) || rc=1
-     rm -f "$evidence/container.json" "$evidence/model.json"
+     rm -f "$evidence/container.json" "$evidence/model.json" "$evidence/image.json"
      rmdir "$evidence"
      return "$rc"
    }

@@ -28,7 +28,8 @@ docker() {
         printf '2026-11-13T12:00:01Z stderr-record\\n' >&2 ;;
   inspect) if [ "\${2:-}" = --format ]; then
       case "$3" in *working_dir*) printf '%s\\n' "$FIXTURE" ;; *config_files*) echo fixture.yml ;; *) echo fixture ;; esac
-    else printf '%s\\n' '[{"Config":{"Image":"fixture:v1","Env":["NOOSPHERE_TEST=preserved"]}}]'; fi ;;
+    else printf '%s\\n' '[{"Image":"sha256:deployed","Config":{"Image":"fixture:v1","Env":["NOOSPHERE_TEST=preserved"]}}]'; fi ;;
+  image) printf '[{"Id":"%s"}]\\n' "\${LOCAL_IMAGE_ID:-sha256:deployed}" ;;
   compose) case " $* " in
       *' config '*) printf '{"services":{"hybrid-worker":{"image":"%s","environment":{"NOOSPHERE_TEST":"preserved"}}}}\\n' "\${MODEL_IMAGE:-fixture:v1}" ;;
       *' up '*) touch "$FIXTURE/recreated" ;;
@@ -91,5 +92,19 @@ grep -q stderr-record "$archive/final-worker.log"
 [ -s "$archive/final-worker.log.sha256" ]
 recreate_verified_worker
 [ -f "$FIXTURE/recreated" ]
+`);
+});
+
+test('a locally retargeted image tag cannot pass the retention-only gate', () => {
+  run(`capture_initial_worker_logs
+LOCAL_IMAGE_ID=sha256:retargeted
+if verify_worker_model; then exit 28; fi
+if capture_final_worker_logs; then exit 29; fi
+[ -z "\${final_capture_ready:-}" ]
+LOCAL_IMAGE_ID=sha256:deployed
+capture_final_worker_logs
+LOCAL_IMAGE_ID=sha256:retargeted
+if recreate_verified_worker; then exit 30; fi
+[ ! -f "$FIXTURE/recreated" ]
 `);
 });
