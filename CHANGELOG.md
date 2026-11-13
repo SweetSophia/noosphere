@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Refresh MCP overrides to `hono` 4.13.18 and `@hono/node-server` 2.1.8
+  to clear the affected advisory ranges, matching the separately reviewed
+  release dependency correction.
+
 ### Changed
 - Bound the hybrid worker's retained Docker diagnostics in the repository Compose
   templates (`docker-compose.yml` and `docker-compose.noosphere.yml`) with a

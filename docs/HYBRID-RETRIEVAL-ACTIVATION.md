@@ -265,7 +265,7 @@ Activation belongs to the next approved worker deployment unless disk pressure
 requires separately approved immediate action. Before recreating the worker:
 
 1. Preserve a timestamp-bounded `docker logs --timestamps` snapshot in a
-   private archive (directory mode 0700, file mode 0600); verify decompression and
+   private archive (directory mode 0700, file mode 0600); verify non-empty contents and
    record its SHA-256, window bounds and container ID. Run the discovery block
    in step 3 first to resolve `$container`, then create the archive and capture
    the snapshot:
@@ -273,7 +273,9 @@ requires separately approved immediate action. Before recreating the worker:
    ```bash
    capture_initial_worker_logs() {
      : "${archive:?set archive to a private path}"
+     [ "${worker_ready:-}" = yes ] || return 1
      : "${container:?run the step 3 discovery block first}"
+     unset initial_capture_ready final_capture_ready
      install -d -m 0700 "$archive" || return 1
      umask 077
      # Set start to the incident start; cutoff is the capture instant.
@@ -284,6 +286,23 @@ requires separately approved immediate action. Before recreating the worker:
        printf 'initial log capture failed; retain partial evidence and do not continue\n' >&2
        return 1
      }
+     # Plain-text archive: no decompression step is implied.
+     python3 - "$archive/worker-before.log" "$start" "$cutoff" "$container" <<'PYVERIFY'
+import datetime, hashlib, json, pathlib, sys
+path, start, cutoff, container = sys.argv[1:]
+def instant(value):
+    return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+data = pathlib.Path(path).read_bytes()
+lines = data.splitlines()
+assert data and lines, "empty log capture"
+times = [instant(line.split(None, 1)[0].decode()) for line in lines]
+assert instant(start) <= max(times) <= instant(cutoff), "capture outside window"
+receipt = {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data),
+           "lines": len(lines), "start": start, "cutoff": cutoff, "container": container}
+pathlib.Path(path + ".receipt.json").write_text(json.dumps(receipt) + "\n")
+PYVERIFY
+     [ "$?" -eq 0 ] || return 1
+     initial_capture_ready=yes
    }
    archive=/path/to/private/archive
    capture_initial_worker_logs
@@ -291,8 +310,7 @@ requires separately approved immediate action. Before recreating the worker:
 
    Both stdout and stderr are archived. A non-zero capture status is a hard
    stop, even if the file contains records: retain the partial file and do not
-   recreate the worker. An empty snapshot decompresses and
-   checksums cleanly, so also record the decoded byte count and the line count,
+   recreate the worker. An empty file checksums cleanly, so also record the byte count and line count,
    and require both to be non-zero. Bound the capture window on both ends and
    require the newest captured timestamp to fall inside it: at or after
    `$start` and at or before `$cutoff`. A zero-line archive, or one whose
@@ -336,42 +354,12 @@ requires separately approved immediate action. Before recreating the worker:
    # `$container`, `$compose` and `$archive` values the later steps need.
    # `return 1` aborts the discovery and leaves the session intact.
    discover_worker() {
-     # Clear stale success values before any discovery that may fail.
-     unset container project config_files working_dir
+     unset worker_ready initial_capture_ready final_capture_ready container
      compose=()
-     # `-a` so a stopped or crashed worker is still discoverable - this
-     # procedure exists to service exactly that worker. The oneoff filter keeps
-     # `docker compose run` leftovers out of the count.
-     mapfile -t workers < <(docker ps -a --filter label=com.docker.compose.service=hybrid-worker --filter label=com.docker.compose.oneoff=False --format '{{.Names}}')
-     if [ "${#workers[@]}" -ne 1 ]; then
-       printf 'expected exactly 1 hybrid-worker container, found %d:\n' "${#workers[@]}" >&2
-       printf '  %s\n' "${workers[@]}" >&2
-       return 1
-     fi
-     container=${workers[0]}
-     project=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$container")
-     config_files=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$container")
-     working_dir=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$container")
-     IFS=',' read -ra files <<< "$config_files"
-     compose=(docker compose --project-name "$project" --project-directory "$working_dir")
-     for file in "${files[@]}"; do compose+=(-f "$file"); done
-     # Pin the environment the way install-openclaw.sh does. Shell variables
-     # beat .env in Compose interpolation, so an ambient NOOSPHERE_VERSION,
-     # NOOSPHERE_IMAGE or POSTGRES_PASSWORD silently changes what the
-     # recreated worker is; COMPOSE_FILE and friends change what Compose loads
-     # at all. install-openclaw.sh:872-890 scrubs the Docker/Compose names,
-     # install-openclaw.sh:1211-1213 always passes --env-file, and this
-     # function additionally clears the application namespace (NOOSPHERE_*,
-     # POSTGRES_*) so the deployment's .env - not the operator's shell -
-     # defines the worker. This redefines the session for the rest of the
-     # procedure; later steps rely on it.
-     #
-     # Resolve the endpoint FIRST, while DOCKER_CONTEXT/DOCKER_HOST still
-     # point at the daemon discovery read: after the scrub only DOCKER_HOST
-     # is re-exported (same precedence as resolve_local_docker_endpoint in
-     # install-openclaw.sh:798), so a DOCKER_CONTEXT-selected daemon cannot
-     # silently change between discovery and the stop/recreate steps.
-     local docker_host docker_context
+     local candidate project config_files working_dir docker_host docker_context
+     local docker_config=${DOCKER_CONFIG:-} ambient_name
+     local -a workers files candidate_compose
+     # Resolve the endpoint before publishing any usable discovery state.
      if [ -n "${DOCKER_CONTEXT:-}" ]; then
        docker_host=$(docker context inspect "$DOCKER_CONTEXT" --format '{{(index .Endpoints "docker").Host}}') || return 1
      elif [ -n "${DOCKER_HOST:-}" ]; then
@@ -380,17 +368,61 @@ requires separately approved immediate action. Before recreating the worker:
        docker_context=$(docker context show) || return 1
        docker_host=$(docker context inspect "$docker_context" --format '{{(index .Endpoints "docker").Host}}') || return 1
      fi
+     # This procedure supports local Unix sockets only, as the installer does.
+     case "$docker_host" in unix:///*) ;; *) return 1 ;; esac
      while IFS= read -r ambient_name; do
        case "$ambient_name" in
-         DOCKER_*|COMPOSE_*|NOOSPHERE_*|POSTGRES_*) unset "$ambient_name" ;;
+         DOCKER_*|COMPOSE_*) unset "$ambient_name" || return 1 ;;
        esac
      done < <(compgen -v)
-     if [ -n "$docker_host" ]; then export DOCKER_HOST="$docker_host"; fi
-     if [ -f "$working_dir/.env" ]; then
-       compose+=(--env-file "$working_dir/.env")
-     fi
+     export DOCKER_HOST="$docker_host"
+     if [ -n "$docker_config" ]; then export DOCKER_CONFIG="$docker_config"; fi
+     # Do not erase application exports: source deployments may depend on them.
+     # Unlike the installer's per-call --env-file usage, this procedure pins
+     # the deployed .env when present, then verifies the fully resolved model.
+     local candidates
+     candidates=$(docker ps -a --filter label=com.docker.compose.service=hybrid-worker --filter label=com.docker.compose.oneoff=False --format '{{.Names}}') || return 1
+     [ -n "$candidates" ] || return 1
+     mapfile -t workers <<< "$candidates"
+     [ "${#workers[@]}" -eq 1 ] || return 1
+     candidate=${workers[0]}
+     project=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$candidate") || return 1
+     config_files=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$candidate") || return 1
+     working_dir=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$candidate") || return 1
+     [ -n "$project" ] && [ -n "$config_files" ] && [ -d "$working_dir" ] || return 1
+     IFS=',' read -ra files <<< "$config_files"
+     candidate_compose=(docker compose --project-name "$project" --project-directory "$working_dir")
+     for file in "${files[@]}"; do candidate_compose+=(-f "$file"); done
+     if [ -f "$working_dir/.env" ]; then candidate_compose+=(--env-file "$working_dir/.env"); fi
+     container=$candidate
+     compose=("${candidate_compose[@]}")
+     worker_ready=yes
    }
-   discover_worker || printf 'worker discovery failed; not continuing\n' >&2
+   verify_worker_model() {
+     [ "${worker_ready:-}" = yes ] || return 1
+     local evidence rc=0
+     evidence=$(mktemp -d) || return 1
+     chmod 0700 "$evidence" || return 1
+     # Never print the resolved environment: it can include credentials.
+     (umask 077
+       docker inspect "$container" > "$evidence/container.json" &&
+       "${compose[@]}" --profile hybrid config --format json > "$evidence/model.json" &&
+       python3 - "$evidence/container.json" "$evidence/model.json" <<'PYMODEL'
+import json, sys
+live = json.load(open(sys.argv[1]))[0]["Config"]
+worker = json.load(open(sys.argv[2]))["services"]["hybrid-worker"]
+env = dict(item.split("=", 1) for item in live["Env"])
+expected = worker.get("environment", {})
+assert worker["image"] == live["Image"], "worker image differs; abort"
+assert all(str(value) == env.get(key) for key, value in expected.items()), "worker environment differs; abort"
+assert all(key in expected for key in env if key.startswith("NOOSPHERE_")), "worker provider/configuration omitted; abort"
+PYMODEL
+     ) || rc=1
+     rm -f "$evidence/container.json" "$evidence/model.json"
+     rmdir "$evidence"
+     return "$rc"
+   }
+   discover_worker || printf 'discovery failed; worker_ready remains unset; stop here\n' >&2
    ```
 
    The discovery above runs before every subsequent step and aborts on an
@@ -408,13 +440,21 @@ requires separately approved immediate action. Before recreating the worker:
    ```bash
    capture_final_worker_logs() {
      : "${archive:?set archive to a private path}"
+     [ "${worker_ready:-}" = yes ] || return 1
      : "${container:?run the step 3 discovery block first}"
+     unset final_capture_ready
+     [ "${initial_capture_ready:-}" = yes ] || return 1
+     verify_worker_model || return 1
      umask 077
      "${compose[@]}" --profile hybrid stop hybrid-worker || return 1
      docker logs --timestamps "$container" > "$archive/final-worker.log" 2>&1 || {
        printf 'final log capture failed; retain old container and do not recreate\n' >&2
        return 1
      }
+     [ -s "$archive/final-worker.log" ] || return 1
+     [ "$(wc -l < "$archive/final-worker.log")" -gt 0 ] || return 1
+     sha256sum "$archive/final-worker.log" > "$archive/final-worker.log.sha256" || return 1
+     final_capture_ready=yes
    }
    capture_final_worker_logs
    ```
@@ -429,7 +469,12 @@ requires separately approved immediate action. Before recreating the worker:
 5. Recreate **only** the worker with the same pinned invocation:
 
    ```bash
-   "${compose[@]}" --profile hybrid up -d --no-deps --no-build --pull never --force-recreate hybrid-worker
+   recreate_verified_worker() {
+     [ "${worker_ready:-}" = yes ] && [ "${final_capture_ready:-}" = yes ] || return 1
+     verify_worker_model || return 1
+     "${compose[@]}" --profile hybrid up -d --no-deps --no-build --pull never --force-recreate hybrid-worker
+   }
+   recreate_verified_worker
    ```
 
    This step does not authorize an application upgrade: `--no-build --pull never`
