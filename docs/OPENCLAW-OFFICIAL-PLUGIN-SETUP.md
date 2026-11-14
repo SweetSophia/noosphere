@@ -1,8 +1,12 @@
 # OpenClaw Noosphere Official Plugin Setup
 
-> **1.15.3 release candidate — not published.** Do not run these version-bound
-> commands until the coordinated public release and all six installer assets
-> exist. Production activation requires separate authorization.
+> **1.15.3 is published.** The coordinated release exists at
+> [`v1.15.3`](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.3)
+> with all six installer assets, the `ghcr.io/sweetsophia/noosphere:1.15.3`
+> image (`linux/amd64` and `linux/arm64`), and the five `1.15.3` npm packages.
+> The version-bound commands below are release-bound and may run now.
+> Production activation remains a separate step and requires its own
+> authorization.
 
 This guide documents the official OpenClaw-facing Noosphere install path: a local Noosphere Docker Compose runtime plus the `noosphere-memory` OpenClaw plugin.
 
@@ -142,7 +146,7 @@ Set these environment variables before running the installer when you need non-d
 | `NOOSPHERE_FORCE_ADMIN` | `false` | Forwarded into the generated `.env`; set to `true` to re-assert the ADMIN role on the existing bootstrap admin account without rotating its password. |
 | `NOOSPHERE_BOOTSTRAP_FULL_ACCESS` | `false` for direct Compose; explicit `true` in guided init | Gives a newly inserted dedicated ADMIN bootstrap key literal `*` scope. Existing API-key scopes, permissions, revocation and principal binding are preserved; incompatible reuse fails instead of escalating. Does not grant full scope to integration keys. |
 | `NOOSPHERE_BOOTSTRAP_SECRETS_FILE` | `/tmp/noosphere-bootstrap-secrets/secrets.json` | Container path where bootstrap writes any auto-generated admin/API credentials with mode `0600` inside a `0700` parent directory; logs include only this path, not the secret values. Use `/app/uploads/bootstrap-secrets/secrets.json` to persist the file in the uploads volume. Paths directly under shared directories such as `/tmp` or `/app/uploads` are rejected. |
-| `NOOSPHERE_PLUGIN_SPEC` | `npm:@sweetsophia/openclaw-noosphere-memory@1.15.3` (unpublished candidate) | Plugin install spec. Useful for testing local tarballs. |
+| `NOOSPHERE_PLUGIN_SPEC` | `npm:@sweetsophia/openclaw-noosphere-memory@1.15.3` (published 1.15.3 package) | Plugin install spec. Useful for testing local tarballs. |
 | `OPENCLAW_SECRETS_DIR` | `~/.openclaw/secrets` | OpenClaw secret directory. |
 | `NOOSPHERE_SECRETS_FILE` | `${OPENCLAW_SECRETS_DIR}/noosphere-memory.json` | Secret file written by installer. |
 | `NOOSPHERE_SECRET_PROVIDER_ID` | `noosphere-memory` | OpenClaw secret provider ID used in config. |

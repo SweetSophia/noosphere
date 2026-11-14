@@ -1,9 +1,12 @@
 # Work VM: Hermes + installer runtime + llama.cpp hybrid
 
-> **1.15.3 release candidate — not published.** Do not run these version-bound
-> commands until the coordinated public release and all six installer assets
-> exist. Publication waits for the coordinated verification gate; production
-> activation remains separate.
+> **1.15.3 is published.** The coordinated release exists at
+> [`v1.15.3`](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.3)
+> with all six installer assets, the `ghcr.io/sweetsophia/noosphere:1.15.3`
+> image (`linux/amd64` and `linux/arm64`), and the five `1.15.3` npm packages.
+> The version-bound commands below are release-bound and may run now.
+> Production activation remains a separate step and requires its own
+> authorization.
 
 This is the path for a **fresh machine** (work VM) where Hermes is already
 installed and you want Noosphere memory, then hybrid retrieval, without using

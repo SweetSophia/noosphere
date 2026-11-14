@@ -1,8 +1,12 @@
 # Noosphere MCP
 
-> **1.15.3 release candidate — not published.** Use the version-bound commands
-> and client configuration below only after the coordinated public release
-> exists. Production activation remains separate.
+> **1.15.3 is published.** The coordinated release exists at
+> [`v1.15.3`](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.3)
+> with all six installer assets, the `ghcr.io/sweetsophia/noosphere:1.15.3`
+> image (`linux/amd64` and `linux/arm64`), and the five `1.15.3` npm packages.
+> The version-bound commands below are release-bound and may run now.
+> Production activation remains a separate step and requires its own
+> authorization.
 
 Connect Codex CLI or another MCP client to a self-hosted Noosphere memory and
 wiki. This stdio server includes a guided Codex CLI installer and skill.
