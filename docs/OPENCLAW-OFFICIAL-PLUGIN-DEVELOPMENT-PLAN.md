@@ -1,8 +1,12 @@
 # OpenClaw Official Plugin Development Plan
 
-> **1.15.3 release candidate — not published.** Do not run these version-bound
-> commands until the coordinated public release and all six installer assets
-> exist. Production activation requires separate authorization.
+> **1.15.3 is published.** The coordinated release exists at
+> [`v1.15.3`](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.3)
+> with all six installer assets, the `ghcr.io/sweetsophia/noosphere:1.15.3`
+> image (`linux/amd64` and `linux/arm64`), and the five `1.15.3` npm packages.
+> The version-bound commands below are release-bound and may run now.
+> Production activation remains a separate step and requires its own
+> authorization.
 
 **Project:** Noosphere ↔ OpenClaw official plugin/productization  
 **Repo:** `SweetSophia/noosphere`  

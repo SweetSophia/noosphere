@@ -1,9 +1,12 @@
 # Noosphere
 
-> **1.15.3 release candidate:** Version-bound commands, images, npm packages,
-> and Hermes archive links below may be used only after coordinated 1.15.3
-> publication and independent artifact verification. Until then, use the
-> published installation instructions in the repository root README instead.
+> **1.15.3 is published.** The coordinated release exists at
+> [`v1.15.3`](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.3)
+> with all six installer assets, the `ghcr.io/sweetsophia/noosphere:1.15.3`
+> image (`linux/amd64` and `linux/arm64`), and the five `1.15.3` npm packages.
+> The version-bound commands below are release-bound and may run now.
+> Production activation remains a separate step and requires its own
+> authorization.
 
 
 > A universal memory and knowledge layer for AI agents — structured enough for automation, readable enough for humans.

@@ -1,8 +1,12 @@
 # Noosphere Memory for OpenClaw
 
-> **1.15.3 release candidate — not published.** Version-bound commands below
-> are for the candidate and must not run until the coordinated public release
-> and all six installer assets exist. Publication waits for the coordinated verification gate; production activation remains separate.
+> **1.15.3 is published.** The coordinated release exists at
+> [`v1.15.3`](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.3)
+> with all six installer assets, the `ghcr.io/sweetsophia/noosphere:1.15.3`
+> image (`linux/amd64` and `linux/arm64`), and the five `1.15.3` npm packages.
+> The version-bound commands below are release-bound and may run now.
+> Production activation remains a separate step and requires its own
+> authorization.
 
 Connect OpenClaw to self-hosted Noosphere memory. Recall relevant knowledge,
 save draft memories, and optionally inject recalled context into prompts.
