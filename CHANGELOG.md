@@ -8,11 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- Refresh MCP overrides to `hono` 4.13.18 and `@hono/node-server` 2.1.8
-  to clear the affected advisory ranges, matching the separately reviewed
-  release dependency correction.
-
 ### Changed
 - Bound the hybrid worker's retained Docker diagnostics in the repository Compose
   templates (`docker-compose.yml` and `docker-compose.noosphere.yml`) with a
@@ -23,7 +18,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disappear from a Compose template again, and record the pre-change log driver
   and daemon default in the activation runbook.
 
+## [1.15.3] - 2026-11-13
+
+Coordinated application and integration release. Publication is verified
+independently of source merge; production activation remains separate.
+
 ### Fixed
+- Resolve the TypeScript-ESLint-only minimatch dependency to patched 11.0.8
+  for GHSA-g3hv-75wg-m249. Keep unrelated matcher copies unchanged; exercise
+  the actual consumer resolution and ordinary project glob APIs in CI.
+  This deliberately exceeds the parent's `^10.2.2`; a changed parent range,
+  pin, or nested resolution requires re-qualification through the policy gate.
+  Root 3.1.5 is outside this advisory's affected `>=7.0.0 <11.0.1` range.
+  The lint-only edge requires Node 20 or >=22 (qualified locally on Node 22/24; root CI uses Node 22);
+  the root and all five integration lockfile audits report zero vulnerabilities.
+- Dependencies: raise the `@sweetsophia/noosphere-mcp` overrides to the patched
+  `@hono/node-server` 2.1.8 and `hono` 4.13.18. The previously pinned 2.1.5 and
+  4.13.13 fall inside the advisory ranges published for an unhandled `ECONNRESET`
+  during a WebSocket upgrade, a backslash request-path bypass, and several
+  `hono` routing and middleware escapes, so `npm audit --audit-level=low`
+  failed the package check on every branch.
+- Coordinated npm publication: the registry readback after publishing a package
+  now uses a shared, bounded verifier instead of a fixed 10-poll/30-second
+  window. npm serves a freshly published version asynchronously and can need
+  minutes to become visible, so the 1.15.2 helper publication was published
+  successfully but its readback gave up first, failing the job and skipping the
+  dependent OpenClaw publication. A genuine integrity mismatch stays fatal, a
+  version that is still propagating is retried within the deadline, and the
+  verifier tells the operator to re-run the workflow rather than republish.
+  Covered by `scripts/test-npm-publication-integrity.sh` and enforced by the
+  package publishing policy check. All five publishers use packed artifacts
+  through duplicate-only retry tolerance, verifying local SHA-512 integrity and
+  package name/version before any registry write (local artifact failures exit
+  40; missing tooling, bounded extraction timeouts, signal-terminated extractions
+  and node faults exit 41 with fixed reason codes). A Node status is honoured
+  only when it is 40 or 41; other statuses are remapped to tooling failure,
+  so Node's reserved codes cannot become publisher verdicts. The private range
+  distinguishes "nothing was published" from "published, but readback failed".
+  Tag-time policy and publication tests guard every publisher, with receipt-shape
+  coverage and lifecycle-output negative controls. Registry/local-tool failures
+  are distinct from propagation and fail promptly with safe error codes.
+  Publisher-local reasons are `ARCHIVE_UNREADABLE`, `DIGEST_MISMATCH`,
+  `MANIFEST_INVALID`, `NAME_MISMATCH`, `VERSION_MISMATCH` (exit 40), and
+  `NODE_UNAVAILABLE`, `TOOL_UNAVAILABLE`, `TOOL_TIMEOUT`, `TOOL_TERMINATED`,
+  `TOOL_FAILURE`, `SCRIPT_DIR_UNAVAILABLE`, `NPM_UNAVAILABLE` (exit 41).
+  `TOOL_TERMINATED` records a child signal without guessing its cause;
+  only an explicit timeout error is classified as `TOOL_TIMEOUT`.
 - Make hybrid-worker fatal stops diagnosable with classified failure kinds and
   bounded, redacted messages (including AggregateError children), without changing
   existing error codes. Classify configuration failures explicitly in the safe
@@ -697,7 +737,8 @@ changes.
   backfill pipeline, and the memory provider refactor. Refer to the commit
   history (`git log v1.8.0..v1.9.0`) for the full set of changes.
 
-[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.15.2...HEAD
+[Unreleased]: https://github.com/SweetSophia/noosphere/compare/v1.15.3...HEAD
+[1.15.3]: https://github.com/SweetSophia/noosphere/compare/v1.15.2...v1.15.3
 [1.15.2]: https://github.com/SweetSophia/noosphere/compare/v1.15.1...v1.15.2
 [1.15.1]: https://github.com/SweetSophia/noosphere/compare/v1.15.0...v1.15.1
 [1.15.0]: https://github.com/SweetSophia/noosphere/compare/v1.14.1...v1.15.0

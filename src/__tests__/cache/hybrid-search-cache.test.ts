@@ -155,13 +155,17 @@ test("tamper, truncation, incompleteness, epoch mismatch, and unknown key versio
   );
   const parsed = JSON.parse(encoded) as Record<string, unknown>;
 
+  const originalMac = String(parsed.mac);
+  const tamperedMac = `${originalMac.slice(0, -1)}${originalMac.endsWith("0") ? "1" : "0"}`;
+  assert.notEqual(tamperedMac, originalMac, "tamper must actually change the MAC");
+
   const cases = [
     encoded.slice(0, -1),
     JSON.stringify({ ...parsed, complete: false }),
     JSON.stringify({ ...parsed, epoch: "43" }),
     JSON.stringify({ ...parsed, keyVersion: "retired" }),
     JSON.stringify({ ...parsed, fusedSetSize: 2 }),
-    JSON.stringify({ ...parsed, mac: `${String(parsed.mac).slice(0, -1)}0` }),
+    JSON.stringify({ ...parsed, mac: tamperedMac }),
   ];
   for (const value of cases) {
     assert.equal(parseHybridCacheEnvelope(built, value, keyring()), null);

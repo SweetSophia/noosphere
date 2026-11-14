@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -15,6 +15,12 @@ function functions(name) {
 function run(body) {
   const dir = mkdtempSync(join(tmpdir(), 'worker-runbook-'));
   try {
+    const imageConfig = { Env: ['PATH=/usr/bin', 'NODE_VERSION=24'], Entrypoint: ['/entrypoint.sh'], Cmd: ['node', 'app'], User: 'node', WorkingDir: '/app' };
+    const worker = { image: 'fixture:v1', environment: { NOOSPHERE_TEST: 'preserved', SKIP_MIGRATION: '1' }, command: ['node', 'worker'], entrypoint: ['/guard.sh', 'marker=$$authorization'], volumes: [{ type: 'volume', source: 'auth', target: '/run/auth', read_only: true }], healthcheck: { test: ['CMD', 'node', 'health'], interval: '30s' } };
+    const deployed = { Image: 'sha256:deployed', Config: { ...imageConfig, Image: 'fixture:v1', Env: [...imageConfig.Env, 'NOOSPHERE_TEST=preserved', 'SKIP_MIGRATION=1'], Cmd: worker.command, Entrypoint: ['/guard.sh', 'marker=$authorization'], Healthcheck: { Test: worker.healthcheck.test, Interval: 30000000000 } }, Mounts: [{ Type: 'volume', Name: 'fixture_auth', Destination: '/run/auth', RW: false }] };
+    writeFileSync(join(dir, 'deployed.json'), JSON.stringify([deployed]));
+    writeFileSync(join(dir, 'image.json'), JSON.stringify([{ Id: 'sha256:deployed', Config: imageConfig }]));
+    writeFileSync(join(dir, 'model.json'), JSON.stringify({ services: { 'hybrid-worker': worker }, volumes: { auth: { name: 'fixture_auth' } } }));
     const script = `set -eu\nexport FIXTURE=${JSON.stringify(dir)}\n` + functions('discover_worker') + '\n' + functions('capture_initial_worker_logs') + '\n' + functions('capture_final_worker_logs') + '\n' + functions('recreate_verified_worker') + `
 container=fixture
 compose=(docker compose)
@@ -28,10 +34,10 @@ docker() {
         printf '2026-11-13T12:00:01Z stderr-record\\n' >&2 ;;
   inspect) if [ "\${2:-}" = --format ]; then
       case "$3" in *working_dir*) printf '%s\\n' "$FIXTURE" ;; *config_files*) echo fixture.yml ;; *) echo fixture ;; esac
-    else printf '%s\\n' '[{"Image":"sha256:deployed","Config":{"Image":"fixture:v1","Env":["NOOSPHERE_TEST=preserved"]}}]'; fi ;;
-  image) printf '[{"Id":"%s"}]\\n' "\${LOCAL_IMAGE_ID:-sha256:deployed}" ;;
+    else cat "$FIXTURE/deployed.json"; fi ;;
+  image) python3 -c 'import json,sys; d=json.load(open(sys.argv[1]));d[0]["Id"]=sys.argv[2];print(json.dumps(d))' "$FIXTURE/image.json" "\${LOCAL_IMAGE_ID:-sha256:deployed}" ;;
   compose) case " $* " in
-      *' config '*) printf '{"services":{"hybrid-worker":{"image":"%s","environment":{"NOOSPHERE_TEST":"preserved"}}}}\\n' "\${MODEL_IMAGE:-fixture:v1}" ;;
+      *' config '*) python3 -c 'import json,sys; d=json.load(open(sys.argv[1]));d["services"]["hybrid-worker"]["image"]=sys.argv[2];print(json.dumps(d))' "$FIXTURE/model.json" "\${MODEL_IMAGE:-fixture:v1}" ;;
       *' up '*) touch "$FIXTURE/recreated" ;;
     esac ;;
   context) [ "\${CONTEXT_FAIL:-0}" = 0 ] || return 1
@@ -127,4 +133,40 @@ test('npm forwards remote-verification arguments to the image policy checker', (
     assert.equal(result.status, 0, result.stderr);
     assert.equal(readFileSync(marker, 'utf8'), 'verified');
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+for (const field of ['authorization mount', 'SKIP_MIGRATION', 'command', 'entrypoint', 'healthcheck', 'image default environment']) {
+  test(`retention-only verification rejects drift of ${field}`, () => {
+    const change = {
+      'authorization mount': "w['volumes']=[]",
+      SKIP_MIGRATION: "del w['environment']['SKIP_MIGRATION']",
+      command: "w['command']=['node','wrong']",
+      entrypoint: "w['entrypoint']=['/wrong']",
+      healthcheck: "w['healthcheck']['interval']='60s'",
+      'image default environment': "w['environment']['NODE_VERSION']='different'",
+    }[field];
+    run(`verify_worker_model
+python3 - "$FIXTURE/model.json" <<'PY'
+import json,sys
+p=sys.argv[1];d=json.load(open(p));w=d['services']['hybrid-worker']
+${change}
+open(p,'w').write(json.dumps(d))
+PY
+if verify_worker_model; then exit 51; fi
+[ ! -f "$FIXTURE/recreated" ]
+`);
+  });
+}
+
+test('destructive recreation rejects a deleted or modified final evidence archive', () => {
+  run(`capture_initial_worker_logs
+capture_final_worker_logs
+rm "$archive/final-worker.log"
+if recreate_verified_worker; then exit 52; fi
+[ ! -f "$FIXTURE/recreated" ]
+capture_final_worker_logs
+printf 'tampered\\n' >> "$archive/final-worker.log"
+if recreate_verified_worker; then exit 53; fi
+[ ! -f "$FIXTURE/recreated" ]
+`);
 });

@@ -262,7 +262,11 @@ step 6 `LogConfig` check can never pass, and this runbook does not ask the
 operator to fake it.
 
 Activation belongs to the next approved worker deployment unless disk pressure
-requires separately approved immediate action. Before recreating the worker:
+requires separately approved immediate action. These snippets require Bash,
+GNU coreutils and Python 3.11 or newer: earlier Python versions reject Docker's
+nanosecond RFC3339 timestamps. Use string-valued environment entries and resolved
+list-form commands; unsupported model or mount options abort rather than guess.
+Before recreating the worker:
 
 1. Preserve a timestamp-bounded `docker logs --timestamps` snapshot in a
    private archive (directory mode 0700, file mode 0600); verify non-empty contents and
@@ -410,16 +414,63 @@ PYVERIFY
        image_ref=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["services"]["hybrid-worker"]["image"])' "$evidence/model.json") &&
        docker image inspect "$image_ref" > "$evidence/image.json" &&
        python3 - "$evidence/container.json" "$evidence/model.json" "$evidence/image.json" <<'PYMODEL'
-import json, sys
+import json, re, sys
 deployed = json.load(open(sys.argv[1]))[0]
 live = deployed["Config"]
-worker = json.load(open(sys.argv[2]))["services"]["hybrid-worker"]
+model = json.load(open(sys.argv[2]))
+worker = model["services"]["hybrid-worker"]
+image = json.load(open(sys.argv[3]))[0]
 env = dict(item.split("=", 1) for item in live["Env"])
 expected = worker.get("environment", {})
 assert worker["image"] == live["Image"], "worker image reference differs; abort"
-assert json.load(open(sys.argv[3]))[0]["Id"] == deployed["Image"], "local image ID differs from deployed worker; abort"
-assert all(str(value) == env.get(key) for key, value in expected.items()), "worker environment differs; abort"
-assert all(key in expected for key in env if key.startswith("NOOSPHERE_")), "worker provider/configuration omitted; abort"
+assert image["Id"] == deployed["Image"], "local image ID differs from deployed worker; abort"
+defaults = image.get("Config", {})
+# Image defaults are legitimate deployed-only keys (PATH, NODE_VERSION, ...),
+# not an allowlist for dropping explicit overrides such as SKIP_MIGRATION.
+merged_env = dict(item.split("=", 1) for item in defaults.get("Env", []))
+assert all(isinstance(value, str) for value in expected.values()), "use string environment values; abort"
+merged_env.update(expected)
+assert merged_env == env, "worker environment differs or was omitted; abort"
+for field, key in [("command", "Cmd"), ("entrypoint", "Entrypoint")]:
+    value = worker.get(field)
+    assert value is None or isinstance(value, list), "use resolved list command/entrypoint; abort"
+    # Compose config re-escapes literal dollars for reuse as a Compose model.
+    # Image defaults are already raw runtime values and must not be unescaped.
+    value = defaults.get(key) if value is None else [item.replace("$$", "$") for item in value]
+    assert (value or []) == (live.get(key) or []), "worker command/entrypoint differs; abort"
+for field, key in [("user", "User"), ("working_dir", "WorkingDir")]:
+    assert worker.get(field, defaults.get(key, "")) == live.get(key, ""), "worker execution identity differs; abort"
+# Resolve named volumes through the model's project-qualified/external name.
+# Unsupported mount types/options fail closed rather than being silently ignored.
+expected_mounts = []
+for volume in worker.get("volumes", []):
+    kind = volume["type"]
+    assert kind in ["volume", "bind"], "unsupported mount type; abort"
+    assert not set(volume) - {"type", "source", "target", "read_only", "bind", "volume"}, "unsupported mount options; abort"
+    options = volume.get(kind, {})
+    allowed = {"create_host_path"} if kind == "bind" else {"nocopy"}
+    assert not set(options) - allowed, "unsupported mount options; abort"
+    source = volume["source"]
+    if kind == "volume":
+        source = model["volumes"][source]["name"]
+    expected_mounts.append((kind, source, volume["target"], not volume.get("read_only", False)))
+actual_mounts = [(v["Type"], v["Name"] if v["Type"] == "volume" else v["Source"],
+                  v["Destination"], v["RW"]) for v in deployed.get("Mounts", [])]
+assert sorted(expected_mounts) == sorted(actual_mounts), "worker mounts differ; abort"
+def duration(value):
+    units = {"h": 3600000000000, "m": 60000000000, "s": 1000000000,
+             "ms": 1000000, "us": 1000, "ns": 1}
+    parts = re.findall(r"(\d+(?:\.\d+)?)(ns|us|ms|s|m|h)", value)
+    assert "".join(n + u for n, u in parts) == value, "unsupported healthcheck duration; abort"
+    return int(sum(float(n) * units[u] for n, u in parts))
+health = dict(defaults.get("Healthcheck") or {})
+for key, value in worker.get("healthcheck", {}).items():
+    target = {"test": "Test", "interval": "Interval", "timeout": "Timeout",
+              "start_period": "StartPeriod", "start_interval": "StartInterval",
+              "retries": "Retries", "disable": "Test"}[key]
+    health[target] = (["NONE"] if value else health.get("Test")) if key == "disable" else (
+        duration(value) if key in ["interval", "timeout", "start_period", "start_interval"] else value)
+assert {k: v for k, v in health.items() if v} == {k: v for k, v in (live.get("Healthcheck") or {}).items() if v}, "worker healthcheck differs; abort"
 PYMODEL
      ) || rc=1
      rm -f "$evidence/container.json" "$evidence/model.json" "$evidence/image.json"
@@ -475,6 +526,9 @@ PYMODEL
    ```bash
    recreate_verified_worker() {
      [ "${worker_ready:-}" = yes ] && [ "${final_capture_ready:-}" = yes ] || return 1
+     [ -n "${archive:-}" ] && [ -s "$archive/final-worker.log" ] &&
+       [ -s "$archive/final-worker.log.sha256" ] || return 1
+     sha256sum --check --status "$archive/final-worker.log.sha256" || return 1
      verify_worker_model || return 1
      "${compose[@]}" --profile hybrid up -d --no-deps --no-build --pull never --force-recreate hybrid-worker
    }

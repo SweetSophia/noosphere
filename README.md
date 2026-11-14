@@ -25,10 +25,10 @@ The old long-form README is preserved at [README-legacy.md](README-legacy.md).
 
 ## Current release
 
-**1.15.2 is published.** The coordinated release is live at
-[`v1.15.2`](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.2) with all
-six installer assets, the `ghcr.io/sweetsophia/noosphere:1.15.2` image for
-`linux/amd64` and `linux/arm64`, and the five `1.15.2` npm packages. The
+**1.15.3 is published.** The coordinated release is live at
+[`v1.15.3`](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.3) with all
+six installer assets, the `ghcr.io/sweetsophia/noosphere:1.15.3` image for
+`linux/amd64` and `linux/arm64`, and the five `1.15.3` npm packages. The
 OpenClaw, OpenCode and Kilo Code adapters resolve their maintained SDK aliases
 from the registry, so a fresh install no longer waits on a candidate.
 
@@ -106,15 +106,15 @@ machine.
 
 ### Install
 
-The published `v1.15.2` release assets are coupled to the coordinated
-`v1.15.2` image, packages, and Hermes archive. Before running the installer,
+The published `v1.15.3` release assets are coupled to the coordinated
+`v1.15.3` image, packages, and Hermes archive. Before running the installer,
 confirm that the
-[`v1.15.2` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.2)
+[`v1.15.3` release](https://github.com/SweetSophia/noosphere/releases/tag/v1.15.3)
 exists with all six installer assets; a merged commit alone is not a release.
 
 **Packaged launcher (recommended).** The release assets are the coordinated
 path: the launcher, its backend and the Hermes archive all carry the same
-`1.15.2` pins, so every surface the launcher installs lands on one version.
+`1.15.3` pins, so every surface the launcher installs lands on one version.
 Download both files from the release and verify both checksums before running
 them.
 
@@ -126,11 +126,11 @@ them.
   installer="$installer_dir/install.sh"
   backend="$installer_dir/install-openclaw.sh"
   unset NOOSPHERE_BACKEND_PATH NOOSPHERE_BACKEND_OVERRIDE_SHA256
-  curl -fsSL https://github.com/SweetSophia/noosphere/releases/download/v1.15.2/install.sh -o "$installer"
-  curl -fsSL https://github.com/SweetSophia/noosphere/releases/download/v1.15.2/install-openclaw.sh -o "$backend"
-  printf '%s  %s\n' 'fa38522104b10991cc85774fade4dffc559090e64838827cffeb74d200d547e0' "$installer" | sha256sum -c -
-  printf '%s  %s\n' '7758cc2aab51da3af18551ad138eb08a8c2d50e546955c498840933cbef63c7c' "$backend" | sha256sum -c -
-  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.2}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.2}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.2}" bash "$installer" --non-interactive --with openclaw
+  curl -fsSL https://github.com/SweetSophia/noosphere/releases/download/v1.15.3/install.sh -o "$installer"
+  curl -fsSL https://github.com/SweetSophia/noosphere/releases/download/v1.15.3/install-openclaw.sh -o "$backend"
+  printf '%s  %s\n' '0b5aedae3a35867c2f8f5adc4d701b69b12ce2133ca6b568be9c88899d94be3e' "$installer" | sha256sum -c -
+  printf '%s  %s\n' '5269de0467b812a48a229afa23dde1d837078d0fd9937e11bb82a8d1d1675bb1' "$backend" | sha256sum -c -
+  NOOSPHERE_VERSION="${NOOSPHERE_VERSION:-1.15.3}" NOOSPHERE_IMAGE="${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.3}" NOOSPHERE_PLUGIN_SPEC="${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.3}" bash "$installer" --non-interactive --with openclaw
 )
 ```
 
@@ -138,7 +138,7 @@ The command is non-interactive and selects its integrations explicitly; it
 never guesses which agent configuration to mutate. Add `hermes`, `opencode` or
 `kilocode` to the `--with` list to configure those surfaces as well - the
 packaged launcher resolves the Hermes archive and the OpenCode and Kilo Code
-packages to `1.15.2` too.
+packages to `1.15.3` too.
 
 Each setting is a default that the launcher applies when the environment does
 not already carry one, so an operator who exported `NOOSPHERE_IMAGE`,
@@ -146,7 +146,7 @@ not already carry one, so an operator who exported `NOOSPHERE_IMAGE`,
 caveat carries over from the audited block: for an existing installation using
 a custom image, export `NOOSPHERE_IMAGE` explicitly before running this block.
 The version-bound default does not reuse a persisted image automatically, so
-without that export the stock `1.15.2` image replaces it.
+without that export the stock `1.15.3` image replaces it.
 
 The launcher detects an existing installation, preserves the named PostgreSQL
 volume and its configuration, and uses the guarded stateful upgrade path. It
@@ -226,7 +226,7 @@ machine, for example `OPENCLAW_NOOSPHERE_API_KEY`,
 Install the Codex CLI integration independently of the core Docker installer:
 
 ```bash
-npx -y @sweetsophia/noosphere-mcp@1.15.2 install-codex
+npx -y @sweetsophia/noosphere-mcp@1.15.3 install-codex
 ```
 
 The command stores the MCP launcher, skill, and approved environment-variable

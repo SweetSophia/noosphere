@@ -313,31 +313,31 @@ assert_doc_gate_rejects() {
 assert_doc_gate_rejects \
   'drifted digest' \
   'must document the published install.sh digest' \
-  sed -i 's/fa38522104b10991cc85774fade4dffc559090e64838827cffeb74d200d547e0/0000000000000000000000000000000000000000000000000000000000000000/' \
+  sed -i 's/0b5aedae3a35867c2f8f5adc4d701b69b12ce2133ca6b568be9c88899d94be3e/0000000000000000000000000000000000000000000000000000000000000000/' \
     "$doc_fixture/README.md"
 
 assert_doc_gate_rejects \
   'hard-pinned image' \
   'must default NOOSPHERE_IMAGE instead of overriding an operator export' \
-  sed -i 's|NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.2}"|NOOSPHERE_IMAGE=ghcr.io/sweetsophia/noosphere:1.15.2|' \
+  sed -i 's|NOOSPHERE_IMAGE="\${NOOSPHERE_IMAGE:-ghcr.io/sweetsophia/noosphere:1.15.3}"|NOOSPHERE_IMAGE=ghcr.io/sweetsophia/noosphere:1.15.3|' \
     "$doc_fixture/README.md"
 
 assert_doc_gate_rejects \
   'hard-pinned version' \
   'must default NOOSPHERE_VERSION instead of overriding an operator export' \
-  sed -i 's|NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-1.15.2}"|NOOSPHERE_VERSION=1.15.2|' \
+  sed -i 's|NOOSPHERE_VERSION="\${NOOSPHERE_VERSION:-1.15.3}"|NOOSPHERE_VERSION=1.15.3|' \
     "$doc_fixture/README.md"
 
 assert_doc_gate_rejects \
   'hard-pinned plugin' \
   'must default NOOSPHERE_PLUGIN_SPEC instead of overriding an operator export' \
-  sed -i 's|NOOSPHERE_PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.2}"|NOOSPHERE_PLUGIN_SPEC=npm:@sweetsophia/openclaw-noosphere-memory@1.15.2|' \
+  sed -i 's|NOOSPHERE_PLUGIN_SPEC="\${NOOSPHERE_PLUGIN_SPEC:-npm:@sweetsophia/openclaw-noosphere-memory@1.15.3}"|NOOSPHERE_PLUGIN_SPEC=npm:@sweetsophia/openclaw-noosphere-memory@1.15.3|' \
     "$doc_fixture/README.md"
 
 assert_doc_gate_rejects \
   'mismatched backend tag' \
   'must download the launcher and the backend from the same release tag' \
-  sed -i 's|releases/download/v1.15.2/install-openclaw.sh|releases/download/v1.15.1/install-openclaw.sh|' \
+  sed -i 's|releases/download/v1.15.3/install-openclaw.sh|releases/download/v1.15.1/install-openclaw.sh|' \
     "$doc_fixture/README.md"
 
 assert_doc_gate_rejects \
@@ -361,7 +361,7 @@ assert_doc_gate_rejects \
 assert_doc_gate_rejects \
   'wrong release tag' \
   'must document the published release v' \
-  sed -i 's|releases/download/v1.15.2/|releases/download/v9.9.9/|' \
+  sed -i 's|releases/download/v1.15.3/|releases/download/v9.9.9/|' \
     "$doc_fixture/README.md"
 
 # A document that still carries a valid block must pass.
