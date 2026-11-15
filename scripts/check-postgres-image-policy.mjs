@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { composeServiceBlock } from "./compose-service-block.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
@@ -42,6 +43,9 @@ if (packagedDocumentsIndex >= 0) {
   }
   packagedDocumentsRoot = resolve(value);
 }
+
+// composeServiceBlock lives in ./compose-service-block.mjs so its extraction
+// contract is unit-tested directly in compose-service-block.test.mjs.
 
 function read(relativePath, base = root) {
   try {
@@ -581,6 +585,21 @@ expect(
 );
 for (const composePath of ["docker-compose.yml", "docker-compose.noosphere.yml"]) {
   const compose = read(composePath);
+  const workerBlock = composeServiceBlock(compose, "hybrid-worker");
+  // A missing service and a missing cap are different failures: the first
+  // means the worker was renamed or dropped, the second means the cap was
+  // dropped. Reporting both as "missing cap" hides a rename.
+  if (workerBlock === null) {
+    expect(false, composePath + " must declare the hybrid-worker service");
+  } else {
+    expect(
+      workerBlock.includes("logging:") &&
+        workerBlock.includes("driver: json-file") &&
+        workerBlock.includes('max-size: "10m"') &&
+        workerBlock.includes('max-file: "3"'),
+      composePath + " must cap the hybrid worker's json-file diagnostics",
+    );
+  }
   expect(
     compose.includes("hybrid-worker:") &&
       compose.includes('profiles: ["hybrid"]') &&
